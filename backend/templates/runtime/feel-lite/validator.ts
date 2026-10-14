@@ -32,7 +32,7 @@ const KNOWN_FUNCTIONS = new Set([
   // otherwise a valid `starts_with(name,"A")` was falsely rejected as an
   // "Unknown function". Matches the frontend validator's list.
   "contains", "starts with", "ends with", "starts_with", "ends_with", "matches",
-  "string", "number", "date", "now", "duration",
+  "string", "string length", "string_length", "number", "date", "now", "duration",
 ]);
 
 export function validateExpression(

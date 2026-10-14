@@ -228,7 +228,7 @@ export function RuleEditor({
             checked={draft.is_active}
             onCheckedChange={(is_active) => onChange({ ...draft, is_active })}
           />
-          <Label className="text-xs">On</Label>
+          <Label className="text-xs">{draft.is_active ? "On" : "Off"}</Label>
         </div>
       </div>
 

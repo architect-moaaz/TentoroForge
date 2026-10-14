@@ -297,6 +297,19 @@ export function parse(tokens: Token[]): ASTNode {
         return { type: "FunctionCall", name: funcName, args };
       }
 
+      // "string length(x)" — the number of characters in x.
+      if (
+        idTok.value === "string" &&
+        peek().type === TokenType.Identifier &&
+        peek().value === "length"
+      ) {
+        advance(); // consume "length"
+        expect(TokenType.LParen);
+        const args = parseArgList();
+        expect(TokenType.RParen);
+        return { type: "FunctionCall", name: "string length", args };
+      }
+
       // Regular function call
       if (peek().type === TokenType.LParen) {
         advance(); // consume (

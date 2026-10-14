@@ -93,6 +93,17 @@ assert.deepEqual(small.errors, []);
 assert.ok(small.formHints.length === 0 || !small.formHints.some((h) => h.required), "no requirement below the limit");
 console.log("required on save: PASS ✅");
 
+// ── a length limit: "a title is at most 60 characters" ──────────────────────
+setRules([
+  ca("RULE-025", "Task", "string length(title) > 60",
+     [{ id: "g", field: "title", type: "show_error", message: "Keep the title to 60 characters." }], { scope: "entity" }),
+]);
+assert.deepEqual((await evaluateRuleSet("tasks", "create", { title: "x".repeat(61) })).errors,
+                 ["Keep the title to 60 characters."]);
+assert.deepEqual((await evaluateRuleSet("tasks", "create", { title: "x".repeat(60) })).errors, []);
+assert.deepEqual((await evaluateRuleSet("tasks", "create", {})).errors, [], "no title is not a long title");
+console.log("length limit: PASS ✅");
+
 // ── side effects are handed to the write path ───────────────────────────────
 setRules([
   ca("RULE-030", "Order", "total > 50000",

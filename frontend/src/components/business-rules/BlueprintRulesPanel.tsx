@@ -158,6 +158,15 @@ export function BlueprintRulesPanel({ projectId, initial }: { projectId: string;
              ...(draft.st.statement.trim() ? [] : ["Say what the rule is, in a sentence."])]
           : [];
   const [checked, setChecked] = useState<{ problems: string[]; runs?: string } | null>(null);
+  // Remove asks twice, in place: a browser dialog is blocked in embedded
+  // views and answered "no" there, so the button did nothing.
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
+  useEffect(() => {
+    if (!confirmingRemove) return;
+    const t = setTimeout(() => setConfirmingRemove(false), 4000);
+    return () => clearTimeout(t);
+  }, [confirmingRemove]);
+  useEffect(() => setConfirmingRemove(false), [editingId]);
   const draftJson = draft ? JSON.stringify(payloadOf(draft)) : "";
   useEffect(() => {
     if (!draft || draft.kind === "prerequisite" || localProblems.length) return setChecked(null);
@@ -194,12 +203,13 @@ export function BlueprintRulesPanel({ projectId, initial }: { projectId: string;
             {editingId && (
               <Button variant="ghost" size="sm" className="h-7 text-rose-500 hover:text-rose-600"
                 disabled={remove.isPending || building}
+                title="The app stops applying it at once; it stays in the history."
                 onClick={() => {
-                  if (window.confirm("Remove this rule? The app stops applying it at once.")) {
-                    remove.mutate({ id: editingId, revision: draft.revision });
-                  }
+                  if (!confirmingRemove) return setConfirmingRemove(true);
+                  setConfirmingRemove(false);
+                  remove.mutate({ id: editingId, revision: draft.revision });
                 }}>
-                <Trash2 className="mr-1 h-3.5 w-3.5" /> Remove
+                <Trash2 className="mr-1 h-3.5 w-3.5" /> {confirmingRemove ? "Click again to remove" : "Remove"}
               </Button>
             )}
             {draft.kind !== "prerequisite" && (
@@ -264,7 +274,7 @@ export function BlueprintRulesPanel({ projectId, initial }: { projectId: string;
               />
               <div className="flex items-center gap-2">
                 <Switch checked={draft.dt.is_active} onCheckedChange={(is_active) => setDraft({ ...draft, dt: { ...draft.dt, is_active } })} />
-                <Label className="text-xs">On</Label>
+                <Label className="text-xs">{draft.dt.is_active ? "On" : "Off"}</Label>
               </div>
             </div>
           )}

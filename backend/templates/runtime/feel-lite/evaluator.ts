@@ -52,6 +52,7 @@ const BUILT_IN_FUNCTIONS: Record<string, (...args: unknown[]) => unknown> = {
     }
   },
   string: (x: unknown) => String(x ?? ""),
+  "string length": (x: unknown) => (x == null ? 0 : String(x).length),
   number: (x: unknown) => {
     const n = Number(x);
     return isNaN(n) ? null : n;

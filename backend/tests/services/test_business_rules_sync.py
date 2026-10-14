@@ -300,6 +300,98 @@ def test_before_the_build_the_tab_lists_what_was_asked_for(app):
     assert [p["id"] for p in planned] == [req["id"]], "a stated rule already written is not 'planned'"
 
 
+def test_a_rule_removed_takes_its_ask_with_it(app):
+    """Removed in the tab, the rule came back at the next catch-up as a
+    written-down rule "you asked for" (Task Board, 2026-10-14)."""
+    svc = BlueprintService.load(output_dir=app)
+    req = _uncited(svc.doc)[0]
+    req["owner"] = "businessRules"
+    svc.save()
+    made = br.create(app, {**GOOD, "requirements": [req["id"]]})["rule"]
+    rid = made["rule"]["id"]
+    br.remove(app, rid, expected=made["revision"])
+    svc = BlueprintService.load(output_dir=app)
+    ask = next(r for r in svc.doc["requirements"] if r["id"] == req["id"])
+    assert ask["status"] == "DEPRECATED" and rid in ask["syncNote"]
+    assert br.keep_stated_rules(svc)["added"] == [], "not brought back"
+    assert br.read(app)["planned"] == [], "not listed as still asked for"
+
+
+def test_an_ask_another_rule_answers_is_kept(app):
+    svc = BlueprintService.load(output_dir=app)
+    req = _uncited(svc.doc)[0]
+    req["owner"] = "businessRules"
+    svc.save()
+    a = br.create(app, {**GOOD, "requirements": [req["id"]]})["rule"]
+    br.create(app, {**GOOD, "name": "Openings cap", "when": "openingsCount > 500",
+                    "requirements": [req["id"]]})
+    br.remove(app, a["rule"]["id"], expected=a["revision"])
+    ask = next(r for r in _doc(app)["requirements"] if r["id"] == req["id"])
+    assert ask["status"] != "DEPRECATED", "still answered by the other rule"
+
+
+def test_a_written_down_rule_steps_aside_for_the_rule_that_enforces_it(app):
+    svc = BlueprintService.load(output_dir=app)
+    req = _uncited(svc.doc)[0]
+    req["owner"] = "businessRules"
+    kept = br.keep_stated_rules(svc)["added"][0]
+    svc.save()
+    br.create(app, {**GOOD, "requirements": [req["id"]]})
+    svc = BlueprintService.load(output_dir=app)
+    br.keep_stated_rules(svc)
+    rule = next(r for r in svc.doc["businessRules"] if r["id"] == kept)
+    assert rule["status"] == "DEPRECATED" and rule["syncNote"].startswith("enforced by RULE-")
+    live = [r for r in svc.doc["businessRules"] if r.get("status") != "DEPRECATED"
+            and req["id"] in (r.get("requirements") or [])]
+    assert len(live) == 1 and live[0]["kind"] == "condition_action", "listed once, as enforced"
+
+
+def test_the_same_ask_recorded_twice_is_one_written_down_rule(app):
+    svc = BlueprintService.load(output_dir=app)
+    a = _uncited(svc.doc)[0]
+    b = {**a, "id": "REQ-901"}
+    svc.doc["requirements"].append(b)
+    for r in (a, b):
+        r["owner"] = "businessRules"
+    added = br.keep_stated_rules(svc)["added"]
+    assert len(added) == 1
+    rule = next(r for r in svc.doc["businessRules"] if r["id"] == added[0])
+    assert sorted(rule["requirements"]) == sorted([a["id"], b["id"]])
+
+
+def test_a_rule_made_again_after_it_was_removed_is_not_its_old_record(app):
+    svc = BlueprintService.load(output_dir=app)
+    req = _uncited(svc.doc)[0]
+    svc.save()
+    made = br.create(app, {**GOOD, "requirements": [req["id"]]})["rule"]
+    off = br.set_enabled(app, made["rule"]["id"], False, expected=made["revision"])["rule"]
+    br.remove(app, made["rule"]["id"], expected=off["revision"])
+    again = br.create(app, GOOD)["rule"]
+    assert again["rule"]["id"] == made["rule"]["id"]
+    assert again["enabled"] and again["runs"] == "everywhere"
+    assert "syncNote" not in again["rule"] and again["rule"]["requirements"] == []
+
+
+def test_a_written_down_rule_made_enforceable_is_no_longer_marked_not_enforced(app):
+    svc = BlueprintService.load(output_dir=app)
+    req = _uncited(svc.doc)[0]
+    req["owner"] = "businessRules"
+    kept = br.keep_stated_rules(svc)["added"][0]
+    svc.save()
+    view = next(v for v in br.read(app)["rules"] if v["rule"]["id"] == kept)
+    out = br.update(app, kept, {"kind": "condition_action", "entity": ROLE, "when": "openingsCount > 10",
+                                "then": [{"type": "show_error", "message": "Ten at most."}]},
+                    expected=view["revision"])["rule"]
+    assert out["rule"]["id"] == kept and out["enforced"] and "syncNote" not in out["rule"]
+
+
+def test_a_length_limit_reads_the_field_it_limits(app):
+    assert br._condition_fields("string length(title) > 60") == {"title"}
+    assert br._condition_fields('starts with(title, "A") and openingsCount > 1') == {"title", "openingsCount"}
+    doc = _doc(app)
+    assert br.check(doc, br.normalise({**GOOD, "when": "string length(title) > 60"}, doc)) == []
+
+
 # --------------------------------------------------------------------------- #
 # Rules the tab saved to the old table
 # --------------------------------------------------------------------------- #

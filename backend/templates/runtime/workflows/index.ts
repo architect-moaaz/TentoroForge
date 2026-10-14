@@ -1345,7 +1345,7 @@ export function registerDefaultActions(): void {
             if (rs.errors.length) refused.push(`row ${r + 1}: ${rs.errors.join("; ")}`);
             else Object.assign(rowsIn[r], rs.patches);
           }
-          if (refused.length) return { error: refused.join(" | ") };
+          if (refused.length) return { error: refused.join(" | "), refusedByRule: true };
         } catch (e: any) { _rethrowIfRulesFailed(e, (config as any).table, "write"); }
         const inserted: unknown[] = [];
         for (const merged of rowsIn) {
@@ -1372,7 +1372,7 @@ export function registerDefaultActions(): void {
         const rs = await evaluateRuleSetForTable(
           (config as any).table, "create", raw, (ctx as any).user,
         );
-        if (rs.errors.length) return { error: rs.errors.join("; ") };
+        if (rs.errors.length) return { error: rs.errors.join("; "), refusedByRule: true };
         Object.assign(raw, rs.patches);
         if (rs.sideEffects?.length) (ctx as any).__ruleEffects = rs.sideEffects;
       } catch (e: any) { _rethrowIfRulesFailed(e, (config as any).table, "write"); }
@@ -1550,7 +1550,7 @@ export function registerDefaultActions(): void {
         const rs = await evaluateRuleSetForTable(
           (config as any).table, "update", subject, (ctx as any).user, previous,
         );
-        if (rs.errors.length) return { error: rs.errors.join("; ") };
+        if (rs.errors.length) return { error: rs.errors.join("; "), refusedByRule: true };
         Object.assign(raw, rs.patches);
         if (rs.sideEffects?.length) (ctx as any).__ruleEffects = rs.sideEffects;
       } catch (e: any) { _rethrowIfRulesFailed(e, (config as any).table, "write"); }

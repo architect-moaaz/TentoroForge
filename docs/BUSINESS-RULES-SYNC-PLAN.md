@@ -76,3 +76,20 @@ Every way a rule is made or changed goes through `businessRules` in the Living B
 * Runtime engine tests (node) for scope, tolerant matching, blanks, previous, reload, decision tables, side effects.
 * Frontend tests: FEEL ↔ condition round-trip, mapping.
 * Live on Kimi with my own small apps (never Mozato): prompt → tab; tab → app (enforced) → Smith; Smith → tab; edit/toggle/delete both ways; conflict; build-in-flight; template copy carries rules.
+
+## Found in live testing (Task Board, 2026-10-14), fixed
+
+Each was found driving a real running app (preview + Postgres), not a fixture.
+
+1. **An app built before a platform change could not compile after its engine was refreshed.** The refreshed bell, frame and data engine import `@/lib/api-path`, `@/lib/push`, `./audit`, `./tenancy`, `./OrgSwitcher` — files the refresh copies only where the app already has them. Every page and API call answered "Module not found". `sync_app.complete_imports` now writes every missing platform module from the platform's templates (never replaces a file, never invents one the platform does not ship); `refresh_engine` and `refresh_frame` both run it.
+2. **A tab save waited for the next conversation to reach an older app.** The tab now runs the same `catch_up` a Smith turn starts with (once per platform version), so the app's engine re-reads its rules at once.
+3. **The same ask asked twice was two requirements** (`REQ:<slug>` keys were pruned by the registry bootstrap). Requirements are keyed with `prose_key`, the scheme the bootstrap keeps.
+4. **A removed rule came back** as a written-down rule "you asked for" at the next catch-up. Removing a rule (tab, chat, or with its record) retires the asks only it answered (`retire_asks`); a kept written-down rule steps aside once another rule enforces the same ask.
+5. **A failed Smith add left its ask behind** while saying "nothing has been changed". The ask is withdrawn.
+6. **A rule asked for again after removal came back switched off** (same wording → same id → merged onto the old record). A rule asked for now starts on, as Smith's, answering only the new ask; an ask a switched-off rule already answers switches it back on instead of claiming "already enforced".
+7. **No length limit could be enforced.** FEEL `string length(x)` added (engine, author-time check, tab); the tab's field reader no longer takes `string length(` for a field.
+8. **A rule refusing a workflow's save was reported as a crash** ("Change status failed"). It is a refusal, in the rule's own words ("A task in progress needs a due date.").
+9. **Smith's page could cut rules off the end** in a large app; every rule now stays named (one-line form) before anything is cut.
+10. Tab: Remove asks twice in place (a browser `confirm()` is blocked in embedded views); the on/off label says Off when off.
+
+Verified live: 48 checks (tab → app 26, required/workflow/lock 9, Smith → tab → app 13), plus a rule built in the tab's own UI, enforced by the app, seen by Smith, switched off and removed from the UI.

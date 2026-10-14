@@ -39,7 +39,12 @@ def record_requirement(svc: Any, text: str, owner: str) -> dict:
     bind_ids(svc)
     body = {"description": text, "evidence": [{"message": text, "type": "conversation"}],
             "confidence": 1.0, "status": "APPROVED", "owner": owner}
-    written = svc.upsert("requirements", body, natural_key=f"REQ:{slug(text)}")
+    # THE KEY `bootstrap` KEEPS (`natural_key_for`). Keyed on a slug, the
+    # binding was pruned by the bootstrap just above, so the same ask asked
+    # again was a new requirement every time (REQ-007, -008, -009 on Task
+    # Board for one sentence).
+    from services.blueprint.ids import prose_key
+    written = svc.upsert("requirements", body, natural_key=prose_key("REQ", text))
     svc.save()
     return written
 

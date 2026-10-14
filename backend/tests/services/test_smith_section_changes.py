@@ -271,6 +271,91 @@ def test_a_rule_reworded_in_chat_keeps_where_it_came_from_and_whether_it_is_on(s
     assert now["origin"] == "editor" and now["enabled"] is False
 
 
+def _cap_agent(spec):
+    cap = {"name": "Years Realistic Cap", "statement": "Years of experience cannot exceed 60.",
+           "kind": "condition_action", "entity": "ENTITY-001", "when": "yearsOfExperience > 60",
+           "appliesTo": ["ENTITY-001"], "scope": "entity",
+           "then": [{"type": "show_error", "field": "yearsOfExperience", "message": "Too many."}]}
+    return _result(spec, [ArtifactProposal("businessRules", "Years Realistic Cap", cap)])
+
+
+def _asks(svc, text):
+    doc = BlueprintService.load(output_dir=str(svc.output_dir)).doc
+    return [r for r in doc["requirements"] if r["description"] == text]
+
+
+def test_the_same_ask_twice_is_one_requirement(svc, tmp_path):
+    """Keyed on a slug the bootstrap pruned, one sentence asked three times
+    was REQ-007, -008 and -009 (Task Board, 2026-10-14)."""
+    ask = "years of experience cannot exceed 60"
+    rc.add_rule(svc, ask, executor=_cap_agent)
+    rc.remove_rule(BlueprintService.load(output_dir=str(svc.output_dir)), "Years Realistic Cap")
+    rc.add_rule(BlueprintService.load(output_dir=str(svc.output_dir)), ask, executor=_cap_agent)
+    asks = _asks(svc, ask)
+    assert len(asks) == 1 and asks[0]["status"] == "APPROVED", "the ask asked again is the same ask, live again"
+
+
+def test_a_rule_that_could_not_be_written_leaves_no_ask_behind(svc):
+    """"Nothing has been changed" — and the next build does not keep the
+    abandoned ask as a written-down rule."""
+    bad = lambda spec: _result(spec, [ArtifactProposal("businessRules", "Broken", {
+        "name": "Broken", "statement": "Broken.", "kind": "condition_action", "entity": "ENTITY-001",
+        "when": "yearsOfExperience >>> 60", "appliesTo": ["ENTITY-001"],
+        "then": [{"type": "show_error", "message": "x"}]})])
+    with pytest.raises(sc.SectionChangeError):
+        rc.add_rule(svc, "years must be sensible", executor=bad)
+    (ask,) = _asks(svc, "years must be sensible")
+    assert ask["status"] == "DEPRECATED"
+    from services import business_rules as br
+    fresh = BlueprintService.load(output_dir=str(svc.output_dir))
+    assert br.keep_stated_rules(fresh)["added"] == [] and br.read(svc.output_dir)["planned"] == []
+
+
+def test_a_rule_removed_in_chat_takes_its_ask_with_it(svc):
+    ask = "years of experience cannot exceed 60"
+    rc.add_rule(svc, ask, executor=_cap_agent)
+    rc.remove_rule(BlueprintService.load(output_dir=str(svc.output_dir)), "Years Realistic Cap")
+    (req,) = _asks(svc, ask)
+    assert req["status"] == "DEPRECATED"
+    from services import business_rules as br
+    assert br.keep_stated_rules(BlueprintService.load(output_dir=str(svc.output_dir)))["added"] == []
+
+
+def test_a_rule_asked_for_again_after_it_was_removed_starts_fresh(svc):
+    """Same wording, same id — merged onto the removed record it came back
+    switched off, and the app let a 61-character title through (Task Board)."""
+    from services import business_rules as br
+    ask = "years of experience cannot exceed 60"
+    out = rc.add_rule(svc, ask, executor=_cap_agent)
+    fresh = BlueprintService.load(output_dir=str(svc.output_dir))
+    next(r for r in fresh.doc["businessRules"] if r["id"] == out["rule"]).update(enabled=False, origin="editor")
+    fresh.save()
+    rc.remove_rule(BlueprintService.load(output_dir=str(svc.output_dir)), "Years Realistic Cap")
+    again = rc.add_rule(BlueprintService.load(output_dir=str(svc.output_dir)), ask, executor=_cap_agent)
+    assert again["rule"] == out["rule"], "the same rule, by its wording"
+    rule = next(r for r in BlueprintService.load(output_dir=str(svc.output_dir)).doc["businessRules"]
+                if r["id"] == again["rule"])
+    assert rule["enabled"] is True and rule["origin"] == "smith" and "syncNote" not in rule
+    assert rule["requirements"] == [again["requirement"]]
+    view = next(v for v in br.read(svc.output_dir)["rules"] if v["rule"]["id"] == again["rule"])
+    assert view["runs"] == "everywhere" and view["enabled"]
+
+
+def test_an_ask_a_switched_off_rule_answers_switches_it_on(svc):
+    """"Already enforced" was untrue: the rule was off in the Business Rules tab."""
+    fresh = BlueprintService.load(output_dir=str(svc.output_dir))
+    fresh.doc["businessRules"][0]["enabled"] = False
+    fresh.save()
+    agent = lambda spec: _result(spec, [ArtifactProposal("businessRules", "Years Non-Negative",
+                                                          {"name": "Years Non-Negative", "statement": "Years cannot be negative.",
+                                                           "kind": "statement", "appliesTo": []})])
+    out = rc.add_rule(BlueprintService.load(output_dir=str(svc.output_dir)), "years cannot be negative", executor=agent)
+    assert out["applied"] and out["switched_on"]
+    rule = BlueprintService.load(output_dir=str(svc.output_dir)).doc["businessRules"][0]
+    assert rule["enabled"] is True and out["requirement"] in rule["requirements"]
+    assert "switched it back on" in rc.summary_of("add_rule", out)
+
+
 def test_a_rule_removed_in_chat_is_versioned(svc, tmp_path):
     (tmp_path / "app").mkdir(exist_ok=True)
     v = BlueprintService.load(output_dir=str(svc.output_dir)).doc.get("version")

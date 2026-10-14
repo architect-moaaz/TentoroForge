@@ -246,6 +246,8 @@ def remove_entity(svc: Any, ref: str, *, app_root: str | None = None, reasoning:
             rule["status"] = "DEPRECATED"
             rule["syncNote"] = f"its record {ent.get('name')} was removed"
             retired_rules.append(str(rule.get("name") or rule.get("id")))
+            from services.business_rules import retire_asks
+            retire_asks(svc.doc, rule, f"its record {ent.get('name')} was removed")
     svc.save()
     tell(reasoning, f"Retired {ent.get('name')}" + (f" with {len(routes)} page(s) and {len(retired_wfs)} workflow(s)" if routes or retired_wfs else "") + ".", "step")
     files = _project_data(svc, app_root)
