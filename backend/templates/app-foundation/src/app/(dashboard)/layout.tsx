@@ -297,6 +297,18 @@ function frameClass(density?: string): string {
   return "mx-auto w-full max-w-[1600px] p-[8px] sm:p-6 lg:p-8";
 }
 
+const MAX_GLYPH_DESTINATIONS = 8;
+/** How many places the rail leads to: every leaf of the shell's groups, plus
+ *  the pages the frame appends because the shell left them out. */
+async function menuDestinations(): Promise<number> {
+  try {
+    const props = await loadNavProps();
+    return flattenNav(props.groups).length;
+  } catch {
+    return 0;
+  }
+}
+
 async function shellIdentity(): Promise<ShellIdentity> {
   try {
     // OPTIONAL. Only the old pipeline writes design-spec.json; a Blueprint
@@ -352,6 +364,12 @@ async function shellIdentity(): Promise<ShellIdentity> {
       skin = String(dna?.skin ?? "");
       density = String(dna?.layout?.density ?? density);
     } catch { /* design-dna optional */ }
+    // A RAIL OF GLYPHS IS FOR A FEW DESTINATIONS. Past MAX_GLYPH_DESTINATIONS
+    // the frame shows labels, whichever chrome the design named (pcn4owv7:
+    // thirteen unlabeled icons in a 64px strip, 2026-10-15).
+    if (["icon-rail", "dock"].includes(chrome) && (await menuDestinations()) > MAX_GLYPH_DESTINATIONS) {
+      chrome = "standard-rail";
+    }
     return { frame, chrome, density, skin, ...(bg ? { bg } : {}), ...(text ? { text } : {}),
              ...(accent ? { accent } : {}), mode, primary: hex(pal.primary) };
   } catch {
@@ -876,7 +894,16 @@ function IconRail({ props, appName, footer }: { props: NavProps; appName: string
   const bg = props.bg ?? (dark ? "#101418" : "#ffffff");
   const text = props.text ?? (dark ? "#c7d2de" : "#334155");
   const accent = props.accent ?? "#5B8DEF";
-  const items = flattenNav(props.groups);
+  // THE GROUPS THE NAVIGATION AGENT DREW STAY GROUPS: a header glyph for a
+  // group of pages, its children under it, a hairline and some air between
+  // groups. Flattened, thirteen glyphs ran as one column (pcn4owv7, 2026-10-15).
+  const leaf = (it: Sub, size: number) => (
+    <a key={it.route} href={it.route} title={it.label} data-nav-item="" suppressHydrationWarning
+      className="grid h-10 w-10 place-items-center rounded-[var(--radius)] opacity-75 transition hover:opacity-100"
+      style={{ color: text }}>
+      <span data-nav-icon="" className="inline-flex"><RailGlyph name={it.icon} label={it.label} size={size} /></span>
+    </a>
+  );
   return (
     <nav data-shell-nav="" className="hidden h-full shrink-0 flex-col items-center overflow-y-auto md:flex"
       style={{ width: "var(--sk-nav-w, 64px)", background: bg, color: text,
@@ -892,13 +919,22 @@ function IconRail({ props, appName, footer }: { props: NavProps; appName: string
         </ShellBrand>
       </div>
       <div className="flex flex-1 flex-col items-center gap-1 pb-4">
-        {items.map((it) => (
-          <a key={it.route} href={it.route} title={it.label} data-nav-item="" suppressHydrationWarning
-            className="grid h-10 w-10 place-items-center rounded-[var(--radius)] opacity-75 transition hover:opacity-100"
-            style={{ color: text }}>
-            <span data-nav-icon="" className="inline-flex"><RailGlyph name={it.icon} label={it.label} size={18} /></span>
-          </a>
-        ))}
+        {props.groups.map((g, gi) => {
+          const subs = (g.items || []).filter((it) => it.route);
+          if (!g.route && subs.length === 0) return null;
+          return (
+            <div key={g.route || g.label || gi} data-nav-group="" className="flex flex-col items-center gap-1">
+              {gi > 0 && <div aria-hidden="true" className="my-1.5 h-px w-6" style={{ background: "currentColor", opacity: 0.18 }} />}
+              {g.route ? leaf({ label: g.label ?? g.route, route: g.route, icon: g.icon }, 18) : (
+                <span title={g.label} data-nav-group-head="" aria-label={g.label}
+                  className="grid h-7 w-10 place-items-center opacity-45" style={{ color: text }}>
+                  <RailGlyph name={g.icon} label={g.label} size={14} />
+                </span>
+              )}
+              {subs.map((it) => leaf(it, 18))}
+            </div>
+          );
+        })}
       </div>
       {footer && <div data-rail-footer="" className="mb-4 flex flex-col items-center gap-2">{footer}</div>}
     </nav>
@@ -955,17 +991,27 @@ export default async function DashboardLayout({
   // room for them: a rail's footer, a top bar's right end, or — for the
   // chromes with neither — a row above the page. Floating over the page's
   // header they sat on top of its primary action.
-  const cluster = session?.user ? (
+  const chromeName = identity.chrome ?? "standard-rail";
+  // A 64px RAIL HOLDS TWO CONTROLS. The organisation switch, the language and
+  // "Install app" stacked into its foot clipped and truncated (pcn4owv7,
+  // 2026-10-15); in the icon rail they live inside the account menu.
+  const compact = chromeName === "icon-rail";
+  const extras = (
     <>
       <OrgSwitcher />
       <LanguageSwitch />
       <InstallButton />
+    </>
+  );
+  const cluster = session?.user ? (
+    <>
+      {!compact && extras}
       <NotificationBell />
       <AccountMenu name={session.user.name} email={session.user.email}
-                   role={(session.user as { role?: string }).role} />
+                   role={(session.user as { role?: string }).role}
+                   compact={compact} extras={compact ? extras : undefined} />
     </>
   ) : null;
-  const chromeName = identity.chrome ?? "standard-rail";
   const clusterInRail = ["wide-rail", "icon-rail", "right-rail", "floating-rail"].includes(chromeName);
   const clusterInBar = chromeName === "topbar" || identity.frame === "topbar";
   const caption = scoped && role ? role : undefined;

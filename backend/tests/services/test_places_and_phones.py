@@ -181,7 +181,7 @@ def test_a_view_of_a_page_is_its_own_destination(tmp_path):
     bar = (_SHELL / "MobileTabBar.tsx").read_text()
     assert "key={`${t.route}:${t.label}`}" in bar
     layout = (_SHELL / "layout.tsx").read_text()
-    assert "glyph: <RailGlyph name={g.icon} size={20} />" in layout and "<React.Suspense" in layout
+    assert "glyph: <RailGlyph name={g.icon} label={g.label} size={20} />" in layout and "<React.Suspense" in layout
     side = (_BACKEND.parent / "packages/library/src/components/SideNav/SideNav.tsx").read_text()
     assert "item.glyph ??" in side and "routes.includes(active)" in side
 
