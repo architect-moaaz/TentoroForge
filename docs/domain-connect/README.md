@@ -16,9 +16,13 @@ To make the **Connect with <provider>** button appear:
 
 ## Where things stand
 
-- Signing key made 2026-10-15; the private half is kept outside any repository
-  (`~/.config/forge/domain-connect/tentoro-dc-signing-key.pem` on the machine that made it).
-- Public key: two TXT records at `_dck1.tentoro.ai` (tentoro.ai's DNS is at GoDaddy).
+- Signing key made 2026-10-15. The private half lives in AWS Systems Manager Parameter Store as an
+  encrypted parameter: `/forge/domain-connect/signing-key` (SecureString, account 992382680919,
+  region ap-southeast-1, the forge-v3 account). The deploy sets `FORGE_DOMAIN_CONNECT_KEY` from it:
+  `aws ssm get-parameter --region ap-southeast-1 --name /forge/domain-connect/signing-key --with-decryption
+  --query Parameter.Value --output text` written straight into the server's environment file, never printed.
+- Public key: two TXT records at `_dck1.tentoro.ai` (tentoro.ai's DNS is at GoDaddy), published 2026-10-15
+  and checked against the private key.
 - Templates submitted: https://github.com/Domain-Connect/Templates/pull/2333 (both pass `dc-template-linter`
   full, logo and fast-track checks; Online Editor tests linked in the PR).
 
