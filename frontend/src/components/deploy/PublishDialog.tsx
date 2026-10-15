@@ -79,7 +79,7 @@ interface CheckNote {
   stale?: boolean;
   pages: number;
   working: number;
-  failing: Array<{ route: string; detail: string }>;
+  failing: Array<{ route: string; detail: string; stale?: boolean }>;
   processes: string[];
 }
 
@@ -321,13 +321,14 @@ export function PublishDialog({
               {check.failing.slice(0, 5).map((f) => (
                 <li key={f.route}>
                   <code>{f.route}</code> — {f.detail}
+                  {f.stale && <span className="text-amber-700/80 dark:text-amber-300/80"> (found before the page was last changed)</span>}
                 </li>
               ))}
               {check.processes.slice(0, 5).map((name) => (
                 <li key={name}>{name} does not run through</li>
               ))}
             </ul>
-            <p className="mt-1">Publishing puts them live as they are. Ask Smith to carry on to fix them first.</p>
+            <p className="mt-1">Publishing puts them live as they are. Tell Smith &ldquo;check the app again and fix everything that still fails&rdquo; first.</p>
           </div>
         )}
 

@@ -118,8 +118,10 @@ def test_two_dry_turns_stop_the_loop_and_what_is_left_is_said(tmp_path, monkeypa
     said = []
     out = ftg.run_checks_to_green(svc, str(tmp_path), str(tmp_path / "app"), None,
                                   emit=lambda e, d: said.append((e, d)), run_turn=run_turn, record=False)
-    assert out["turns"] == 2 and out["yield"] == [0, 0] and out["stopped"] == "yield"
-    assert len(turns) == 2
+    # Three dry turns in a row end it (DRY_STOP): a list that yields nothing
+    # is not worked for the whole time cap.
+    assert out["turns"] == 3 and out["yield"] == [0, 0, 0] and out["stopped"] == "yield"
+    assert len(turns) == 3
     closing = [d["text"] for e, d in said if e == "message"][-1]
     assert "Still not right (1): Checkout" in closing
     assert sc.read(svc.doc)["criteria"]["smith"]["red"][0]["id"] == "PAGE-002"
@@ -132,9 +134,23 @@ def test_the_cap_and_the_person_both_end_the_loop(tmp_path, monkeypatch):
     rounds = [{"pages": [sc.item(f"PAGE-{i:03d}", f"Q{i}", "500", f"PAGE-{i:03d}") for i in range(10, 20 - k)]}
               for k in range(0, 10)]
     turns, run_turn = _wire(monkeypatch, svc, rounds)
+    monkeypatch.setattr(ftg, "FIX_TURNS", 6)      # the ceiling behind the time cap
     out = ftg.run_checks_to_green(svc, str(tmp_path), str(tmp_path / "app"), None,
                                   emit=None, run_turn=run_turn, record=False)
-    assert out["turns"] == ftg.FIX_TURNS and out["stopped"] == "turns"
+    assert out["turns"] == 6 and out["stopped"] == "turns"
+
+    # THE CAP IS TIME. With the minutes used up after the first turn, the loop
+    # ends on "time" with the list still open — and says so.
+    svc3 = _Svc(tmp_path / "c", DOC)
+    sc.seed_from_boot(svc3)
+    rounds3 = [{"pages": [sc.item(f"PAGE-{i:03d}", f"Q{i}", "500", f"PAGE-{i:03d}") for i in range(10, 20 - k)]}
+               for k in range(0, 10)]
+    _turns3, run_turn3 = _wire(monkeypatch, svc3, rounds3)
+    monkeypatch.setattr(ftg, "FIX_TURNS", 40)
+    monkeypatch.setattr(ftg, "FIX_MINUTES", 0.0001)
+    out3 = ftg.run_checks_to_green(svc3, str(tmp_path / "c"), str(tmp_path / "c" / "app"), None,
+                                   emit=None, run_turn=run_turn3, record=False)
+    assert out3["turns"] == 1 and out3["stopped"] == "time"
 
     svc2 = _Svc(tmp_path / "b", DOC)
     sc.seed_from_boot(svc2)

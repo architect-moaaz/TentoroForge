@@ -293,6 +293,54 @@ def ledger_snapshot(output_dir: str | Path, *, turns: bool = True) -> dict[str, 
     return newest
 
 
+
+def live_state(output_dir: str | Path) -> str:
+    """Where the work on this application stands RIGHT NOW, read off the
+    ledgers on disk — the one thing a status answer may be built on.
+
+    Asked "what is the % completion now", Smith answered "65–70%, fixes in
+    progress" from the last check while nothing at all was running: the turn
+    it described had been killed by the host forty minutes earlier (pcn4owv7,
+    2026-10-15). Every status answer starts from this line."""
+    import glob
+    import os
+    runs = sorted(glob.glob(os.path.join(str(output_dir), ".forge", "runs", "*.jsonl")))
+    if not runs:
+        return "NOTHING HAS RUN on this application yet."
+    going = None
+    for path in reversed(runs[-6:]):
+        folded = _fold(path)
+        if folded and folded.get("active"):
+            going = (path, folded)
+            break
+    def kind_of(path: str) -> str:
+        stem = os.path.basename(path)
+        if stem.endswith("-smith-turn.jsonl"):
+            return "turn"
+        if stem.endswith("-checks.jsonl") or stem.endswith("-app-check.jsonl"):
+            return "check of the application"
+        return "build"
+    def clock(epoch: float | None) -> str:
+        return time.strftime("%H:%M UTC", time.gmtime(epoch)) if epoch else "?"
+    if going is not None:
+        path, folded = going
+        started = folded.get("startedAt")
+        minutes = int(max(0.0, time.time() - (started or time.time())) // 60)
+        try:
+            alive = clock(os.path.getmtime(path))
+        except OSError:
+            alive = "?"
+        return (f"RIGHT NOW: a {kind_of(path)} is running — started {clock(started)}, {minutes} min so far, "
+                f"last sign of life {alive}.")
+    path = runs[-1]
+    folded = _fold(path) or {}
+    ended = folded.get("endedAt")
+    if folded.get("status") == "error":
+        return (f"NOTHING IS RUNNING NOW. The last {kind_of(path)} was stopped by a platform restart at "
+                f"{clock(ended)} before it finished; say “carry on” to pick it up.")
+    return f"NOTHING IS RUNNING NOW. The last {kind_of(path)} ended at {clock(ended)}."
+
+
 def close_orphaned_ledgers(root: str | Path) -> list[str]:
     """A RESTART CLOSES WHAT IT KILLED. Every ledger is written by this
     process; one still open when the process starts belonged to the one
@@ -323,9 +371,15 @@ def close_orphaned_ledgers(root: str | Path) -> list[str]:
                     fh.write(json.dumps({"event": "run:crashed", "error": "the platform restarted while it ran",
                                          "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}) + "\n")
                 closed.append(path.stem)
+                CLOSED_PATHS.append(str(path))
             except OSError:
                 continue
     return closed
+
+
+#: Every ledger `close_orphaned_ledgers` closed in this process, by path —
+#: so the person whose turn it was can be told (`main._tell_whose_turn_was_lost`).
+CLOSED_PATHS: list[str] = []
 
 
 def _is_turn(path: str | Path) -> bool:

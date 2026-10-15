@@ -22,6 +22,8 @@ failure, said as such on the card and left alone.
 """
 from __future__ import annotations
 
+import os
+
 import logging
 import threading
 import time
@@ -35,9 +37,13 @@ from services.build_usage import carrying
 logger = logging.getLogger(__name__)
 
 #: Fix turns per hand-over (each turn is one Smith turn per group in the batch).
-FIX_TURNS = 6
+FIX_TURNS = 40
 #: Turns in a row that turned nothing green before the loop stops.
-DRY_STOP = 2
+DRY_STOP = 3
+#: THE CAP IS TIME, NOT A COUNT. "Working through them" stopped after two
+#: turns and zero fixes on a list of thirty (pcn4owv7, 2026-10-14); the person
+#: is promised the list, and gets as much of it as this many minutes allow.
+FIX_MINUTES = int(os.environ.get("FORGE_FIX_MINUTES") or 45)
 #: Page groups fixed at once; pages are different files.
 PAGE_PARALLEL = 3
 #: Steps a repair turn may take: the fix, the page or process, and the try.
@@ -92,10 +98,11 @@ def run_checks_to_green(svc: Any, output_dir: str, app_root: str, report: Any, *
         if reds and not cancelled():
             sc.set_status(svc, "fixing")
             scorecard_event("fixing")
-            say(f"{len(reds)} thing{'s' if len(reds) != 1 else ''} to fix. Working through them by cause; "
-                "I'll say each one here as it turns green. The app stays usable meanwhile.")
+            say(f"{len(reds)} thing{'s' if len(reds) != 1 else ''} to fix. Working through them by cause for up to "
+                f"{FIX_MINUTES} minutes; I'll say each one here as it turns green. The app stays usable meanwhile.")
         dry = 0
-        while reds and turns < FIX_TURNS and dry < DRY_STOP:
+        t0 = time.time()
+        while reds and turns < FIX_TURNS and dry < DRY_STOP and (time.time() - t0) < FIX_MINUTES * 60:
             if cancelled():
                 stopped = "stopped by the person"
                 break
@@ -125,7 +132,8 @@ def run_checks_to_green(svc: Any, output_dir: str, app_root: str, report: Any, *
                 say(sc.green_line(criterion, it))
             scorecard_event("fixing")
         if reds and stopped is None and turns:
-            stopped = "yield" if dry >= DRY_STOP else ("turns" if turns >= FIX_TURNS else None)
+            stopped = ("yield" if dry >= DRY_STOP else "turns" if turns >= FIX_TURNS
+                       else "time" if (time.time() - t0) >= FIX_MINUTES * 60 else None)
         _write_smith(svc, turns, yields, before_total=len(sc.reds(svc.doc)) + sum(yields))
         card = sc.set_status(svc, "stopped" if stopped == "stopped by the person" else "done",
                              fix={"turns": turns, "yield": yields, "stopped": stopped})

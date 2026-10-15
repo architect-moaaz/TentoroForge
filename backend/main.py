@@ -354,6 +354,53 @@ async def _close_orphaned_ledgers():
     if closed:
         logging.getLogger("forge.startup").info("[ledgers] closed %d left open by the last process: %s",
                                                 len(closed), ", ".join(closed[:6]))
+        await _tell_whose_turn_was_lost(list(run_registry.CLOSED_PATHS))
+        run_registry.CLOSED_PATHS.clear()
+
+
+async def _tell_whose_turn_was_lost(paths: list[str]) -> None:
+    """THE PERSON IS TOLD. A turn the restart killed used to leave the chat on
+    "Still working on it" for good: the tester asked three times over an hour
+    what the progress was and was answered from the last check (pcn4owv7,
+    2026-10-15). The closed ledger names the application's folder; the folder
+    names the project; one line goes into its chat, in Smith's voice, saying
+    what happened and how to go on."""
+    import logging
+    import time
+    from pathlib import Path
+
+    from sqlalchemy import select
+
+    from database import async_session
+    from models.project import Conversation, MessageRole, MessageType, Project
+
+    log = logging.getLogger("forge.startup")
+    when = time.strftime("%H:%M UTC", time.gmtime())
+    for raw in paths:
+        path = Path(raw)
+        short_id = path.parent.parent.parent.name     # <short_id>/.forge/runs/<ledger>
+        stem = path.stem
+        if stem.endswith("-smith-turn"):
+            text = (f"The platform restarted at {when} while I was working on your last message, and that "
+                    "turn was lost before it finished. Nothing you said is lost. Say “carry on” and I will "
+                    "pick up from where it stopped.")
+        elif stem.endswith("-checks") or stem.endswith("-app-check"):
+            text = (f"The platform restarted at {when} while I was checking the application, and that check "
+                    "stopped before it finished. Say “check the app again” and I will run it through.")
+        else:
+            text = (f"The platform restarted at {when} during the build, and the build stopped before it "
+                    "finished. Press Build to carry on; what was already built is kept.")
+        try:
+            async with async_session() as sess:
+                project = (await sess.execute(select(Project).where(Project.short_id == short_id))).scalar_one_or_none()
+                if project is None:
+                    continue
+                sess.add(Conversation(project_id=project.id, role=MessageRole.assistant, content=text,
+                                      message_type=MessageType.chat, metadata_={"source": "restart", "ledger": stem}))
+                await sess.commit()
+                log.info("[ledgers] told %s that %s was lost", short_id, stem)
+        except Exception:  # noqa: BLE001 — telling is best-effort; the ledger is closed either way
+            log.warning("[ledgers] could not tell %s about %s", short_id, stem, exc_info=True)
 
 
 @app.on_event("startup")
