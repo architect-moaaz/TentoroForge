@@ -20,6 +20,8 @@ Everything here is derived, never authored:
 """
 from __future__ import annotations
 
+import time
+
 import json
 import re
 from pathlib import Path
@@ -196,6 +198,10 @@ def _written_by_workflows(doc: dict, entity_id: str) -> dict[str, dict]:
                     written["decided"].add(value)    # $now, $user.id — the runtime's
                 elif isinstance(value, str) and value:
                     written["decided"].add(value)    # a state the process names
+                elif isinstance(value, (bool, int, float)):
+                    # A number or a flag the process sets — "onboardingCompleted:
+                    # true", "budgetStartDate: 1" — is as decided as a state name.
+                    written["decided"].add(str(value))
     return out
 
 
@@ -235,7 +241,24 @@ def account_initial(doc: dict) -> dict[str, Any]:
             # never be asked for it, so the row carries a value nobody can
             # sign in with — the login itself lives in the platform's table.
             out[name] = UNUSABLE_CREDENTIAL
+        else:
+            # A REQUIRED FIELD A PROCESS OWNS STARTS EMPTY, OF ITS KIND. Not
+            # asked for (the process sets it) and not given here, the column
+            # was NOT NULL and the signup route refused every new account as
+            # missing it. The value is the kind's nothing: the process fills it.
+            out[name] = _empty_of(str(f.get("type") or "string").lower())
     return out
+
+
+def _empty_of(ftype: str) -> Any:
+    """The starting value of a field a process will fill: the kind's nothing."""
+    if ftype in ("integer", "number", "decimal", "float"):
+        return 0
+    if ftype == "boolean":
+        return False
+    if ftype in ("date", "timestamp", "datetime"):
+        return time.strftime("%Y-%m-%d", time.gmtime())
+    return ""
 
 
 def account_fields(doc: dict) -> list[dict]:

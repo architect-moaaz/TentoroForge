@@ -1,6 +1,7 @@
 "use client";
 
 import { apiPath } from "@/lib/api-path";
+import { ACCOUNT, type AccountField } from "@/lib/account";
 import { useState } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
@@ -57,11 +58,55 @@ function BrandPanel({ variant }: { variant: "full" | "panel" }) {
   );
 }
 
+// THE PERSON'S OWN RECORD IS ASKED FOR HERE. The account entity's fields a
+// person types (`ACCOUNT.fields`, from `@/lib/account`) are the signup form's
+// beyond name, email and password — the route refuses a required one left
+// out, and this form used to send none: an account with a required display
+// name could not be created at all (pcn4owv7, 2026-10-15). The name-like
+// field is the Name box above; an email field is the login's email.
+const NAME_LIKE = /^(display_?name|name|full_?name|user_?name|nick_?name)$/i;
+function nameLike(fieldName: string): boolean {
+  return (ACCOUNT?.labelField ? ACCOUNT.labelField === fieldName : false) || NAME_LIKE.test(fieldName);
+}
+const ACCOUNT_FIELDS: AccountField[] = (ACCOUNT?.fields ?? []).filter((f) => f.kind !== "email" && !nameLike(f.name));
+const fieldClass = "w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring";
+
+function AccountFieldInput({ field, value, onChange }: { field: AccountField; value: unknown; onChange: (v: unknown) => void }) {
+  const id = `account-${field.name}`;
+  if (field.kind === "checkbox") {
+    return (
+      <label className="flex items-center gap-2 text-sm text-foreground" htmlFor={id}>
+        <input id={id} type="checkbox" checked={Boolean(value)} onChange={(e) => onChange(e.target.checked)} />
+        {field.label}
+      </label>
+    );
+  }
+  return (
+    <div className="space-y-1.5">
+      <label className="text-sm font-medium text-foreground" htmlFor={id}>
+        {field.label}{field.required && <span aria-hidden="true" className="ml-0.5 text-destructive">*</span>}
+      </label>
+      {field.kind === "select" ? (
+        <select id={id} required={field.required} value={String(value ?? "")} onChange={(e) => onChange(e.target.value)} className={fieldClass}>
+          <option value="">Choose…</option>
+          {(field.options ?? []).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+      ) : field.kind === "textarea" ? (
+        <textarea id={id} required={field.required} value={String(value ?? "")} onChange={(e) => onChange(e.target.value)} className={fieldClass} rows={3} />
+      ) : (
+        <input id={id} required={field.required} value={String(value ?? "")} onChange={(e) => onChange(e.target.value)} className={fieldClass}
+          type={field.kind === "number" ? "number" : field.kind === "date" ? "date" : field.kind === "tel" ? "tel" : field.kind === "url" ? "url" : "text"} />
+      )}
+    </div>
+  );
+}
+
 export default function SignupPage() {
   const router = useRouter();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [account, setAccount] = useState<Record<string, unknown>>({});
   const [accountType, setAccountType] = useState(ACCOUNT_TYPES[0]?.value ?? "");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -80,13 +125,15 @@ export default function SignupPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
           ACCOUNT_TYPES.length > 0
-            ? { name, email, password, accountType }
-            : { name, email, password }
+            ? { name, email, password, accountType, account }
+            : { name, email, password, account }
         ),
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
-        setError(j?.error || "Signup failed");
+        // The route says why in `error.message`; an object is not a message.
+        const why = j?.error?.message ?? (typeof j?.error === "string" ? j.error : null);
+        setError(why || "Signup failed");
         setLoading(false);
         return;
       }
@@ -166,6 +213,10 @@ export default function SignupPage() {
             <input id="password" type="password" required value={password} onChange={(e) => setPassword(e.target.value)}
               className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring" />
           </div>
+          {ACCOUNT_FIELDS.map((f) => (
+            <AccountFieldInput key={f.name} field={f} value={account[f.name]}
+              onChange={(v) => setAccount((a) => ({ ...a, [f.name]: v }))} />
+          ))}
           {error && <p className="text-sm text-destructive">{error}</p>}
           <button type="submit" disabled={loading}
             className="w-full rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground shadow-sm transition hover:opacity-90 disabled:opacity-50">
