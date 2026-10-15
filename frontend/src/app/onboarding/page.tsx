@@ -526,10 +526,11 @@ function OnboardingInner() {
         ["--ob-accent" as string]: accent,
         ["--ob-on-accent" as string]: onAccent,
       }}
-      className="min-h-screen w-full lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,32rem)]"
+      className="min-h-screen w-full lg:mx-auto lg:grid lg:max-w-[78rem] lg:grid-cols-[minmax(0,1fr)_minmax(0,30rem)]"
     >
-      {/* Left: the interview. */}
-      <div className="mx-auto w-full max-w-xl px-6 py-16 sm:py-20 lg:ml-auto lg:mr-0 lg:px-16">
+      {/* Left: the interview. Centred in its column so the page stays balanced
+          on a wide screen rather than hugging the divider. */}
+      <div className="mx-auto w-full max-w-xl px-6 py-16 sm:py-20 lg:px-12">
       <div className="mb-14 flex items-center gap-2.5">
         <div className="flex h-7 w-7 items-center justify-center rounded-md bg-slate-900 text-white dark:bg-white dark:text-slate-900">
           <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
