@@ -17,10 +17,13 @@ from auth import get_current_user
 from database import get_db
 from models.auth import PlatformUser
 from models.project import Project
+from services.features import feature_gate
 from services.project_service import get_project_with_auth
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+#: Changing where an app answers is part of publishing it: the same switch.
+_PUBLISH = [Depends(feature_gate("publish"))]
 
 
 class AddDomain(BaseModel):
@@ -104,7 +107,7 @@ async def list_domains(project_id: uuid.UUID, user: PlatformUser = Depends(get_c
     return svc.view()
 
 
-@router.post("/api/projects/{project_id}/domains")
+@router.post("/api/projects/{project_id}/domains", dependencies=_PUBLISH)
 async def add_domain(project_id: uuid.UUID, body: AddDomain, user: PlatformUser = Depends(get_current_user),
                      db: AsyncSession = Depends(get_db)):
     async def act(svc):
@@ -113,7 +116,7 @@ async def add_domain(project_id: uuid.UUID, body: AddDomain, user: PlatformUser 
     return await _run(project_id, user, db, act)
 
 
-@router.post("/api/projects/{project_id}/domains/{name}/check")
+@router.post("/api/projects/{project_id}/domains/{name}/check", dependencies=_PUBLISH)
 async def check_domain(project_id: uuid.UUID, name: str, user: PlatformUser = Depends(get_current_user),
                        db: AsyncSession = Depends(get_db)):
     async def act(svc):
@@ -122,7 +125,7 @@ async def check_domain(project_id: uuid.UUID, name: str, user: PlatformUser = De
     return await _run(project_id, user, db, act)
 
 
-@router.post("/api/projects/{project_id}/domains/{name}/main")
+@router.post("/api/projects/{project_id}/domains/{name}/main", dependencies=_PUBLISH)
 async def make_main(project_id: uuid.UUID, name: str, user: PlatformUser = Depends(get_current_user),
                     db: AsyncSession = Depends(get_db)):
     async def act(svc):
@@ -131,7 +134,7 @@ async def make_main(project_id: uuid.UUID, name: str, user: PlatformUser = Depen
     return await _run(project_id, user, db, act)
 
 
-@router.delete("/api/projects/{project_id}/domains/{name}")
+@router.delete("/api/projects/{project_id}/domains/{name}", dependencies=_PUBLISH)
 async def remove_domain(project_id: uuid.UUID, name: str, user: PlatformUser = Depends(get_current_user),
                         db: AsyncSession = Depends(get_db)):
     async def act(svc):
@@ -140,7 +143,7 @@ async def remove_domain(project_id: uuid.UUID, name: str, user: PlatformUser = D
     return await _run(project_id, user, db, act, dns=True)
 
 
-@router.put("/api/projects/{project_id}/domains/old-address")
+@router.put("/api/projects/{project_id}/domains/old-address", dependencies=_PUBLISH)
 async def set_old_address(project_id: uuid.UUID, body: OldAddress, user: PlatformUser = Depends(get_current_user),
                           db: AsyncSession = Depends(get_db)):
     async def act(svc):
@@ -149,7 +152,7 @@ async def set_old_address(project_id: uuid.UUID, body: OldAddress, user: Platfor
     return await _run(project_id, user, db, act)
 
 
-@router.put("/api/projects/{project_id}/domains/tentoro")
+@router.put("/api/projects/{project_id}/domains/tentoro", dependencies=_PUBLISH)
 async def rename_tentoro(project_id: uuid.UUID, body: AddDomain, user: PlatformUser = Depends(get_current_user),
                          db: AsyncSession = Depends(get_db)):
     """Give the app's Tentoro address another name (`aqua`)."""
@@ -159,7 +162,7 @@ async def rename_tentoro(project_id: uuid.UUID, body: AddDomain, user: PlatformU
     return await _run(project_id, user, db, act)
 
 
-@router.post("/api/projects/{project_id}/domains/{name}/records")
+@router.post("/api/projects/{project_id}/domains/{name}/records", dependencies=_PUBLISH)
 async def write_records(project_id: uuid.UUID, name: str, body: WriteRecords,
                         user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """Add the address's records at the organisation's connected DNS account.
@@ -170,7 +173,7 @@ async def write_records(project_id: uuid.UUID, name: str, body: WriteRecords,
     return await _run(project_id, user, db, act, dns=True)
 
 
-@router.post("/api/projects/{project_id}/domains/organisations")
+@router.post("/api/projects/{project_id}/domains/organisations", dependencies=_PUBLISH)
 async def connect_organisations(project_id: uuid.UUID, body: AddDomain, user: PlatformUser = Depends(get_current_user),
                                 db: AsyncSession = Depends(get_db)):
     """Each organisation of the app answers at its own address under this domain."""
@@ -180,7 +183,7 @@ async def connect_organisations(project_id: uuid.UUID, body: AddDomain, user: Pl
     return await _run(project_id, user, db, act)
 
 
-@router.put("/api/projects/{project_id}/domains/organisations/sign-in")
+@router.put("/api/projects/{project_id}/domains/organisations/sign-in", dependencies=_PUBLISH)
 async def set_organisation_sign_in(project_id: uuid.UUID, body: OldAddress, user: PlatformUser = Depends(get_current_user),
                                    db: AsyncSession = Depends(get_db)):
     """`shared`: one sign-in across the organisations' addresses; `per_organisation`: one at each."""
@@ -205,7 +208,7 @@ def _return_to(request: Request, project: Project, name: str) -> str:
     return f"{base}/org/{project.org_id}/projects/{project.id}?settings=domains&dc={quote(name, safe='')}"
 
 
-@router.post("/api/projects/{project_id}/domains/{name}/connect")
+@router.post("/api/projects/{project_id}/domains/{name}/connect", dependencies=_PUBLISH)
 async def connect_with_provider(project_id: uuid.UUID, name: str, request: Request,
                                 user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """The signed Domain Connect link: the owner approves the records at their
