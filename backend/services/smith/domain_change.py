@@ -60,6 +60,15 @@ def _records_said(view: dict) -> str:
     return " Add " + ("this record" if len(rows) == 1 else "these records") + " where its DNS is managed: " + "; ".join(lines) + "."
 
 
+def _guide_said(view: dict) -> str:
+    g = view.get("guide") or {}
+    if not g:
+        return ""
+    p = g["provider"]
+    head = f" How to add it at {p}:" if p != "Another provider" else " How to add it:"
+    return " ".join([head, *g["steps"][p], *g["tips"][p][:2]])
+
+
 def _said(view: dict) -> str:
     name, status = view.get("name"), view.get("status")
     if status == "live":
@@ -68,8 +77,8 @@ def _said(view: dict) -> str:
             out += f" {view.get('worksDetail')}"
         return out
     if status == "failed":
-        return f"{name} is not working: {view.get('detail')}" + _records_said(view)
-    return f"{name} is waiting: {view.get('detail')}" + _records_said(view)
+        return f"{name} is not working: {view.get('detail')}" + _records_said(view) + _guide_said(view)
+    return f"{name} is waiting: {view.get('detail')}" + _records_said(view) + _guide_said(view)
 
 
 def run(output_dir: str, verb: str, *, domain: str = "", change: str = "", reasoning: Any = None) -> dict:

@@ -138,6 +138,10 @@ def _no_real_probe(monkeypatch):
         return {}
     monkeypatch.setattr("services.deploy.domain_connect.discover", no_offer)
 
+    async def nothing_wrong(name, kind, root, records, transport=None):
+        return []
+    monkeypatch.setattr("services.deploy.dns_guides.diagnose", nothing_wrong)
+
 
 # --------------------------------------------------------------------------- #
 
