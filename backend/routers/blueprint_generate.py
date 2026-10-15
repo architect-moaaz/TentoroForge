@@ -2194,6 +2194,12 @@ async def smith_chat(
                              "do anything."),
                 })
                 emit("done", {"status": "timeout"})
+                # BETWEEN THAT NOTE AND THE END, SAY WHAT IS HAPPENING. The
+                # note was the last word for the rest of the turn — fifty
+                # minutes of it, and a turn that died read exactly the same
+                # (pcn4owv7, 2026-10-15). Every few minutes: the step the
+                # ledger says it is on; the moment the ledger stops: that.
+                _progress = asyncio.ensure_future(_post_progress(_inner, output_dir, emit))
                 # WHEN THE BACKGROUND BUILD ACTUALLY FINISHES, SAY SO. The panel
                 # was released, but the run registry (which the panel now polls)
                 # must still learn the run ended — otherwise it stays "running"
@@ -2201,6 +2207,7 @@ async def smith_chat(
                 # no-op for the closed stream and the signal the registry (and any
                 # reconnected client) needs to mark the run complete.
                 def _late_done(f: Any) -> None:
+                    _progress.cancel()
                     try:
                         _result = f.result()
                         emit("done", _result)
@@ -2970,6 +2977,48 @@ def _fix_everything(output_dir: Any, app_root: Any, emit: Any) -> dict:
                               "The app stays usable meanwhile."),
                      "status": "reported"})
     return {"status": "reported", "checks": {"pending": True, "output_dir": str(output_dir), "app_root": str(app_root)}}
+
+
+#: How often a released turn says where it is, in seconds.
+PROGRESS_EVERY_S = int(os.environ.get("FORGE_TURN_PROGRESS_S") or 300)
+
+
+def progress_line(snapshot: dict | None) -> str | None:
+    """The line a released turn posts: how long, and the step it is on; None
+    when the snapshot shows nothing running."""
+    if not snapshot or not snapshot.get("active"):
+        return None
+    minutes = int(max(0, int(snapshot.get("elapsedMs") or 0) // 60000))
+    step = str(snapshot.get("step") or "").strip()
+    return f"Still at it ({minutes} min): {step}." if step else f"Still at it ({minutes} min)."
+
+
+async def _post_progress(inner: Any, output_dir: Any, emit: Any, *, every: float | None = None) -> None:
+    """While a released turn runs: its step every `every` seconds; the moment
+    its ledger stops pulsing, that it stopped and how to go on."""
+    every = PROGRESS_EVERY_S if every is None else every
+    while not inner.done():
+        try:
+            await asyncio.sleep(every)
+        except asyncio.CancelledError:
+            return
+        if inner.done():
+            return
+        try:
+            snap = run_registry.ledger_snapshot(output_dir)
+        except Exception:  # noqa: BLE001 — a note, never the turn
+            continue
+        if snap is None:
+            continue
+        if not snap.get("active"):
+            when = time.strftime("%H:%M UTC", time.gmtime(snap.get("endedAt") or time.time()))
+            emit("message", {"text": (f"That turn stopped at {when} before it finished — its ledger went quiet. "
+                                      "Say “carry on” and I will pick up from where it stopped."),
+                             "status": "stopped"})
+            return
+        line = progress_line(snap)
+        if line:
+            emit("message", {"text": line, "status": "progress"})
 
 
 def _yes_to_a_carry_on_offer(history: Any, message: str) -> bool:

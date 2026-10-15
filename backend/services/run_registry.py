@@ -330,8 +330,9 @@ def live_state(output_dir: str | Path) -> str:
             alive = clock(os.path.getmtime(path))
         except OSError:
             alive = "?"
+        step = str(folded.get("step") or "")
         return (f"RIGHT NOW: a {kind_of(path)} is running — started {clock(started)}, {minutes} min so far, "
-                f"last sign of life {alive}.")
+                f"last sign of life {alive}." + (f" Last step: {step}." if step else ""))
     path = runs[-1]
     folded = _fold(path) or {}
     ended = folded.get("endedAt")
@@ -375,6 +376,21 @@ def close_orphaned_ledgers(root: str | Path) -> list[str]:
             except OSError:
                 continue
     return closed
+
+
+#: The turn ledgers alive in this process, by the application's folder.
+TURNS: dict[str, Any] = {}
+
+
+def turn_step(output_dir: str | Path, text: str) -> None:
+    """The step a turn is on, written to its ledger if one is registered
+    for this application in this process. Nothing when there is none."""
+    ledger = TURNS.get(str(Path(output_dir).resolve()))
+    if ledger is not None:
+        try:
+            ledger.step(text)
+        except Exception:  # noqa: BLE001 — a note, never the turn
+            pass
 
 
 #: Every ledger `close_orphaned_ledgers` closed in this process, by path —
@@ -429,6 +445,9 @@ def _fold(path: str) -> dict[str, Any] | None:
                         run["callsDone"] += 1
                 elif ev in ("node:failed", "node:blocked", "node:skipped"):
                     _node(run, e)["state"] = "failed"
+                elif ev == "turn:step":
+                    run["step"] = str(e.get("text") or "")
+                    run["stepAt"] = _epoch(e.get("at"))
                 if ev in MOMENTS:
                     run["moments"].append({"event": ev, **{k: v for k, v in e.items() if k not in ("at", "elapsedMs", "runId")}})
                     if len(run["moments"]) > MOMENTS_KEPT:

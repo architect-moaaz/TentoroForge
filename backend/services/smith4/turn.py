@@ -462,6 +462,12 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
                     sum(len(o.said or "") for o in observations), t2 - turn_started)
         args = chosen.get("args") if isinstance(chosen.get("args"), dict) else {}
         args = {k: v for k, v in args.items() if v not in (None, "")}
+        # SAID TO THE LEDGER, so a long turn can be reported on while it runs.
+        try:
+            from services import run_registry as _rr
+            _rr.turn_step(ctx.out, step_line(_step, tool, args))
+        except Exception:  # noqa: BLE001 — a note, never the turn
+            pass
 
         if ctx.unattended and tool in ("ask_user", "propose_plan"):
             observations.append(Observation(tool=tool, args=args, status="error", said=NOBODY_TO_ASK))
@@ -780,6 +786,17 @@ def _ended(tool: str, args: dict, landed: list[str], touched: list[str],
         if said:
             return _finished([said], touched, Outcome(status="no_op", said=said))
     return _finished(landed, touched, last)
+
+
+def step_line(n: int, tool: str, args: dict) -> str:
+    """One short line for a step: the tool and what it is about."""
+    about = ""
+    for key in ("route", "path", "name", "workflow", "entity", "page"):
+        if args.get(key):
+            about = str(args[key])[:60]
+            break
+    who = f" as {args['as']}" if args.get("as") else ""
+    return f"step {n}: {tool or '-'}" + (f" {about}" if about else "") + who
 
 
 def _finished(landed: list[str], touched: list[str], last: Outcome | None, *,

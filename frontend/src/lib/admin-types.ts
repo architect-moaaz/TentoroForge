@@ -205,3 +205,15 @@ export interface OrgFeatures {
 export const FEATURE_GROUP_NAMES: Record<AdminFeature["group"], string> = {
   build: "Build", workspace: "Workspace", ship: "Ship", integrations: "Integrations",
 };
+
+/** Something that went wrong on the platform, as the backend recorded it (services/incidents.py). */
+export interface Incident {
+  at: string;
+  kind: "turn_lost" | "build_lost" | "check_lost" | "platform_fault" | string;
+  app: string;
+  detail: string;
+  why?: string;
+  ledger?: string;
+  path?: string;
+  cause?: string;
+}
