@@ -141,7 +141,8 @@ async def run_agent_test(agent_data: dict[str, Any], message: str,
     if tools:
         req["tools"] = tools
     if cfg["model"].get("temperature") is not None:
-        req["temperature"] = cfg["model"]["temperature"]
+        # the SDK's own signature has no temperature (newer versions dropped it), but the API still takes it: send it in the body
+        req["extra_body"] = {"temperature": cfg["model"]["temperature"]}
 
     sp = next((n for n in nodes if kind(n) == "system_prompt"), None)
     started = _now()
