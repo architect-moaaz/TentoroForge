@@ -237,6 +237,13 @@ FRAME_FILES: tuple[str, ...] = (
     "src/app/(dashboard)/AccountMenu.tsx", "src/app/(dashboard)/MobileNav.tsx",
     "src/app/(dashboard)/MobileTabBar.tsx", "src/app/(dashboard)/PersonaChrome.tsx",
     "src/app/(dashboard)/RouteBreadcrumb.tsx",
+    # The layout imports these two siblings; without them its refreshed copy
+    # has a dangling import and every dashboard route 500s with "module not
+    # found". OrgSwitcher (tenancy) and OutsideOrganisation (an app answering
+    # at another organisation's address) arrived with the layout that imports
+    # them, but were not listed here, so a turn wrote the import and not the
+    # file (pcn4owv7, forge-v3, 2026-10-15).
+    "src/app/(dashboard)/OrgSwitcher.tsx", "src/app/(dashboard)/OutsideOrganisation.tsx",
     "src/components/PublicPageFrame.tsx", "src/components/PublicNavLinks.tsx",
     "src/components/AppNavigator.tsx",
 )
