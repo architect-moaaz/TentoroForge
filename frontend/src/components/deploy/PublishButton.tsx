@@ -2,10 +2,12 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ExternalLink, Smartphone, Upload } from "lucide-react";
+import { ExternalLink, Lock, Smartphone, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { PublishDialog } from "./PublishDialog";
+import { lockedNote } from "@/lib/features";
+import { explainLock } from "@/components/features/Locked";
 
 interface LatestDeployment {
   id: string;
@@ -26,9 +28,13 @@ interface Props {
    *  org's Settings → Integrations page when credentials are missing. */
   orgId?: string;
   size?: "sm" | "default";
+  /** The organisation lacks "Publish to the web": the button stays, locked. */
+  lockedWeb?: boolean;
+  /** The organisation lacks "Mobile builds". */
+  lockedMobile?: boolean;
 }
 
-export function PublishButton({ projectId, orgId, size = "sm" }: Props) {
+export function PublishButton({ projectId, orgId, size = "sm", lockedWeb = false, lockedMobile = false }: Props) {
   const [open, setOpen] = useState(false);
   // Which tab the dialog will open on. The main "Publish" button leaves
   // it on "web" (unchanged behavior). The secondary Smartphone icon
@@ -94,11 +100,14 @@ export function PublishButton({ projectId, orgId, size = "sm" }: Props) {
         variant="default"
         size={size}
         onClick={() => {
+          if (lockedWeb) { explainLock("Publish to the web"); return; }
           setInitialTab("web");
           setOpen(true);
         }}
-        disabled={!projectId || !isReady}
+        disabled={!projectId || (!isReady && !lockedWeb)}
+        data-locked={lockedWeb ? "publish" : undefined}
         title={
+          lockedWeb ? lockedNote("Publish to the web") :
           !projectId
             ? undefined
             : projectStatus === "generating"
@@ -112,21 +121,23 @@ export function PublishButton({ projectId, orgId, size = "sm" }: Props) {
                     : undefined
         }
       >
-        <Upload className="mr-1.5 h-3.5 w-3.5" />
+        {lockedWeb ? <Lock className="mr-1.5 h-3.5 w-3.5" /> : <Upload className="mr-1.5 h-3.5 w-3.5" />}
         {liveUrl ? "Republish" : "Publish"}
       </Button>
       <Button
         variant="outline"
         size={size}
         onClick={() => {
+          if (lockedMobile) { explainLock("Mobile builds"); return; }
           setInitialTab("mobile");
           setOpen(true);
         }}
-        disabled={!projectId || !isReady}
-        title="Build a mobile app (APK / IPA)"
+        disabled={!projectId || (!isReady && !lockedMobile)}
+        data-locked={lockedMobile ? "mobile_builds" : undefined}
+        title={lockedMobile ? lockedNote("Mobile builds") : "Build a mobile app (APK / IPA)"}
         aria-label="Build mobile app"
       >
-        <Smartphone className="h-3.5 w-3.5" />
+        {lockedMobile ? <Lock className="h-3.5 w-3.5" /> : <Smartphone className="h-3.5 w-3.5" />}
       </Button>
       <PublishDialog
         projectId={projectId}
@@ -134,6 +145,7 @@ export function PublishButton({ projectId, orgId, size = "sm" }: Props) {
         open={open}
         onOpenChange={setOpen}
         initialTab={initialTab}
+        mobileLocked={lockedMobile}
       />
     </div>
   );

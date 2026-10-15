@@ -27,6 +27,7 @@ from database import get_db
 from models.auth import PlatformUser
 from models.project import Project
 from services.schema_pipeline import run_schema_frontend_pipeline
+from services.features import feature_gate
 
 router = APIRouter()
 
@@ -806,7 +807,7 @@ async def get_preview_data(short_id: str, _project: Project = Depends(_member_of
 _EXPORT_EXCLUDE_DIRS = {"node_modules", ".next", ".git", "out", ".fixtures-cache", ".design", "__pycache__"}
 
 
-@router.get("/api/_debug/project-export/{short_id}")
+@router.get("/api/_debug/project-export/{short_id}", dependencies=[Depends(feature_gate("code_export"))])
 async def export_project_debug(short_id: str, _project: Project = Depends(_member_of)):
     """Stream a tarball of the project's output directory.
 

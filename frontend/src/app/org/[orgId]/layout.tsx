@@ -25,6 +25,8 @@ import {
 import { AuthGuard } from "@/components/auth-guard";
 import { useAuthStore } from "@/stores/auth";
 import { api } from "@/lib/api";
+import { useOrgFeatures, type FeatureKey } from "@/lib/features";
+import { LockBadge, LockedPanel, explainLock } from "@/components/features/Locked";
 
 interface Org {
   id: string;
@@ -39,6 +41,8 @@ interface NavItem {
   /** When true, href is used as-is (not org-prefixed). Used for top-level
    *  routes like /editor that aren't scoped to an org. */
   external?: boolean;
+  /** The platform feature this item belongs to; locked when the organisation lacks it. */
+  feature?: FeatureKey;
 }
 
 interface NavGroup {
@@ -50,16 +54,16 @@ const NAV_GROUPS: NavGroup[] = [
   {
     items: [
       { href: "", label: "Dashboard", icon: LayoutDashboard },
-      { href: "/portal", label: "Portal", icon: Globe },
+      { href: "/portal", label: "Portal", icon: Globe, feature: "portal" },
     ],
   },
   {
     label: "BUILD",
     items: [
       { href: "/projects", label: "Projects", icon: FolderOpen },
-      { href: "/drafts-room", label: "Drafts Room", icon: PencilRuler },
-      { href: "/discover", label: "Discover", icon: Sparkles },
-      { href: "/templates", label: "Templates", icon: LayoutTemplate },
+      { href: "/drafts-room", label: "Drafts Room", icon: PencilRuler, feature: "drafts_room" },
+      { href: "/discover", label: "Discover", icon: Sparkles, feature: "discover" },
+      { href: "/templates", label: "Templates", icon: LayoutTemplate, feature: "templates" },
     ],
   },
   {
@@ -90,6 +94,11 @@ function OrgLayout({
 }) {
   const pathname = usePathname();
   const { user, logout } = useAuthStore();
+  const features = useOrgFeatures(orgId);
+  // The feature behind the page in view, when the organisation lacks it.
+  const lockedHere = NAV_GROUPS.flatMap((g) => g.items).find(
+    (it) => it.feature && it.href && pathname.startsWith(`/org/${orgId}${it.href}`) && !features.allowed(it.feature),
+  );
 
   const { data: org } = useQuery({
     queryKey: ["org", orgId],
@@ -132,8 +141,24 @@ function OrgLayout({
                 </p>
               )}
               <div className="space-y-0.5">
-                {group.items.map(({ href, label, icon: Icon, external }) => {
+                {group.items.map(({ href, label, icon: Icon, external, feature }) => {
                   const fullHref = external ? href : `/org/${orgId}${href}`;
+                  if (feature && !features.allowed(feature)) {
+                    return (
+                      <button
+                        key={href}
+                        type="button"
+                        onClick={() => explainLock(features.nameOf(feature))}
+                        aria-disabled="true"
+                        data-locked={feature}
+                        className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-[13px] text-slate-400 hover:bg-slate-50 dark:text-slate-500 dark:hover:bg-slate-800/60"
+                      >
+                        <Icon className="h-[15px] w-[15px] text-slate-300" />
+                        {label}
+                        <LockBadge className="ml-auto" />
+                      </button>
+                    );
+                  }
                   const isActive =
                     href === ""
                       ? pathname === fullHref
@@ -194,7 +219,7 @@ function OrgLayout({
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 overflow-y-auto">{children}</main>
+      <main className="flex-1 overflow-y-auto">{lockedHere ? <LockedPanel name={features.nameOf(lockedHere.feature!)} /> : children}</main>
     </div>
   );
 }

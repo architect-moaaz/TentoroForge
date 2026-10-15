@@ -29,6 +29,8 @@ import {
   Route,
 } from "lucide-react";
 import { api } from "@/lib/api";
+import { useOrgFeatures, type FeatureKey } from "@/lib/features";
+import { LockBadge, LockedPanel, explainLock } from "@/components/features/Locked";
 import { Button } from "@/components/ui/button";
 // §112 — Smith is the conversation in this workspace. `ChatPanel` drives
 // routers/generate.py, which never imports services.blueprint, so the chat
@@ -252,7 +254,7 @@ function ProjectWorkspace({
       items: [
         { id: "chat" as Tab, label: "Chat", icon: MessageSquare, shortcut: "⌘1" },
         { id: "preview" as Tab, label: "Preview", icon: Eye, shortcut: "⌘2" },
-        { id: "code" as Tab, label: "Code", icon: Code, shortcut: "⌘3" },
+        { id: "code" as Tab, label: "Code", icon: Code, shortcut: "⌘3", feature: "code_view" as FeatureKey },
       ],
     },
     {
@@ -262,7 +264,7 @@ function ProjectWorkspace({
         { id: "rules" as Tab, label: "Rules", icon: Shield },
         { id: "business-rules" as Tab, label: "Business Rules", icon: Scale },
         { id: "workflows" as Tab, label: "Workflows", icon: Workflow },
-        { id: "agents" as Tab, label: "Agents", icon: Bot },
+        { id: "agents" as Tab, label: "Agents", icon: Bot, feature: "agents" as FeatureKey },
       ],
     },
     {
@@ -274,6 +276,16 @@ function ProjectWorkspace({
       ],
     },
   ];
+
+  // Which tab belongs to which platform feature; a tab the organisation lacks
+  // is shown locked, with the note saying who can open it.
+  const feat = useOrgFeatures(orgId);
+  const TAB_FEATURE: Partial<Record<Tab, FeatureKey>> = {
+    code: "code_view", agents: "agents", ai: "agents", office: "office", monitoring: "monitoring",
+    "schema-editor": "legacy_editors", "design-editor": "legacy_editors", "ir-editor": "legacy_editors",
+  };
+  const lockedFeature = TAB_FEATURE[activeTab];
+  const lockedName = lockedFeature && !feat.allowed(lockedFeature) ? feat.nameOf(lockedFeature) : null;
 
   // Fetch app model for command palette context
   const { data: appModel } = useQuery({
@@ -452,16 +464,17 @@ function ProjectWorkspace({
               <KeyRound className={`h-3.5 w-3.5 ${syncIntegrations.isPending ? "animate-pulse" : ""}`} />
             </button>
           </Tooltip>
-          <Tooltip label="Export">
+          <Tooltip label={feat.allowed("code_export") ? "Export" : "Export (locked)"}>
             <button
-              onClick={() => setShowExport(true)}
+              onClick={() => (feat.allowed("code_export") ? setShowExport(true) : explainLock(feat.nameOf("code_export")))}
+              data-locked={feat.allowed("code_export") ? undefined : "code_export"}
               className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors dark:hover:bg-slate-800"
             >
-              <Download className="h-3.5 w-3.5" />
+              {feat.allowed("code_export") ? <Download className="h-3.5 w-3.5" /> : <LockBadge />}
             </button>
           </Tooltip>
           <div className="w-px h-4 bg-slate-200 mx-1 dark:bg-slate-700" />
-          <PublishButton projectId={projectId} orgId={orgId} />
+          <PublishButton projectId={projectId} orgId={orgId} lockedWeb={!feat.allowed("publish")} lockedMobile={!feat.allowed("mobile_builds")} />
         </div>
       </div>
 
@@ -473,10 +486,14 @@ function ProjectWorkspace({
               <div className="mx-2.5 my-2 border-t border-slate-100 dark:border-slate-800" />
             )}
             <div className="flex flex-col items-center gap-0.5 px-1.5">
-              {section.items.map(({ id, label, icon: Icon, ...rest }) => (
-                <Tooltip key={id} label={label} shortcut={"shortcut" in rest ? (rest as { shortcut?: string }).shortcut : undefined}>
+              {section.items.map(({ id, label, icon: Icon, ...rest }) => {
+                const feature = "feature" in rest ? (rest as { feature?: FeatureKey }).feature : undefined;
+                const locked = !!feature && !feat.allowed(feature);
+                return (
+                <Tooltip key={id} label={locked ? `${label} (locked)` : label} shortcut={"shortcut" in rest ? (rest as { shortcut?: string }).shortcut : undefined}>
                   <button
                     onClick={() => setActiveTab(id)}
+                    data-locked={locked ? feature : undefined}
                     /* A3-1: Tooltip gives a VISUAL label but no accessible name,
                        so the workspace's primary navigation announced as a bare
                        "button" (WCAG 2.2 4.1.2). Every tab already carries
@@ -490,9 +507,11 @@ function ProjectWorkspace({
                     }`}
                   >
                     <Icon className="h-[16px] w-[16px]" />
+                    {locked && <LockBadge className="absolute -right-0.5 -top-0.5" />}
                   </button>
                 </Tooltip>
-              ))}
+                );
+              })}
             </div>
           </div>
         ))}
@@ -536,7 +555,8 @@ function ProjectWorkspace({
         {activeTab === "preview" && (
           <PreviewFrame projectId={projectId} project={project || null} />
         )}
-        {activeTab === "code" && <CodePanel projectId={projectId} />}
+        {lockedName && <LockedPanel name={lockedName} />}
+        {activeTab === "code" && !lockedName && <CodePanel projectId={projectId} />}
         {activeTab === "data" && (
           <DataModelPanel
             projectId={projectId}
@@ -562,7 +582,7 @@ function ProjectWorkspace({
             pages. The schema-JSON editor stays reachable as "schema-editor"
             for apps built before pages were written as React. */}
         {activeTab === "editor" && <ReactEditor projectId={projectId} />}
-        {activeTab === "schema-editor" && project?.short_id && (
+        {activeTab === "schema-editor" && !lockedName && project?.short_id && (
           <VisualEditorWorkspace projectId={project.short_id} />
         )}
         {/* Legacy individual editors — accessible via command palette */}
@@ -573,7 +593,7 @@ function ProjectWorkspace({
             onEditStructure={() => setActiveTab("design-editor")}
           />
         )}
-        {activeTab === "design-editor" && (
+        {activeTab === "design-editor" && !lockedName && (
           <DesignEditor
             projectId={projectId}
             onCompiled={(route) => {
@@ -582,25 +602,25 @@ function ProjectWorkspace({
             }}
           />
         )}
-        {activeTab === "ir-editor" && (
+        {activeTab === "ir-editor" && !lockedName && (
           <IREditor projectId={projectId} />
         )}
         {activeTab === "navigation" && (
           <NavigationPanel projectId={projectId} />
         )}
-        {activeTab === "agents" && (
+        {activeTab === "agents" && !lockedName && (
           <AgentBuilderPanel projectId={projectId} orgId={orgId} />
         )}
-        {activeTab === "ai" && (
+        {activeTab === "ai" && !lockedName && (
           <AIFeaturesPanel projectId={projectId} />
         )}
-        {activeTab === "office" && (
+        {activeTab === "office" && !lockedName && (
           <VirtualOffice
             className="h-full"
             isGenerating={useChatStore.getState().isGenerating}
           />
         )}
-        {activeTab === "monitoring" && (
+        {activeTab === "monitoring" && !lockedName && (
           <CostTrackingPanel projectId={projectId} />
         )}
         {activeTab === "versions" && (

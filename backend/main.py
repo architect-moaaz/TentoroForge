@@ -93,6 +93,7 @@ from routers.usage import router as usage_router
 from routers.drafts_room import router as drafts_room_router
 from routers.admin import router as admin_router
 from routers.admin_credits import router as admin_credits_router
+from routers.features import router as features_router, admin_router as admin_features_router
 
 # Middleware
 from middleware.rate_limit import RateLimitMiddleware
@@ -235,6 +236,8 @@ app.include_router(usage_router)
 app.include_router(drafts_room_router)
 app.include_router(admin_router)
 app.include_router(admin_credits_router)
+app.include_router(features_router)
+app.include_router(admin_features_router)
 
 # Metrics endpoint (Prometheus format)
 app.add_api_route("/metrics", metrics_endpoint, methods=["GET"], tags=["monitoring"])

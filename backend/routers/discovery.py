@@ -24,8 +24,9 @@ from schemas.discovery import (
 from schemas.project import ProjectResponse
 from services.project_service import create_project
 from sse_helpers import sse_event, stream_agent_messages
+from services.features import feature_gate
 
-router = APIRouter(tags=["discovery"])
+router = APIRouter(tags=["discovery"], dependencies=[Depends(feature_gate("discover"))])
 
 
 # ---------------------------------------------------------------------------

@@ -33,6 +33,7 @@ from services.deploy.provider import DeploySnapshot
 from services.deploy.vercel_client import VercelClient
 from services.deploy.vercel_provider import VercelDeployProvider
 from services.platform_integrations_crypto import CryptoError, decrypt
+from services.features import feature_gate
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -120,7 +121,7 @@ async def _collect_integrations(
 # --------------------------------------------------------------------------- #
 
 
-@router.post("/api/projects/{project_id}/publish")
+@router.post("/api/projects/{project_id}/publish", dependencies=[Depends(feature_gate("publish"))])
 async def publish(
     project_id: uuid.UUID,
     user: PlatformUser = Depends(get_current_user),
@@ -299,7 +300,7 @@ async def list_deployments(
 # --------------------------------------------------------------------------- #
 
 
-@router.post("/api/deployments/{deployment_id}/rollback")
+@router.post("/api/deployments/{deployment_id}/rollback", dependencies=[Depends(feature_gate("publish"))])
 async def rollback(
     deployment_id: uuid.UUID,
     user: PlatformUser = Depends(get_current_user),

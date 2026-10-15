@@ -22,6 +22,7 @@ from schemas.template import (
 from schemas.project import ProjectResponse
 from services.project_service import create_project
 from services.suggestion_service import get_suggested_templates
+from services.features import feature_gate
 
 router = APIRouter(tags=["templates"])
 
@@ -80,7 +81,7 @@ async def get_template(slug: str, db: AsyncSession = Depends(get_db)):
 # Create project from template
 # ---------------------------------------------------------------------------
 
-@router.post("/api/orgs/{org_id}/projects/from-template", response_model=ProjectResponse, status_code=201)
+@router.post("/api/orgs/{org_id}/projects/from-template", dependencies=[Depends(feature_gate("templates"))], response_model=ProjectResponse, status_code=201)
 async def create_from_template(
     org_id: uuid.UUID,
     req: CreateFromTemplateRequest,
@@ -116,7 +117,7 @@ async def create_from_template(
 # Suggested apps for an org
 # ---------------------------------------------------------------------------
 
-@router.get("/api/orgs/{org_id}/suggested-apps", response_model=SuggestedTemplatesResponse)
+@router.get("/api/orgs/{org_id}/suggested-apps", dependencies=[Depends(feature_gate("templates"))], response_model=SuggestedTemplatesResponse)
 async def suggested_apps(
     org_id: uuid.UUID,
     user: PlatformUser = Depends(get_current_user),

@@ -49,9 +49,10 @@ from models.auth import PlatformUser
 from routers.discovery import _require_org_member_simple
 from services.drafts_room import brand as brands
 from services.drafts_room import store
+from services.features import feature_gate
 
 logger = logging.getLogger(__name__)
-router = APIRouter(tags=["drafts-room"])
+router = APIRouter(tags=["drafts-room"], dependencies=[Depends(feature_gate("drafts_room"))])
 
 #: One turn at a time per session.
 _BUSY: set[str] = set()

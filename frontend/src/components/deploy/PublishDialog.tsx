@@ -43,6 +43,7 @@ import { useDeployStream, DeployEvent } from "@/hooks/useDeployStream";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { MobileBuildsPanel } from "./MobileBuildsPanel";
+import { LockedPanel } from "@/components/features/Locked";
 
 interface LatestDeployment {
   id: string;
@@ -65,6 +66,8 @@ interface Props {
    *  separately (a distinct toolbar entry) pass "mobile"; the default
    *  "web" preserves the existing Publish button behavior. */
   initialTab?: "web" | "mobile";
+  /** The organisation lacks "Mobile builds": the tab shows the lock, not the panel. */
+  mobileLocked?: boolean;
 }
 
 /** What the build found when it used the app (GET /api/projects/{id}/check). */
@@ -95,6 +98,7 @@ export function PublishDialog({
   open,
   onOpenChange,
   initialTab = "web",
+  mobileLocked = false,
 }: Props) {
   const [target, setTarget] = useState<"vercel" | "tentoro-cloud">("vercel");
   const [started, setStarted] = useState(false);
@@ -421,7 +425,9 @@ export function PublishDialog({
           </TabsContent>
 
           <TabsContent value="mobile" className="mt-3">
-            {projectId && orgId ? (
+            {mobileLocked ? (
+              <LockedPanel name="Mobile builds" />
+            ) : projectId && orgId ? (
               <MobileBuildsPanel projectId={projectId} orgId={orgId} />
             ) : (
               <div className="rounded border bg-muted/40 px-3 py-4 text-xs text-muted-foreground text-center">

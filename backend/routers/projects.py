@@ -36,6 +36,7 @@ from services.project_service import (
     create_project, copy_project, get_project_with_auth, reconcile_ready_status,
 )
 from preview import start_preview, stop_preview, get_preview_port, health_check
+from services.features import feature_gate
 
 router = APIRouter(tags=["projects"])
 
@@ -151,7 +152,7 @@ async def copy_project_endpoint(
 # File browsing
 # ===========================================================================
 
-@router.get("/api/projects/{project_id}/files")
+@router.get("/api/projects/{project_id}/files", dependencies=[Depends(feature_gate("code_view"))])
 async def list_project_files(
     project_id: uuid.UUID,
     user: PlatformUser = Depends(get_current_user),
@@ -171,7 +172,7 @@ async def list_project_files(
     return {"project_id": str(project.id), "files": files}
 
 
-@router.get("/api/projects/{project_id}/file")
+@router.get("/api/projects/{project_id}/file", dependencies=[Depends(feature_gate("code_view"))])
 async def read_project_file(
     project_id: uuid.UUID,
     path: str = Query(...),
@@ -193,7 +194,7 @@ async def read_project_file(
     return {"path": path, "content": content}
 
 
-@router.get("/api/projects/{project_id}/download")
+@router.get("/api/projects/{project_id}/download", dependencies=[Depends(feature_gate("code_export"))])
 async def download_project(
     project_id: uuid.UUID,
     user: PlatformUser = Depends(get_current_user),

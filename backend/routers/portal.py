@@ -33,8 +33,9 @@ from schemas.portal import (
     ErrorLogEntry,
 )
 from services.project_service import get_project_with_auth
+from services.features import feature_gate
 
-router = APIRouter(tags=["portal"])
+router = APIRouter(tags=["portal"], dependencies=[Depends(feature_gate("portal"))])
 
 
 # ---------------------------------------------------------------------------
@@ -640,7 +641,7 @@ def _generate_docker_compose(project_name: str) -> str:
     """)
 
 
-@router.post("/api/projects/{project_id}/export")
+@router.post("/api/projects/{project_id}/export", dependencies=[Depends(feature_gate("code_export"))])
 async def export_project(
     project_id: uuid.UUID,
     req: ExportRequest,

@@ -34,10 +34,11 @@ from models.platform_mcp_server import PlatformMcpServer
 from routers.platform_integrations import _require_org_admin
 from services import mcp_client
 from services.platform_integrations_crypto import CryptoError, encrypt
+from services.features import feature_gate
 
 
 log = logging.getLogger(__name__)
-router = APIRouter(tags=["platform-mcp-servers"])
+router = APIRouter(tags=["platform-mcp-servers"], dependencies=[Depends(feature_gate("mcp_servers"))])
 
 
 # --------------------------------------------------------------------------- #

@@ -25,6 +25,7 @@ from services.brand_extractor import extract_palette_from_logo
 from services.color_theory import derive_palette
 from services.project_service import get_project_with_auth
 from services.url_brand_scraper import scrape_brand_from_url
+from services.features import feature_gate
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +82,7 @@ async def extract_from_url(req: _ExtractURLRequest = Body(...)):
 # the logo itself
 # --------------------------------------------------------------------------- #
 
-@router.post("/api/projects/{project_id}/brand/logo")
+@router.post("/api/projects/{project_id}/brand/logo", dependencies=[Depends(feature_gate("brand"))])
 async def set_project_logo(
     project_id: uuid.UUID,
     logo: UploadFile = File(...),
@@ -129,7 +130,7 @@ async def set_project_logo(
             "version": out["version"], "summary": out["diff_summary"]}
 
 
-@router.delete("/api/projects/{project_id}/brand/logo")
+@router.delete("/api/projects/{project_id}/brand/logo", dependencies=[Depends(feature_gate("brand"))])
 async def clear_project_logo(
     project_id: uuid.UUID,
     user: PlatformUser = Depends(get_current_user),

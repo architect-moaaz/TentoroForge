@@ -4,6 +4,8 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { api } from "@/lib/api";
+import { isFeatureRefusal } from "@/lib/features";
+import { LockedPanel } from "@/components/features/Locked";
 import { FileTree } from "@/components/FileTree";
 import { CodeEditor } from "./CodeEditor";
 
@@ -14,7 +16,7 @@ interface CodePanelProps {
 export function CodePanel({ projectId }: CodePanelProps) {
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
 
-  const { data: filesData, isLoading: filesLoading } = useQuery({
+  const { data: filesData, isLoading: filesLoading, error: filesError } = useQuery({
     queryKey: ["project", projectId, "files"],
     queryFn: () =>
       api.get<{ project_id: string; files: string[] }>(
@@ -32,6 +34,8 @@ export function CodePanel({ projectId }: CodePanelProps) {
   });
 
   const files = filesData?.files || [];
+
+  if (isFeatureRefusal(filesError)) return <LockedPanel name="Code tab" />;
 
   return (
     <div className="flex h-full">

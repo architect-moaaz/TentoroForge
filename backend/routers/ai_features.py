@@ -18,8 +18,9 @@ from schemas.ai_features import (
     ScheduledAIConfigSave,
 )
 from services.project_service import get_project_with_auth
+from services.features import feature_gate
 
-router = APIRouter(tags=["ai-features"])
+router = APIRouter(tags=["ai-features"], dependencies=[Depends(feature_gate("agents"))])
 
 AI_CONFIG_DIR = "ai-config"  # relative to project output_dir
 

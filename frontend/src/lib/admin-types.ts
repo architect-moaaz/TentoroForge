@@ -158,3 +158,50 @@ export interface ImpersonationGrant {
   user: AdminPerson;
   default_org_id: string | null;
 }
+
+/** A feature as the cockpit sees it: the catalogue, the platform's setting, how many organisations override it. */
+export interface FeatureSettingRow {
+  enabled: boolean;
+  reason: string;
+  at: string | null;
+  by_email: string | null;
+}
+
+export interface AdminFeature {
+  key: string;
+  name: string;
+  description: string;
+  group: "build" | "workspace" | "ship" | "integrations";
+  default_on: boolean;
+  source_out: boolean;
+  enforced: "api" | "ui";
+  platform: FeatureSettingRow | null;
+  enabled_by_default: boolean;
+  org_overrides: number;
+}
+
+export interface OrgFeatureRow {
+  key: string;
+  name: string;
+  description: string;
+  group: "build" | "workspace" | "ship" | "integrations";
+  default_on: boolean;
+  source_out: boolean;
+  enforced: "api" | "ui";
+  platform: FeatureSettingRow | null;
+  override: FeatureSettingRow | null;
+  enabled: boolean;
+  source: "default" | "platform" | "org";
+}
+
+export interface OrgFeatures {
+  org_id: string;
+  name: string;
+  slug: string;
+  status: string;
+  features: OrgFeatureRow[];
+}
+
+export const FEATURE_GROUP_NAMES: Record<AdminFeature["group"], string> = {
+  build: "Build", workspace: "Workspace", ship: "Ship", integrations: "Integrations",
+};

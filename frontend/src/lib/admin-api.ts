@@ -2,6 +2,7 @@
 import { api } from "@/lib/api";
 import type {
   AdminApp,
+  AdminFeature,
   AdminMember,
   AdminOrg,
   AdminOverview,
@@ -14,6 +15,7 @@ import type {
   LimitStanding,
   Limits,
   OrgBalanceRow,
+  OrgFeatures,
   Paged,
   TeardownReport,
 } from "@/lib/admin-types";
@@ -37,6 +39,8 @@ export const adminKeys = {
   credits: ["admin", "credits"] as const,
   creditEntries: (id: string) => ["admin", "credits", id] as const,
   limits: ["admin", "credits", "limits"] as const,
+  features: ["admin", "features"] as const,
+  orgFeatures: (id: string) => ["admin", "org", id, "features"] as const,
   audit: (filters: Record<string, string>, page: number) => ["admin", "audit", filters, page] as const,
 };
 
@@ -87,6 +91,13 @@ export const adminApi = {
     api.post<CreditEntry>(`/api/admin/credits/orgs/${id}/entries`, body),
   setLimits: (scope_kind: string, scope_id: string, limits: Limits) =>
     api.put<{ limits: Limits }>("/api/admin/credits/limits", { scope_kind, scope_id, ...limits }),
+
+  features: () => api.get<{ groups: string[]; features: AdminFeature[] }>("/api/admin/features"),
+  setPlatformFeature: (key: string, enabled: boolean | null, reason: string) =>
+    api.put<{ key: string; enabled_by_default: boolean }>(`/api/admin/features/${key}`, { enabled, reason }),
+  orgFeatures: (id: string) => api.get<OrgFeatures>(`/api/admin/orgs/${id}/features`),
+  setOrgFeature: (id: string, key: string, enabled: boolean | null, reason: string) =>
+    api.put<OrgFeatures>(`/api/admin/orgs/${id}/features/${key}`, { enabled, reason }),
 
   audit: (filters: Record<string, string>, page = 1, limit = 50) =>
     api.get<AuditRow[]>(`/api/admin/audit${qs({ ...filters, limit, offset: (page - 1) * limit })}`),

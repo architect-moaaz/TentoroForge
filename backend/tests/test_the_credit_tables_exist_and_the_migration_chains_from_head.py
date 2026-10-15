@@ -33,7 +33,8 @@ def test_the_cockpit_migrations_chain_in_one_line_from_the_old_head():
             children.setdefault(d, []).append(rev)
     assert children.get("bd0920_brand_profiles") == ["sa1015_super_admin"], "one child, not a fork"
     heads = [r for r in revs if r not in children]
-    assert heads == ["cr1015_credits"], heads
+    assert revs["ft1015_features"] == ("cr1015_credits",)
+    assert heads == ["ft1015_features"], heads
 
 
 @pytest.mark.asyncio

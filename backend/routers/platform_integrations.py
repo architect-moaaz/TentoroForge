@@ -34,10 +34,11 @@ from services.node_config_specs import (
     keys_for_provider,
 )
 from services.platform_integrations_crypto import CryptoError, encrypt
+from services.features import feature_gate
 
 
 log = logging.getLogger(__name__)
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(feature_gate("integrations"))])
 
 
 # --------------------------------------------------------------------------- #

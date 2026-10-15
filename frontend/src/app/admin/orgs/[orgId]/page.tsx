@@ -23,6 +23,9 @@ import { CreditEntryDialog } from "@/components/admin/CreditEntryDialog";
 import { LimitsEditor } from "@/components/admin/LimitsEditor";
 import { when } from "@/components/admin/PeopleTable";
 import { SpendPanel } from "@/components/usage/SpendPanel";
+import { FeatureSwitch, switchValue } from "@/components/admin/FeatureSwitch";
+import { FEATURE_GROUP_NAMES, type OrgFeatureRow } from "@/lib/admin-types";
+import { Lock } from "lucide-react";
 import { useAuthStore } from "@/stores/auth";
 
 function said(err: unknown, fallback: string): string {
@@ -53,6 +56,7 @@ export default function AdminOrgPage({ params }: { params: Promise<{ orgId: stri
   const members = useQuery({ queryKey: adminKeys.members(orgId), queryFn: () => adminApi.members(orgId) });
   const apps = useQuery({ queryKey: adminKeys.apps("", orgId, 1), queryFn: () => adminApi.apps("", orgId, 1) });
   const credits = useQuery({ queryKey: adminKeys.creditEntries(orgId), queryFn: () => adminApi.creditEntries(orgId) });
+  const orgFeatures = useQuery({ queryKey: adminKeys.orgFeatures(orgId), queryFn: () => adminApi.orgFeatures(orgId) });
 
   const [dialog, setDialog] = useState<"block" | "remove" | "purge" | "add" | "entry" | null>(null);
   const [deleting, setDeleting] = useState<AdminApp | null>(null);
@@ -126,6 +130,11 @@ export default function AdminOrgPage({ params }: { params: Promise<{ orgId: stri
     mutationFn: (body: { amount_usd: number; kind: "opening" | "top_up" | "adjustment" | "refund"; note: string }) => adminApi.addEntry(orgId, body),
     onSuccess: () => { toast.success("Entry recorded"); refresh(); setDialog(null); }, onError: (e) => toast.error(said(e, "Not recorded")),
   });
+  const setFeature = useMutation({
+    mutationFn: ({ key, enabled, reason }: { key: string; enabled: boolean | null; reason: string }) => adminApi.setOrgFeature(orgId, key, enabled, reason),
+    onSuccess: () => { toast.success("Feature setting saved"); qc.invalidateQueries({ queryKey: adminKeys.orgFeatures(orgId) }); qc.invalidateQueries({ queryKey: ["admin", "features"] }); qc.invalidateQueries({ queryKey: ["admin", "audit"] }); },
+    onError: (e) => toast.error(said(e, "Not saved")),
+  });
   const setLimits = useMutation({
     mutationFn: (limits: Parameters<typeof adminApi.setLimits>[2]) => adminApi.setLimits("org", orgId, limits),
     onSuccess: () => { toast.success("Limits saved"); refresh(); }, onError: (e) => toast.error(said(e, "Limits not saved")),
@@ -168,6 +177,7 @@ export default function AdminOrgPage({ params }: { params: Promise<{ orgId: stri
           <TabsTrigger value="members">Members ({accepted.length}{pending.length ? ` + ${pending.length} invited` : ""})</TabsTrigger>
           <TabsTrigger value="apps">Apps ({apps.data?.total ?? 0})</TabsTrigger>
           <TabsTrigger value="credits">Credits</TabsTrigger>
+          <TabsTrigger value="features">Features</TabsTrigger>
         </TabsList>
 
         <TabsContent value="members" className="space-y-3">
@@ -256,6 +266,35 @@ export default function AdminOrgPage({ params }: { params: Promise<{ orgId: stri
               </TableBody>
             </Table>
           </div>
+        </TabsContent>
+        <TabsContent value="features" className="space-y-4">
+          <p className="text-sm text-muted-foreground">What this organisation may use. &ldquo;Inherit&rdquo; follows the platform default; a setting of its own wins. Members see a locked feature with a note to ask you.</p>
+          {(["build", "workspace", "ship", "integrations"] as const).map((g) => (
+            <div key={g} className="rounded-lg border bg-white dark:bg-slate-900">
+              <div className="border-b px-3 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{FEATURE_GROUP_NAMES[g]}</div>
+              <Table>
+                <TableBody>
+                  {(orgFeatures.data?.features ?? []).filter((f: OrgFeatureRow) => f.group === g).map((f: OrgFeatureRow) => (
+                    <TableRow key={f.key} data-testid={`org-feature-${f.key}`}>
+                      <TableCell className="w-1/2">
+                        <div className="flex items-center gap-1.5 font-medium">{f.name}{f.source_out && <Lock className="h-3 w-3 text-amber-500" aria-label="takes source out" />}</div>
+                        <div className="text-xs text-muted-foreground">{f.description}</div>
+                      </TableCell>
+                      <TableCell>
+                        <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${f.enabled ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300" : "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"}`}>{f.enabled ? "on" : "off"}</span>
+                        <div className="mt-1 text-[11px] text-muted-foreground">{f.source === "org" ? "this organisation's setting" : f.source === "platform" ? "platform default" : "catalogue"}</div>
+                      </TableCell>
+                      <TableCell>
+                        <FeatureSwitch value={switchValue(f.override)} inheritLabel={`Inherit (${(f.platform ? f.platform.enabled : f.default_on) ? "on" : "off"})`} featureName={f.name}
+                                       pending={setFeature.isPending} onChange={(enabled, reason) => setFeature.mutate({ key: f.key, enabled, reason })} />
+                        {f.override && <div className="mt-1 text-[11px] text-muted-foreground">{f.override.reason} · {f.override.by_email || "—"} · {when(f.override.at)}</div>}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          ))}
         </TabsContent>
       </Tabs>
 
