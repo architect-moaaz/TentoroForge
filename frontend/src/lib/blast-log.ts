@@ -43,6 +43,8 @@ export interface LogContext {
   total: number;
   /** A bomb's key in words ("made_up_id" → "Made-up ID"). */
   bombTitle: (key?: string | null) => string | null;
+  /** A tool test's kind in words ("tool_data_exposure" → "Secrets and privacy"). */
+  kindTitle?: (kind?: string | null) => string | null;
 }
 
 /** The lines to print for one event of the run stream. */
@@ -54,7 +56,7 @@ export function linesForEvent(e: Event, ctx: LogContext): Printed {
       return [{ kind: "info", text: `Throwing ${e.total} test${e.total === 1 ? "" : "s"}${e.repeats > 1 ? `, each ${e.repeats} times` : ""}, a few at a time…` }];
 
     case "test_start": {
-      const kind = ctx.bombTitle(e.bomb);
+      const kind = ctx.bombTitle(e.bomb) ?? (e.tool ? [e.tool, ctx.kindTitle?.(e.kind)].filter(Boolean).join(" · ") : null);
       return [{ kind: "cmd", text: `${tag(e.index, total)} ▶ ${e.name}${kind ? `  (${kind})` : ""}${e.runs > 1 ? `  run ${e.run}/${e.runs}` : ""}` }];
     }
 
@@ -74,6 +76,8 @@ export function linesForEvent(e: Event, ctx: LogContext): Printed {
           return [{ kind: "info", text: `${t}   ⛔ stopped by the safety rules before the AI saw it` }];
         case "rules":
           return (e.failures as string[]).map((f) => ({ kind: "bad" as LogKind, text: `${t}   ✗ ${short(oneLine(f), 110)}` }));
+        case "guard":
+          return [{ kind: "info", text: `${t}   🛡 ${short(oneLine(String(e.text ?? "")), 120)}` }];
         case "judge_start":
           return [{ kind: "dim", text: `${t}   ⚖ asking a reviewer…` }];
         case "judge":

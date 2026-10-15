@@ -1,7 +1,7 @@
 "use client";
 
 import { Plus, X, Wand2 } from "lucide-react";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -213,6 +213,15 @@ export function ToolPicker({ config, onUpdate, projectId, orgId }: ToolPickerPro
   };
 
   const asksFirst = config.confirm ?? changesData(config);
+
+  // The fields the assistant is shown: typed as words with commas, kept as a list. The text is held here so a comma and a
+  // space being typed are not rubbed out by the list they make; it follows the list when something else changes it (a fix
+  // from Find problems, or taking one back out).
+  const filterKeys = fieldList(config.response_filter);
+  const [filterText, setFilterText] = useState(filterKeys.join(", "));
+  useEffect(() => {
+    setFilterText((text) => (sameList(fieldList(text.split(",")), filterKeys) ? text : filterKeys.join(", ")));
+  }, [filterKeys.join("\u0000")]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="space-y-3">
@@ -591,9 +600,42 @@ export function ToolPicker({ config, onUpdate, projectId, orgId }: ToolPickerPro
               : "Reads run straight away. Switch this on for a tool that changes things."}
         </p>
       </div>
+
+      {/* What the assistant is shown of the tool's answer: anything it is not shown it cannot repeat. */}
+      <div className="space-y-1 rounded border p-2">
+        <Label className="text-xs" htmlFor="tool-fields">Fields the assistant can see</Label>
+        <Input
+          id="tool-fields"
+          className="h-8 text-xs"
+          placeholder="Everything the app returns"
+          value={filterText}
+          onChange={(e) => {
+            setFilterText(e.target.value);
+            const list = fieldList(e.target.value.split(","));
+            onUpdate({ response_filter: list.length ? list : undefined });
+          }}
+        />
+        <p className="text-[10px] text-muted-foreground">
+          {filterKeys.length
+            ? "Any other field of the tool's answer is hidden from the assistant, so it cannot repeat it."
+            : "Leave empty and the assistant sees everything the app returns. Passwords, keys and tokens are always removed. List the fields it needs (id, subject, status) to hide the rest."}
+        </p>
+      </div>
     </div>
   );
 }
+
+/** Field names from a list of words: trimmed, no blanks, no repeats. */
+function fieldList(items: unknown): string[] {
+  const out: string[] = [];
+  for (const raw of Array.isArray(items) ? items : []) {
+    const name = String(raw ?? "").trim();
+    if (name && !out.includes(name)) out.push(name);
+  }
+  return out;
+}
+
+const sameList = (a: string[], b: string[]) => a.length === b.length && a.every((x, i) => x === b[i]);
 
 /** Whether a tool changes anything: a create/update/delete, a call that is not a plain read, or a workflow. */
 export function changesData(c: ToolConfig): boolean {
