@@ -33,8 +33,8 @@ def agent_graph():
 class Script:
     """The model, by who is asking."""
 
-    def __init__(self, invent=None, judge=None, fix=None, agent=None, sim=None):
-        self.invent, self.judge, self.fix, self.agent = invent, judge, fix, agent
+    def __init__(self, invent=None, judge=None, fix=None, agent=None, sim=None, tooltest=None):
+        self.invent, self.judge, self.fix, self.agent, self.tooltest = invent, judge, fix, agent, tooltest
         self.sim = {"data": [{"id": "t-1", "subject": "A ticket"}], "total": 1} if sim is None else sim
         self.calls: list[tuple[str, dict]] = []
         self.messages = SimpleNamespace(create=self._create)
@@ -43,6 +43,8 @@ class Script:
         system = req["system"]
         if "tester whose job is to break" in system:
             who, answer = "invent", self.invent
+        elif "examines ONE tool" in system:
+            who, answer = "tooltest", self.tooltest
         elif "strict, fair reviewer" in system:
             who, answer = "judge", self.judge
         elif "fix weaknesses found by tests" in system:
@@ -249,7 +251,7 @@ async def test_each_bomb_reports_what_it_does_as_it_does_it_in_order():
     events = await collect(blast(agent_graph(), [test], client=s))
     mine = [e for e in events if e.get("id") == "t5" or (e["type"] == "result" and e["result"]["id"] == "t5")]
     assert [e["type"] for e in mine] == ["test_start", "step", "step", "step", "step", "step", "result"]
-    assert mine[0] == {"type": "test_start", "id": "t5", "name": "Looks one up", "bomb": "vague", "index": 1, "total": 1, "run": 1, "runs": 1}
+    assert mine[0] == {"type": "test_start", "id": "t5", "name": "Looks one up", "bomb": "vague", "kind": None, "tool": None, "index": 1, "total": 1, "run": 1, "runs": 1}
     kinds = [e["kind"] for e in steps_of(events, "t5")]
     assert kinds == ["tool", "tool_result", "reply", "judge_start", "judge"]
     tool, got, reply, _, judge = steps_of(events, "t5")
@@ -427,7 +429,9 @@ async def test_a_made_up_record_is_told_to_the_simulator_and_comes_back_not_foun
 async def test_a_change_is_held_exactly_as_the_real_app_holds_it_and_nothing_is_made_up_for_it():
     s = Script(agent=agent_says(call=("update_ticket", {"id": "abc", "data": {"status": "closed"}}), then="I am about to close ticket abc. Shall I go ahead?"))
     out = await run_of(s, {"message": "set ticket abc to closed"})
-    assert out["tool_calls"] == [{"name": "update_ticket", "input": {"id": "abc", "data": {"status": "closed"}}, "held": True, "kind": "change"}]
+    [call] = out["tool_calls"]
+    assert {k: call[k] for k in ("name", "input", "held", "kind")} == {"name": "update_ticket", "input": {"id": "abc", "data": {"status": "closed"}}, "held": True, "kind": "change"}
+    assert "needs_confirmation" in call["output"], "what the assistant was told is kept, so a reader can see it"
     assert s.who("sim") == [], "no model call is spent inventing a result for a change"
     given = json.loads(s.who("agent")[1]["messages"][-1]["content"][0]["content"])  # the assistant gets the hold as data, as in the real app
     assert given["held"] is True and given["needs_confirmation"] is True
@@ -697,6 +701,35 @@ async def test_a_busy_service_is_tried_once_more_and_a_model_that_keeps_failing_
     with pytest.raises(RuntimeError, match="did not answer"):
         await propose_fixes(fix_graph(), FAILED, client=refused)
     assert refused.n == 1, "a refusal is not a hiccup: no second try"
+
+
+class Credit(Exception):
+    status_code = 400
+
+    def __str__(self):
+        return "Error code: 400 - {'error': {'message': 'Your credit balance is too low to access the Anthropic API.'}}"
+
+
+class Refused(Exception):
+    status_code = 401
+
+
+@pytest.mark.asyncio
+async def test_an_empty_account_a_refused_key_and_a_rate_limit_are_each_named_as_what_they_are():
+    for exc, words in ((Credit(), "out of credit"), (Refused("invalid x-api-key"), "refused the model key"), (Busy("x"), "did not answer")):
+        with pytest.raises(RuntimeError, match=words):
+            await propose_fixes(fix_graph(), FAILED, client=Flaky(A_FIX, bad=9, first=exc))
+    limited = type("RateLimitError", (Exception,), {"status_code": 429})("slow down")
+    assert str(ab._plain_failure(limited)).startswith("The AI service is limiting how fast"), "named, not 'try again in a moment'"
+    unknown = type("Weird", (Exception,), {"status_code": 404})("model: claude-nope not found")
+    assert "does not know the model" in str(ab._plain_failure(unknown))
+    assert str(ab._plain_failure(RuntimeError("Finding problems needs a model key."))) == "Finding problems needs a model key."
+
+
+def test_a_fixer_brief_does_not_trust_what_a_page_sends_back_for_the_number_of_runs():
+    for odd in ("3", None, True, 2.0, [3]):
+        assert "runs" not in ab._failed_brief({"id": "a", "message": "m", "response": "r", "failures": [], "runs": odd})
+    assert ab._failed_brief({"id": "a", "message": "m", "response": "r", "failures": [], "runs": 3, "passedRuns": 1})["runs_that_held"] == 1
 
 
 @pytest.mark.asyncio

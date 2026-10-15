@@ -49,6 +49,8 @@ async def test_the_bombs_and_their_limits_are_listed(project):
     out = await blast_bombs(project.id, U, None)
     assert len(out["bombs"]) == 8 and {"made_up_id", "no_permission"} <= {b["key"] for b in out["bombs"]}
     assert out["maxTests"] == 20 and out["maxRepeats"] == 3 and out["perBomb"] == 2
+    assert [a["key"] for a in out["toolAngles"]][:2] == ["valid_use", "bad_input"] and len(out["toolAngles"]) == 8 and out["perAngle"] == 2
+    assert all(set(a) == {"key", "title"} for a in out["toolAngles"]), "what the AI is told about an angle is not sent to the page"
 
 
 @pytest.mark.asyncio
@@ -132,3 +134,28 @@ def test_the_old_run_scenarios_endpoint_is_gone_because_find_problems_runs_saved
     assert {"/api/projects/{project_id}/agent-definitions/blast/bombs"} <= paths
     assert any(p.endswith("/blast/invent") for p in paths) and any(p.endswith("/blast/run") for p in paths) and any(p.endswith("/blast/fixes") for p in paths)
     assert any(p.endswith("/{agent_id}/tests") for p in paths), "saved tests are still kept and listed"
+
+
+@pytest.mark.asyncio
+async def test_a_tool_is_studied_and_its_tests_come_back_with_the_analysis_and_a_failure_is_a_plain_400(project, monkeypatch):
+    from routers.agent_builder import blast_tool_tests
+    from schemas.agent_builder import AgentBlastTool
+
+    seen = {}
+
+    async def fake(graph_, tool, angles, per_angle, **kw):
+        seen.update(tool=tool, angles=angles, per=per_angle)
+        return {"analysis": {"whatItDoes": "Lists tickets.", "needs": [], "risks": []}, "tests": [{"id": "tool_x_valid_use_1", "name": "n", "message": "m", "expect": {}}]}
+
+    monkeypatch.setattr("services.agent_blast.invent_tool_tests", fake)
+    out = await blast_tool_tests(project.id, "support", AgentBlastTool(graph=drawn(), tool="list_tickets", angles=["fidelity"], per_angle=3), U, None)
+    assert out["analysis"]["whatItDoes"] == "Lists tickets." and out["tests"][0]["id"] == "tool_x_valid_use_1"
+    assert seen == {"tool": "list_tickets", "angles": ["fidelity"], "per": 3}
+
+    async def broken(*a, **kw):
+        raise RuntimeError("There is no tool called 'ghost' on this agent.")
+
+    monkeypatch.setattr("services.agent_blast.invent_tool_tests", broken)
+    with pytest.raises(HTTPException) as e:
+        await blast_tool_tests(project.id, "support", AgentBlastTool(graph=drawn(), tool="ghost"), U, None)
+    assert e.value.status_code == 400 and "no tool called 'ghost'" in e.value.detail

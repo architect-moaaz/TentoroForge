@@ -20,7 +20,7 @@ from models.project import (
     Version,
 )
 from schemas.agent_builder import (
-    AgentBlastFixes, AgentBlastInvent, AgentBlastRun, AgentBlastWrite, AgentDefinitionSave, AgentListItem, AgentScenarioSave,
+    AgentBlastFixes, AgentBlastInvent, AgentBlastRun, AgentBlastTool, AgentBlastWrite, AgentDefinitionSave, AgentListItem, AgentScenarioSave,
     AgentTestRequest,
     AgentWatch,
 )
@@ -271,10 +271,11 @@ async def blast_bombs(
     db: AsyncSession = Depends(get_db),
 ):
     """The kinds of bomb that can be thrown at an agent, and the limits on one blast."""
-    from services.agent_blast import BOMBS, MAX_REPEATS, MAX_TESTS, PER_BOMB_DEFAULT
+    from services.agent_blast import BOMBS, MAX_REPEATS, MAX_TESTS, PER_BOMB_DEFAULT, TOOL_ANGLES, TOOL_PER_ANGLE_DEFAULT
 
     await get_project_with_auth(project_id, user, db)
-    return {"bombs": BOMBS, "maxTests": MAX_TESTS, "maxRepeats": MAX_REPEATS, "perBomb": PER_BOMB_DEFAULT}
+    return {"bombs": BOMBS, "maxTests": MAX_TESTS, "maxRepeats": MAX_REPEATS, "perBomb": PER_BOMB_DEFAULT,
+            "toolAngles": [{"key": a["key"], "title": a["title"]} for a in TOOL_ANGLES], "perAngle": TOOL_PER_ANGLE_DEFAULT}
 
 
 @router.post("/api/projects/{project_id}/agent-definitions/{agent_id}/blast/invent")
@@ -291,6 +292,25 @@ async def blast_invent(
     await get_project_with_auth(project_id, user, db)
     try:
         return {"tests": await invent_bombs(req.graph.model_dump(), req.bombs, req.per_bomb)}
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/api/projects/{project_id}/agent-definitions/{agent_id}/blast/tool-tests")
+async def blast_tool_tests(
+    project_id: uuid.UUID,
+    agent_id: str,
+    req: AgentBlastTool,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Have an AI study ONE tool and write the tests that would break it, with a short analysis of what the tool does and how
+    it could go wrong. One model call. Nothing is run or saved here: the builder runs them with the blast."""
+    from services.agent_blast import invent_tool_tests
+
+    await get_project_with_auth(project_id, user, db)
+    try:
+        return await invent_tool_tests(req.graph.model_dump(), req.tool, req.angles, req.per_angle)
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
