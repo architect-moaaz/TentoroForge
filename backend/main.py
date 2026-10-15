@@ -94,12 +94,14 @@ from routers.usage import router as usage_router
 from routers.drafts_room import router as drafts_room_router
 from routers.admin import router as admin_router
 from routers.admin_credits import router as admin_credits_router
+from routers.admin_live import router as admin_live_router
 from routers.features import router as features_router, admin_router as admin_features_router
 
 # Middleware
 from middleware.rate_limit import RateLimitMiddleware
 from middleware.security_headers import SecurityHeadersMiddleware
 from middleware.impersonation_audit import ImpersonationAuditMiddleware
+from middleware.live_activity import LiveActivityMiddleware
 from middleware.logging import StructuredLoggingMiddleware, setup_structured_logging
 from middleware.error_handler import ErrorHandlerMiddleware
 from middleware.metrics import MetricsMiddleware, metrics_endpoint
@@ -151,6 +153,7 @@ app.add_middleware(StructuredLoggingMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 # Inside the security headers, so the request id it sets is on the record.
 app.add_middleware(ImpersonationAuditMiddleware)
+app.add_middleware(LiveActivityMiddleware)
 app.add_middleware(
     RateLimitMiddleware,
     requests_per_minute=RATE_LIMIT_REQUESTS_PER_MINUTE,
@@ -238,6 +241,7 @@ app.include_router(usage_router)
 app.include_router(drafts_room_router)
 app.include_router(admin_router)
 app.include_router(admin_credits_router)
+app.include_router(admin_live_router)
 app.include_router(features_router)
 app.include_router(admin_features_router)
 

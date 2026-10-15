@@ -16,7 +16,7 @@ export function when(iso: string | null | undefined): string {
 }
 
 export function PeopleTable({
-  rows, selfId, onDisable, onEnable, onGrant, onRevoke, onImpersonate,
+  rows, selfId, onDisable, onEnable, onGrant, onRevoke, onImpersonate, onWatchLive,
 }: {
   rows: AdminPerson[];
   selfId: string;
@@ -25,6 +25,7 @@ export function PeopleTable({
   onGrant: (p: AdminPerson) => void;
   onRevoke: (p: AdminPerson) => void;
   onImpersonate: (p: AdminPerson) => void;
+  onWatchLive?: (p: AdminPerson) => void;
 }) {
   return (
     <Table>
@@ -63,7 +64,10 @@ export function PeopleTable({
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                       {p.platform_role !== "super_admin" && !p.disabled_at && (
-                        <DropdownMenuItem onClick={() => onImpersonate(p)}>Impersonate</DropdownMenuItem>
+                        <>
+                          <DropdownMenuItem onClick={() => onImpersonate(p)}>Impersonate</DropdownMenuItem>
+                          {onWatchLive && <DropdownMenuItem onClick={() => onWatchLive(p)}>Watch live</DropdownMenuItem>}
+                        </>
                       )}
                       {p.disabled_at
                         ? <DropdownMenuItem onClick={() => onEnable(p)}>Enable login</DropdownMenuItem>

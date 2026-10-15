@@ -66,7 +66,8 @@ function AdminPeoplePageInner() {
                      onDisable={setDisabling} onEnable={(p) => enable.mutate(p.id)}
                      onGrant={(p) => { if (window.confirm(`Make ${p.email} a super admin of the whole platform?`)) grant.mutate(p.id); }}
                      onRevoke={(p) => { if (window.confirm(`Revoke ${p.email}'s super admin role?`)) revoke.mutate(p.id); }}
-                     onImpersonate={onImpersonate} />
+                     onImpersonate={onImpersonate}
+                     onWatchLive={(p) => router.push(`/admin/live?user=${p.id}`)} />
       </div>
       {pages > 1 && (
         <div className="flex items-center justify-end gap-2 text-xs">
