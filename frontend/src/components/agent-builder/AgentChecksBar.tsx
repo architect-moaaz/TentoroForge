@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Info, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Info, X, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { AgentFinding, FindingSeverity } from "@/types/agent-builder";
 
@@ -38,18 +38,39 @@ export function AgentChecksBar({
   onCancel,
 }: AgentChecksBarProps) {
   const [open, setOpen] = useState(false);
+  // Put away with the X: it stays away for exactly what it said, and comes back when the checks say something else.
+  const [dismissed, setDismissed] = useState<string | null>(null);
   const count = (s: FindingSeverity) => findings.filter((f) => f.severity === s).length;
   const errors = count("error");
   const warnings = count("warning");
   const notes = count("info");
+  const said = `${appChecked}|${findings.map((f) => `${f.severity}:${f.code}:${f.nodeId ?? ""}:${f.message}`).join("|")}`;
+
+  // A question that is waiting for an answer (Apply anyway?) can never be put away.
+  if (dismissed === said && !confirming) return null;
+
+  const dismissButton = confirming ? null : (
+    <button
+      type="button"
+      aria-label="Dismiss these checks"
+      title="Dismiss"
+      className="ml-auto shrink-0 rounded p-0.5 text-slate-500 hover:bg-black/5 hover:text-slate-800"
+      onClick={() => setDismissed(said)}
+    >
+      <X className="h-3.5 w-3.5" />
+    </button>
+  );
 
   if (findings.length === 0) {
     return (
       <div data-testid="agent-checks" aria-live="polite" className="flex items-center gap-1.5 border-b px-4 py-1 text-[11px] text-muted-foreground">
         <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
-        {appChecked
-          ? "No problems found, checked against this app."
-          : "No problems found in the agent. This project has no built app yet, so nothing was checked against one."}
+        <span className="flex-1">
+          {appChecked
+            ? "No problems found, checked against this app."
+            : "No problems found in the agent. This project has no built app yet, so nothing was checked against one."}
+        </span>
+        {dismissButton}
       </div>
     );
   }
@@ -68,16 +89,19 @@ export function AgentChecksBar({
       aria-live="polite"
       className={`border-b px-4 py-1.5 text-xs ${errors ? "bg-red-50" : warnings ? "bg-amber-50" : "bg-slate-50"}`}
     >
-      <button
-        type="button"
-        className="flex w-full items-center gap-1.5 text-left font-medium"
-        aria-expanded={open || confirming}
-        onClick={() => setOpen((o) => !o)}
-      >
-        {open || confirming ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-        <span className={errors ? TONE.error : warnings ? TONE.warning : TONE.info}>Checks: {summary}</span>
-        {!appChecked && <span className="font-normal text-muted-foreground">(not checked against an app: none built yet)</span>}
-      </button>
+      <div className="flex items-center gap-1.5">
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 items-center gap-1.5 text-left font-medium"
+          aria-expanded={open || confirming}
+          onClick={() => setOpen((o) => !o)}
+        >
+          {open || confirming ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+          <span className={errors ? TONE.error : warnings ? TONE.warning : TONE.info}>Checks: {summary}</span>
+          {!appChecked && <span className="font-normal text-muted-foreground">(not checked against an app: none built yet)</span>}
+        </button>
+        {dismissButton}
+      </div>
 
       {confirming && (
         <div className="mt-1.5 flex items-center gap-2 rounded border border-red-200 bg-white px-2 py-1.5">
