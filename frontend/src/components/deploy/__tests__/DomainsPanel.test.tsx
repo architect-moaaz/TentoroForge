@@ -203,4 +203,33 @@ describe("DomainsPanel", () => {
     expect(nav.replaced).toContain("/org/o1/projects/p1");
     nav.search = new URLSearchParams();
   });
+
+  it("shows how to add the record at the owner's provider, and what exactly is wrong", async () => {
+    const guide = {
+      provider: "GoDaddy",
+      providers: ["GoDaddy", "Cloudflare", "Another provider"],
+      steps: {
+        GoDaddy: ["Sign in at godaddy.com and open My Products.", "Type CNAME · Name app · Value cname.vercel-dns.com"],
+        Cloudflare: ["Sign in at dash.cloudflare.com", "Type CNAME · Name app · Target/Content cname.vercel-dns.com · Proxy status: DNS only (grey cloud)"],
+        "Another provider": ["Sign in where acme.com's DNS is managed"],
+      },
+      tips: { GoDaddy: ["Type only app as the name"], Cloudflare: ["Proxy status must be DNS only"], "Another provider": [] },
+    };
+    apiGet.mockImplementation(async () => ({
+      ...waiting,
+      domains: [{ ...waiting.domains[0], guide,
+                  problems: [{ code: "in-the-way", says: "app.acme.com already has an A record (203.0.113.7). Delete it." }] }],
+    }));
+    await render();
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain("already has an A record");
+    expect(host.textContent).toContain("How to add this at GoDaddy");
+    expect(host.textContent).toContain("open My Products");
+    const select = host.querySelector("select#guide-app-acme-com") as HTMLSelectElement;
+    await act(async () => {
+      select.value = "Cloudflare";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(host.textContent).toContain("How to add this at Cloudflare");
+    expect(host.textContent).toContain("DNS only (grey cloud)");
+  });
 });

@@ -92,6 +92,25 @@ SIGN_IN_FILES: tuple[tuple[str, bool], ...] = (
     ("src/hooks/useLogin.ts", False),
 )
 
+#: The signup route: the platform's, with the app's account types written in.
+SIGNUP_ROUTE = "src/app/api/auth/signup/route.ts"
+
+
+def _signup_route_text(template: str, app_root: Path, doc: dict | None) -> str:
+    """The current signup route as this app would be built with it: the
+    account-type choice the definition models, written into the literal."""
+    if doc is None:
+        return template
+    import json
+    from services.blueprint.signup_actors import derive_signup_account_types
+    options = derive_signup_account_types(doc, cache_dir=app_root)
+    if not options:
+        return template
+    needle = "const ACCOUNT_TYPES: { value: string }[] = [];"
+    literal = json.dumps([{"value": o["value"]} for o in options], ensure_ascii=False)
+    return template.replace(needle, f"const ACCOUNT_TYPES: {{ value: string }}[] = {literal};", 1)
+
+
 #: Database scripts every app runs, the platform's: prepare, verify, reset.
 DB_SCRIPTS: tuple[str, ...] = ("src/db/prepare-schema.ts", "src/db/verify-schema.ts",
                                "src/db/reset-schema.ts", "src/db/extensions.ts")
@@ -169,6 +188,20 @@ def refresh_engine(app_root: str | Path, doc: dict | None = None) -> list[str]:
         changed.append(rel)
     # THE DATABASE SCRIPTS ARE THE PLATFORM'S TOO: how a schema change keeps
     # the rows, and the check that it landed.
+    # THE SIGNUP ROUTE IS THE PLATFORM'S. Its account-type literal is the
+    # app's (interpolated at build from the definition), so the current
+    # template is interpolated the same way before comparing — an app with
+    # account types is not rewritten every turn, and never loses them.
+    signup = SIGNUP_ROUTE
+    src, dst = foundation / signup, root / signup
+    if src.is_file() and dst.is_file():
+        try:
+            text = _signup_route_text(src.read_text("utf-8"), root, doc)
+            if dst.read_text("utf-8") != text:
+                dst.write_text(text, "utf-8")
+                changed.append(signup)
+        except Exception:  # noqa: BLE001 — a refresh that cannot read the definition leaves the route alone
+            logger.debug("[engine] the signup route could not be refreshed", exc_info=True)
     for rel in DB_SCRIPTS:
         src, dst = foundation / rel, root / rel
         if not src.is_file() or not (root / "drizzle.config.ts").is_file():
@@ -237,6 +270,13 @@ FRAME_FILES: tuple[str, ...] = (
     "src/app/(dashboard)/AccountMenu.tsx", "src/app/(dashboard)/MobileNav.tsx",
     "src/app/(dashboard)/MobileTabBar.tsx", "src/app/(dashboard)/PersonaChrome.tsx",
     "src/app/(dashboard)/RouteBreadcrumb.tsx",
+    # The layout imports these two siblings; without them its refreshed copy
+    # has a dangling import and every dashboard route 500s with "module not
+    # found". OrgSwitcher (tenancy) and OutsideOrganisation (an app answering
+    # at another organisation's address) arrived with the layout that imports
+    # them, but were not listed here, so a turn wrote the import and not the
+    # file (pcn4owv7, forge-v3, 2026-10-15).
+    "src/app/(dashboard)/OrgSwitcher.tsx", "src/app/(dashboard)/OutsideOrganisation.tsx",
     "src/components/PublicPageFrame.tsx", "src/components/PublicNavLinks.tsx",
     "src/components/AppNavigator.tsx",
 )

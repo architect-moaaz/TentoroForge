@@ -16,6 +16,10 @@ async def _templates_answer(auth_client, org_id) -> int:
 
 @pytest.mark.asyncio
 async def test_an_organisations_setting_shuts_a_door_and_is_audited(super_admin_client, auth_client, org_id):
+    # The Drafts Room is off by default; the super admin opens it platform-wide first.
+    assert (await auth_client.get(f"/api/orgs/{org_id}/drafts-room")).status_code == 403
+    r = await super_admin_client.put("/api/admin/features/drafts_room", json={"enabled": True, "reason": "opened for everyone"})
+    assert r.status_code == 200
     assert (await auth_client.get(f"/api/orgs/{org_id}/drafts-room")).status_code == 200
     r = await super_admin_client.put(f"/api/admin/orgs/{org_id}/features/drafts_room",
                                      json={"enabled": False, "reason": "contract excludes the Drafts Room"})
@@ -31,10 +35,10 @@ async def test_an_organisations_setting_shuts_a_door_and_is_audited(super_admin_
     rows = (await super_admin_client.get("/api/admin/audit", params={"org_id": org_id, "action": "feature."})).json()
     assert len(rows) == 1 and rows[0]["action"] == "feature.org" and rows[0]["changes"]["reason"] == "contract excludes the Drafts Room"
 
-    # Clearing the setting opens the door again.
+    # Clearing the setting opens the door again: the platform's setting applies.
     r = await super_admin_client.put(f"/api/admin/orgs/{org_id}/features/drafts_room",
                                      json={"enabled": None, "reason": "contract renewed"})
-    assert next(f for f in r.json()["features"] if f["key"] == "drafts_room")["source"] == "default"
+    assert next(f for f in r.json()["features"] if f["key"] == "drafts_room")["source"] == "platform"
     assert (await auth_client.get(f"/api/orgs/{org_id}/drafts-room")).status_code == 200
 
 

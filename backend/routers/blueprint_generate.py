@@ -99,13 +99,30 @@ _LIFECYCLE_VERBS = frozenset({"status", "define", "approve", "build", "preview",
                               "export", "deploy", "help"})
 
 
+#: A question about where things stand. A short question, in these words,
+#: with no change asked in it — "fix the status badge" is a change.
+_STATUS_ASK = re.compile(
+    r"\b(status|progress|% ?complet\w*|percent\w*|how long (does|will|is|until)|is it (done|stuck|finished|still)"
+    r"|still (working|running|going)|any update|where are we|how far|eta)\b", re.I)
+#: A message that opens with a change verb is a change, whatever else it says.
+_CHANGE_START = re.compile(r"^(please\s+|can you\s+|could you\s+)?(fix|change|add|remove|make|rename|build|create|delete|set|show|open|edit|update|rebuild)\b", re.I)
+
+
 def _lifecycle_verb(message: str) -> str | None:
     """The lifecycle verb a message IS, or None. Only an exact one-word command
-    counts — 'define the roles for me' is a sentence, not the `define` verb."""
+    counts — 'define the roles for me' is a sentence, not the `define` verb —
+    except `status`, which a person asks in a sentence: "what is the % completion
+    now", "is it still working", "any update". Those were answered by the model
+    from the last check while nothing ran (pcn4owv7, 2026-10-15); a status
+    question is answered from the live run, by `_status_report`."""
     if not message:
         return None
-    word = message.strip().lower().rstrip(".!").strip()
-    return word if word in _LIFECYCLE_VERBS else None
+    word = message.strip().lower().rstrip(".!?").strip()
+    if word in _LIFECYCLE_VERBS:
+        return word
+    if len(word) <= 200 and _STATUS_ASK.search(word) and not _CHANGE_START.match(word):
+        return "status"
+    return None
 
 
 #: Where the application is, said as a place rather than as a state name.
@@ -121,11 +138,46 @@ _WHERE_IT_IS = {
 }
 
 
-def _status_report(doc: dict) -> str:
-    """A deterministic status line read straight off the Blueprint — never a
-    define. Answers 'where are we' with what has been drafted and the next
-    explicit step, and NOT with the state machine's own name: see below."""
+def _status_report(doc: dict, output_dir: Any = None) -> str:
+    """A deterministic status line — never a define, never a guess. It opens
+    with what is running RIGHT NOW as the ledgers on disk say it
+    (`run_registry.live_state`), then what the application has, then what
+    the last check found. Answers 'where are we' with what has been drafted
+    and the next explicit step, and NOT with the state machine's own name."""
     from services.smith import decisions as _decisions
+    live = ""
+    if output_dir:
+        try:
+            live = run_registry.live_state(output_dir)
+        except Exception:  # noqa: BLE001 — a status answer never fails on its opening line
+            live = ""
+    body = _status_body(doc, _decisions)
+    checked = _check_summary(output_dir) if output_dir else ""
+    return "\n\n".join(part for part in (live, body, checked) if part)
+
+
+def _check_summary(output_dir: Any) -> str:
+    """What the last check of the built application found, in numbers, and
+    when it was — so "how far along" is answered with what was proven."""
+    try:
+        from services.blueprint.app_check import publish_note
+        note = publish_note(str(output_dir))
+    except Exception:  # noqa: BLE001
+        return ""
+    if not note.get("checked"):
+        return ""
+    pages, working = int(note.get("pages") or 0), int(note.get("working") or 0)
+    failing = [f["route"] for f in note.get("failing") or []]
+    flows = list(note.get("processes") or [])
+    lines = [f"The last check of the built application: {working} of {pages} pages work"
+             + (f"; still not right: {', '.join(failing[:6])}" if failing else "")
+             + (f"; processes that do not run through: {', '.join(flows[:6])}" if flows else "") + "."]
+    if note.get("stale"):
+        lines.append("Pages were changed after that check; say “check the app again” for a current picture.")
+    return "\n".join(lines)
+
+
+def _status_body(doc: dict, _decisions: Any) -> str:
     state = (doc or {}).get("state", "DISCOVERY")
     reqs = len((doc or {}).get("requirements") or [])
     pages = len((doc or {}).get("pages") or [])
@@ -1692,11 +1744,23 @@ async def smith_chat(
             # reason about. Answer it deterministically from the Blueprint and
             # return — it must NEVER fall through and trigger a define (which it
             # did, because this handler had no verb parsing at all).
+            # A YES TO SMITH'S OFFER IS THAT OFFER. Smith ended with "Say
+            # “carry on” and I will keep at it"; the person said "Go ahead";
+            # it was read as a build consent and answered "It is already
+            # built… what would you like to do?" (pcn4owv7, 2026-10-15 05:36).
+            if _yes_to_a_carry_on_offer(req.history, req.message):
+                req.message = "carry on"
             verb = _lifecycle_verb(req.message)
             if verb == "status":
-                emit("message", {"text": _status_report(svc.doc if svc else {}),
+                emit("message", {"text": _status_report(svc.doc if svc else {}, output_dir),
                                  "status": "reported"})
                 return {"status": "reported"}
+            # THE WHOLE LIST. "Fix the remaining issues", "review and fix",
+            # "check the app again", or a yes to the checks' own offer: the
+            # checks run again and every red is worked, not one.
+            if svc is not None and defined and _is_built(output_dir) \
+                    and _wants_the_whole_list(req.message, req.history):
+                return _fix_everything(output_dir, app_root, emit)
             # THE OTHER LIFECYCLE WORDS, ANSWERED WHERE THEY ARE TYPED. They
             # were declared in `_LIFECYCLE_VERBS` and handled nowhere, so the
             # architect took them as changes to reason about.
@@ -2130,6 +2194,12 @@ async def smith_chat(
                              "do anything."),
                 })
                 emit("done", {"status": "timeout"})
+                # BETWEEN THAT NOTE AND THE END, SAY WHAT IS HAPPENING. The
+                # note was the last word for the rest of the turn — fifty
+                # minutes of it, and a turn that died read exactly the same
+                # (pcn4owv7, 2026-10-15). Every few minutes: the step the
+                # ledger says it is on; the moment the ledger stops: that.
+                _progress = asyncio.ensure_future(_post_progress(_inner, output_dir, emit))
                 # WHEN THE BACKGROUND BUILD ACTUALLY FINISHES, SAY SO. The panel
                 # was released, but the run registry (which the panel now polls)
                 # must still learn the run ended — otherwise it stays "running"
@@ -2137,6 +2207,7 @@ async def smith_chat(
                 # no-op for the closed stream and the signal the registry (and any
                 # reconnected client) needs to mark the run complete.
                 def _late_done(f: Any) -> None:
+                    _progress.cancel()
                     try:
                         _result = f.result()
                         emit("done", _result)
@@ -2855,6 +2926,116 @@ def _is_gate_consent(message: str) -> bool:
 
 def _said(message: str) -> str:
     return " ".join((message or "").strip().lower().rstrip(".!").split())
+
+
+#: The whole list, asked for: every open fault, not one of them.
+_WHOLE_LIST = re.compile(
+    r"\b(fix|sort out|clear|resolve|address)\b.{0,40}\b(remaining|open|outstanding|all|every|rest of the|these)\b.{0,30}"
+    r"\b(issue|problem|fault|error|bug|item)s?\b"
+    r"|\breview (the app |the application |it )?(once |all )?again\b"
+    r"|\bcheck (the )?(app|application|whole app)( once)? again\b"
+    r"|\brun the checks? again\b|\bfix everything\b|\bfix (them )?all\b", re.I)
+
+
+def _wants_the_whole_list(message: str, history: Any) -> bool:
+    """Whether the person asked for every open fault to be fixed — in those
+    words, or as a yes to the checks' own "Tell me to carry on". "Fix the
+    remaining issues" used to be one Smith turn that fixed one button label
+    in fifty minutes (pcn4owv7, 2026-10-15); the list is the checks' loop."""
+    m = " ".join((message or "").strip().lower().split())
+    if _WHOLE_LIST.search(m):
+        return True
+    from services.smith import confirm
+    if not (confirm.is_yes(m) or m in ("carry on", "continue", "keep going", "go on")):
+        return False
+    last = ""
+    for t in reversed(list(history or [])):
+        role = getattr(t, "role", None) if not isinstance(t, (tuple, list)) else t[0]
+        text = getattr(t, "text", None) if not isinstance(t, (tuple, list)) else t[1]
+        if str(role) == "assistant" and str(text or "").strip():
+            last = str(text)
+            break
+    return "tell me to carry on" in last.lower()
+
+
+def _fix_everything(output_dir: Any, app_root: Any, emit: Any) -> dict:
+    """Check the whole application again, then fix every red it finds, each
+    said here as it turns green — the checks' loop (`fix_to_green`), in the
+    background, for up to its time cap. Started after this turn ends, by
+    `_after_turn`, like the checks after a build."""
+    from services.blueprint.fix_to_green import FIX_MINUTES
+    going = run_registry.ledger_snapshot(output_dir, turns=False)
+    if going and going.get("active") and str(going.get("phase") or "") == "checking":
+        started = time.strftime("%H:%M UTC", time.gmtime(going.get("startedAt") or time.time()))
+        emit("message", {"text": (f"A check of the whole application is already running (since {started}). "
+                                  "I'll say each fault here as it turns green; nothing for you to do."),
+                         "status": "reported"})
+        return {"status": "reported"}
+    emit("message", {"text": ("Checking the whole application again first — every page as every kind of person, "
+                              "every process and rule — then working through everything that fails, by cause, "
+                              f"for up to {FIX_MINUTES} minutes. I'll say each one here as it turns green. "
+                              "The app stays usable meanwhile."),
+                     "status": "reported"})
+    return {"status": "reported", "checks": {"pending": True, "output_dir": str(output_dir), "app_root": str(app_root)}}
+
+
+#: How often a released turn says where it is, in seconds.
+PROGRESS_EVERY_S = int(os.environ.get("FORGE_TURN_PROGRESS_S") or 300)
+
+
+def progress_line(snapshot: dict | None) -> str | None:
+    """The line a released turn posts: how long, and the step it is on; None
+    when the snapshot shows nothing running."""
+    if not snapshot or not snapshot.get("active"):
+        return None
+    minutes = int(max(0, int(snapshot.get("elapsedMs") or 0) // 60000))
+    step = str(snapshot.get("step") or "").strip()
+    return f"Still at it ({minutes} min): {step}." if step else f"Still at it ({minutes} min)."
+
+
+async def _post_progress(inner: Any, output_dir: Any, emit: Any, *, every: float | None = None) -> None:
+    """While a released turn runs: its step every `every` seconds; the moment
+    its ledger stops pulsing, that it stopped and how to go on."""
+    every = PROGRESS_EVERY_S if every is None else every
+    while not inner.done():
+        try:
+            await asyncio.sleep(every)
+        except asyncio.CancelledError:
+            return
+        if inner.done():
+            return
+        try:
+            snap = run_registry.ledger_snapshot(output_dir)
+        except Exception:  # noqa: BLE001 — a note, never the turn
+            continue
+        if snap is None:
+            continue
+        if not snap.get("active"):
+            when = time.strftime("%H:%M UTC", time.gmtime(snap.get("endedAt") or time.time()))
+            emit("message", {"text": (f"That turn stopped at {when} before it finished — its ledger went quiet. "
+                                      "Say “carry on” and I will pick up from where it stopped."),
+                             "status": "stopped"})
+            return
+        line = progress_line(snap)
+        if line:
+            emit("message", {"text": line, "status": "progress"})
+
+
+def _yes_to_a_carry_on_offer(history: Any, message: str) -> bool:
+    """Whether `message` is a plain yes and the last thing Smith said offered
+    to carry on. "Go ahead", "yes", "ok", "please" after "Say “carry on” and I
+    will keep at it" are that, not a build consent and not a new request."""
+    from services.smith import confirm
+    if not confirm.is_yes(message):
+        return False
+    last = ""
+    for t in reversed(list(history or [])):
+        role = getattr(t, "role", None) if not isinstance(t, (tuple, list)) else t[0]
+        text = getattr(t, "text", None) if not isinstance(t, (tuple, list)) else t[1]
+        if str(role) == "assistant" and str(text or "").strip():
+            last = str(text)
+            break
+    return "carry on" in last.lower()
 
 
 def _smith_is_waiting(output_dir: Any, message: str) -> bool:

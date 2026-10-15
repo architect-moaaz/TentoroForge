@@ -67,7 +67,10 @@ def _verify(url: str, key_pem: str) -> dict[str, str]:
 def test_the_templates_write_what_vercel_asks_and_carry_the_proof_as_its_own_group():
     sub, apex = dc.templates("tentoro.ai")
     assert sub["serviceId"] == "forge-subdomain" and sub["hostRequired"] is True
-    assert sub["syncPubKeyDomain"] == "tentoro.ai" and sub["syncRedirectDomain"] == "forge-v3.tentoro.ai"
+    assert sub["syncPubKeyDomain"] == "tentoro.ai"
+    assert sub["syncRedirectDomain"] == "tentoro.ai,forge.tentoro.ai,forge-v3.tentoro.ai", \
+        "every platform address in full: the spec does not say a domain covers its subdomains"
+    assert sub["version"] == apex["version"] == 2
     assert [(r["type"], r["host"]) for r in sub["records"]] == [("CNAME", "@")]
     assert {(r["groupId"], r["type"], r["host"]) for r in apex["records"]} == {
         ("main", "A", "@"), ("www", "CNAME", "www"), ("proof", "TXT", "_vercel")}

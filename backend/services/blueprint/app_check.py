@@ -566,8 +566,16 @@ def _record(svc: Any, last: dict[str, dict], left: list[dict], fixed: list[str],
     issues = [i for i in runtime.get("issues") or []
               if not (isinstance(i, dict) and i.get("kind") == "page_check"
                       and (not partial or str(i.get("page")) in checked))]
+    # EACH FINDING SAYS WHEN IT WAS FOUND. A partial check stamps the record
+    # with the application's version while keeping the other pages' entries
+    # from an older check, so "stale" could never be told per page: the
+    # Publish dialog quoted ₹NaN on a page rewritten three times since
+    # (pcn4owv7, 2026-10-15). The version and the time ride on the entry.
+    import time as _time
+    found_at = {"version": int(svc.doc.get("version") or 0),
+                "at": _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime())}
     issues += [{"kind": "page_check", "page": t["page"], "name": t["name"], "route": t["route"],
-                "detail": " | ".join(t["findings"])[:600]} for t in left]
+                "detail": " | ".join(t["findings"])[:600], **found_at} for t in left]
     runtime["issues"] = issues
     failing = sorted({str(i.get("route")) for i in issues if isinstance(i, dict) and i.get("kind") == "page_check"})
     could_not = sorted({str(t["route"]) for t in untried or []}
@@ -654,7 +662,14 @@ def check_change(output_dir: str, touched: list[str], *, run_turn: Callable[...,
         return None                          # nothing built to open
     with usage_scope(agent="change_check", output_dir=str(output_dir), phase="change", kind="smith"):
         svc = BlueprintService.load(output_dir=output_dir)
-        reached = affected_pages(svc.doc, touched)
+        # A REWRITE NAMES ITS FILES FROM THE APP ROOT, SOMETIMES ABSOLUTELY.
+        # Either way the page they belong to is the one to open again.
+        root = str(Path(output_dir)).rstrip("/") + "/"
+        rel = [str(t).replace("\\", "/") for t in touched or []]
+        rel = [t[len(root):] if t.startswith(root) else t for t in rel]
+        reached = affected_pages(svc.doc, rel)
+        logger.info("[change-check] %s: %d file(s) touched reach %d page(s)%s", Path(output_dir).name,
+                    len(rel), len(reached), "" if reached else f" — {rel[:4]}")
         if not reached:
             return None
         order = [v["page"] for v in visits(svc.doc) if v["page"] in reached]
@@ -686,18 +701,56 @@ def publish_note(output_dir: str) -> dict:
     check = runtime.get("check") if isinstance(runtime.get("check"), dict) else None
     issues = [i for i in runtime.get("issues") or [] if isinstance(i, dict)]
     version = (check or {}).get("version")
+    failing = []
+    for i in issues:
+        if i.get("kind") != "page_check":
+            continue
+        # A FINDING OLDER THAN THE PAGE IS SAID SO. The page was rewritten
+        # after this was found: what the dialog quotes may be gone.
+        stale = page_changed_after(doc, str(i.get("page") or ""), i.get("version"))
+        failing.append({"route": str(i.get("route") or ""), "detail": str(i.get("detail") or "").split(" | ")[0][:200],
+                        "stale": stale, "found_at": i.get("at")})
     return {
         "checked": check is not None,
         # A CHANGE NOBODY USED THE APP AFTER. Smith checks the pages each of
         # its changes reaches; an edit made elsewhere (the editor) is not.
-        "stale": check is not None and version is not None and int(version) < int(doc.get("version") or 0),
+        "stale": check is not None and ((version is not None and int(version) < int(doc.get("version") or 0))
+                                        or any(f["stale"] for f in failing)),
         "pages": int((check or {}).get("pages") or 0),
         "working": int((check or {}).get("working") or 0),
-        "failing": [{"route": str(i.get("route") or ""), "detail": str(i.get("detail") or "").split(" | ")[0][:200]}
-                    for i in issues if i.get("kind") == "page_check"],
+        "failing": failing,
         "processes": [str(i.get("name") or i.get("workflow")) for i in issues if i.get("kind") == "process"],
     }
 
 
-__all__ = ["MAX_CHANGE_PAGES", "MAX_REPAIRS", "affected_pages", "check_change", "publish_note", "ROUNDS", "check_app", "check_pages", "fault_ask", "screen_findings", "tooling_faults",
+def page_changed_after(doc: dict, page_id: str, version: Any) -> bool:
+    """Whether `page_id` was changed by a Blueprint version later than
+    `version` — read off `changeHistory`, where every change names the
+    artifacts it touched. A finding with no version is from before findings
+    were dated: stale if the application moved at all since the check."""
+    if not page_id:
+        return False
+    try:
+        since = int(version) if version is not None else None
+    except (TypeError, ValueError):
+        since = None
+    if since is None:
+        check = ((doc.get("runtime") or {}).get("check") or {})
+        try:
+            since = int(check.get("version"))
+        except (TypeError, ValueError):
+            return False
+    for rec in doc.get("changeHistory") or []:
+        if not isinstance(rec, dict):
+            continue
+        try:
+            v = int(rec.get("version") or 0)
+        except (TypeError, ValueError):
+            continue
+        if v > since and page_id in {str(a) for a in rec.get("affectedArtifacts") or []}:
+            return True
+    return False
+
+
+__all__ = ["MAX_CHANGE_PAGES", "MAX_REPAIRS", "affected_pages", "check_change", "page_changed_after", "publish_note", "ROUNDS", "check_app", "check_pages", "fault_ask", "screen_findings", "tooling_faults",
            "shot_findings", "visits"]

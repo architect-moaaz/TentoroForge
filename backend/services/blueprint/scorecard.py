@@ -206,21 +206,42 @@ def closing(doc: dict) -> str:
     if not card:
         return ""
     parts, left, untried = [], [], 0
+    platform: list[str] = []
     for c in CRITERIA:
         v = (card.get("criteria") or {}).get(c) or {}
         total, green = int(v.get("total") or 0), int(v.get("green") or 0)
         if total:
             parts.append(f"{LABELS[c].lower()} {green} of {total}")
         if c != "smith":                      # its reds are the others', said once
-            left += [str(r.get("label") or r.get("id")) for r in v.get("red") or [] if isinstance(r, dict)]
+            left += [str(r.get("label") or r.get("id")) for r in v.get("red") or []
+                     if isinstance(r, dict) and not r.get("platform")]
+            platform += [f"{r.get('label') or r.get('id')} ({r.get('platform')})" for r in v.get("red") or []
+                         if isinstance(r, dict) and r.get("platform")]
         untried += len([u for u in v.get("untried") or []
                         if isinstance(u, dict) and "not checked" not in str(u.get("why") or "")])
     said = "Checks finished: " + ("; ".join(parts) if parts else "nothing to check") + "."
     if left:
         said += f" Still not right ({len(left)}): {', '.join(left[:8])}{' and more' if len(left) > 8 else ''}. Tell me to carry on, or what to fix first."
+    if platform:
+        seen = list(dict.fromkeys(platform))
+        said += (f" Not the app's to fix ({len(seen)}): {', '.join(seen[:6])}{' and more' if len(seen) > 6 else ''} — "
+                 "the fault is in the platform's engine; recorded for the platform team.")
     if untried:
         said += f" {untried} I could not try — my own check failed, not the app; I'll try again on the next build."
     return said
+
+
+def mark_platform(svc: Any, cause: str, where: str) -> None:
+    """Every red with this `cause` is the platform's to fix, not the app's:
+    `where` names the engine file. The fix loop leaves it alone from here."""
+    card = read(svc.doc)
+    if not card:
+        return
+    for c in CRITERIA:
+        for r in ((card.get("criteria") or {}).get(c) or {}).get("red") or []:
+            if isinstance(r, dict) and str(r.get("cause") or r.get("id")) == str(cause):
+                r["platform"] = str(where)
+    _save(svc, card)
 
 
 def _now() -> str:

@@ -36,7 +36,10 @@ def _checked(output_dir: str, out: Outcome) -> Outcome:
     the people they are for, and what broke is repaired once (`app_check`).
     Both chat paths come through `handle`; a turn the platform runs unattended
     is already inside a check and is not checked again."""
-    if out.status != "resolved" or not out.touched:
+    # A CHANGE THAT LANDED IS CHECKED EVEN WHEN THE TURN ENDED ON A QUESTION:
+    # the pages it rewrote are on disk either way (five calendar rewrites went
+    # unchecked, pcn4owv7 2026-10-15).
+    if out.status not in ("resolved", "needs_user") or not out.touched:
         return out
     try:
         from services.blueprint.app_check import check_change

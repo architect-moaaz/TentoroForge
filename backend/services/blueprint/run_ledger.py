@@ -119,6 +119,11 @@ class RunLedger:
         crashed. This keeps the ledger's mtime fresh while the run is alive."""
         self._write({"event": "run:heartbeat", "at": _now()})
 
+    def step(self, text: str) -> None:
+        """What a turn is doing right now, one short line per step — what a
+        progress note and a status answer read while the turn is long."""
+        self._write({"event": "turn:step", "text": str(text or "")[:200], "at": _now()})
+
     def node_start(self, key: str, subjects: int = 1) -> None:
         self._write({"event": "node:start", "node": key, "subjects": subjects,
                      "at": _now()})
@@ -399,12 +404,23 @@ class TurnLedger:
             while not self._stop.wait(20):
                 self.ledger.heartbeat()
         threading.Thread(target=pulse, daemon=True, name="smith-turn-pulse").start()
+        # Registered while it lives, so the loop inside can say its steps
+        # (`run_registry.turn_step`) without being handed the ledger.
+        self.key = str(Path(output_dir).resolve())
+        from services import run_registry
+        run_registry.TURNS[self.key] = self
+
+    def step(self, text: str) -> None:
+        self.ledger.step(text)
 
     def end(self, error: BaseException | None = None) -> None:
         """The turn's work returned, or raised `error`. Once only."""
         if self._stop.is_set():
             return
         self._stop.set()
+        from services import run_registry
+        if run_registry.TURNS.get(self.key) is self:
+            run_registry.TURNS.pop(self.key, None)
         if error is not None:
             self.ledger.crashed(error)
         else:

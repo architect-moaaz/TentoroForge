@@ -22,6 +22,8 @@ failure, said as such on the card and left alone.
 """
 from __future__ import annotations
 
+import os
+
 import logging
 import threading
 import time
@@ -35,9 +37,13 @@ from services.build_usage import carrying
 logger = logging.getLogger(__name__)
 
 #: Fix turns per hand-over (each turn is one Smith turn per group in the batch).
-FIX_TURNS = 6
+FIX_TURNS = 40
 #: Turns in a row that turned nothing green before the loop stops.
-DRY_STOP = 2
+DRY_STOP = 3
+#: THE CAP IS TIME, NOT A COUNT. "Working through them" stopped after two
+#: turns and zero fixes on a list of thirty (pcn4owv7, 2026-10-14); the person
+#: is promised the list, and gets as much of it as this many minutes allow.
+FIX_MINUTES = int(os.environ.get("FORGE_FIX_MINUTES") or 45)
 #: Page groups fixed at once; pages are different files.
 PAGE_PARALLEL = 3
 #: Steps a repair turn may take: the fix, the page or process, and the try.
@@ -88,14 +94,15 @@ def run_checks_to_green(svc: Any, output_dir: str, app_root: str, report: Any, *
                           app_factory=app_factory, bench_factory=bench_factory, client=client,
                           cancelled=cancelled, record=record)
         scorecard_event("checking")
-        reds = sc.reds(svc.doc)
+        reds = _ours(sc.reds(svc.doc))
         if reds and not cancelled():
             sc.set_status(svc, "fixing")
             scorecard_event("fixing")
-            say(f"{len(reds)} thing{'s' if len(reds) != 1 else ''} to fix. Working through them by cause; "
-                "I'll say each one here as it turns green. The app stays usable meanwhile.")
+            say(f"{len(reds)} thing{'s' if len(reds) != 1 else ''} to fix. Working through them by cause for up to "
+                f"{FIX_MINUTES} minutes; I'll say each one here as it turns green. The app stays usable meanwhile.")
         dry = 0
-        while reds and turns < FIX_TURNS and dry < DRY_STOP:
+        t0 = time.time()
+        while reds and turns < FIX_TURNS and dry < DRY_STOP and (time.time() - t0) < FIX_MINUTES * 60:
             if cancelled():
                 stopped = "stopped by the person"
                 break
@@ -108,6 +115,9 @@ def run_checks_to_green(svc: Any, output_dir: str, app_root: str, report: Any, *
             card_before = sc.read(svc.doc)
             _fix(batch, output_dir, run_turn=run_turn, say=say)
             reload()
+            for g in batch:
+                if g.get("platform"):
+                    sc.mark_platform(svc, str(g["cause"]), str(g["platform"]))
             # THE CARD IS THE CHECKS' TO WRITE. A Smith turn loads the engine's
             # copy of the Blueprint, which still carries the hand-over card, and
             # its save put that card back over the one the checks had written
@@ -116,7 +126,7 @@ def run_checks_to_green(svc: Any, output_dir: str, app_root: str, report: Any, *
                 sc.restore(svc, card_before)
             _check_again(svc, output_dir, app_root, report, batch, run_turn=run_turn, app_factory=app_factory,
                          bench_factory=bench_factory, client=client, cancelled=cancelled, record=record)
-            reds = sc.reds(svc.doc)
+            reds = _ours(sc.reds(svc.doc))
             after = {(r["criterion"], r["id"]) for r in reds}
             turned = [(key[0], before[key]) for key in sorted(set(before) - after)]
             yields.append(len(turned))
@@ -125,7 +135,8 @@ def run_checks_to_green(svc: Any, output_dir: str, app_root: str, report: Any, *
                 say(sc.green_line(criterion, it))
             scorecard_event("fixing")
         if reds and stopped is None and turns:
-            stopped = "yield" if dry >= DRY_STOP else ("turns" if turns >= FIX_TURNS else None)
+            stopped = ("yield" if dry >= DRY_STOP else "turns" if turns >= FIX_TURNS
+                       else "time" if (time.time() - t0) >= FIX_MINUTES * 60 else None)
         _write_smith(svc, turns, yields, before_total=len(sc.reds(svc.doc)) + sum(yields))
         card = sc.set_status(svc, "stopped" if stopped == "stopped by the person" else "done",
                              fix={"turns": turns, "yield": yields, "stopped": stopped})
@@ -355,6 +366,12 @@ def _write_smith(svc: Any, turns: int, yields: list[int], *, before_total: int) 
 # The fix loop
 # --------------------------------------------------------------------------- #
 
+def _ours(reds: list[dict]) -> list[dict]:
+    """The reds that are the app's to fix: a red marked the platform's is
+    said in the closing and not worked again."""
+    return [r for r in reds if not r.get("platform")]
+
+
 def by_cause(reds: list[dict]) -> list[dict]:
     """`{cause, kind, items}` — the reds a single repair turn is addressed to.
     A page's reds across criteria (does not open, wrong route answer, a
@@ -401,6 +418,32 @@ def ask_for(group: dict, doc: dict) -> str:
             "holds for them. Nobody is waiting to answer questions: decide from the definition and act.")
 
 
+def platform_fault(output_dir: str, result: Any) -> str | None:
+    """The engine file a repair turn had to change — the fault is the
+    platform's, not the app's — or None. Read off the paths the turn edited
+    (`file_edit.classify`) and, failing that, off its own words."""
+    import re
+    from pathlib import Path as _P
+    if not isinstance(result, dict):
+        return None
+    try:
+        from services.blueprint.service import BlueprintService
+        from services.smith.file_edit import classify
+        doc = BlueprintService.load(output_dir=output_dir).doc
+        root = str(_P(output_dir)).rstrip("/") + "/"
+        for raw in result.get("edited_paths") or []:
+            rel = str(raw).replace("\\", "/")
+            rel = rel[len(root):] if rel.startswith(root) else rel
+            rel = rel[4:] if rel.startswith("app/") else rel
+            if classify(doc, rel).get("kind") == "platform":
+                return rel
+    except Exception:  # noqa: BLE001 — the words below still tell
+        logger.debug("[fix-to-green] could not classify the paths a repair touched", exc_info=True)
+    text = str(result.get("answer") or result.get("finding") or "")
+    m = re.search(r"platform's `([^`]+)`", text)
+    return m.group(1) if m else None
+
+
 def _fix(batch: list[dict], output_dir: str, *, run_turn: Callable, say: Callable) -> None:
     def one(group: dict) -> None:
         from services.blueprint.service import BlueprintService
@@ -409,11 +452,25 @@ def _fix(batch: list[dict], output_dir: str, *, run_turn: Callable, say: Callabl
         except Exception:  # noqa: BLE001
             doc = {}
         label = str(group["items"][0].get("label") or group["cause"])
-        say(f"{label} — {str(group['items'][0].get('why') or '')[:160]}. Fixing it.")
+        why = str(group["items"][0].get("why") or "")[:160]
+        say(f"{label} — {why}. Fixing it.")
         try:
-            run_turn("", output_dir, ask_for(group, doc), max_steps=STEPS, unattended=True)
+            result = run_turn("", output_dir, ask_for(group, doc), max_steps=STEPS, unattended=True)
         except Exception as exc:  # noqa: BLE001 — one repair never ends the loop
             logger.warning("[fix-to-green] %s: %s", group["cause"], exc)
+            return
+        # NOT THE APP'S TO FIX. A repair that had to reach into the engine
+        # is a platform fault: said as such, on the record, and left alone —
+        # thirty reds were worked twice and fixed zero times because every
+        # one of them was the engine's (pcn4owv7, 2026-10-14).
+        where = platform_fault(output_dir, result)
+        if where:
+            group["platform"] = where
+            say(f"{label} — the fault is in the platform's engine (`{where}`), not in the app; I cannot fix it "
+                "from inside the app. Recorded for the platform team; moving on.")
+            from services import incidents
+            incidents.record("platform_fault", app=Path(output_dir).name, detail=f"{label}: {why}",
+                             path=where, cause=str(group["cause"]))
     if len(batch) > 1 and all(g["kind"] == "page" for g in batch):
         with ThreadPoolExecutor(max_workers=min(PAGE_PARALLEL, len(batch)), thread_name_prefix="forge-fix") as pool:
             list(pool.map(carrying(one), batch))

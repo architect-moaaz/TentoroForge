@@ -51,6 +51,8 @@ interface Deployment {
   target: string;
   status: string;
   url: string | null;
+  /** This build's own address, frozen at this build; `url` is the app's. */
+  deployment_url?: string | null;
   error: string | null;
   created_at: string | null;
   started_at: string | null;
@@ -138,15 +140,15 @@ export function DeploymentHistory({ projectId }: Props) {
             <div className="min-w-0 flex-1 space-y-1">
               {/* Row 1: URL or error, plus a subtle "current" tag on the live one. */}
               <div className="flex items-center gap-2">
-                {r.url ? (
+                {(r.deployment_url || r.url) ? (
                   <a
-                    href={r.url}
+                    href={r.deployment_url || r.url || "#"}
                     target="_blank"
                     rel="noreferrer"
                     className="truncate font-mono text-xs hover:underline"
-                    title={r.url}
+                    title={r.deployment_url ? `This build's own address — the app's is ${r.url}` : (r.url ?? "")}
                   >
-                    {r.url.replace(/^https?:\/\//, "")}
+                    {(r.deployment_url || r.url || "").replace(/^https?:\/\//, "")}
                   </a>
                 ) : (
                   <span className="truncate text-xs text-muted-foreground">
@@ -210,9 +212,9 @@ export function DeploymentHistory({ projectId }: Props) {
             </div>
 
             <div className="flex shrink-0 items-center gap-1">
-              {r.url && (
+              {(r.deployment_url || r.url) && (
                 <Button variant="ghost" size="icon" className="h-6 w-6" asChild>
-                  <a href={r.url} target="_blank" rel="noreferrer" title="Open">
+                  <a href={r.deployment_url || r.url || "#"} target="_blank" rel="noreferrer" title="Open this build">
                     <ExternalLink className="h-3 w-3" />
                   </a>
                 </Button>

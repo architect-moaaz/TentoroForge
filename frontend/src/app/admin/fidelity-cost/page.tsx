@@ -1,24 +1,25 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { api, ApiError } from "@/lib/api";
 
 export default function FidelityCostPage() {
   const [stats, setStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [problem, setProblem] = useState<string>("");
 
   useEffect(() => {
-    const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
-    fetch(`${apiBase}/api/_debug/fidelity-stats`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        setStats(data);
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
+    // The stats endpoint answers super admins only, so the request carries
+    // the person's token like every other cockpit call; a plain fetch read
+    // the 401 as "unreachable".
+    api.get<any>("/api/_debug/fidelity-stats")
+      .then((data) => setStats(data))
+      .catch((e) => setProblem(e instanceof ApiError ? `${e.message} (${e.status})` : "The stats endpoint did not answer."))
+      .finally(() => setLoading(false));
   }, []);
 
   if (loading) return <main className="p-8 text-sm text-muted-foreground">Loading…</main>;
-  if (!stats) return <main className="p-8 text-sm text-destructive">Stats endpoint unreachable.</main>;
+  if (!stats) return <main className="p-8 text-sm text-destructive">{problem || "The stats endpoint did not answer."}</main>;
 
   return (
     <main className="bg-background min-h-screen p-8">

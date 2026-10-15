@@ -17,7 +17,13 @@ function initials(name: string): string {
   return ((parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? "")).toUpperCase() || "?";
 }
 
-export function AccountMenu({ name, email, role }: { name?: string | null; email?: string | null; role?: string | null }) {
+export function AccountMenu({ name, email, role, compact = false, extras }: {
+  name?: string | null; email?: string | null; role?: string | null;
+  /** The avatar alone, for a rail with no room for a name. */
+  compact?: boolean;
+  /** Controls the frame has no room for beside the avatar: shown inside the menu. */
+  extras?: React.ReactNode;
+}) {
   const [open, setOpen] = React.useState(false);
   const box = React.useRef<HTMLDivElement>(null);
   const who = (name || email || "").trim();
@@ -35,18 +41,25 @@ export function AccountMenu({ name, email, role }: { name?: string | null; email
     <div className="relative" ref={box}>
       <button type="button" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((v) => !v)}
         title={who ? `Signed in as ${who}` : "Account"}
-        className="inline-flex h-9 items-center gap-2 rounded-full border border-border/60 bg-background pl-1 pr-3 text-sm text-foreground hover:bg-muted/50">
+        className={compact
+          ? "inline-flex h-9 w-9 items-center justify-center rounded-full border border-border/60 bg-background text-sm text-foreground hover:bg-muted/50"
+          : "inline-flex h-9 items-center gap-2 rounded-full border border-border/60 bg-background pl-1 pr-3 text-sm text-foreground hover:bg-muted/50"}>
         <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-muted text-xs font-medium">
           {who ? initials(who) : <User size={14} aria-hidden />}
         </span>
-        <span className="hidden max-w-[12ch] truncate sm:inline">{who || "Account"}</span>
+        {!compact && <span className="hidden max-w-[12ch] truncate sm:inline">{who || "Account"}</span>}
       </button>
       {open && (
-        <div role="menu" className="absolute right-0 z-50 mt-2 w-60 overflow-hidden rounded-lg border border-border/60 bg-background shadow-lg">
+        <div role="menu" className={"absolute z-50 mt-2 w-60 " + (compact ? "left-0" : "right-0") + " overflow-hidden rounded-lg border border-border/60 bg-background shadow-lg"}>
           <div className="border-b border-border/60 px-3 py-2">
             <p className="truncate text-sm font-medium text-foreground">{who || "Signed in"}</p>
             {role && <p className="mt-0.5 text-xs text-muted-foreground">{role}</p>}
           </div>
+          {extras && (
+            <div data-account-extras="" className="flex flex-col gap-2 border-b border-border/60 px-3 py-2">
+              {extras}
+            </div>
+          )}
           <button type="button" role="menuitem"
             onClick={() => {
               try { void signOut({ callbackUrl: "/login" }); }

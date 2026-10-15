@@ -47,7 +47,11 @@ class Deployment(Base):
     status: Mapped[str] = mapped_column(
         String(32), nullable=False, server_default="pending"
     )
+    #: The app's own address (its main domain, else the production alias):
+    #: the one people are given, the same after every publish.
     url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: This build's own address, frozen at this build — for the history and a rollback.
+    deployment_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # --- Vercel-specific ---

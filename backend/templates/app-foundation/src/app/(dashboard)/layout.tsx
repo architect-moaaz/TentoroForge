@@ -16,6 +16,10 @@ import {
   UserCog, Users, Wallet, Wrench, Zap,
 } from "lucide-react";
 import { icons as lucideIcons } from "lucide-react";
+// The package's top-level exports carry the ALIASES (`PlusCircle` for
+// `CirclePlus`, `BarChart3` for `ChartBar`…) that the `icons` object does
+// not: a shell naming "plus-circle" drew a bare circle (pcn4owv7, 2026-10-15).
+import * as lucideAll from "lucide-react";
 import { ShellStateProvider } from "@tentoroforge/renderer";
 import { MobileNav } from "./MobileNav";
 import { NotificationBell } from "./NotificationBell";
@@ -96,11 +100,24 @@ const ICON_MAP: [RegExp, string][] = [
   [/timeline|activity|log|event/, "activity"],
   [/message|inbox|chat|mail|notification/, "inbox"],
   [/document|file|record|note/, "file-text"],
+  // Pages a finance, lifestyle or onboarding app adds to the menu after the
+  // shell was drawn ("Onboarding Setup" drew a bare circle, pcn4owv7 2026-10-15).
+  [/onboard|setup|welcome|getting.started|wizard/, "compass"],
+  [/import|upload/, "upload"],
+  [/export|download|backup/, "download"],
+  [/budget|wallet|allowance/, "wallet"],
+  [/categor|folder|taxonomy/, "folder-tree"],
+  [/recur|repeat|subscription|standing/, "repeat"],
+  [/scenario|simulat|what.if|forecast/, "sliders-horizontal"],
+  [/goal|target|saving/, "target"],
+  [/account|profile/, "user"],
+  [/help|support|faq/, "life-buoy"],
 ];
 function iconFor(label: string, route: string): string {
   const hay = `${label} ${route}`.toLowerCase();
   for (const [re, icon] of ICON_MAP) if (re.test(hay)) return icon;
-  return "circle";
+  // No keyword: the rail draws the label's initial (`RailGlyph`), never a bare circle.
+  return "";
 }
 
 function findSideNav(node: unknown): { props?: NavProps } | null {
@@ -280,6 +297,18 @@ function frameClass(density?: string): string {
   return "mx-auto w-full max-w-[1600px] p-[8px] sm:p-6 lg:p-8";
 }
 
+const MAX_GLYPH_DESTINATIONS = 8;
+/** How many places the rail leads to: every leaf of the shell's groups, plus
+ *  the pages the frame appends because the shell left them out. */
+async function menuDestinations(): Promise<number> {
+  try {
+    const props = await loadNavProps();
+    return flattenNav(props.groups).length;
+  } catch {
+    return 0;
+  }
+}
+
 async function shellIdentity(): Promise<ShellIdentity> {
   try {
     // OPTIONAL. Only the old pipeline writes design-spec.json; a Blueprint
@@ -335,6 +364,12 @@ async function shellIdentity(): Promise<ShellIdentity> {
       skin = String(dna?.skin ?? "");
       density = String(dna?.layout?.density ?? density);
     } catch { /* design-dna optional */ }
+    // A RAIL OF GLYPHS IS FOR A FEW DESTINATIONS. Past MAX_GLYPH_DESTINATIONS
+    // the frame shows labels, whichever chrome the design named (pcn4owv7:
+    // thirteen unlabeled icons in a 64px strip, 2026-10-15).
+    if (["icon-rail", "dock"].includes(chrome) && (await menuDestinations()) > MAX_GLYPH_DESTINATIONS) {
+      chrome = "standard-rail";
+    }
     return { frame, chrome, density, skin, ...(bg ? { bg } : {}), ...(text ? { text } : {}),
              ...(accent ? { accent } : {}), mode, primary: hex(pal.primary) };
   } catch {
@@ -726,15 +761,33 @@ const GLYPHS: Record<string, React.ComponentType<{ size?: number; strokeWidth?: 
 // ones listed above: the architect picks the icon that depicts a destination
 // in this product. Resolved here, on the server, so no icon set ships to the
 // browser.
-function lucideByName(name: string): React.ComponentType<{ size?: number; strokeWidth?: number }> | undefined {
+type Glyph = React.ComponentType<{ size?: number; strokeWidth?: number }>;
+function lucideByName(name: string): Glyph | undefined {
   const pascal = name.split(/[-_\s]+/).filter(Boolean).map((w) => w[0]!.toUpperCase() + w.slice(1)).join("");
-  return (lucideIcons as Record<string, React.ComponentType<{ size?: number; strokeWidth?: number }>>)[pascal];
+  const canonical = (lucideIcons as Record<string, Glyph>)[pascal];
+  if (canonical) return canonical;
+  // An alias ("plus-circle", "bar-chart-3") lives on the package, not in `icons`.
+  const alias = (lucideAll as unknown as Record<string, unknown>)[pascal];
+  return typeof alias === "function" || (alias !== null && typeof alias === "object" && "render" in (alias as object))
+    ? (alias as Glyph) : undefined;
 }
 
-function RailGlyph({ name, size = 17 }: { name?: string; size?: number }) {
-  const key = (name || "circle").toLowerCase();
-  const C = GLYPHS[key] ?? lucideByName(key) ?? Circle;
-  return <C size={size} strokeWidth={2} />;
+/** The glyph for a menu item: its icon by name — canonical or alias — else the
+ *  label's initial in a small chip. Never a bare circle: thirteen icons with
+ *  two anonymous circles among them read as a broken menu. */
+function RailGlyph({ name, label, size = 17 }: { name?: string; label?: string; size?: number }) {
+  const key = (name || "").toLowerCase();
+  const C = key ? (GLYPHS[key] ?? lucideByName(key)) : undefined;
+  if (C) return <C size={size} strokeWidth={2} />;
+  const initial = (label || "").trim().charAt(0).toUpperCase();
+  if (!initial) return <Circle size={size} strokeWidth={2} />;
+  return (
+    <span aria-hidden="true" className="grid place-items-center rounded-md font-semibold leading-none"
+      style={{ width: size + 4, height: size + 4, fontSize: Math.max(10, Math.round(size * 0.62)),
+               background: "currentColor", opacity: 0.9 }}>
+      <span style={{ color: "var(--sk-nav-bg, #101418)" }}>{initial}</span>
+    </span>
+  );
 }
 
 /** Wide sectioned rail: 272px, uppercase group labels, pill actives, footer. */
@@ -809,7 +862,7 @@ function WideRail({ props, appName, caption, footer }: {
                   <a key={it.route} href={it.route} data-nav-item="" suppressHydrationWarning
                     className="mb-0.5 flex items-center gap-2.5 rounded-full px-3 py-[7px] text-[13px] opacity-85 transition hover:opacity-100"
                     style={{ color: text }}>
-                    <span data-nav-icon="" className="inline-flex"><RailGlyph name={it.icon} size={16} /></span>
+                    <span data-nav-icon="" className="inline-flex"><RailGlyph name={it.icon} label={it.label} size={16} /></span>
                     <span data-nav-label="">{it.label}</span>
                   </a>
                 ))}
@@ -818,7 +871,7 @@ function WideRail({ props, appName, caption, footer }: {
               <a href={g.route} data-nav-item="" suppressHydrationWarning
                 className="mb-0.5 flex items-center gap-2.5 rounded-full px-3 py-[7px] text-[13px] opacity-85 transition hover:opacity-100"
                 style={{ color: text }}>
-                <span data-nav-icon="" className="inline-flex"><RailGlyph name={g.icon} size={16} /></span>
+                <span data-nav-icon="" className="inline-flex"><RailGlyph name={g.icon} label={g.label} size={16} /></span>
                 <span data-nav-label="">{g.label ?? g.route}</span>
               </a>
             ) : null}
@@ -841,7 +894,16 @@ function IconRail({ props, appName, footer }: { props: NavProps; appName: string
   const bg = props.bg ?? (dark ? "#101418" : "#ffffff");
   const text = props.text ?? (dark ? "#c7d2de" : "#334155");
   const accent = props.accent ?? "#5B8DEF";
-  const items = flattenNav(props.groups);
+  // THE GROUPS THE NAVIGATION AGENT DREW STAY GROUPS: a header glyph for a
+  // group of pages, its children under it, a hairline and some air between
+  // groups. Flattened, thirteen glyphs ran as one column (pcn4owv7, 2026-10-15).
+  const leaf = (it: Sub, size: number) => (
+    <a key={it.route} href={it.route} title={it.label} data-nav-item="" suppressHydrationWarning
+      className="grid h-10 w-10 place-items-center rounded-[var(--radius)] opacity-75 transition hover:opacity-100"
+      style={{ color: text }}>
+      <span data-nav-icon="" className="inline-flex"><RailGlyph name={it.icon} label={it.label} size={size} /></span>
+    </a>
+  );
   return (
     <nav data-shell-nav="" className="hidden h-full shrink-0 flex-col items-center overflow-y-auto md:flex"
       style={{ width: "var(--sk-nav-w, 64px)", background: bg, color: text,
@@ -857,13 +919,22 @@ function IconRail({ props, appName, footer }: { props: NavProps; appName: string
         </ShellBrand>
       </div>
       <div className="flex flex-1 flex-col items-center gap-1 pb-4">
-        {items.map((it) => (
-          <a key={it.route} href={it.route} title={it.label} data-nav-item="" suppressHydrationWarning
-            className="grid h-10 w-10 place-items-center rounded-[var(--radius)] opacity-75 transition hover:opacity-100"
-            style={{ color: text }}>
-            <span data-nav-icon="" className="inline-flex"><RailGlyph name={it.icon} size={18} /></span>
-          </a>
-        ))}
+        {props.groups.map((g, gi) => {
+          const subs = (g.items || []).filter((it) => it.route);
+          if (!g.route && subs.length === 0) return null;
+          return (
+            <div key={g.route || g.label || gi} data-nav-group="" className="flex flex-col items-center gap-1">
+              {gi > 0 && <div aria-hidden="true" className="my-1.5 h-px w-6" style={{ background: "currentColor", opacity: 0.18 }} />}
+              {g.route ? leaf({ label: g.label ?? g.route, route: g.route, icon: g.icon }, 18) : (
+                <span title={g.label} data-nav-group-head="" aria-label={g.label}
+                  className="grid h-7 w-10 place-items-center opacity-45" style={{ color: text }}>
+                  <RailGlyph name={g.icon} label={g.label} size={14} />
+                </span>
+              )}
+              {subs.map((it) => leaf(it, 18))}
+            </div>
+          );
+        })}
       </div>
       {footer && <div data-rail-footer="" className="mb-4 flex flex-col items-center gap-2">{footer}</div>}
     </nav>
@@ -892,7 +963,7 @@ function DockNav({ props, appName }: { props: NavProps; appName: string }) {
         <a key={it.route} href={it.route} data-nav-item="" suppressHydrationWarning title={it.label}
           className="flex flex-col items-center gap-0.5 rounded-xl px-2.5 py-1.5 opacity-80 transition hover:opacity-100"
           style={{ color: text }}>
-          <span data-nav-icon="" className="inline-flex"><RailGlyph name={it.icon} size={17} /></span>
+          <span data-nav-icon="" className="inline-flex"><RailGlyph name={it.icon} label={it.label} size={17} /></span>
           <span data-nav-label="" className="text-[10px] leading-none">{it.label.split(" ")[0]}</span>
         </a>
       ))}
@@ -920,17 +991,27 @@ export default async function DashboardLayout({
   // room for them: a rail's footer, a top bar's right end, or — for the
   // chromes with neither — a row above the page. Floating over the page's
   // header they sat on top of its primary action.
-  const cluster = session?.user ? (
+  const chromeName = identity.chrome ?? "standard-rail";
+  // A 64px RAIL HOLDS TWO CONTROLS. The organisation switch, the language and
+  // "Install app" stacked into its foot clipped and truncated (pcn4owv7,
+  // 2026-10-15); in the icon rail they live inside the account menu.
+  const compact = chromeName === "icon-rail";
+  const extras = (
     <>
       <OrgSwitcher />
       <LanguageSwitch />
       <InstallButton />
+    </>
+  );
+  const cluster = session?.user ? (
+    <>
+      {!compact && extras}
       <NotificationBell />
       <AccountMenu name={session.user.name} email={session.user.email}
-                   role={(session.user as { role?: string }).role} />
+                   role={(session.user as { role?: string }).role}
+                   compact={compact} extras={compact ? extras : undefined} />
     </>
   ) : null;
-  const chromeName = identity.chrome ?? "standard-rail";
   const clusterInRail = ["wide-rail", "icon-rail", "right-rail", "floating-rail"].includes(chromeName);
   const clusterInBar = chromeName === "topbar" || identity.frame === "topbar";
   const caption = scoped && role ? role : undefined;
@@ -959,7 +1040,7 @@ export default async function DashboardLayout({
           <div aria-hidden="true" className="h-20 md:hidden" />
           <React.Suspense fallback={null}>
             <MobileTabBar tabs={mobileTabs.map((t) => ({ label: t.label ?? t.route, route: t.route,
-                                                        icon: <RailGlyph name={t.icon} size={20} /> }))} />
+                                                        icon: <RailGlyph name={t.icon} label={t.label} size={20} /> }))} />
           </React.Suspense>
         </>
       )}
@@ -1136,8 +1217,8 @@ export default async function DashboardLayout({
             names resolves; the library's own list is short on purpose. */}
         <SideNav {...navProps} appName={appName}
           groups={navProps.groups.map((g) => ({
-            ...g, glyph: <RailGlyph name={g.icon} size={20} />,
-            items: g.items?.map((it) => ({ ...it, glyph: <RailGlyph name={it.icon} size={17} /> })),
+            ...g, glyph: <RailGlyph name={g.icon} label={g.label} size={20} />,
+            items: g.items?.map((it) => ({ ...it, glyph: <RailGlyph name={it.icon} label={it.label} size={17} /> })),
           }))} />
         {main}
       </div>

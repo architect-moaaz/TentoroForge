@@ -357,6 +357,23 @@ async def _close_orphaned_ledgers():
     if closed:
         logging.getLogger("forge.startup").info("[ledgers] closed %d left open by the last process: %s",
                                                 len(closed), ", ".join(closed[:6]))
+        await _tell_whose_turn_was_lost(list(run_registry.CLOSED_PATHS))
+        run_registry.CLOSED_PATHS.clear()
+
+
+async def _tell_whose_turn_was_lost(paths: list[str]) -> None:
+    """THE PERSON IS TOLD (`services.lost_runs`). A turn the restart killed used
+    to leave the chat on "Still working on it" for good (pcn4owv7, 2026-10-15)."""
+    from services import lost_runs
+    await lost_runs.tell(paths, "restarted")
+
+
+@app.on_event("startup")
+async def _start_lost_run_watch():
+    """A ledger that stops pulsing while the platform is up — a worker died,
+    not the container — is closed and its person told; see `services.lost_runs`."""
+    from services import lost_runs
+    app.state.lost_run_watch = asyncio.create_task(lost_runs.watch_forever())
 
 
 @app.on_event("startup")

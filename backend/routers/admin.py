@@ -74,6 +74,14 @@ async def overview(admin: PlatformUser = Depends(require_super_admin), db: Async
     }
 
 
+@router.get("/incidents")
+async def list_incidents(limit: int = Query(100, ge=1, le=500), admin: PlatformUser = Depends(require_super_admin)):
+    """What went wrong on the platform, newest first: turns and builds whose
+    process went away, faults the fix loop found to be the engine's."""
+    from services import incidents
+    return {"incidents": incidents.recent(limit)}
+
+
 # --------------------------------------------------------------------------- #
 # People
 # --------------------------------------------------------------------------- #

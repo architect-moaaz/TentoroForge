@@ -8,13 +8,15 @@ import { allowed, lockedNote, type FeatureMap } from "@/lib/features";
 
 const map: FeatureMap = {
   code_export: { key: "code_export", name: "Code export", description: "", group: "ship", default_on: false, source_out: true, enforced: "api", enabled: false, source: "default" },
-  drafts_room: { key: "drafts_room", name: "Drafts Room", description: "", group: "build", default_on: true, source_out: false, enforced: "api", enabled: true, source: "default" },
+  drafts_room: { key: "drafts_room", name: "Drafts Room", description: "", group: "build", default_on: false, source_out: false, enforced: "api", enabled: false, source: "default" },
+  templates: { key: "templates", name: "Templates", description: "", group: "build", default_on: true, source_out: false, enforced: "api", enabled: true, source: "default" },
 };
 
 describe("what the organisation may use", () => {
   it("locks what the platform says is off and opens what it says is on", () => {
     expect(allowed(map, "code_export")).toBe(false);
-    expect(allowed(map, "drafts_room")).toBe(true);
+    expect(allowed(map, "drafts_room")).toBe(false);
+    expect(allowed(map, "templates")).toBe(true);
   });
   it("reads as open before the features have loaded, so a slow network never locks a screen", () => {
     expect(allowed(undefined, "code_export")).toBe(true);

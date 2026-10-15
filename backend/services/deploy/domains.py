@@ -843,6 +843,19 @@ class DomainService:
         seen.update({"checkedAt": _iso(now), "state": state, "reason": reason,
                      "records": records_for(name, entry.get("kind") or "subdomain", project_domain, config),
                      "apexName": (project_domain or {}).get("apexName")})
+        # WHAT IS WRONG, SPECIFICALLY: a record in the way, the proxy on, the
+        # doubled name, a CAA record — said instead of "not there yet".
+        seen["problems"] = []
+        if state in ("records", "certificate") and entry.get("kind") in ("subdomain", "apex"):
+            from services.deploy import dns_guides
+            root = str((project_domain or {}).get("apexName") or ".".join(name.split(".")[-2:]))
+            try:
+                seen["problems"] = await dns_guides.diagnose(name, entry.get("kind"), root, seen["records"])
+            except Exception:  # noqa: BLE001 — a hint, never a failure
+                seen["problems"] = []
+            if seen["problems"]:
+                reason = seen["problems"][0]["says"]
+                seen["reason"] = reason
         status = "live" if state == "live" else entry.get("status")
         gave_up = False
         if state != "live":
@@ -956,8 +969,20 @@ class DomainService:
                 "state": seen.get("state"), "detail": seen.get("reason") or e.get("reason") or "",
                 "works": seen.get("works"), "worksDetail": seen.get("worksWhy") or "",
                 "dnsHost": seen.get("dnsHost") or "", "written": bool(seen.get("written")),
+                "problems": seen.get("problems") or [],
+                "guide": self._guide(name, e, seen),
                 "connect": ((seen.get("connect") or {}).get("providerName") or "your DNS provider")
                 if e.get("status") != "live" and self._connect_plan(name) is not None else ""}
+
+    def _guide(self, name: str, entry: dict, seen: dict) -> dict | None:
+        """Step-by-step instructions for adding this address's records at each
+        common DNS provider, the detected one first (`dns_guides`)."""
+        records = seen.get("records") or []
+        if not records or entry.get("status") == "live" or entry.get("kind") in ("tentoro", "organisations"):
+            return None
+        from services.deploy import dns_guides
+        root = str(seen.get("apexName") or ".".join(name.split(".")[-2:]))
+        return dns_guides.guides(records, root, seen.get("dnsHost") or "")
 
     def view(self) -> dict:
         """Everything the Domains section and Smith show."""

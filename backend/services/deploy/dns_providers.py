@@ -320,8 +320,8 @@ class Route53:
 # ── where an address's DNS is ───────────────────────────────────────────
 
 _NAMESERVERS = (("ns.cloudflare.com", "Cloudflare"), ("awsdns", "Route 53"), ("domaincontrol.com", "GoDaddy"),
-                ("vercel-dns.com", "Vercel"), ("googledomains.com", "Google Domains"),
-                ("registrar-servers.com", "Namecheap"), ("azure-dns", "Azure DNS"))
+                ("vercel-dns.com", "Vercel"), ("googledomains.com", "Squarespace"), ("squarespacedns", "Squarespace"),
+                ("registrar-servers.com", "Namecheap"), ("ui-dns.", "IONOS"), ("azure-dns", "Azure DNS"))
 
 
 async def dns_host(name: str, transport: httpx.AsyncBaseTransport | None = None) -> str:

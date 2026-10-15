@@ -1896,6 +1896,48 @@ RAIL_PAINT: dict[str, dict[str, str]] = {
 }
 
 
+#: The most destinations an icon-only rail or a dock may hold before the
+#: frame falls back to a rail with labels.
+MAX_GLYPH_DESTINATIONS = 8
+
+
+def menu_destinations(doc: dict) -> int:
+    """How many places the menu leads to: every leaf of `navigation.tree`
+    (a group with children counts its children, a group with its own page
+    counts itself), plus every page inside the frame the tree left out — the
+    frame appends those, so they take room in the rail too."""
+    nav = doc.get("navigation") or {}
+    tree = nav.get("tree") if isinstance(nav.get("tree"), list) else []
+    seen: set[str] = set()
+
+    def walk(nodes: list) -> int:
+        n = 0
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            kids = node.get("children") if isinstance(node.get("children"), list) else []
+            if kids:
+                n += walk(kids)
+            if node.get("page"):
+                seen.add(str(node["page"]))
+                if not kids:
+                    n += 1
+            elif not kids:
+                n += 1
+        return n
+    count = walk(tree)
+    for p in doc.get("pages") or []:
+        if not isinstance(p, dict) or p.get("status") == "DEPRECATED" or str(p.get("id")) in seen:
+            continue
+        route = str(p.get("route") or "")
+        if not route or "[" in route or p.get("access") == "public" or p.get("shell") is False:
+            continue
+        if route in ("/login", "/signup", "/forgot-password", "/reset-password"):
+            continue
+        count += 1
+    return count
+
+
 def derive_shell(doc: dict) -> dict[str, str]:
     """The frame: the design's own `shell` when it states one, otherwise read
     off what it did say — the navigation approach, the mobile style, the
@@ -1941,6 +1983,12 @@ def derive_shell(doc: dict) -> dict[str, str]:
             chrome = "wide-rail"
         else:
             chrome = "standard-rail"
+    # A RAIL OF GLYPHS IS FOR A FEW DESTINATIONS. Thirteen pages drawn as
+    # thirteen unlabeled icons in a 64px strip read as a broken menu (pcn4owv7,
+    # 2026-10-15): the chrome had been picked blind to the menu. Past eight
+    # destinations the frame shows labels, whoever chose the chrome.
+    if chrome in ("icon-rail", "dock") and menu_destinations(doc) > MAX_GLYPH_DESTINATIONS:
+        chrome = "standard-rail"
     if auth not in AUTH_LAYOUTS:
         if chrome == "dock" or any(w in personality for w in ("consumer", "playful", "warm", "friendly")):
             auth = "brand-wash"

@@ -6,6 +6,7 @@ import type {
   AdminMember,
   AdminOrg,
   AdminOverview,
+  Incident,
   AdminPerson,
   AuditRow,
   Balance,
@@ -31,6 +32,7 @@ function qs(params: Record<string, string | number | undefined | null>): string 
 
 export const adminKeys = {
   overview: ["admin", "overview"] as const,
+  incidents: ["admin", "incidents"] as const,
   people: (q: string, page: number) => ["admin", "people", q, page] as const,
   orgs: (q: string, status: string, page: number) => ["admin", "orgs", q, status, page] as const,
   org: (id: string) => ["admin", "org", id] as const,
@@ -46,6 +48,7 @@ export const adminKeys = {
 
 export const adminApi = {
   overview: () => api.get<AdminOverview>("/api/admin/overview"),
+  incidents: (limit = 50) => api.get<{ incidents: Incident[] }>(`/api/admin/incidents?limit=${limit}`),
 
   people: (q: string, page = 1) => api.get<Paged<AdminPerson>>(`/api/admin/people${qs({ q, page })}`),
   disable: (id: string, reason: string) => api.post<AdminPerson>(`/api/admin/people/${id}/disable`, { reason }),

@@ -29,6 +29,51 @@ export interface DomainRecord {
   why: string;
 }
 
+export interface DnsGuide {
+  provider: string;
+  providers: string[];
+  steps: Record<string, string[]>;
+  tips: Record<string, string[]>;
+}
+
+/** Step by step, at the provider the owner picks (the detected one first). */
+function GuideBlock({ guide, name }: { guide: DnsGuide; name: string }) {
+  const [provider, setProvider] = useState(guide.provider);
+  const id = `guide-${name.replace(/[^a-z0-9]/gi, "-")}`;
+  return (
+    <details className="rounded-md border border-slate-200 p-2 text-xs dark:border-slate-700" open={guide.provider !== "Another provider"}>
+      <summary className="cursor-pointer font-medium text-slate-700 dark:text-slate-200">
+        How to add this at {provider === "Another provider" ? "your DNS provider" : provider}
+      </summary>
+      <div className="mt-2 space-y-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <label htmlFor={id} className="text-slate-500">DNS provider</label>
+          <select
+            id={id}
+            value={provider}
+            onChange={(e) => setProvider(e.target.value)}
+            className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900"
+          >
+            {guide.providers.map((p) => (
+              <option key={p} value={p}>{p}</option>
+            ))}
+          </select>
+        </div>
+        <ol className="list-decimal space-y-1 pl-5 text-slate-700 dark:text-slate-300">
+          {(guide.steps[provider] ?? []).map((step, i) => (
+            <li key={i} className="break-words">{step}</li>
+          ))}
+        </ol>
+        <ul className="list-disc space-y-1 pl-5 text-slate-500">
+          {(guide.tips[provider] ?? []).map((tip, i) => (
+            <li key={i} className="break-words">{tip}</li>
+          ))}
+        </ul>
+      </div>
+    </details>
+  );
+}
+
 export interface DomainView {
   name: string;
   kind: "subdomain" | "apex" | "tentoro" | "organisations";
@@ -48,6 +93,10 @@ export interface DomainView {
   /** The DNS provider that approves this address's records in one click
    *  (Domain Connect), or "". */
   connect?: string;
+  /** What is wrong in the address's live DNS, specifically, most useful first. */
+  problems?: { code: string; says: string }[];
+  /** How to add the records at each common DNS provider, the detected one first. */
+  guide?: DnsGuide | null;
   /** Forge wrote this address's records at a connected DNS account. */
   written?: boolean;
 }
@@ -279,7 +328,15 @@ export function DomainsPanel({ projectId, compact = false }: { projectId: string
               {d.checkedAt ? ` · checked ${ago(d.checkedAt)}` : ""}
               {d.status === "live" && d.liveAt ? ` · live since ${new Date(d.liveAt).toLocaleString()}` : ""}
             </p>
-            {d.status !== "live" && d.detail && <p className="mt-2 text-xs text-slate-700 dark:text-slate-300">{d.detail}</p>}
+            {d.status !== "live" && (d.problems ?? []).length > 0 ? (
+              <div role="alert" className="mt-2 space-y-1 rounded-md bg-amber-50 p-2 text-xs text-amber-900 dark:bg-amber-900/30 dark:text-amber-100">
+                {(d.problems ?? []).map((p) => (
+                  <p key={p.code}>{p.says}</p>
+                ))}
+              </div>
+            ) : (
+              d.status !== "live" && d.detail && <p className="mt-2 text-xs text-slate-700 dark:text-slate-300">{d.detail}</p>
+            )}
             {d.status === "live" && d.works === false && d.worksDetail && (
               <p className="mt-2 text-xs text-amber-800 dark:text-amber-300">{d.worksDetail}</p>
             )}
@@ -317,6 +374,7 @@ export function DomainsPanel({ projectId, compact = false }: { projectId: string
                   </table>
                 </div>
                 <p className="text-[11px] text-slate-500">It usually works within minutes and can take up to two days.</p>
+                {d.guide && <GuideBlock guide={d.guide} name={d.name} />}
                 {d.connect && d.kind !== "organisations" && (
                   <div className="space-y-1 pt-1">
                     <Button size="sm" onClick={() => connect.mutate(d.name)} disabled={busy(connect, d.name)}>

@@ -53,8 +53,23 @@ def published_address(output_dir: str | Path, project_name: str) -> str:
     return production_alias(project_name) if sso_declared(output_dir) else ""
 
 
+def stable_address(output_dir: str | Path, project_name: str, alias: str = "") -> str:
+    """THE APP'S OWN ADDRESS, the one people are given: its live main domain;
+    else the production alias Vercel reports (or `<name>.vercel.app`). The
+    per-deployment address Vercel also mints is frozen at that build — a
+    tester kept the first publish's and saw a fault fixed in the second
+    (pcn4owv7, 2026-10-15); it belongs in the history, not in the toolbar."""
+    main = main_domain(output_dir)
+    if main:
+        return main
+    alias = str(alias or "").strip()
+    if alias:
+        return alias if alias.startswith("http") else f"https://{alias}"
+    return production_alias(project_name)
+
+
 def callback_addresses(address: str, entry_ids: list[str]) -> list[str]:
     return [f"{address.rstrip('/')}/api/auth/callback/{eid}" for eid in entry_ids]
 
 
-__all__ = ["callback_addresses", "main_domain", "production_alias", "published_address", "sso_declared"]
+__all__ = ["callback_addresses", "main_domain", "production_alias", "published_address", "sso_declared", "stable_address"]
