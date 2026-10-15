@@ -102,6 +102,24 @@ async def test_the_console_calls_the_model_with_the_compiled_agent(project):
 
 
 @pytest.mark.asyncio
+async def test_the_console_sends_a_temperature_in_the_body_because_the_sdk_has_no_argument_for_it(project):
+    import copy
+    import inspect
+
+    import anthropic
+
+    from services.agent_test_run import run_agent_test
+
+    g = copy.deepcopy(GRAPH)
+    g["nodes"][0]["data"]["config"]["temperature"] = 0.2
+    client = FakeClient([text("Hi.")])
+    await run_agent_test(g, "hello", [], client=client)
+    req = client.requests[0]
+    assert req["extra_body"] == {"temperature": 0.2} and "temperature" not in req
+    assert set(req) <= set(inspect.signature(anthropic.AsyncAnthropic(api_key="x").messages.create).parameters)
+
+
+@pytest.mark.asyncio
 async def test_a_tool_request_is_shown_and_never_executed(project):
     from services.agent_test_run import run_agent_test
 

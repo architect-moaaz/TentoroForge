@@ -573,7 +573,8 @@ async def simulate(graph: dict[str, Any], test: dict[str, Any], client: Any, emi
     if tools:
         req["tools"] = tools
     if cfg["model"].get("temperature") is not None:
-        req["temperature"] = cfg["model"]["temperature"]
+        # the SDK's own signature has no temperature (newer versions dropped it), but the API still takes it: send it in the body
+        req["extra_body"] = {"temperature": cfg["model"]["temperature"]}
     texts: list[str] = []
     calls: list[dict[str, Any]] = []
     held_before: set[str] = set()

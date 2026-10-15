@@ -806,3 +806,34 @@ def test_a_saved_test_keeps_its_kind_and_its_good_reply_note():
                       {"id": "ai_y", "name": "n", "message": "m", "expect": {}, "kind": "Not A Kind!"}])
     assert kept[0]["kind"] == "missing_detail" and kept[0]["judge"] == "It asks."
     assert "kind" not in kept[1], "only a plain word is kept as a kind"
+
+
+# ── what is sent to the model must be something the installed SDK takes ───────
+
+def sdk_takes():
+    import inspect
+
+    import anthropic
+
+    return set(inspect.signature(anthropic.AsyncAnthropic(api_key="x").messages.create).parameters)
+
+
+@pytest.mark.asyncio
+async def test_a_temperature_on_the_system_prompt_is_sent_in_the_body_because_the_sdk_has_no_argument_for_it():
+    """The installed SDK's create() has no temperature parameter, so passing one as a keyword made EVERY run of an agent with a
+    temperature fail with 'unexpected keyword argument' (the suggested agents all have one)."""
+    g = agent_graph()
+    next(n for n in g["nodes"] if n["id"] == "sp")["data"]["config"]["temperature"] = 0.3
+    s = Script(agent=agent_says(reply="Hello."))
+    out = await run_of(s, {"message": "hi"}, g)
+    sent = s.who("agent")[0]
+    assert out["response"] == "Hello." and sent["extra_body"] == {"temperature": 0.3} and "temperature" not in sent
+    assert set(sent) <= sdk_takes(), f"the SDK does not take: {sorted(set(sent) - sdk_takes())}"
+
+
+@pytest.mark.asyncio
+async def test_every_argument_of_a_plain_run_is_one_the_sdk_takes_and_a_run_with_no_temperature_sends_none():
+    s = Script(agent=agent_says(call=("list_tickets", {}), then="ok"))
+    await run_of(s, {"message": "show"})
+    for req in s.who("agent"):
+        assert set(req) <= sdk_takes() and "extra_body" not in req
