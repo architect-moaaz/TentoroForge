@@ -38,8 +38,14 @@ DEFAULT_KEY_HOST = "_dck1"
 SUBDOMAIN = "forge-subdomain"
 APEX = "forge-apex"
 #: Where owners come back to after approving (the template's
-#: `syncRedirectDomain`). A new platform address means a new template version.
-REDIRECT_DOMAINS = ("forge-v3.tentoro.ai",)
+#: `syncRedirectDomain`). Every link is signed, and the spec exempts signed
+#: requests from this list, so another platform address works without a new
+#: template; the list is spelled out for providers that check it anyway, each
+#: name in full because the spec does not say whether a domain covers its
+#: subdomains.
+REDIRECT_DOMAINS = ("tentoro.ai", "forge.tentoro.ai", "forge-v3.tentoro.ai")
+#: Bumped whenever a template changes (the template repository requires it).
+TEMPLATE_VERSION = 2
 #: Vercel's ownership token always starts so; the template keeps the prefix fixed.
 PROOF_PREFIX = "vc-domain-verify="
 #: The logo providers show beside "Tentoro wants to change your DNS".
@@ -84,7 +90,7 @@ def templates(provider: str, redirect_domains: list[str] | tuple[str, ...] | Non
     owner approves once. (A subdomain's proof sits at the bare domain, which
     a template may not reach from a subdomain; that rare case is added by hand.)"""
     common = {
-        "providerId": provider, "providerName": "Tentoro", "version": 1,
+        "providerId": provider, "providerName": "Tentoro", "version": TEMPLATE_VERSION,
         "syncPubKeyDomain": provider, "logoUrl": LOGO_URL,
     }
     if redirect_domains:
