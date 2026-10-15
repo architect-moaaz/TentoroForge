@@ -301,6 +301,22 @@ console.log("filters, a date range and top N");
     range: { from: "2026-02-01", to: "2026-03-01" },
   }, admin);
   eqJson(feb, [{ revenue: 1299 }], "the range narrows the time field, half-open");
+  // A WIDGET ABOUT TODAY COUNTS TODAY: AquaTrack's "Entries Logged Today"
+  // counted every drink ever logged (m1dck85j). None of these orders is today's.
+  const all = await engine.resolveQuery({ entity: "orders", op: "query", measures: [count], timeField: "placedAt" }, admin);
+  const today = await engine.resolveQuery({ entity: "orders", op: "query", measures: [count], timeField: "placedAt", window: "today" }, admin);
+  ok((all[0] as any).orders > 0 && (today[0] as any).orders === 0, "a widget's own period keeps only that period's rows");
+  const both = await engine.resolveQuery({ entity: "orders", op: "query", measures: [revenue], timeField: "placedAt",
+    window: "year", range: { from: "2026-02-01", to: "2026-03-01" } }, admin);
+  ok(both.length === 1, "a period and a page's range apply together");
+  // A DATE COLUMN IS GIVEN A CALENDAR DATE: a Date was refused by the driver
+  // and AquaTrack's Home stopped opening (m1dck85j, 2026-10-14).
+  const day = engine.dateBound({ dataType: "string", columnType: "PgDateString" }, new Date(2026, 9, 14, 9, 30));
+  ok(day === "2026-10-14", "a date column's bound is the calendar date");
+  const asText = engine.dateBound({ dataType: "string", columnType: "PgTimestampString" }, new Date(Date.UTC(2026, 9, 14)));
+  ok(asText === "2026-10-14T00:00:00.000Z", "a timestamp kept as text gets its text");
+  const moment = new Date();
+  ok(engine.dateBound({ dataType: "date", columnType: "PgTimestamp" }, moment) === moment, "a timestamp column keeps the moment");
   const top = await engine.resolveQuery({
     entity: "orders", op: "query", measures: [revenue], dimensions: [{ field: "region" }], limit: 2,
   }, admin);

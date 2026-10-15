@@ -1721,7 +1721,11 @@ NODE_TASKS: dict[str, str] = {
         "`[{label: \"Under 18\", to: 18}, {label: \"18–30\", from: 18, to: "
         "31}, …, {label: \"61+\", from: 61}]`; bands do not overlap. A metric "
         "has no dimension; set `timeField` to the entity's natural date so the "
-        "page's date filter narrows it. `filter` holds literal equality values "
+        "page's date filter narrows it. A widget about a period — today's "
+        "total, this week's count, the last 30 days — also sets `window` "
+        "(today, week, month, last_7_days, last_30_days, year) on that date: "
+        "without it the number covers every record there is, whatever its "
+        "label says. `filter` holds literal equality values "
         "(`status: \"OPEN\"`); whose rows a reader sees is already enforced by "
         "the security rules — do not filter by user.\n\n"
         "Draw each chart by the job its data does, in `chart.mark`: change over "
@@ -1944,7 +1948,12 @@ NODE_TASKS: dict[str, str] = {
         "`{\"status\": \"approved\"}`), `message` (what the person is told, "
         "saying what to do first) and `page` (the page where they do it; a "
         "new account is sent there first). Every gated workflow then starts "
-        "by checking it and refuses with the message when it is not met."
+        "by checking it and refuses with the message when it is not met. "
+        "When the gate is about who the person IS rather than what they have "
+        "done — only staff, only administrators — give `requires.roles`, the "
+        "roles that may pass, and no record: the role is read off the "
+        "signed-in person. A record's own `id` is an account's id only when "
+        "that record is the one people sign in as."
     ),
     "integrations": (
         "Declare each outside system this application talks to, from the "
@@ -3666,6 +3675,10 @@ class RunUsage:
     #: ``change`` for anything asked for afterwards. Recorded per row so the
     #: two can be told apart without reading timestamps.
     phase: str = "build"
+    #: Who the run spends for, taken where the run starts: the fan-out's
+    #: worker threads do not carry the request's context.
+    user: str = ""
+    org: str = ""
 
     @classmethod
     def for_app(cls, svc: Any, *, phase: str = "build") -> "RunUsage":
@@ -3676,9 +3689,11 @@ class RunUsage:
         rather than at each of the dozen call sites that record a call, only
         some of which are in a position to know either.
         """
+        from services.build_usage import actor
         doc = getattr(svc, "doc", None) or {}
+        who = actor()
         return cls(project=str((doc.get("application") or {}).get("id") or ""),
-                   phase=phase)
+                   phase=phase, user=who.get("user", ""), org=who.get("org", ""))
 
     def record(self, *, node: str, agent: str, usage: Usage,
                elapsed_s: float, project: str = "") -> None:
@@ -3715,6 +3730,8 @@ class RunUsage:
                 duration_ms=int(elapsed_s * 1000),
                 kind="blueprint",
                 phase=self.phase,
+                user=self.user,
+                org=self.org,
             )
         except Exception:  # ledger is best-effort; never fail a run over it
             pass

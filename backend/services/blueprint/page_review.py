@@ -42,6 +42,7 @@ from pathlib import Path
 from typing import Any
 
 from services.preview_session import Session, boot_env, cookies
+from services.build_usage import carrying
 
 logger = logging.getLogger(__name__)
 
@@ -186,6 +187,13 @@ def _listening(port: int | None) -> bool:
         return s.connect_ex(("127.0.0.1", port)) == 0
 
 
+def _capped(env: dict) -> dict:
+    """A server for trying the app runs with the trial heap (`TRIAL_HEAP_MB`):
+    it opens every page in one sitting."""
+    from services.dev_servers import TRIAL_HEAP_MB, capped_env
+    return capped_env(env, heap_mb=TRIAL_HEAP_MB)
+
+
 class RunningApp:
     """The generated app, its database up and its dev server serving — beside
     whatever the person is already running, never over it."""
@@ -211,6 +219,23 @@ class RunningApp:
         self._sink: Any = None
 
     def __enter__(self) -> "RunningApp":
+        # ONE OF A FEW AT ONCE (`dev_servers.TrialSlot`): two trial servers
+        # beside each other filled the host (forge-v3, 2026-10-09).
+        from services import dev_servers
+        self._slot = dev_servers.TrialSlot()
+        try:
+            self._slot.acquire()
+        except dev_servers.SlotUnavailable as exc:
+            self._slot = None
+            raise ReviewUnavailable(str(exc)) from exc
+        try:
+            return self._enter()
+        except BaseException:
+            self._slot.release()
+            self._slot = None
+            raise
+
+    def _enter(self) -> "RunningApp":
         from services import app_databases
         if app_databases.server():
             # NO DOCKER IN THE PLATFORM'S CONTAINER (forge-v3): the app's
@@ -257,14 +282,14 @@ class RunningApp:
             ["npx", "next", "dev", "--port", str(self.port)], cwd=self.root,
             stdout=sink, stderr=subprocess.STDOUT if self.log is not None else subprocess.DEVNULL,
             start_new_session=True,
-            env={**os.environ, "BROWSER": "none",
+            env=_capped({**os.environ, "BROWSER": "none",
                  # The preview secret, so a session minted for a role the
                  # administrator does not hold is a session this server accepts.
                  **boot_env(self.base),
                  # Also what the SDK's empty state answers to: only this server
                  # builds into `.next-review`.
                  "NEXT_DIST_DIR": self.dist_dir, "DATABASE_URL": self.clone[2],
-                 **self.extra_env})
+                 **self.extra_env}))
         from services import dev_servers
         dev_servers.track(self.proc.pid, port=self.port, root=self.root, kind="review")
         deadline = time.monotonic() + 180
@@ -278,6 +303,15 @@ class RunningApp:
         raise ReviewUnavailable("the dev server did not start within 180s")
 
     def __exit__(self, *exc: Any) -> None:
+        try:
+            self._stop()
+        finally:
+            slot = getattr(self, "_slot", None)
+            if slot is not None:
+                slot.release()
+                self._slot = None
+
+    def _stop(self) -> None:
         if self.proc is not None:
             from services import dev_servers
             dev_servers.forget(self.proc.pid)
@@ -624,7 +658,7 @@ def review_app(svc: Any, app_root: str | Path, client: Any, *, usage: Any = None
 
             say("analysis", round=round_)
             with cf.ThreadPoolExecutor(workers) as pool:
-                verdicts = dict(pool.map(judge, pending))
+                verdicts = dict(pool.map(carrying(judge), pending))
             failing = []
             for pid, v in verdicts.items():
                 if v is None:
@@ -663,7 +697,7 @@ def review_app(svc: Any, app_root: str | Path, client: Any, *, usage: Any = None
 
             say("fixing", round=round_, pages=[routes.get(p, p) for p in failing])
             with cf.ThreadPoolExecutor(workers) as pool:
-                rewrites = [r for r in pool.map(rewrite, failing) if r[1] is not None]
+                rewrites = [r for r in pool.map(carrying(rewrite), failing) if r[1] is not None]
             for pid, body in rewrites:
                 result = AgentResult(task_id=f"TASK-page_review-{pid}-{round_}", agent="ui_engineer",
                                      confidence=0.9,

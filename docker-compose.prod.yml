@@ -98,6 +98,11 @@ services:
       # Where a PUBLISHED app reports its failures to Smith (services/app_reporting):
       # this platform's public address, whose /api/* reaches the backend.
       FORGE_PUBLIC_URL: ${FORGE_PUBLIC_URL:-}
+      # An app's own addresses: one-click approval at the owner's DNS provider
+      # (Domain Connect) and the free <app>.<FORGE_APPS_DOMAIN> address. Empty = off.
+      FORGE_DOMAIN_CONNECT_DOMAIN: ${FORGE_DOMAIN_CONNECT_DOMAIN:-}
+      FORGE_DOMAIN_CONNECT_KEY: ${FORGE_DOMAIN_CONNECT_KEY:-}
+      FORGE_APPS_DOMAIN: ${FORGE_APPS_DOMAIN:-}
       # The usage ledger lives beside the projects, on the volume: left at its
       # default it sat inside the container and every cutover erased it — the
       # ledger on forge-v3 stopped at 2026-09-23 (2026-10-03).

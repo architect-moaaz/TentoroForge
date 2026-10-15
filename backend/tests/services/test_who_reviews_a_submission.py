@@ -198,7 +198,10 @@ def test_a_lookup_of_one_record_is_read_as_that_record():
     handler = (Path(__file__).resolve().parents[2] / "templates/runtime/workflows/index.ts").read_text()
     assert "return queryResult(rows);" in handler
     helper = (Path(__file__).resolve().parents[2] / "templates/runtime/workflows/query-result.ts").read_text()
-    assert "list.length === 1" in helper, "only a lookup of ONE record is that record"
+    # The FIRST row whenever there is one — the row a template reads. Only
+    # exactly-one left AquaTrack's `find_active_goal.id` null over three
+    # active goals (m1dck85j); the behaviour is proven in query-result.test.mts.
+    assert "list.length > 0 ? list[0]" in helper, "a condition reads the row a template reads"
 
 
 def test_an_app_people_sign_in_to_lets_them_sign_out():

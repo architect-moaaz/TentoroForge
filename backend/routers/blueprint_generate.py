@@ -837,6 +837,40 @@ def _announce_build_complete(doc: dict | None, emit, *, offer_verify: bool,
         logger.warning("[blueprint] %s: could not announce completion", where)
 
 
+async def _spend_gate(db: AsyncSession, project: Any, user: Any, *, build: bool, turns: int = 1) -> None:
+    """NOTHING STARTS THAT THE ORGANISATION CANNOT PAY FOR (`services.credits.gate`):
+    before a build or a turn, the organisation's balance (when one is
+    recorded) must cover what it is expected to cost, and no limit over the
+    platform, the organisation, the person or the application may be
+    reached — else 402, in the administrator's terms."""
+    from services import credits, spending
+    await credits.gate(db, org_id=getattr(project, "org_id", ""), user_email=str(getattr(user, "email", "") or ""),
+                       project_short_id=str(getattr(project, "short_id", "") or ""),
+                       estimate=None if build else spending.TURN_USD * max(1, turns), turn=not build)
+
+
+def _acting_with(work: Any, actor: dict | None) -> Any:
+    """`work`, run as `actor` ({"user": email, "org": id}): every usage row it
+    writes names them (`build_usage.acting`). The executor's thread does not
+    inherit the request's context, so it is set inside the call."""
+    if not actor:
+        return work
+    from services.build_usage import acting
+
+    def run() -> Any:
+        with acting(user=str(actor.get("user") or ""), org=str(actor.get("org") or "")):
+            return work()
+    return run
+
+
+def _actor_of(user: Any, project: Any) -> dict:
+    return {"user": str(getattr(user, "email", "") or ""), "org": str(getattr(project, "org_id", "") or "")}
+
+
+def _acting_as(work: Any, user: Any, project: Any) -> Any:
+    return _acting_with(work, _actor_of(user, project))
+
+
 def _output_dir(project: Any) -> Path:
     """Where this project's application lives.
 
@@ -893,6 +927,7 @@ async def generate_via_blueprint(
 ):
     """Generate an application through the Blueprint engine, streaming progress."""
     project = await get_project_with_auth(project_id, user, db)
+    await _spend_gate(db, project, user, build=bool(req.approved and not req.define_only), turns=3)
 
     from services.blueprint.executors import (
         RunUsage, make_executor, tiered_router)
@@ -1038,7 +1073,7 @@ async def generate_via_blueprint(
         try:
             emit("started", {"projectId": str(project_id),
                              "engine": "blueprint"})
-            outcome = await loop.run_in_executor(None, work)
+            outcome = await loop.run_in_executor(None, _acting_as(work, user, project))
             # COMMIT THE BUILT APP. The mainline generate path commits after a
             # build; this DAG path did not, so the app tree stayed untracked and
             # Smith's first change landed in an untracked working tree — its
@@ -1541,6 +1576,7 @@ async def smith_chat(
     chooses the node order. §28's graph stays authoritative.
     """
     project = await get_project_with_auth(project_id, user, db)
+    await _spend_gate(db, project, user, build=bool(getattr(req, "approved", False)))
 
     from services.blueprint.executors import (
         RunUsage, make_executor, tiered_router)
@@ -1551,24 +1587,7 @@ async def smith_chat(
     from services.blueprint.plan_forecast import forecast
     from services.smith_chat_v2 import ChatV2Request, handle_chat_v2
 
-    try:
-        output_dir = _output_dir(project)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    output_dir.mkdir(parents=True, exist_ok=True)
-    _adopt_design_references(output_dir, str(project_id))
-    # THE COMPANY'S OWN DESIGN LANGUAGE, when the organisation finished
-    # discovery. Copied in on every turn, used only if the owner says so at
-    # the gate — see `_adopt_brand_language`.
-    await _adopt_brand_language(output_dir, project, db)
-    app_root = str(output_dir / "app")
-    await _adopt_mcp_servers(output_dir, project, db)
-    # Its failures reach Smith's inbox (services/app_reporting).
-    try:
-        from services.app_reporting import wire as _wire_reporting
-        _wire_reporting(app_root, getattr(project, "id", None))
-    except OSError as exc:
-        logger.warning("[smith-chat] could not point the app's reporter at the platform: %s", exc)
+    output_dir, app_root = await prepare_project_tree(project, db)
 
     queue: asyncio.Queue = asyncio.Queue()
     loop = asyncio.get_running_loop()
@@ -1639,7 +1658,8 @@ async def smith_chat(
         if not isinstance(checks, dict) or not checks.get("pending"):
             return
         _start_checks(loop, str(project_id), checks["output_dir"], checks["app_root"],
-                      memory_lock=memory_lock, app_name=getattr(project, "name", "") or "")
+                      memory_lock=memory_lock, app_name=getattr(project, "name", "") or "",
+                      actor=_actor_of(user, project))
 
     async def turn() -> None:
 
@@ -1817,10 +1837,12 @@ async def smith_chat(
                 # offer. The review runs on the next turn, only if the user takes
                 # it (see `_is_verify_consent`).
                 # A review's button is a decision, not more brief.
+                # `documents=`: an approved first build keeps its evidence too.
                 built = _run_dag(str(output_dir), app_root,
                                  "" if req.gate else req.message,
                                  approved=True, emit=emit,
                                  app_name=getattr(project, "name", "") or "",
+                                 documents=req.evidence,
                                  modules=req.modules)
                 return built
 
@@ -2069,7 +2091,7 @@ async def smith_chat(
             # Keep the INNER future too: `wait_for` cancels the shield on timeout,
             # but the inner build keeps running, and it is the inner one we wait
             # on to emit the real completion afterwards.
-            _inner = loop.run_in_executor(None, work)
+            _inner = loop.run_in_executor(None, _acting_as(work, user, project))
             # ON DISK, FOR EVERY WORKER. The registry above is this worker's
             # memory; a panel whose stream dropped polls whichever worker
             # answers, and only a ledger tells it the turn is still working —
@@ -2299,8 +2321,101 @@ def busy_message(run: dict) -> str:
             "you'll see it here, with the offer to verify it; ask again then.")
 
 
+async def prepare_project_tree(project: Any, db: Any) -> tuple[Path, str]:
+    """The project's tree, ready for a turn: the output directory, the design
+    references, the organisation's design language, its MCP servers and the
+    app's reporter. What every Smith turn did first; the Drafts Room's
+    hand-off does it too, since its build starts without a turn."""
+    try:
+        output_dir = _output_dir(project)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    output_dir.mkdir(parents=True, exist_ok=True)
+    _adopt_design_references(output_dir, str(project.id))
+    # THE COMPANY'S OWN DESIGN LANGUAGE, when the organisation finished
+    # discovery. Copied in on every turn, used only if the owner says so at
+    # the gate — see `_adopt_brand_language`.
+    await _adopt_brand_language(output_dir, project, db)
+    app_root = str(output_dir / "app")
+    await _adopt_mcp_servers(output_dir, project, db)
+    # Its failures reach Smith's inbox (services/app_reporting).
+    try:
+        from services.app_reporting import wire as _wire_reporting
+        _wire_reporting(app_root, getattr(project, "id", None))
+    except OSError as exc:
+        logger.warning("[smith-chat] could not point the app's reporter at the platform: %s", exc)
+    return output_dir, app_root
+
+
+def start_build_in_background(loop: Any, project: Any, *, message: str, description: str,
+                              documents: list[str], app_name: str, output_dir: Path, app_root: str,
+                              modules: list[str] | None = None, actor: dict | None = None) -> "asyncio.Future":
+    """A first build started by the platform, not by a turn: the Drafts Room's
+    hand-off. The build used to start only when the person's browser reached
+    the new project and replayed the specification as an approved first
+    message — close the tab and no build. Here it runs the way the checks
+    after a hand-over run (`_start_checks`): in the background, every message
+    to the transcript and every event to the run registry, so the project's
+    panel shows it live and reattaches after a reload.
+
+    `message` is what the app builder's Smith is told (the first row of the
+    transcript); `description` is the app's own description, which the
+    Blueprint carries as `application.description`; `documents` are the
+    specification, kept beside the Blueprint for the agents that read
+    documents. Returns the future of the build."""
+    from services import run_registry
+    from services.blueprint.run_ledger import TurnLedger
+
+    project_id = str(project.id)
+    memory_lock = asyncio.Lock()
+    _remember(loop, project_id, "user", message, lock=memory_lock)
+
+    def background_emit(event: str, data: dict) -> None:
+        if event == "message":
+            _remember(loop, project_id, "assistant", str(data.get("text") or ""),
+                      {k: v for k, v in data.items() if k in ("options", "status") and v},
+                      lock=memory_lock)
+        run_registry.note(project_id, event, data)
+
+    # BEFORE THE RUN, OR ITS FIRST EVENTS ARE DROPPED: `note` folds events into
+    # an entry `begin` creates. The turn ledger is what the OTHER worker reads
+    # (`ledger_snapshot`) to say a build is active before the DAG's own ledger
+    # exists.
+    run_registry.begin(project_id, phase="build", output_dir=output_dir)
+    turn_ledger = TurnLedger(output_dir, phase="build")
+
+    def work() -> dict:
+        return _run_dag(str(output_dir), app_root, description, approved=True, emit=background_emit,
+                        app_name=app_name, documents=documents, modules=modules)
+
+    def _ended(f: Any) -> None:
+        error: BaseException | None = None
+        try:
+            result = f.result()
+        except Exception as exc:  # noqa: BLE001 — said in the transcript, as a turn's failure is
+            error = exc
+            logger.exception("[hand-off build] %s failed", project_id)
+            background_emit("message", {
+                "text": ("Something went wrong on my side while building, and I stopped "
+                         f"({type(exc).__name__}). Open the app and ask me to build it again."),
+                "status": "error"})
+            background_emit("error", {"message": str(exc)})
+            return
+        finally:
+            turn_ledger.end(error)
+        background_emit("done", result if isinstance(result, dict) else {})
+        checks = result.get("checks") if isinstance(result, dict) else None
+        if isinstance(checks, dict) and checks.get("pending"):
+            _start_checks(loop, project_id, checks["output_dir"], checks["app_root"],
+                          memory_lock=memory_lock, app_name=app_name, actor=actor)
+
+    fut = loop.run_in_executor(None, _acting_with(work, actor))
+    fut.add_done_callback(_ended)
+    return fut
+
+
 def _start_checks(loop: Any, project_id: str, output_dir: str, app_root: str, *,
-                  memory_lock: Any = None, app_name: str = "") -> "asyncio.Future":
+                  memory_lock: Any = None, app_name: str = "", actor: dict | None = None) -> "asyncio.Future":
     """The checks after a hand-over, in the background: everything they say
     goes to the transcript (a reloaded panel reads it there) and to the run
     registry (the panel's strip), never to the stream that has ended."""
@@ -2329,7 +2444,7 @@ def _start_checks(loop: Any, project_id: str, output_dir: str, app_root: str, *,
         except Exception:  # noqa: BLE001 — said in the log; the app is handed over regardless
             logger.warning("[checks] %s: the checks failed", Path(output_dir).name, exc_info=True)
             run_registry.checks_done(project_id, "done")
-    fut = loop.run_in_executor(None, work)
+    fut = loop.run_in_executor(None, _acting_with(work, actor))
     fut.add_done_callback(_ended)
     return fut
 

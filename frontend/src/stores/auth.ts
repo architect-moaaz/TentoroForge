@@ -1,19 +1,31 @@
 import { create } from "zustand";
 import { api, ApiError } from "@/lib/api";
+import {
+  REFRESH_KEY,
+  TOKEN_KEY,
+  hasCockpitReturn,
+  restoreCockpitReturn,
+  saveCockpitReturn,
+} from "@/lib/auth-storage";
 
-interface OrgMembership {
+export interface OrgMembership {
   org_id: string;
   org_name: string;
   org_slug: string;
   role: string;
+  status?: string;
 }
 
-interface User {
+export interface User {
   id: string;
   email: string;
   name: string;
   created_at: string;
   orgs: OrgMembership[];
+  platform_role?: "super_admin" | null;
+  disabled?: boolean;
+  /** Set while a super admin is acting as this person. */
+  impersonated_by?: { id: string; email: string } | null;
 }
 
 interface AuthState {
@@ -32,6 +44,11 @@ interface AuthState {
   fetchUser: () => Promise<void>;
   clearError: () => void;
   hydrate: () => void;
+  /** Act as a person: the admin's own tokens are kept for the way back.
+   * Resolves to the person's default organisation. */
+  impersonate: (userId: string) => Promise<string | null>;
+  /** Back to the cockpit's own session. */
+  endImpersonation: () => Promise<void>;
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -108,6 +125,22 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       // keeps the token and stops loading, so the app can retry.
       const status = err instanceof ApiError ? err.status : undefined;
       if (status === 401 || status === 403) {
+        // An impersonation token that ran out is not the admin's session
+        // ending: their own tokens come back instead.
+        if (hasCockpitReturn() && restoreCockpitReturn()) {
+          set({ token: localStorage.getItem(TOKEN_KEY) });
+          await get().fetchUser();
+          return;
+        }
+        // The request layer may already have put the admin's token back
+        // (it does so on the 401 itself): storage then holds a token this
+        // store never saw, and that is the one to ask /me with.
+        const restored = localStorage.getItem(TOKEN_KEY);
+        if (restored && restored !== get().token) {
+          set({ token: restored });
+          await get().fetchUser();
+          return;
+        }
         localStorage.removeItem("token");
         localStorage.removeItem("refresh_token");
         set({ token: null, user: null, isLoading: false });
@@ -118,6 +151,25 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   clearError: () => set({ error: null }),
+
+  impersonate: async (userId) => {
+    const grant = await api.post<{ access_token: string; default_org_id: string | null }>(
+      `/api/admin/people/${userId}/impersonate`,
+    );
+    saveCockpitReturn();
+    localStorage.setItem(TOKEN_KEY, grant.access_token);
+    // No refresh for an impersonation token: when it runs out, the admin is back.
+    localStorage.removeItem(REFRESH_KEY);
+    set({ token: grant.access_token });
+    await get().fetchUser();
+    return grant.default_org_id;
+  },
+
+  endImpersonation: async () => {
+    if (!restoreCockpitReturn()) return;
+    set({ token: localStorage.getItem(TOKEN_KEY) });
+    await get().fetchUser();
+  },
 
   hydrate: () => {
     const token = localStorage.getItem("token");

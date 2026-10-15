@@ -13,6 +13,7 @@
  */
 import { AlertTriangle, XCircle, Info, ChevronDown, ChevronRight } from "lucide-react";
 import { useEffect, useState } from "react";
+import { authFetch } from "@/lib/api";
 
 interface RawFault {
   interaction_id: string;
@@ -67,7 +68,7 @@ export function RemediationReport({ projectId, runId }: Props) {
 
   useEffect(() => {
     let alive = true;
-    fetch(`/api/projects/${projectId}/verify/${runId}`, {
+    authFetch(`/api/projects/${projectId}/verify/${runId}`, {
       credentials: "include",
     })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))

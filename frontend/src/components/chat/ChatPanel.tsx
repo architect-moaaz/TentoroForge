@@ -14,6 +14,8 @@ import { useSpeechSynthesis, stripForSpeech } from "@/lib/voice";
 import { useOfficeStore } from "@/components/virtual-office/OfficeStateManager";
 import type { OfficeEvent } from "@/components/virtual-office/types";
 import type { Project } from "@/types/project";
+import { authFetch } from "@/lib/api";
+import { describeRefusal } from "@/lib/spend-refusal";
 
 /** Which backend a user message belongs to.
  *
@@ -73,7 +75,7 @@ export function ChatPanel({
     if (!projectId) return;
     const ctl = new AbortController();
     setHasBlueprint(false);
-    fetch(`/api/projects/${projectId}/smith/warmup`, {
+    authFetch(`/api/projects/${projectId}/smith/warmup`, {
       method: "POST",
       signal: ctl.signal,
     })
@@ -373,7 +375,7 @@ export function ChatPanel({
       const store = useChatStore.getState();
       store.startStreaming();
       try {
-        const res = await fetch(`/api/projects/${projectId}/smith/turn`, {
+        const res = await authFetch(`/api/projects/${projectId}/smith/turn`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ text }),
@@ -383,7 +385,11 @@ export function ChatPanel({
         if (!res.ok) {
           useOfficeStore.getState().endRun();
           store.setError(
-            body?.detail ?? `Smith could not take that turn (${res.status})`,
+            describeRefusal(
+              res.status,
+              typeof body?.detail === "string" ? body.detail : null,
+              `Smith could not take that turn (${res.status})`,
+            ),
           );
           return;
         }

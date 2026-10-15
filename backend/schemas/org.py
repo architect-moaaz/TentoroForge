@@ -29,6 +29,7 @@ class OrgResponse(BaseModel):
     slug: str
     logo_url: str | None
     settings: dict | None
+    status: str = "active"
     created_at: datetime
 
     model_config = {"from_attributes": True}

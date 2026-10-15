@@ -12,6 +12,7 @@
  */
 import type { Artifacts } from "@forge/patches";
 import { useEditorStore } from "./editor-store";
+import { authFetch } from "./api";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
 
@@ -20,7 +21,7 @@ async function saveFile(projectId: string, relPath: string, content: string): Pr
   // Write via the short-id project-file endpoint — symmetric with the editor's
   // read path (GET /api/_debug/project-file/{short_id}/{path}). projectId here
   // is the project SHORT id (what VisualEditorWorkspace passes).
-  const r = await fetch(`${API}/api/_debug/project-file/${projectId}/${relPath}`, {
+  const r = await authFetch(`${API}/api/_debug/project-file/${projectId}/${relPath}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ content }),

@@ -473,3 +473,37 @@ def test_a_typed_verify_is_told_what_it_costs_and_asked_how_much():
     # Turning it down is an answer, not a change to interpret.
     assert "not now" in _DECLINED and "no thanks" in _DECLINED
     assert not _is_verify_consent("Not now")
+
+
+def test_an_approved_first_build_keeps_the_supplied_documents(tmp_path, monkeypatch):
+    """The documents a first build is handed travel beside the Blueprint,
+    read by the agents that read documents — and the description stays the
+    short message, not the document (the Drafts Room's hand-off relies on
+    both)."""
+    from types import SimpleNamespace
+    from routers import blueprint_generate as router
+    from services.blueprint.service import BlueprintService
+
+    def fake_run(svc, executor, **kw):
+        return SimpleNamespace(completed=[], failed=[], blocked=[], skipped=[], failed_because={},
+                               skipped_because={}, blocked_because={}, paused_because="", degraded={})
+    monkeypatch.setattr("services.blueprint.orchestrator.run", fake_run)
+    router._run_dag(str(tmp_path), str(tmp_path / "app"), "A clinic tracker for one practice.",
+                    approved=True, emit=lambda kind, data: None, app_name="Clinic",
+                    documents=["# Clinic\n\nThe full specification."])
+    assert (tmp_path / ".forge" / "documents" / "document-1.md").read_text() == "# Clinic\n\nThe full specification."
+    doc = BlueprintService.load(output_dir=str(tmp_path)).doc
+    assert doc["application"]["description"] == "A clinic tracker for one practice."
+    assert doc["application"]["name"] == "Clinic"
+
+
+def test_the_approved_first_build_on_the_chat_route_forwards_the_evidence():
+    """`/smith/chat` with `approved` on a fresh project used to call `_run_dag`
+    without the evidence it was sent; the define path forwarded it. The
+    Drafts Room's hand-off needs both doors to keep the documents."""
+    import inspect
+    from routers import blueprint_generate
+    src = inspect.getsource(blueprint_generate.smith_chat)
+    approved_call = src[src.index("built = _run_dag("):]
+    approved_call = approved_call[:approved_call.index("return built")]
+    assert "documents=req.evidence" in approved_call

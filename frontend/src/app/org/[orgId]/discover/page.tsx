@@ -18,6 +18,7 @@ import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { StructuredBriefPreview } from "@/components/discovery/StructuredBriefPreview";
+import { authFetch } from "@/lib/api";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
 
@@ -113,7 +114,7 @@ function DiscoverPage({ orgId }: { orgId: string }) {
       }
 
       // Stream SSE response
-      const response = await fetch(`${API_BASE}${url}`, {
+      const response = await authFetch(`${API_BASE}${url}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

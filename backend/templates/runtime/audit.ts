@@ -121,8 +121,37 @@ export function changedColumns(before: unknown, after: unknown): string[] {
   return out.sort();
 }
 
+/** A value as it reads back from the database, keys in one order. Postgres
+ *  keeps a jsonb object's keys in its own order (shortest first) and a Date
+ *  comes back as text, so a hash over the value as written never matched the
+ *  value as read: the first entry that recorded a real change broke the
+ *  chain, every time (60v142ju, 2026-10-12). */
+function canonical(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(canonical);
+  if (v && typeof v === "object") {
+    const out: Record<string, unknown> = {};
+    for (const k of Object.keys(v as object).sort()) out[k] = canonical((v as Record<string, unknown>)[k]);
+    return out;
+  }
+  return v;
+}
+
+const plain = (v: unknown): unknown => (v == null ? null : JSON.parse(JSON.stringify(v)));
+
+/** Rows hashed over the canonical form say so; rows from before it do not. */
+export const HASH_FORM = "c1:";
+
 /** The hash of one row: the facts, in one order, chained to the previous. */
 export function rowHash(facts: { at: string; actorId: string | null; action: string; entity: string; entityId: string | null;
+  before: unknown; after: unknown; prevHash: string | null }): string {
+  const text = JSON.stringify([facts.at, facts.actorId, facts.action, facts.entity, facts.entityId,
+    canonical(plain(facts.before)), canonical(plain(facts.after)), facts.prevHash]);
+  return HASH_FORM + crypto.createHash("sha256").update(text).digest("hex");
+}
+
+/** How rows were hashed before the canonical form: the value in the order it
+ *  was handed in, which a jsonb read-back cannot reproduce. */
+function legacyHash(facts: { at: string; actorId: string | null; action: string; entity: string; entityId: string | null;
   before: unknown; after: unknown; prevHash: string | null }): string {
   const text = JSON.stringify([facts.at, facts.actorId, facts.action, facts.entity, facts.entityId,
     facts.before ?? null, facts.after ?? null, facts.prevHash]);
@@ -240,8 +269,11 @@ export function actorOf(user: any, guest?: string | null): AuditActor {
   return { kind: "system" };
 }
 
-/** Walk the chain back: every row's hash recomputes, and links to the one before. */
-export async function verifyChain(limit = 100_000): Promise<{ ok: boolean; checked: number; brokenAt?: number }> {
+/** Walk the chain back: every row's hash recomputes, and links to the one before.
+ *  `unproven` counts rows written before the canonical hash whose content can
+ *  no longer be recomputed (their links are still checked); a canonical row
+ *  that does not recompute is a break. */
+export async function verifyChain(limit = 100_000): Promise<{ ok: boolean; checked: number; brokenAt?: number; unproven?: number }> {
   await policy();
   const rows = _rows(await db.execute(sql`
     SELECT seq, at, actor_id, action, entity, entity_id, before, after, prev_hash, hash
@@ -249,6 +281,7 @@ export async function verifyChain(limit = 100_000): Promise<{ ok: boolean; check
   `));
   let prevHash: string | null = null;
   let checked = 0;
+  let unproven = 0;
   for (const row of rows) {
     checked += 1;
     if (row.action === "prune") {
@@ -256,15 +289,19 @@ export async function verifyChain(limit = 100_000): Promise<{ ok: boolean; check
       prevHash = String(row.hash);
       continue;
     }
-    const expected = rowHash({ at: new Date(row.at).toISOString(), actorId: row.actor_id ?? null, action: row.action,
+    const facts = { at: new Date(row.at).toISOString(), actorId: row.actor_id ?? null, action: row.action,
       entity: row.entity, entityId: row.entity_id ?? null, before: row.before ?? null, after: row.after ?? null,
-      prevHash: row.prev_hash ?? null });
-    if ((row.prev_hash ?? null) !== prevHash || row.hash !== expected) {
-      return { ok: false, checked, brokenAt: Number(row.seq) };
+      prevHash: row.prev_hash ?? null };
+    if ((row.prev_hash ?? null) !== prevHash) return { ok: false, checked, brokenAt: Number(row.seq) };
+    const stored = String(row.hash);
+    if (stored.startsWith(HASH_FORM)) {
+      if (stored !== rowHash(facts)) return { ok: false, checked, brokenAt: Number(row.seq) };
+    } else if (stored !== legacyHash(facts)) {
+      unproven += 1;
     }
-    prevHash = String(row.hash);
+    prevHash = stored;
   }
-  return { ok: true, checked };
+  return unproven ? { ok: true, checked, unproven } : { ok: true, checked };
 }
 
 /** Rows older than the policy's retention are removed through the one door. */

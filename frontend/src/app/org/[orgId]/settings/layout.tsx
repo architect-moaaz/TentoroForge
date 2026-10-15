@@ -14,18 +14,21 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { BarChart3, Building2, KeyRound, Palette, Server } from "lucide-react";
 import { useIsOrgAdmin } from "@/lib/org-admin";
+import { useOrgFeatures, type FeatureKey } from "@/lib/features";
+import { LockBadge, LockedPanel, explainLock } from "@/components/features/Locked";
 
 interface Tab {
   href: string;              // relative to /org/[orgId]/settings
   label: string;
   icon: React.ComponentType<{ className?: string }>;
+  feature?: FeatureKey;
 }
 
 const TABS: Tab[] = [
   { href: "",              label: "General",      icon: Building2 },
-  { href: "/brand",        label: "Brand",        icon: Palette },
-  { href: "/integrations", label: "Integrations", icon: KeyRound },
-  { href: "/mcp-servers",  label: "MCP Servers",  icon: Server },
+  { href: "/brand",        label: "Brand",        icon: Palette,  feature: "brand" },
+  { href: "/integrations", label: "Integrations", icon: KeyRound, feature: "integrations" },
+  { href: "/mcp-servers",  label: "MCP Servers",  icon: Server,   feature: "mcp_servers" },
   // Usage & Cost is admin-only — filtered out of the bar for members
   // below (the backend gates the API regardless).
   { href: "/usage",        label: "Usage & Cost", icon: BarChart3 },
@@ -43,6 +46,8 @@ export default function SettingsLayout({
   const base = `/org/${orgId}/settings`;
   const isAdmin = useIsOrgAdmin(orgId);
   const tabs = TABS.filter((t) => t.href !== "/usage" || isAdmin);
+  const features = useOrgFeatures(orgId);
+  const lockedHere = TABS.find((t) => t.feature && t.href && pathname.startsWith(`${base}${t.href}`) && !features.allowed(t.feature));
 
   return (
     <div className="flex flex-col h-full">
@@ -56,6 +61,22 @@ export default function SettingsLayout({
                 ? pathname === base || pathname === `${base}/`
                 : pathname.startsWith(href);
             const Icon = t.icon;
+            if (t.feature && !features.allowed(t.feature)) {
+              return (
+                <button
+                  key={t.href}
+                  type="button"
+                  onClick={() => explainLock(features.nameOf(t.feature!))}
+                  aria-disabled="true"
+                  data-locked={t.feature}
+                  className="px-4 py-2.5 -mb-px border-b-2 border-transparent flex items-center gap-2 text-sm font-medium text-slate-400 dark:text-slate-500"
+                >
+                  <Icon className="w-4 h-4" />
+                  {t.label}
+                  <LockBadge />
+                </button>
+              );
+            }
             return (
               <Link
                 key={t.href}
@@ -76,7 +97,7 @@ export default function SettingsLayout({
       </div>
 
       {/* Tab content */}
-      <div className="flex-1 min-h-0 overflow-auto">{children}</div>
+      <div className="flex-1 min-h-0 overflow-auto">{lockedHere ? <LockedPanel name={features.nameOf(lockedHere.feature!)} /> : children}</div>
     </div>
   );
 }

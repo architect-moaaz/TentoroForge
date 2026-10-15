@@ -57,11 +57,12 @@ from services.mobile_credentials import (
     MobileCredentials,
     load_mobile_credentials,
 )
+from services.features import feature_gate
 
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(tags=["mobile-builds"])
+router = APIRouter(tags=["mobile-builds"], dependencies=[Depends(feature_gate("mobile_builds"))])
 
 # Poll cadence — EAS builds run 10–20 min; a check every 30s gives us
 # a snappy UI without hammering their API.

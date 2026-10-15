@@ -17,14 +17,30 @@ class AuditLog(Base):
         Index("ix_audit_resource", "resource_type", "resource_id"),
         Index("ix_audit_action", "action"),
         Index("ix_audit_timestamp", "timestamp"),
+        Index("ix_audit_org", "org_id"),
+        Index("ix_audit_actor", "actor_user_id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
+    #: Whose action it was, as the application saw it.
     user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("platform_users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    #: Whose hand it really was: the super admin when `user_id` was being
+    #: impersonated, else the same person. Impersonation is the two differing.
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("platform_users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    #: The organisation the action concerned, so its admins can read their own trail.
+    org_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="SET NULL"),
         nullable=True,
     )
     action: Mapped[str] = mapped_column(String(50), nullable=False)

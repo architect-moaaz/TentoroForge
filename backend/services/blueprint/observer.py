@@ -86,6 +86,7 @@ from services.blueprint.verification import (
     Finding,
     verify,
 )
+from services.build_usage import carrying
 
 logger = logging.getLogger(__name__)
 
@@ -641,7 +642,7 @@ class Observer:
             with ThreadPoolExecutor(
                     max_workers=min(len(jobs), CRITIC_CONCURRENCY)) as pool:
                 answers = list(pool.map(
-                    lambda job: self._ask(obs, doc, job[0], user_request=user_request, scope=job[1]),
+                    carrying(lambda job: self._ask(obs, doc, job[0], user_request=user_request, scope=job[1])),
                     jobs))
         else:
             answers = [self._ask(obs, doc, s, user_request=user_request, scope=sc) for s, sc in jobs]

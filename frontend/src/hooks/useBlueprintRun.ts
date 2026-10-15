@@ -21,6 +21,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { OfficeBridge } from "@/components/smith/officeBridge";
 import { useOfficeStore } from "@/components/virtual-office/OfficeStateManager";
+import { describeRefusal } from "@/lib/spend-refusal";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
 
@@ -552,12 +553,16 @@ export function useBlueprintRun(projectId: string | null) {
       // nothing. The same blindness cost a generated app its form submits.
       if (res.redirected || !res.ok || !res.body) {
         ownStreamRef.current = false;
+        // A refusal at the door (402) comes with its reasons in the body —
+        // the administrator's words, shown as they are.
+        const body = res.ok ? null : await res.json().catch(() => null);
+        const detail = typeof body?.detail === "string" ? body.detail : null;
         setRun((r) => ({
           ...r,
           status: "error",
           error: res.redirected
             ? `Not signed in — the request was redirected to ${res.url}.`
-            : `The engine refused the run (HTTP ${res.status}).`,
+            : describeRefusal(res.status, detail, `The engine refused the run (HTTP ${res.status}).`),
         }));
         return;
       }

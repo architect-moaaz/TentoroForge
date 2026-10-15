@@ -483,7 +483,7 @@ def widget_query(doc: dict, widget: dict) -> dict | None:
                "dimensions": [{k: v for k, v in d.items() if v is not None}
                               for d in src.get("dimensions") or []],
                "filter": filt}
-        for k in ("timeField", "sort", "limit"):
+        for k in ("timeField", "window", "sort", "limit"):
             if src.get(k) is not None:
                 out[k] = src[k]
         return out
@@ -517,6 +517,7 @@ def emit_widgets(doc: dict) -> str:
            "      dimensions: readonly { field: string; bucket?: \"day\" | \"week\" | \"month\" | \"quarter\" | \"year\";",
            "                             ranges?: readonly { label?: string; from?: number; to?: number }[] }[];",
            "      filter: Readonly<Record<string, unknown>>; timeField?: string;",
+           "      window?: \"today\" | \"week\" | \"month\" | \"last_7_days\" | \"last_30_days\" | \"year\";",
            "      sort?: { by: string; order?: \"asc\" | \"desc\" }; limit?: number }",
            "  | { op: \"list\"; entity: EntityName; fields: readonly string[];",
            "      filter: Readonly<Record<string, unknown>>; sort?: string; limit: number };",

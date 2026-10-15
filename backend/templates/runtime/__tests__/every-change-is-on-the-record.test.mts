@@ -14,6 +14,11 @@ installHarness({ stubs: {
     tag.join = (parts, sep) => ({ strings: [], values: parts, text: parts.map((p) => p.text).join(sep?.text ?? ",") });
     export const sql = tag;`,
   "@/db": `
+    // AS POSTGRES HANDS JSONB BACK: keys shortest first, then by bytes.
+    const order = (v) => Array.isArray(v) ? v.map(order) : (v && typeof v === "object")
+      ? Object.fromEntries(Object.keys(v).sort((a, b) => a.length - b.length || (a < b ? -1 : a > b ? 1 : 0)).map((k) => [k, order(v[k])]))
+      : v;
+    const jsonb = (text) => order(JSON.parse(text));
     export const db = {
       async execute(q) {
         globalThis.__SQL__.push(q.text);
@@ -22,7 +27,7 @@ installHarness({ stubs: {
         }
         if (q.text.startsWith("\\n    INSERT INTO forge_audit")) {
           const v = q.values; const row = { seq: globalThis.__ROWS__.length + 1, at: v[0], actor_id: v[1], action: v[7],
-            entity: v[8], entity_id: v[9], before: JSON.parse(v[10]), after: JSON.parse(v[11]), prev_hash: v[17], hash: v[18] };
+            entity: v[8], entity_id: v[9], before: jsonb(v[10]), after: jsonb(v[11]), prev_hash: v[17], hash: v[18] };
           globalThis.__ROWS__.push(row); return [{ seq: row.seq, hash: row.hash }];
         }
         if (q.text.includes("FROM forge_audit ORDER BY seq ASC")) return globalThis.__ROWS__;
@@ -48,6 +53,13 @@ eqJson(rows[1].prev_hash, rows[0].hash, "the second row chains to the first");
 ok((globalThis as any).__SQL__.some((s: string) => s.includes("pg_advisory_xact_lock")), "writers are serialised");
 ok((globalThis as any).__SQL__.some((s: string) => s.includes("forge_audit is append-only")), "the guard is applied");
 eqJson(await audit.verifyChain(), { ok: true, checked: 2 }, "the chain verifies");
+// A REAL CHANGE: several fields, in the order a row has them, and a moment.
+const three0 = await audit.recordAudit((await import("@/db")).db, { action: "create", entity: "Submission", entityId: "s-1",
+  after: { submittedAt: new Date("2026-10-12T10:00:00Z"), fullName: "••••", id: "s-1", status: "New" }, actor: { id: "u-1" } });
+ok(three0 && Object.keys(rows[2].after)[0] === "id", "the stub hands the row back reordered, as jsonb does");
+eqJson(await audit.verifyChain(), { ok: true, checked: 3 }, "a change with many fields still verifies after the database reorders it");
+ok(String(rows[2].hash).startsWith(audit.HASH_FORM), "a new row says how it was hashed");
+rows.splice(2, 1);
 rows[0].after = { total: 99 };
 eqJson(await audit.verifyChain(), { ok: false, checked: 1, brokenAt: 1 }, "a row changed underneath is found");
 

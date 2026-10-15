@@ -56,6 +56,7 @@ from services.blueprint.agent_contract import (
     capability_for,
 )
 from services.blueprint.service import BlueprintInvalid, BlueprintService
+from services.build_usage import carrying
 
 # ---------------------------------------------------------------------------
 # §94 — application state machine
@@ -1610,7 +1611,7 @@ def _execute(
             leads = state.warm is not None and subject == state.leader and attempt == 1
             # After an outage, the re-send waits — on its worker, not here.
             delay = OUTAGE_BACKOFF_S * state.stalled.get(subject, 0)
-            futures[pool.submit(_call_after, delay, executor, spec, state.warm, leads)] = spec
+            futures[pool.submit(carrying(_call_after), delay, executor, spec, state.warm, leads)] = spec
 
     def start(pool: ThreadPoolExecutor, key: str) -> None:
         started.add(key)
@@ -1739,7 +1740,7 @@ def _execute(
         with svc.lock:
             snapshot = copy.deepcopy(svc.doc)
         fut = pool.submit(
-            _observe_with_database, observer_agent, key, app_root, agent=DAG[key].agent,
+            carrying(_observe_with_database), observer_agent, key, app_root, agent=DAG[key].agent,
             subjects=list(subjects), doc=snapshot,
             pending=_pending_sections(in_plan, finished),
             planned=_planned_sections(in_plan), user_request=user_request,
@@ -1921,7 +1922,7 @@ def _execute(
             repair=True,
         )
         _note(ledger, "repair", key, subject, n, limit, task.feedback)
-        fut = pool.submit(_call, executor, spec)
+        fut = pool.submit(carrying(_call), executor, spec)
         futures[fut] = spec
         kinds[fut] = "repair"
         w.awaiting.add(subject)
@@ -3217,7 +3218,7 @@ def _project_install(svc: BlueprintService, app_root: str) -> Any:
         return install_dependencies(app_root)
 
     pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="forge-install")
-    future = pool.submit(work)
+    future = pool.submit(carrying(work))
     pool.shutdown(wait=False)  # the worker finishes the job; nobody blocks here
     return future
 

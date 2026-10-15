@@ -29,6 +29,7 @@ const KNOWN_FUNCTIONS = new Set([
   "abs", "floor", "ceiling", "round",
   "contains", "starts with", "ends with", "starts_with", "ends_with", "matches",
   "string", "number", "date", "now", "duration",
+  "date and time", "date_and_time", "today",
 ]);
 
 export function validateExpression(

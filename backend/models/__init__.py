@@ -35,6 +35,9 @@ from models.workflow_instance import WorkflowInstance, TaskInstance
 from models.node_execution_log import NodeExecutionLog
 from models.notification import Notification
 from models.audit import AuditLog
+from models.deployment import Deployment
+from models.credits import CreditEntry, SpendLimit
+from models.features import FeatureSetting
 from models.webhook import Webhook
 from models.environment import Environment
 from models.platform_integration import PlatformIntegration

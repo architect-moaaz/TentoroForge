@@ -13,9 +13,15 @@ from datetime import datetime
 from pathlib import Path
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from auth import get_current_user
 from config import FIDELITY_SCORING_ENABLED, FIDELITY_STATS_ENABLED, RENDER_SERVICE_URL
+from database import get_db
+from models.auth import PlatformUser
+from models.project import Project
+from platform_admin import require_super_admin
 from services.fidelity_log import append_fidelity_entry, read_fidelity_log
 from services.vision_evaluator import EvaluatorContext, evaluate_page
 
@@ -27,6 +33,13 @@ def _output_dir(short_id: str) -> Path:
     return Path(__file__).resolve().parent.parent.parent / "output" / short_id
 
 
+async def _member_of(short_id: str, user: PlatformUser = Depends(get_current_user),
+                     db: AsyncSession = Depends(get_db)) -> Project:
+    """The route's project, for a member of its organisation (`project_for`)."""
+    from services.project_service import project_for
+    return await project_for(short_id, user, db)
+
+
 @router.post("/api/_debug/score-page/{short_id}")
 async def score_page(
     short_id: str,
@@ -35,8 +48,7 @@ async def score_page(
     domain: str = "general",
     app_name: str = "App",
     description: str = "",
-    tone: str = "professional",
-):
+    tone: str = "professional", _project: Project = Depends(_member_of)):
     """Render the page, score it, append to fidelity-log.json. Returns the
     structured critique."""
     if not FIDELITY_SCORING_ENABLED:
@@ -94,7 +106,7 @@ async def score_page(
 
 
 @router.get("/api/_debug/fidelity-stats")
-async def fidelity_stats(since: str | None = None):
+async def fidelity_stats(since: str | None = None, _admin: PlatformUser = Depends(require_super_admin)):
     """Aggregate per-project fidelity-log.json across recent generations."""
     if not FIDELITY_STATS_ENABLED:
         raise HTTPException(403, "Fidelity stats endpoint disabled (set FIDELITY_STATS_ENABLED=true)")
@@ -165,7 +177,7 @@ async def fidelity_stats(since: str | None = None):
 
 
 @router.get("/api/_debug/fidelity-log/{short_id}")
-async def get_fidelity_log(short_id: str):
+async def get_fidelity_log(short_id: str, _project: Project = Depends(_member_of)):
     """Return the raw fidelity-log.json for a given project short_id."""
     output_dir = _output_dir(short_id)
     log_path = output_dir / "src" / "contracts" / "fidelity-log.json"
@@ -181,7 +193,7 @@ from services.critique_meta_eval import sample_critiques, diagnose_distribution
 
 
 @router.get("/api/_debug/critique-meta-eval")
-async def critique_meta_eval(limit: int = 20):
+async def critique_meta_eval(limit: int = 20, _admin: PlatformUser = Depends(require_super_admin)):
     output_root = Path(__file__).resolve().parent.parent.parent / "output"
     samples = sample_critiques(output_root, limit=limit)
     return diagnose_distribution(samples)
@@ -191,7 +203,7 @@ from services.bank_promotion import find_candidates
 
 
 @router.get("/api/_debug/bank-candidates")
-async def bank_candidates_list():
+async def bank_candidates_list(_admin: PlatformUser = Depends(require_super_admin)):
     """List schemas eligible for promotion into the reference bank.
     Manual review step — does NOT promote automatically."""
     output_root = Path(__file__).resolve().parent.parent.parent / "output"

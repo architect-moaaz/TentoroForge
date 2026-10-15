@@ -22,6 +22,7 @@ from schemas.template import (
 from schemas.project import ProjectResponse
 from services.project_service import create_project
 from services.suggestion_service import get_suggested_templates
+from services.features import feature_gate
 
 router = APIRouter(tags=["templates"])
 
@@ -80,7 +81,7 @@ async def get_template(slug: str, db: AsyncSession = Depends(get_db)):
 # Create project from template
 # ---------------------------------------------------------------------------
 
-@router.post("/api/orgs/{org_id}/projects/from-template", response_model=ProjectResponse, status_code=201)
+@router.post("/api/orgs/{org_id}/projects/from-template", dependencies=[Depends(feature_gate("templates"))], response_model=ProjectResponse, status_code=201)
 async def create_from_template(
     org_id: uuid.UUID,
     req: CreateFromTemplateRequest,
@@ -88,16 +89,8 @@ async def create_from_template(
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new project from a template and kick off generation."""
-    # Verify org membership
-    membership = await db.execute(
-        select(OrgMember).where(
-            OrgMember.org_id == org_id,
-            OrgMember.user_id == user.id,
-            OrgMember.invite_status == InviteStatus.accepted,
-        )
-    )
-    if not membership.scalar_one_or_none():
-        raise HTTPException(status_code=403, detail="Not a member of this organization")
+    from services.org_access import require_org_member
+    await require_org_member(org_id, user, db)
 
     # Find template
     result = await db.execute(
@@ -124,23 +117,15 @@ async def create_from_template(
 # Suggested apps for an org
 # ---------------------------------------------------------------------------
 
-@router.get("/api/orgs/{org_id}/suggested-apps", response_model=SuggestedTemplatesResponse)
+@router.get("/api/orgs/{org_id}/suggested-apps", dependencies=[Depends(feature_gate("templates"))], response_model=SuggestedTemplatesResponse)
 async def suggested_apps(
     org_id: uuid.UUID,
     user: PlatformUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get template suggestions based on the org's departments."""
-    # Verify membership
-    membership = await db.execute(
-        select(OrgMember).where(
-            OrgMember.org_id == org_id,
-            OrgMember.user_id == user.id,
-            OrgMember.invite_status == InviteStatus.accepted,
-        )
-    )
-    if not membership.scalar_one_or_none():
-        raise HTTPException(status_code=403, detail="Not a member of this organization")
+    from services.org_access import require_org_member
+    await require_org_member(org_id, user, db)
 
     results = await get_suggested_templates(org_id, db)
 

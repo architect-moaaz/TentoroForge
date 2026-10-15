@@ -138,7 +138,11 @@ async def get_project_with_auth(
     user: PlatformUser,
     db: AsyncSession,
 ) -> Project:
-    """Fetch a project and verify the user has access via org membership."""
+    """Fetch a project and verify the user has access via org membership.
+    The membership check is the shared one (`services.org_access`), so a
+    blocked or removed organisation refuses every app route with it."""
+    from services.org_access import require_org_member
+
     result = await db.execute(
         select(Project).where(Project.id == project_id)
     )
@@ -147,19 +151,25 @@ async def get_project_with_auth(
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Project not found")
 
-    # Verify user is member of the project's org
-    membership = await db.execute(
-        select(OrgMember).where(
-            OrgMember.org_id == project.org_id,
-            OrgMember.user_id == user.id,
-            OrgMember.invite_status == InviteStatus.accepted,
-        )
-    )
-    if not membership.scalar_one_or_none():
-        from fastapi import HTTPException
-        raise HTTPException(status_code=403, detail="Not a member of this organization")
-
+    await require_org_member(project.org_id, user, db)
     return project
+
+
+async def project_for(project_ref: str, user: PlatformUser, db: AsyncSession) -> Project:
+    """The project a route names by id OR short id, for a member of its
+    organisation — the editor routes that lived under `output/<short_id>/`
+    take either. A folder with no row is 404: an orphan is nobody's."""
+    from fastapi import HTTPException
+
+    ref = str(project_ref or "").strip()
+    project = None
+    try:
+        project = await db.get(Project, uuid.UUID(ref))
+    except ValueError:
+        project = (await db.execute(select(Project).where(Project.short_id == ref))).scalar_one_or_none()
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return await get_project_with_auth(project.id, user, db)
 
 
 def _build_passed(output_dir: str | None) -> bool:

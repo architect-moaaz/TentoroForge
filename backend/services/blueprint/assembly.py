@@ -1123,6 +1123,16 @@ class BootFailed(RuntimeError):
     """The application compiles and will not start."""
 
 
+#: How long the first request may take: in `next dev` it is the entry page's
+#: compile, which a busy host stretches (see `verify_boot`).
+FIRST_COMPILE_S = 180
+
+
+def _capped_env(env: dict) -> dict:
+    from services.dev_servers import capped_env
+    return capped_env(env)
+
+
 def verify_boot(app_root: str | Path, *, entry: str = "/",
                 timeout: int = 120) -> dict[str, Any]:
     """Start the app and prove it serves its way in. Raise if it will not.
@@ -1175,7 +1185,7 @@ def verify_boot(app_root: str | Path, *, entry: str = "/",
     proc = subprocess.Popen(
         ["npm", "run", "dev", "--", "--port", str(port)],
         cwd=str(root), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        text=True, env={**os.environ, "BROWSER": "none"},
+        text=True, env=_capped_env({**os.environ, "BROWSER": "none"}),
         start_new_session=True,
     )
     from services import dev_servers

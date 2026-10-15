@@ -23,10 +23,12 @@ from auth import (
     record_failed_attempt,
     clear_failed_attempts,
     get_current_user,
+    DISABLED_MESSAGE,
 )
 from database import get_db
 from models.auth import PlatformUser
 from models.org import OrgMember, Organization
+from platform_admin import record_sign_in
 from schemas.auth import (
     SignupRequest,
     LoginRequest,
@@ -34,6 +36,7 @@ from schemas.auth import (
     RefreshRequest,
     UserResponse,
     OrgMembership,
+    ImpersonatedBy,
     ForgotPasswordRequest,
     ForgotPasswordResponse,
     ResetPasswordRequest,
@@ -67,6 +70,7 @@ async def signup(req: SignupRequest, db: AsyncSession = Depends(get_db)):
     db.add(user)
     await db.commit()
     await db.refresh(user)
+    await record_sign_in(user, db)
 
     access_token = create_access_token(user.id)
     refresh_token = create_refresh_token(user.id)
@@ -85,9 +89,14 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
     if not user or not verify_password(req.password, user.password_hash):
         record_failed_attempt(req.email)
         raise HTTPException(status_code=401, detail="Invalid email or password")
+    # A disabled login is refused with its own words, and the attempt is not
+    # a failed one: the password was right.
+    if user.disabled_at is not None:
+        raise HTTPException(status_code=401, detail=DISABLED_MESSAGE)
 
     # Successful login — clear failed attempts
     clear_failed_attempts(req.email)
+    await record_sign_in(user, db)
 
     access_token = create_access_token(user.id)
     refresh_token = create_refresh_token(user.id)
@@ -102,14 +111,21 @@ async def refresh(req: RefreshRequest, db: AsyncSession = Depends(get_db)):
     if not user_id:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
 
+    # THE PERSON IS LOOKED UP AGAIN. A refresh used to mint a new pair for
+    # whatever id the old token carried; a login disabled or deleted in the
+    # meantime would have lived on for another week.
+    user = await db.get(PlatformUser, uuid.UUID(user_id))
+    if user is None:
+        raise HTTPException(status_code=401, detail="User not found")
+    if user.disabled_at is not None:
+        raise HTTPException(status_code=401, detail=DISABLED_MESSAGE)
+
     # Blacklist the old refresh token (rotation)
     blacklist_token(req.refresh_token)
 
     # Issue new token pair
-    import uuid
-    uid = uuid.UUID(user_id)
-    access_token = create_access_token(uid)
-    refresh_token = create_refresh_token(uid)
+    access_token = create_access_token(user.id)
+    refresh_token = create_refresh_token(user.id)
     return TokenResponse(access_token=access_token, refresh_token=refresh_token)
 
 
@@ -124,17 +140,19 @@ async def logout(
 
 @router.get("/me", response_model=UserResponse)
 async def get_me(
+    request: Request,
     current_user: PlatformUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    # Load org memberships
+    # Load org memberships — a removed organisation is not one of theirs any
+    # more; a blocked one is listed with its status, so the UI can say why.
     result = await db.execute(
         select(OrgMember)
         .where(OrgMember.user_id == current_user.id)
         .where(OrgMember.invite_status == "accepted")
         .options(selectinload(OrgMember.organization))
     )
-    memberships = result.scalars().all()
+    memberships = [m for m in result.scalars().all() if not m.organization.is_removed]
 
     orgs = [
         OrgMembership(
@@ -142,16 +160,22 @@ async def get_me(
             org_name=m.organization.name,
             org_slug=m.organization.slug,
             role=m.role.value,
+            status=m.organization.status,
         )
         for m in memberships
     ]
 
+    actor = getattr(request.state, "actor", None)
+    impersonated = getattr(request.state, "impersonated_by", None)
     return UserResponse(
         id=current_user.id,
         email=current_user.email,
         name=current_user.name,
         created_at=current_user.created_at,
         orgs=orgs,
+        platform_role=current_user.platform_role,
+        disabled=current_user.disabled_at is not None,
+        impersonated_by=ImpersonatedBy(id=actor.id, email=actor.email) if impersonated and actor else None,
     )
 
 

@@ -20,6 +20,7 @@ import { ShellStateProvider } from "@tentoroforge/renderer";
 import { MobileNav } from "./MobileNav";
 import { NotificationBell } from "./NotificationBell";
 import { OrgSwitcher } from "./OrgSwitcher";
+import { OutsideOrganisation } from "./OutsideOrganisation";
 import { InstallButton } from "@/components/PwaRegister";
 import { LanguageSwitch } from "@/sdk/i18n";
 import { AccountMenu } from "./AccountMenu";
@@ -906,6 +907,9 @@ export default async function DashboardLayout({
 }) {
   const session = await auth();
   if (!session) redirect("/login");
+  // AT ANOTHER ORGANISATION'S ADDRESS: nothing of it, and where to go instead.
+  const outside = (session.user as { outsideOrg?: string } | undefined)?.outsideOrg;
+  if (outside) return <OutsideOrganisation userId={String((session.user as { id?: string }).id ?? "")} slug={outside} />;
 
   const navProps = await loadNavProps();
   const role = String((session.user as { role?: string } | undefined)?.role ?? "");

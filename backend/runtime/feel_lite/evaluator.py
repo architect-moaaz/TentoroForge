@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import math
 import re
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from runtime.feel_lite.tokenizer import tokenize
@@ -132,7 +132,14 @@ def _fn_matches(args: list) -> bool:
 def _fn_string(args: list) -> str:
     if not args:
         return ""
-    return str(args[0])
+    v = args[0]
+    # A moment reads as the TypeScript engine writes it (ISO, UTC, milliseconds).
+    if isinstance(v, datetime):
+        v = v if v.tzinfo else v.replace(tzinfo=timezone.utc)
+        return v.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    if isinstance(v, date):
+        return v.isoformat()
+    return str(v) if v is not None else ""
 
 
 @_register("number")
@@ -157,9 +164,34 @@ def _fn_date(args: list) -> date | None:
         return None
 
 
+@_register("date and time")
+def _fn_date_and_time(args: list) -> datetime | None:
+    if not args:
+        return None
+    v = args[0]
+    if isinstance(v, datetime):
+        return v
+    if isinstance(v, date):
+        return datetime(v.year, v.month, v.day, tzinfo=timezone.utc)
+    try:
+        d = datetime.fromisoformat(str(v).strip().replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+    return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+
+
+BUILTIN_FUNCTIONS["date_and_time"] = _fn_date_and_time
+
+
 @_register("now")
 def _fn_now(args: list) -> datetime:
     return datetime.now()
+
+
+@_register("today")
+def _fn_today(args: list) -> str:
+    """Today as the calendar shows it where the app runs, as `$today` writes it."""
+    return date.today().isoformat()
 
 
 @_register("duration")
@@ -302,12 +334,19 @@ def evaluate(node: ASTNode, ctx: dict) -> Any:
         return True  # Wildcard always matches
 
     if isinstance(node, Identifier):
+        # The clock by the names steps use; a variable of that name still wins.
+        if node.name in ("$today", "$now") and node.name not in ctx:
+            return date.today().isoformat() if node.name == "$today" else \
+                datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
         # Support dotted names stored as a single identifier (e.g., "person.age")
         if "." in node.name:
             parts = node.name.split(".")
             val = ctx
             for part in parts:
-                if isinstance(val, dict):
+                dp = _date_part(val, part)
+                if dp is not _NOT_TIME:
+                    val = dp
+                elif isinstance(val, dict):
                     val = val.get(part)
                 elif isinstance(val, list):
                     # A path on a list is the list of each item's value (FEEL).
@@ -394,6 +433,9 @@ def evaluate(node: ASTNode, ctx: dict) -> Any:
 
     if isinstance(node, MemberExpr):
         obj = evaluate(node.object, ctx)
+        dp = _date_part(obj, node.property)
+        if dp is not _NOT_TIME:
+            return dp
         if isinstance(obj, dict):
             return obj.get(node.property)
         if isinstance(obj, list):
@@ -535,8 +577,93 @@ def _fuzzy_equal(a: Any, b: Any) -> bool:
     return str(a).lower() == str(b).lower()
 
 
+# DATES AND MOMENTS AS TIME, not text and a number: `"2026-10-12" + duration`
+# joined the two (the shipped TypeScript engine gave "2026-10-1286400000"),
+# and AquaTrack's Edit Log Entry could not find the end of a day (m1dck85j,
+# 2026-10-12). A date or moment plus or minus a duration is a date or moment,
+# in the form it came in; two of them subtract to the time between.
+_ISO_DAY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_ISO_MOMENT = re.compile(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}")
+
+
+def _as_moment(v: Any) -> tuple[datetime, str] | None:
+    """`(moment, kind)`: kind says how to answer — date, datetime, day text, moment text."""
+    if isinstance(v, datetime):
+        return (v if v.tzinfo else v.replace(tzinfo=timezone.utc)), "datetime"
+    if isinstance(v, date):
+        return datetime(v.year, v.month, v.day, tzinfo=timezone.utc), "date"
+    if not isinstance(v, str):
+        return None
+    s = v.strip()
+    try:
+        if _ISO_DAY.match(s):
+            d = date.fromisoformat(s)
+            return datetime(d.year, d.month, d.day, tzinfo=timezone.utc), "day"
+        if _ISO_MOMENT.match(s):
+            d = datetime.fromisoformat(s.replace("Z", "+00:00"))
+            return (d if d.tzinfo else d.replace(tzinfo=timezone.utc)), "moment"
+    except ValueError:
+        return None
+    return None
+
+
+def _as_duration(v: Any) -> timedelta | None:
+    if isinstance(v, timedelta):
+        return v
+    if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v):
+        return timedelta(milliseconds=v)
+    return None
+
+
+def _from_moment(m: datetime, kind: str) -> Any:
+    if kind == "date":
+        return m.date()
+    if kind == "datetime":
+        return m
+    if kind == "day":
+        return m.date().isoformat()
+    return m.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def _time_arithmetic(op: str, left: Any, right: Any) -> Any:
+    lm, rm = _as_moment(left), _as_moment(right)
+    if op == "+":
+        if lm and _as_duration(right) is not None:
+            return _from_moment(lm[0] + _as_duration(right), lm[1])
+        if rm and _as_duration(left) is not None:
+            return _from_moment(rm[0] + _as_duration(left), rm[1])
+    if op == "-":
+        if lm and rm:
+            return lm[0] - rm[0]
+        if lm and _as_duration(right) is not None:
+            return _from_moment(lm[0] - _as_duration(right), lm[1])
+    return _NOT_TIME
+
+
+_NOT_TIME = object()
+
+# A DATE'S PARTS, AS FEEL NAMES THEM — `date(d).year`, `logged.month` — in UTC,
+# like the TypeScript engine; weekday is 1 (Monday) to 7 (Sunday). Data
+# Collector 4's reference numbers read each as nothing (60v142ju, 2026-10-12).
+_DATE_PARTS = {"year", "month", "day", "weekday", "hour", "minute", "second"}
+
+
+def _date_part(v: Any, part: str) -> Any:
+    if part not in _DATE_PARTS:
+        return _NOT_TIME
+    m = _as_moment(v)
+    if not m:
+        return _NOT_TIME
+    d = m[0].astimezone(timezone.utc)
+    return {"year": d.year, "month": d.month, "day": d.day, "weekday": d.isoweekday(),
+            "hour": d.hour, "minute": d.minute, "second": d.second}[part]
+
+
 def _eval_binary(op: str, left: Any, right: Any) -> Any:
     """Evaluate a binary arithmetic operation."""
+    timed = _time_arithmetic(op, left, right)
+    if timed is not _NOT_TIME:
+        return timed
     if op == "+":
         # String concatenation if either side is a string
         if isinstance(left, str) or isinstance(right, str):

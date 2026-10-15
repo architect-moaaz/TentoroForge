@@ -1563,6 +1563,14 @@ export const QuerySource = z.object({
   /** The date column a dashboard's date range narrows. Defaults to the
    *  bucketed dimension when there is one. */
   timeField: z.string().optional(),
+  /**
+   * The period this widget always reads on `timeField`, counted back from
+   * now: a tile that says "today" is `window: "today"`. Without it a query
+   * covers every record there is, narrowed only by a page's date range —
+   * AquaTrack's "Entries Logged Today" counted every drink ever logged, and
+   * Today's Log showed 7 entries above a list of none (m1dck85j, 2026-10-12).
+   */
+  window: z.enum(["today", "week", "month", "last_7_days", "last_30_days", "year"]).optional(),
   /** A measure key or a dimension field; the default is chronological for a
    *  bucketed axis and the first measure, largest first, otherwise. */
   sort: z.object({
@@ -2046,12 +2054,20 @@ export const RuleAction = z.object({
  * What satisfies a prerequisite: a row of `entity` belonging to the acting
  * account (`account` names its field that holds the account's id), matching
  * every `where` value — "a KycVerification of this member with status
- * approved".
+ * approved" — and/or the signed-in person holding one of `roles`.
+ *
+ * `roles` is for a gate that is about who the person IS, not what they have
+ * done: staff only, administrators only. Data Collector 4's "submission data
+ * is admin-only" could only be written as a record to look up, so it demanded
+ * an AdminUser whose id was the sign-in account's id — a record no account
+ * ever had — and every staff process refused every member of staff
+ * (60v142ju, 2026-10-12). Both given: both must hold.
  */
 export const PrerequisiteRequirement = z.object({
-  entity: EntityId,
-  account: z.string(),
+  entity: EntityId.optional(),
+  account: z.string().optional(),
   where: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).default({}),
+  roles: z.array(RoleId).optional(),
 });
 
 export const BusinessRule = z.object({
@@ -2384,6 +2400,9 @@ export const Security = z.object({
       platformRoles: z.array(z.string()).default([]),
       organisationAdminRole: z.string().optional(),
       nameField: z.string().optional(),
+      /** When each organisation answers at its own address: one sign-in
+       *  across them all (`shared`), or a separate one at each. */
+      addressSignIn: z.enum(["shared", "per_organisation"]).default("shared"),
     })
     .default({}),
   /** Superseded by `audit`; read by nothing. Kept so older documents load. */
@@ -2974,8 +2993,43 @@ export const Database = z.object({
   seeded: z.boolean().default(false),
 });
 
+/**
+ * An address the published application answers at besides its own
+ * `<project>.vercel.app`: the owner's domain (`acme.com`) or subdomain
+ * (`app.acme.com`), or the address Tentoro gives every app. Forge attaches it
+ * to the app's Vercel project, tells the owner the DNS records to add, and
+ * watches until it answers; `status` changes only when that changes, so the
+ * definition is not rewritten on every check (the checks themselves are kept
+ * in the project's `.forge/domains.json`).
+ */
+export const DomainEntry = z.object({
+  name: z.string().min(3),
+  /** `apex` is a bare domain (acme.com), `subdomain` one under it, `tentoro`
+   *  the address the platform gives the app, `organisations` a wildcard
+   *  (`*.clinicapp.com`) under which each organisation answers at its own
+   *  address (`acme.clinicapp.com`). */
+  kind: z.enum(["subdomain", "apex", "tentoro", "organisations"]).default("subdomain"),
+  /** The address sign-in, email links and the phone app use. At most one. */
+  main: z.boolean().default(false),
+  /** `waiting`: added, its records or its first publish not there yet;
+   *  `live`: it answers with a valid certificate; `failed`: it stopped, or
+   *  never started, answering — `reason` says why. */
+  status: z.enum(["waiting", "live", "failed"]).default("waiting"),
+  reason: z.string().optional(),
+  /** Requests for this address go to that one (a permanent redirect): the
+   *  `www.` companion Forge adds beside a bare domain. Never main. */
+  redirectTo: z.string().optional(),
+  addedAt: z.string().optional(),
+  liveAt: z.string().optional(),
+});
+
 export const Deployment = z.object({
   provider: z.enum(["vercel"]).default("vercel"),
+  /** The addresses the published application answers at (`DomainEntry`). */
+  domains: z.array(DomainEntry).default([]),
+  /** What opening `<project>.vercel.app` does once another address is the
+   *  main one: send people there, or keep answering as before. */
+  oldAddress: z.enum(["redirect", "keep"]).default("redirect"),
   preview: z
     .object({
       status: z.enum(["stopped", "starting", "running", "failed"]).default("stopped"),

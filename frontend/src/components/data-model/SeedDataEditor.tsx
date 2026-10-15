@@ -9,6 +9,8 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { api } from "@/lib/api";
+import { isFeatureRefusal } from "@/lib/features";
+import { LockedPanel } from "@/components/features/Locked";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -35,7 +37,7 @@ export function SeedDataEditor({ projectId, onComplete }: SeedDataEditorProps) {
   const [error, setError] = useState<string | null>(null);
 
   // Load existing seed.ts
-  const { data: seedFile } = useQuery({
+  const { data: seedFile, error: seedError } = useQuery({
     queryKey: ["project", projectId, "file", "src/db/seed.ts"],
     queryFn: () =>
       api.get<{ path: string; content: string }>(
@@ -137,6 +139,10 @@ export function SeedDataEditor({ projectId, onComplete }: SeedDataEditorProps) {
       setIsGenerating(false);
     }
   };
+
+  if (isFeatureRefusal(seedError)) {
+    return <LockedPanel name="Code tab" description="Seed data is part of the app's source, so it opens with the Code tab." />;
+  }
 
   return (
     <div className="flex h-full flex-col">

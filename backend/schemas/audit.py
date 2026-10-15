@@ -9,6 +9,8 @@ from pydantic import BaseModel
 class AuditLogResponse(BaseModel):
     id: uuid.UUID
     user_id: uuid.UUID | None
+    actor_user_id: uuid.UUID | None = None
+    org_id: uuid.UUID | None = None
     action: str
     resource_type: str
     resource_id: str | None

@@ -1679,15 +1679,35 @@ def prerequisite_findings(rule: dict, doc: dict) -> list[str]:
     out += [f"`gates` names {g}, which is not a workflow of this application" for g in gates if flows and g not in flows]
     req = rule.get("requires") or {}
     ents = {str(e.get("id")): e for e in live((doc.get("data") or {}).get("entities"))}
-    ent = ents.get(str(req.get("entity") or ""))
-    if ent is None:
+    roles = {str(r.get("id")) for r in live(doc.get("roles"))} | {str(r.get("name")) for r in live(doc.get("roles"))}
+    wanted_roles = [str(r) for r in req.get("roles") or []]
+    out += [f"`requires.roles` names {r}, which is not a role of this application" for r in wanted_roles
+            if roles and r not in roles]
+    ent = ents.get(str(req.get("entity") or "")) if req.get("entity") else None
+    if req.get("entity") and ent is None:
         out.append("`requires.entity` must name the entity whose record satisfies it")
-    else:
+    elif ent is None and not wanted_roles:
+        out.append("`requires` names the record that satisfies it (`entity`, `account`, `where`), the "
+                   "`roles` the signed-in person must hold, or both")
+    if ent is not None:
         cols = {str(f.get("name")) for f in ent.get("fields") or []}
         acct = str(req.get("account") or "")
         if acct not in cols:
             out.append(f"`requires.account` must be the field of {ent.get('name')} holding the person's "
                        f"account id (one of: {', '.join(sorted(cols)) or 'none'})")
+        else:
+            # A RECORD'S OWN ID IS AN ACCOUNT'S ID ONLY WHEN THE RECORD IS THE
+            # ACCOUNT. Data Collector 4 required an AdminUser whose id was the
+            # signed-in account's: no account ever had one, and every staff
+            # process refused every member of staff (60v142ju, 2026-10-12).
+            from services.blueprint.account_model import account_entity
+            keys = {str(f.get("name")) for f in ent.get("fields") or [] if f.get("primaryKey")} or {"id"}
+            signs_in = account_entity(doc) or {}
+            if acct in keys and str(signs_in.get("id")) != str(ent.get("id")):
+                out.append(f"`requires.account` is {ent.get('name')}'s own `{acct}`, but people do not sign in as "
+                           f"{ent.get('name')} records, so no signed-in account ever has one. Name the field of "
+                           f"{ent.get('name')} that holds the account's id, or — when the gate is about who the "
+                           f"person is (staff, administrators) — give `requires.roles` instead")
         out += [f"`requires.where` names {k}, which {ent.get('name')} does not have"
                 for k in (req.get("where") or {}) if cols and k not in cols]
     if not str(rule.get("message") or "").strip():
