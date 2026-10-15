@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Node as RFNode, Edge as RFEdge } from "@xyflow/react";
 import {
   Plus,
   Trash2,
-  Save,
+  Workflow,
   Play,
   ArrowLeft,
   Loader2,
@@ -42,6 +42,9 @@ import type {
   AgentNodeData,
   AgentTemplate,
 } from "@/types/agent-builder";
+
+/** An agent saves itself this long after the last change, so typing is not a save per key. */
+const AUTOSAVE_MS = 1200;
 
 interface AgentBuilderPanelProps {
   projectId: string;
@@ -82,6 +85,10 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
   const [showBlast, setShowBlast] = useState(false);
   // The agent as last saved (see draftKeyOf), or null for one that was only just drawn and never saved.
   const [savedKey, setSavedKey] = useState<string | null>(null);
+  // The agent as it was when opened or drawn (saved or not). "Touched" means the person has changed it since, and only
+  // a touched agent saves itself: opening "New Agent" and leaving again leaves nothing behind.
+  const [baseKey, setBaseKey] = useState<string | null>(null);
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "error">("idle");
   const [showTestConsole, setShowTestConsole] = useState(false);
   // Watch the running app's real chats live: the canvas lights up as they happen.
   const [showWatch, setShowWatch] = useState(false);
@@ -105,7 +112,10 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
       setEditDescription(agent.description || "");
       setNodes(agent.nodes || []);
       setEdges(agent.edges || []);
-      setSavedKey(draftKeyOf(agent.name, agent.description || "", agent.nodes || [], agent.edges || [], agent.config));
+      const opened = draftKeyOf(agent.name, agent.description || "", agent.nodes || [], agent.edges || [], agent.config);
+      setSavedKey(opened);
+      setBaseKey(opened);
+      setSaveState("idle");
       setSelectedNodeId(null);
       setShowTestConsole(false);
       setApplyStatus(null);
@@ -142,6 +152,8 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
     setNodes(newAgent.nodes);
     setEdges(newAgent.edges);
     setSavedKey(null);
+    setBaseKey(draftKeyOf(newAgent.name, "", newAgent.nodes, newAgent.edges, newAgent.config));
+    setSaveState("idle");
     setSelectedNodeId(null);
     setShowTestConsole(false);
     setApplyStatus(null);
@@ -164,6 +176,8 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
       setNodes(newAgent.nodes);
       setEdges(newAgent.edges);
       setSavedKey(null);
+      setBaseKey(draftKeyOf(newAgent.name, newAgent.description || "", newAgent.nodes, newAgent.edges, newAgent.config));
+      setSaveState("idle");
       setSelectedNodeId(null);
       setShowTestConsole(false);
       setApplyStatus(null);
@@ -187,6 +201,8 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
       setNodes(suggested.nodes);
       setEdges(suggested.edges);
       setSavedKey(null);
+      setBaseKey(draftKeyOf(suggested.name, suggested.description || "", suggested.nodes, suggested.edges, suggested.config));
+      setSaveState("idle");
       setSelectedNodeId(null);
       setShowTestConsole(false);
       setApplyStatus(null);
@@ -277,21 +293,47 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
     });
   }, [currentAgent, editName, editDescription, nodes, edges, projectId, queryClient]);
 
-  // Has the agent changed since it was last saved? Said inside Find problems, where fixes are applied.
-  const agentUnsaved = useMemo(
-    () => !!currentAgent && savedKey !== draftKeyOf(editName, editDescription, nodes, edges, currentAgent.config),
-    [currentAgent, savedKey, editName, editDescription, nodes, edges],
+  // What the agent is now, what was last saved, and what it was when opened. A change that is not saved yet is saved by
+  // itself a moment later (there is no Save button), but only once the person has changed something.
+  const draftKey = useMemo(
+    () => (currentAgent ? draftKeyOf(editName, editDescription, nodes, edges, currentAgent.config) : ""),
+    [currentAgent, editName, editDescription, nodes, edges],
   );
+  const agentUnsaved = !!currentAgent && savedKey !== draftKey;
+  const touched = !!currentAgent && baseKey !== draftKey;
+  const needsSave = agentUnsaved && touched;
 
-  // Save, from the toolbar button: the outcome is shown in the status bar.
-  const handleSave = useCallback(async () => {
+  // A failed save is said in the status bar, in words. The message is kept so a later good save can take it away again.
+  const saveFailure = useRef<string | null>(null);
+  const autoSave = useCallback(async () => {
+    setSaveState("saving");
     try {
       await saveAgent();
-      setApplyStatus("Saved.");
+      setSaveState("idle");
+      const earlier = saveFailure.current;
+      saveFailure.current = null;
+      if (earlier) setApplyStatus((now) => (now === earlier ? null : now));
     } catch (e) {
-      setApplyStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+      const message = `Error: ${e instanceof Error ? e.message : String(e)}`;
+      saveFailure.current = message;
+      setApplyStatus(message);
+      setSaveState("error");
     }
   }, [saveAgent]);
+
+  // No retry loop: after a failure it waits for the next change (or the person pressing the status) to try again.
+  useEffect(() => {
+    if (!needsSave || isApplying) return;
+    const timer = setTimeout(() => void autoSave(), AUTOSAVE_MS);
+    return () => clearTimeout(timer);
+  }, [needsSave, draftKey, isApplying, autoSave]);
+
+  // Leaving the builder (going back, or the page closing the panel) must not lose a change made a moment ago.
+  const leaving = useRef<() => void>(() => {});
+  leaving.current = () => {
+    if (needsSave) void saveAgent().catch(() => {});
+  };
+  useEffect(() => () => leaving.current(), []);
 
   // Delete agent
   const deleteAgent = useCallback(
@@ -402,11 +444,23 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
 
   // Back to list
   const backToList = useCallback(() => {
+    if (needsSave) void saveAgent().catch(() => {});
+    saveFailure.current = null;
+    setSaveState("idle");
     setCurrentAgent(null);
     setSelectedNodeId(null);
     setShowTestConsole(false);
     setApplyStatus(null);
-  }, [setCurrentAgent, setSelectedNodeId]);
+  }, [needsSave, saveAgent, setCurrentAgent, setSelectedNodeId]);
+
+  // The diagram page: the drawing, with the components to build it. The other pages (Test, Find problems, Watch live)
+  // are closed to get back to it.
+  const showDiagram = useCallback(() => {
+    setShowTestConsole(false);
+    setShowBlast(false);
+    setShowWatch(false);
+  }, []);
+  const onDiagramPage = !showTestConsole && !showBlast && !showWatch;
 
   // Update node data
   const updateNodeData = useCallback(
@@ -546,9 +600,31 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
         </div>
 
         <div className="flex items-center gap-1">
-          <Button size="sm" variant="outline" onClick={handleSave}>
-            <Save className="mr-1 h-3.5 w-3.5" />
-            Save
+          {saveState === "error" ? (
+            <button type="button" className="mr-1 text-xs text-red-700 underline" onClick={() => void autoSave()} data-testid="save-state">
+              Not saved. Try again
+            </button>
+          ) : saveState === "saving" ? (
+            <span className="mr-1 text-xs text-muted-foreground" data-testid="save-state">
+              Saving…
+            </span>
+          ) : needsSave ? (
+            <span className="mr-1 text-xs text-amber-700" data-testid="save-state">
+              Unsaved changes
+            </span>
+          ) : (
+            <span className="mr-1 text-xs text-muted-foreground" data-testid="save-state">
+              {savedKey !== null ? "Saved" : "Saves as you edit"}
+            </span>
+          )}
+          <Button
+            size="sm"
+            variant={onDiagramPage ? "default" : "outline"}
+            aria-pressed={onDiagramPage}
+            onClick={showDiagram}
+          >
+            <Workflow className="mr-1 h-3.5 w-3.5" />
+            Diagram
           </Button>
           <Button
             size="sm"
@@ -652,7 +728,7 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
 
       {/* Canvas area */}
       <div className="flex flex-1 overflow-hidden">
-        <AgentNodePalette />
+        {onDiagramPage && <AgentNodePalette />}
         <div className="flex-1">
           {showBlast ? (
             <AgentBlastPanel
@@ -668,11 +744,8 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
               }}
               onApplyFix={(fix) => setNodes((current) => applyFix(current, fix))}
               onRevertFix={(fix) => setNodes((current) => revertFix(current, fix))}
-              agentUnsaved={agentUnsaved}
-              onSaveAgent={async () => {
-                await saveAgent();
-                setApplyStatus("Saved.");
-              }}
+              agentUnsaved={saveState === "error"}
+              onSaveAgent={() => autoSave()}
             />
           ) : showTestConsole ? (
             <AgentTestConsole
