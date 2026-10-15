@@ -35,7 +35,8 @@ def test_the_cockpit_migrations_chain_in_one_line_from_the_old_head():
     heads = [r for r in revs if r not in children]
     assert revs["ft1015_features"] == ("cr1015_credits",)
     assert revs["dp1015_deployment_url"] == ("ft1015_features",)
-    assert heads == ["dp1015_deployment_url"], heads
+    assert revs["tm1015_team_members"] == ("dp1015_deployment_url",)
+    assert heads == ["tm1015_team_members"], heads
 
 
 @pytest.mark.asyncio

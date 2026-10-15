@@ -2,17 +2,12 @@
 
 import { use, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, Pencil, Trash2 } from "lucide-react";
+import { Plus, Pencil, Trash2, X } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Card,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardDescription, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -39,6 +34,87 @@ interface Team {
 interface Department {
   id: string;
   name: string;
+}
+
+interface Person {
+  id: string;
+  first_name: string;
+  last_name: string;
+  title: string | null;
+  email: string;
+  team_ids?: string[];
+}
+
+/** Who is in the team, and the way to take somebody in or let them go. A
+ *  person may be in more than one team, so taking them in here leaves their
+ *  other teams alone. */
+function TeamMembers({ orgId, team }: { orgId: string; team: Team }) {
+  const queryClient = useQueryClient();
+  const [adding, setAdding] = useState("");
+  const { data: members = [] } = useQuery({
+    queryKey: ["org", orgId, "teams", team.id, "members"],
+    queryFn: () => api.get<Person[]>(`/api/orgs/${orgId}/teams/${team.id}/members`),
+  });
+  const { data: everyone = [] } = useQuery({
+    queryKey: ["org", orgId, "people", "", "all"],
+    queryFn: () => api.get<Person[]>(`/api/orgs/${orgId}/people?limit=200`),
+  });
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: ["org", orgId, "teams", team.id, "members"] });
+    queryClient.invalidateQueries({ queryKey: ["org", orgId, "people"] });
+    queryClient.invalidateQueries({ queryKey: ["org", orgId, "org-chart"] });
+  };
+  const add = useMutation({
+    mutationFn: (person_id: string) => api.post(`/api/orgs/${orgId}/teams/${team.id}/members`, { person_id }),
+    onSuccess: () => { setAdding(""); refresh(); },
+  });
+  const remove = useMutation({
+    mutationFn: (person_id: string) => api.delete(`/api/orgs/${orgId}/teams/${team.id}/members/${person_id}`),
+    onSuccess: refresh,
+  });
+  const inTeam = new Set(members.map((m) => m.id));
+  const candidates = everyone.filter((p) => !inTeam.has(p.id));
+  return (
+    <div data-team-members="" className="space-y-2">
+      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {members.length} member{members.length !== 1 ? "s" : ""}
+      </p>
+      {members.length > 0 && (
+        <ul className="space-y-1">
+          {members.map((m) => (
+            <li key={m.id} className="flex items-center justify-between rounded-md border px-2 py-1 text-sm">
+              <span>
+                {m.first_name} {m.last_name}
+                {m.title && <span className="text-xs text-muted-foreground"> · {m.title}</span>}
+              </span>
+              <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground" title="Remove from this team"
+                      onClick={() => remove.mutate(m.id)}>
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {candidates.length > 0 && (
+        <div className="flex items-center gap-2">
+          <Select value={adding || "none"} onValueChange={(v) => setAdding(v === "none" ? "" : v)}>
+            <SelectTrigger className="h-8 text-xs">
+              <SelectValue placeholder="Add a person" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">Add a person…</SelectItem>
+              {candidates.map((p) => (
+                <SelectItem key={p.id} value={p.id}>{p.first_name} {p.last_name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button size="sm" variant="outline" className="h-8" disabled={!adding || add.isPending} onClick={() => adding && add.mutate(adding)}>
+            Add
+          </Button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function TeamForm({
@@ -224,6 +300,9 @@ function TeamsPage({ orgId }: { orgId: string }) {
                   </div>
                 </div>
               </CardHeader>
+              <CardContent>
+                <TeamMembers orgId={orgId} team={team} />
+              </CardContent>
             </Card>
           ))}
         </div>
