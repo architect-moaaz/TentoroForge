@@ -220,6 +220,125 @@ function StepRail({ index }: { index: number }) {
   );
 }
 
+function clampWords(s: string, n: number): string {
+  const words = s.trim().split(/\s+/);
+  return words.length <= n ? s.trim() : words.slice(0, n).join(" ") + "…";
+}
+
+/**
+ * The right pane: a small, believable app rendered in the company's own
+ * colour, type and mark — the thing Forge is here to build, taking their
+ * identity as they give it. It is quiet until there is something to show,
+ * then it wears their brand: the page's accent variables carry the colour,
+ * so it fills in the moment the site is read and their heading font is set
+ * in the title. The one place on the screen that is allowed to be loud.
+ */
+function BrandPreview({
+  name,
+  identity,
+  design,
+  logoSrc,
+}: {
+  name: string;
+  identity: BrandIdentity;
+  design: BrandDesign;
+  logoSrc: string | null;
+}) {
+  const heading =
+    design.typography?.fontFamilyHeading ||
+    design.typography?.fontFamilyBase ||
+    undefined;
+  const company = name.trim() || "Your company";
+  const headline = (identity.what_you_do || "").trim();
+  const initial = company.charAt(0).toUpperCase();
+
+  return (
+    <figure className="w-full max-w-[22rem]">
+      <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-2xl shadow-slate-900/10 dark:border-slate-800 dark:bg-slate-950">
+        <div
+          className="flex items-center gap-2.5 px-4 py-3"
+          style={{ background: "var(--ob-accent)", color: "var(--ob-on-accent)" }}
+        >
+          {logoSrc ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={logoSrc} alt="" className="h-6 w-6 rounded-md bg-white/15 object-contain" />
+          ) : (
+            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-white/15 text-[11px] font-bold">
+              {initial}
+            </span>
+          )}
+          <span className="truncate text-[13px] font-semibold" style={{ fontFamily: heading }}>
+            {company}
+          </span>
+          <span className="ml-auto flex gap-1 opacity-70">
+            <span className="h-1.5 w-1.5 rounded-full bg-current" />
+            <span className="h-1.5 w-1.5 rounded-full bg-current" />
+            <span className="h-1.5 w-1.5 rounded-full bg-current" />
+          </span>
+        </div>
+
+        <div className="space-y-4 p-5">
+          <div className="flex items-center justify-between">
+            <p
+              className="text-[15px] font-semibold text-slate-900 dark:text-white"
+              style={{ fontFamily: heading }}
+            >
+              {headline ? clampWords(headline, 4) : "Dashboard"}
+            </p>
+            <span
+              className="rounded-md px-2.5 py-1 text-[11px] font-medium"
+              style={{ background: "var(--ob-accent)", color: "var(--ob-on-accent)" }}
+            >
+              New
+            </span>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2">
+            {[0, 1, 2].map((i) => (
+              <div
+                key={i}
+                className="rounded-lg border border-slate-100 bg-slate-50/80 p-2.5 dark:border-slate-800 dark:bg-slate-900"
+              >
+                <div
+                  className="mb-2 h-5 w-5 rounded"
+                  style={{ background: "var(--ob-accent)", opacity: 0.15 + i * 0.1 }}
+                />
+                <div className="h-1.5 w-full rounded bg-slate-200 dark:bg-slate-700" />
+                <div className="mt-1 h-1.5 w-2/3 rounded bg-slate-200 dark:bg-slate-700" />
+              </div>
+            ))}
+          </div>
+
+          <div className="space-y-2 rounded-lg border border-slate-100 p-3 dark:border-slate-800">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="flex items-center gap-2.5">
+                <span
+                  className="h-2 w-2 shrink-0 rounded-full"
+                  style={{ background: "var(--ob-accent)" }}
+                />
+                <div
+                  className="h-2 rounded bg-slate-200 dark:bg-slate-700"
+                  style={{ width: `${70 - i * 15}%` }}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+      <figcaption className="mx-auto mt-5 max-w-[22rem] text-center text-[13px] leading-relaxed text-slate-500 dark:text-slate-400">
+        {headline ? (
+          <>
+            Every app you build here can speak as{" "}
+            <span className="font-medium text-slate-900 dark:text-white">{company}</span>.
+          </>
+        ) : (
+          <>This is where your apps take your brand.</>
+        )}
+      </figcaption>
+    </figure>
+  );
+}
+
 function OnboardingInner() {
   const router = useRouter();
   const [index, setIndex] = useState(0);
@@ -399,15 +518,18 @@ function OnboardingInner() {
 
   return (
     <div
-      // One property, read by the rail, the numbers, the button and every
-      // focus ring below. Set from the company's own primary the moment the
-      // read lands, which is what makes the screen wear their brand.
+      // One property, read by the rail, the numbers, the button, every focus
+      // ring, and the live preview. Set from the company's own primary the
+      // moment the read lands, which is what makes the whole screen — and the
+      // mock app on the right — wear their brand.
       style={{
         ["--ob-accent" as string]: accent,
         ["--ob-on-accent" as string]: onAccent,
       }}
-      className="mx-auto min-h-screen w-full max-w-2xl px-6 py-16 sm:py-20"
+      className="min-h-screen w-full lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,32rem)]"
     >
+      {/* Left: the interview. */}
+      <div className="mx-auto w-full max-w-xl px-6 py-16 sm:py-20 lg:ml-auto lg:mr-0 lg:px-16">
       <div className="mb-14 flex items-center gap-2.5">
         <div className="flex h-7 w-7 items-center justify-center rounded-md bg-slate-900 text-white dark:bg-white dark:text-slate-900">
           <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -601,6 +723,19 @@ function OnboardingInner() {
       {step.id !== "site" && error && (
         <p className="mt-4 text-sm text-red-600 dark:text-red-400">{error}</p>
       )}
+
+        {/* On a phone the preview sits under the interview, not beside it. */}
+        <div className="mt-16 flex justify-center lg:hidden">
+          <BrandPreview name={name} identity={identity} design={design} logoSrc={logoSrc} />
+        </div>
+      </div>
+
+      {/* Right: the app being built in their brand, held in view as they go. */}
+      <aside className="relative hidden border-l border-slate-200/70 bg-slate-50/60 dark:border-slate-800 dark:bg-slate-900/40 lg:block">
+        <div className="sticky top-0 flex min-h-screen items-center justify-center px-10">
+          <BrandPreview name={name} identity={identity} design={design} logoSrc={logoSrc} />
+        </div>
+      </aside>
     </div>
   );
 }
