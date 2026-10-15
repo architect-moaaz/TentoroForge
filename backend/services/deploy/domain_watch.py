@@ -4,8 +4,10 @@ chat. Started with the backend; quiet when publishing is not set up."""
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import logging
 import os
+import tempfile
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -59,8 +61,30 @@ async def sweep() -> int:
     return checked
 
 
+def _hold_watch(path: Path | None = None):
+    """ONE WATCH PER HOST. The backend runs several workers, each starting
+    this loop; only the one holding this lock sweeps, so an address is not
+    checked — nor its "is live" said in chat — once per worker. The lock goes
+    with the process, so another worker takes over when it dies. The open
+    file is returned (keep it), or None when another worker holds it."""
+    lock = path or Path(os.environ.get("FORGE_DOMAIN_WATCH_LOCK_PATH") or Path(tempfile.gettempdir()) / "forge-domain-watch.lock")
+    fh = open(lock, "a+")  # noqa: SIM115 — held for the life of the process
+    try:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        fh.close()
+        return None
+    return fh
+
+
 async def watch_forever() -> None:
+    held = None
     while True:
+        if held is None:
+            held = _hold_watch()
+        if held is None:
+            await asyncio.sleep(INTERVAL_S)
+            continue
         try:
             await sweep()
         except asyncio.CancelledError:

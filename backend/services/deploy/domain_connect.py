@@ -55,9 +55,19 @@ def key_host() -> str:
     return str(os.environ.get(KEY_HOST_ENV) or DEFAULT_KEY_HOST).strip() or DEFAULT_KEY_HOST
 
 
+def private_pem() -> str:
+    """The signing key from the environment. An environment file holds one
+    line per setting, so the PEM may arrive with its line breaks as `\\n`."""
+    pem = str(os.environ.get(KEY_ENV) or "").strip().strip('"')
+    return pem.replace("\\n", "\n") if "\\n" in pem and "\n" not in pem else pem
+
+
+_env_pem = private_pem  # `apply_url`'s own parameter shadows the name
+
+
 def ready() -> bool:
     """Set up to sign links: a provider id and a key."""
-    return bool(provider_id() and str(os.environ.get(KEY_ENV) or "").strip())
+    return bool(provider_id() and private_pem())
 
 
 def service_for(kind: str) -> str | None:
@@ -177,7 +187,7 @@ def apply_url(settings: dict, service: str, root: str, host: str, values: dict[s
         pairs.append(("groupId", ",".join(groups)))
     pairs += [("redirect_uri", redirect_uri), ("state", state)]
     query = "&".join(f"{k}={quote(v, safe='')}" for k, v in pairs)
-    pem = private_pem if private_pem is not None else str(os.environ.get(KEY_ENV) or "")
+    pem = private_pem if private_pem is not None else _env_pem()
     sig = sign(query, pem)
     base = str(settings["urlSyncUX"]).rstrip("/")
     return (f"{base}/v2/domainTemplates/providers/{quote(provider, safe='')}/services/{quote(service, safe='')}/apply"

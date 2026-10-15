@@ -538,3 +538,15 @@ def test_smith_renames_the_tentoro_address(tmp_path, monkeypatch):
     assert "aqua.apps.tentoro.ai now" in out["diff_summary"]
     out = domain_change.run(str(root), "rename_app_address", domain="", change="rename our address")
     assert not out["applied"] and "What should the address be called" in out["reason"]
+
+
+def test_only_one_worker_watches_the_addresses(tmp_path):
+    from services.deploy import domain_watch
+    lock = tmp_path / "watch.lock"
+    first = domain_watch._hold_watch(lock)
+    assert first is not None
+    assert domain_watch._hold_watch(lock) is None, "a second worker leaves the sweep to the first"
+    first.close()
+    again = domain_watch._hold_watch(lock)
+    assert again is not None, "and takes over when the first is gone"
+    again.close()

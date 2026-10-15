@@ -247,3 +247,12 @@ def test_the_submitted_templates_are_the_ones_the_code_applies():
     docs = Path(__file__).resolve().parents[3] / "docs" / "domain-connect"
     for t in dc.templates("tentoro.ai"):
         assert json.loads((docs / f"tentoro.ai.{t['serviceId']}.json").read_text()) == t
+
+
+def test_the_key_works_from_an_environment_file_with_its_line_breaks_escaped(monkeypatch, key_pem):
+    monkeypatch.setenv("FORGE_DOMAIN_CONNECT_DOMAIN", "tentoro.ai")
+    monkeypatch.setenv("FORGE_DOMAIN_CONNECT_KEY", key_pem.strip().replace("\n", "\\n"))
+    assert dc.ready() and dc.private_pem() == key_pem.strip()
+    url = dc.apply_url(GODADDY, "forge-subdomain", "abc.com", "xyz", {"target": "cname.vercel-dns.com"}, [],
+                       redirect_uri="https://forge-v3.tentoro.ai/x", state="s")
+    _verify(url, key_pem)
