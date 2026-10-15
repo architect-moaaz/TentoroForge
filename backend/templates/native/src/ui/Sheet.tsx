@@ -27,7 +27,7 @@ export function Sheet({ visible, onClose, title, children }: SheetProps) {
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
       <View style={{ flex: 1, justifyContent: "flex-end" }}>
         <Pressable accessibilityRole="button" accessibilityLabel="Close" onPress={onClose} style={{ ...absoluteFill, backgroundColor: theme.alpha("foreground", 0.4) }} />
-        <View style={{ maxHeight: "80%", backgroundColor: theme.colors.card, borderTopLeftRadius: theme.radius + 8, borderTopRightRadius: theme.radius + 8, paddingBottom: insets.bottom + theme.space.lg }}>
+        <View style={{ maxHeight: "80%", backgroundColor: theme.colors.card, borderTopLeftRadius: theme.radii.lg, borderTopRightRadius: theme.radii.lg, paddingBottom: insets.bottom + theme.space.lg }}>
           <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: theme.space.lg, paddingTop: theme.space.lg, paddingBottom: theme.space.sm }}>
             <Text variant="heading" style={{ flex: 1 }}>{title ?? ""}</Text>
             <Button variant="ghost" size="sm" onPress={onClose}>Done</Button>
@@ -60,7 +60,7 @@ export function Dialog({ visible, message, title, confirmLabel = "OK", variant =
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel} statusBarTranslucent>
       <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: theme.space.xl }}>
         <Pressable accessibilityRole="button" accessibilityLabel="Cancel" onPress={onCancel} style={{ ...absoluteFill, backgroundColor: theme.alpha("foreground", 0.4) }} />
-        <View accessibilityViewIsModal style={{ width: "100%", maxWidth: 420, backgroundColor: theme.colors.card, borderRadius: theme.radius + 8, padding: theme.space.xl, gap: theme.space.lg }}>
+        <View accessibilityViewIsModal style={{ width: "100%", maxWidth: 420, backgroundColor: theme.colors.card, borderRadius: theme.radii.lg, padding: theme.space.xl, gap: theme.space.lg }}>
           {title ? <Text variant="heading">{title}</Text> : null}
           <Text>{message}</Text>
           <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: theme.space.sm }}>

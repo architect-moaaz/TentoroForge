@@ -160,23 +160,26 @@ touch targets; accessibility roles and labels throughout.
 
 ```
 Screen({ title?, subtitle?, back?, right?, scroll=true, padded=true, loading?, error?, onRetry?, empty?, onRefresh?, refreshing?, footer? })
-Header, Title, Text({ variant: display|title|heading|body|label|caption, tone, weight, align })
-Stack({ gap, padding, align, justify }), Row({ …, wrap }), Spacer({ size? }), Divider, Card({ onPress?, variant: filled|muted|inverse, padding })
+Header, Title, Text({ variant: display|title|heading|body|label|caption, tone: default|muted|primary|accent|danger|success|warning|inverse, weight: regular|medium|semibold|bold, align })
+Stack({ gap, padding, align, justify }), Row({ …, wrap })   // gap/padding: xs|sm|md|lg|xl|xxl; align: start|center|end|stretch|baseline; justify: start|center|end|between|around, Spacer({ size? }), Divider, Card({ onPress?, variant: filled|muted|inverse, padding })
 Button({ variant: primary|accent|secondary|outline|ghost|danger, size: sm|md, icon?, loading, disabled, fullWidth, onPress })   // icon: an Icon name; sm+ghost is a compact row action
-ListView({ list, renderItem(item, i), keyExtractor?, empty?, header?, separators? })   // list = what useList returns: states, pull-to-refresh, onEndReached
+ListView({ list, renderItem(item, i), keyExtractor?, empty?, header?, separators?, spaced? })   // list = what useList returns: states, pull-to-refresh, onEndReached   // a list of CARDS is `spaced` (space between them, not hairlines)
 ListItem({ title, subtitle?, meta?, leading?, badge?, trailing?, onPress? })
-Badge({ tone, dot? }), StatusBadge({ status }) /* a tinted pill with a dot */, Tag({ onPress?, selected? }), Avatar({ name, image, size }), StatTile({ label, value, delta?, hint? }), Money({ value, currency? })
+Badge({ tone: neutral|info|success|warning|danger|accent, dot? }), StatusBadge({ status }) /* a tinted pill with a dot */, Tag({ onPress?, selected? }), Avatar({ name, image, size }), StatTile({ label, value, delta?, hint? }), Money({ value, currency? })
 Chips({ items: [{ key, label, count? }], value, onChange })   // filter chips that scroll sideways to the screen edges, never wrap
 Dots({ value, max = 5 })                                      // 3 of 5 as dots: a priority, a level
 Icon({ name, size?, tone?, color? })                          // an Ionicons glyph (add, search, checkmark-circle, trash-outline, construct, ...)
 Loading, Empty({ title, message?, action?, icon? }), ErrorState({ message, onRetry? })   // Empty icon: an Icon name, drawn in a soft circle
 SimpleChart({ type: bar|line|pie|donut, data | labels + series, format?, height?, horizontal? })   // Views only; pie/donut = proportion bar
 WidgetView({ widget, data, height?, currency?, action?, title? })                    // metric, gauge, text, chart (+ table), list
+GradientBand({ children, style?, bleed? })   // a padded, rounded band by default (`bleed` = style it yourself, edge to edge); the design's brand gradient (gradientStart -> gradientEnd, else primary -> accent) as a band; text on it is colors.primaryForeground; ONE per screen, never behind a form or list
+AuthFrame({ title, tagline?, footer?, children })   // the sign-in / sign-up screens' frame: a band in the primary colour with the app's mark and name, a card for the form
+SignInForm({ submitLabel? }), SignUpForm({ submitLabel? }), SwitchAuthLink({ to: "signin" | "signup" })   // the ONLY parts that make a session or an account; a sign-in / sign-up screen places one and draws the rest
 Sheet({ visible, onClose, title }), Dialog({ visible, message, confirmLabel, variant, onConfirm, onCancel })
 Fields (value/onChange, label, required, help, error, disabled):
   TextField(kind: text|textarea|email|tel|url|password), NumberField, MoneyField, SelectField({ options }), MultiSelect({ options }),
   TagsField, SwitchField, DateField(kind: date|time|datetime — typed 2026-03-01 / 14:30), ImageField, FileField, LocationField, Field (the shell)
-WorkflowForm({ workflow, fields, initial?, submitLabel?, submitVariant?, cancelHref?, redirectTo?, successMessage?, onDone?, groups?, steps?, submitPlacement? })
+WorkflowForm({ workflow, fields, initial?, submitLabel?, submitVariant?, cancelHref?, redirectTo?, successMessage?, onDone?, groups?, steps?, submitPlacement? })   // onDone(result) runs after EVERY attempt, a refused one too: test `result.ok` before leaving the screen or closing a sheet (or use redirectTo)
 WorkflowButton({ workflow, input, children?, variant?, size?, confirm?, redirectTo?, successMessage?, fullWidth? })
 LanguageSwitch, ErrorBoundary, useTheme()
 ```

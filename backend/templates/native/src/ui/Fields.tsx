@@ -24,6 +24,7 @@ import { ActivityIndicator, Image, Pressable, Switch, TextInput, View, type Keyb
 import { useTheme } from "../theme";
 import { Text } from "./Text";
 import { Button } from "./Button";
+import { Icon, type IconName } from "./Icon";
 import { Tag } from "./Display";
 import { Sheet } from "./Sheet";
 import { CURRENCY, } from "../sdk/money";
@@ -78,9 +79,9 @@ function useBox(error: string | null | undefined, focused: boolean, disabled?: b
   const theme = useTheme();
   return {
     minHeight: theme.touch + 4,
-    borderWidth: 1,
+    borderWidth: theme.borderWidth,
     borderColor: error ? theme.colors.destructive : focused ? theme.colors.ring : theme.colors.input,
-    borderRadius: theme.radius,
+    borderRadius: theme.radii.md,
     backgroundColor: disabled ? theme.colors.muted : theme.colors.card,
     paddingHorizontal: theme.space.md,
     color: theme.colors.foreground,
@@ -98,6 +99,8 @@ export interface TextFieldProps extends Common {
   kind?: "text" | "textarea" | "email" | "tel" | "url" | "password";
   placeholder?: string;
   onBlur?: () => void;
+  /** A glyph at the start of the field (`mail-outline`, `lock-closed-outline`). A password field gets a show/hide eye. */
+  icon?: IconName;
 }
 
 const KEYBOARD: Record<NonNullable<TextFieldProps["kind"]>, { keyboardType: KeyboardTypeOptions; autoCapitalize: TextInputProps["autoCapitalize"]; autoComplete?: TextInputProps["autoComplete"] }> = {
@@ -109,11 +112,45 @@ const KEYBOARD: Record<NonNullable<TextFieldProps["kind"]>, { keyboardType: Keyb
   password: { keyboardType: "default", autoCapitalize: "none", autoComplete: "password" },
 };
 
-export function TextField({ label, required, help, error, disabled, value, onChange, kind = "text", placeholder, onBlur }: TextFieldProps) {
+export function TextField({ label, required, help, error, disabled, value, onChange, kind = "text", placeholder, onBlur, icon }: TextFieldProps) {
   const theme = useTheme();
   const [focused, setFocused] = React.useState(false);
+  const [shown, setShown] = React.useState(false);
   const box = useBox(error, focused, disabled);
   const k = KEYBOARD[kind];
+  const isPassword = kind === "password";
+  const secret = isPassword && !shown;
+  if ((icon || isPassword) && kind !== "textarea") {
+    // The box is the row; the input inside it has no border of its own.
+    return (
+      <Field label={label} required={required} help={help} error={error}>
+        <View style={[box, { flexDirection: "row", alignItems: "center", gap: theme.space.sm }]}>
+          {icon ? <Icon name={icon} tone={focused ? "primary" : "muted"} /> : null}
+          <TextInput
+            value={value ?? ""}
+            onChangeText={onChange}
+            editable={!disabled}
+            placeholder={placeholder}
+            placeholderTextColor={theme.colors.mutedForeground}
+            accessibilityLabel={label}
+            secureTextEntry={secret}
+            autoCorrect={false}
+            keyboardType={k.keyboardType}
+            autoCapitalize={k.autoCapitalize}
+            autoComplete={k.autoComplete}
+            onFocus={() => setFocused(true)}
+            onBlur={() => { setFocused(false); onBlur?.(); }}
+            style={[{ flex: 1, color: theme.colors.foreground, fontSize: 16, paddingVertical: theme.space.sm }, theme.font("regular", "body")]}
+          />
+          {isPassword ? (
+            <Pressable onPress={() => setShown((s) => !s)} accessibilityRole="button" accessibilityLabel={shown ? "Hide password" : "Show password"} hitSlop={8}>
+              <Icon name={shown ? "eye-off-outline" : "eye-outline"} tone="muted" />
+            </Pressable>
+          ) : null}
+        </View>
+      </Field>
+    );
+  }
   return (
     <Field label={label} required={required} help={help} error={error}>
       <TextInput
@@ -124,14 +161,13 @@ export function TextField({ label, required, help, error, disabled, value, onCha
         placeholderTextColor={theme.colors.mutedForeground}
         accessibilityLabel={label}
         multiline={kind === "textarea"}
-        secureTextEntry={kind === "password"}
         autoCorrect={kind === "text" || kind === "textarea"}
         keyboardType={k.keyboardType}
         autoCapitalize={k.autoCapitalize}
         autoComplete={k.autoComplete}
         onFocus={() => setFocused(true)}
         onBlur={() => { setFocused(false); onBlur?.(); }}
-        style={[box, kind === "textarea" ? { minHeight: 110, textAlignVertical: "top", paddingTop: theme.space.md } : { paddingVertical: theme.space.sm }]}
+        style={[box, theme.font("regular", "body"), kind === "textarea" ? { minHeight: 110, textAlignVertical: "top", paddingTop: theme.space.md } : { paddingVertical: theme.space.sm }]}
       />
     </Field>
   );
@@ -238,7 +274,7 @@ export function SelectField({ label, required, help, error, disabled, value, onC
         {options.length > 8 ? (
           <TextInput value={query} onChangeText={setQuery} placeholder="Search" placeholderTextColor={theme.colors.mutedForeground}
             accessibilityLabel="Search options" autoCapitalize="none"
-            style={{ minHeight: theme.touch, borderWidth: 1, borderColor: theme.colors.input, borderRadius: theme.radius, paddingHorizontal: theme.space.md, color: theme.colors.foreground, fontSize: 16 }} />
+            style={{ minHeight: theme.touch, borderWidth: theme.borderWidth, borderColor: theme.colors.input, borderRadius: theme.radii.md, paddingHorizontal: theme.space.md, color: theme.colors.foreground, fontSize: 16 }} />
         ) : null}
         {!required && chosen ? <OptionRow label="Clear" selected={false} onPress={() => { onChange(undefined); close(); }} /> : null}
         {shown.map((o) => <OptionRow key={o.value} label={o.label} selected={o.value === value} onPress={() => { onChange(o.value); close(); }} />)}

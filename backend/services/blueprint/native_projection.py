@@ -45,6 +45,9 @@ _SUBSTITUTED = {"app.json", "package.json", "README.md"}
 #: The tab bar's layout is shipped only when the application HAS tabs (an empty route group is a
 #: navigator with nothing in it); `project_screens` writes it with them.
 TABS_LAYOUT = "app/(tabs)/_layout.tsx"
+MORE_TAB = "app/(tabs)/more.tsx"
+#: A drawer app has no tab group: its Account screen is an ordinary route (the same screen the account tab is).
+ACCOUNT_ROUTE = "app/account.tsx"
 
 #: The last tab of an app with a sign-in: who is signed in, and SIGN OUT. Written with the tabs, like the layout.
 ACCOUNT_TAB = "app/(tabs)/account.tsx"
@@ -68,16 +71,69 @@ _NOT_A_TAB = ("form", "record_workspace", "auth", "audit_trail")
 #: At most this many tabs (the platforms' own limit of comfort is five).
 MAX_TABS = 5
 
-#: Ionicons glyphs, by what the Blueprint's navigation calls the icon, else by the page's pattern.
-_ICON_BY_NAME = {"Wrench": "construct", "BarChart3": "stats-chart", "BookOpen": "book", "Home": "home",
-                 "Users": "people", "Settings": "settings", "Calendar": "calendar", "ShoppingCart": "cart",
-                 "Package": "cube", "Bell": "notifications", "User": "person", "Mail": "mail", "Map": "map"}
-_ICON_BY_PATTERN = {"entity_list": "list", "dashboard": "stats-chart", "calendar": "calendar", "board": "albums"}
+#: Ionicons glyphs. A tab's icon is, in order: what the Blueprint's navigation calls it (a lucide name), a word
+#: in the page's own name ("Invoices" is a receipt, "Pets" a paw), the page's pattern, else a plain grid. Two tabs
+#: never share one: a bar of identical lists is a bar nobody can read.
+_ICON_BY_NAME = {
+    "Wrench": "construct", "Hammer": "hammer", "BarChart3": "stats-chart", "BarChart": "bar-chart", "LineChart": "trending-up",
+    "PieChart": "pie-chart", "BookOpen": "book", "Book": "book", "Home": "home", "LayoutDashboard": "grid", "Users": "people",
+    "User": "person", "UserRound": "person", "Settings": "settings", "Calendar": "calendar", "CalendarDays": "calendar",
+    "ShoppingCart": "cart", "ShoppingBag": "bag", "Package": "cube", "Box": "cube", "Bell": "notifications", "Mail": "mail",
+    "Map": "map", "MapPin": "location", "PawPrint": "paw", "Receipt": "receipt", "FileText": "document-text", "File": "document",
+    "Folder": "folder", "ClipboardList": "clipboard", "CheckSquare": "checkbox", "ListChecks": "checkbox",
+    "MessageSquare": "chatbubbles", "MessageCircle": "chatbubbles", "Heart": "heart", "HeartPulse": "pulse",
+    "Stethoscope": "medkit", "Pill": "medkit", "CreditCard": "card", "Wallet": "wallet", "DollarSign": "cash",
+    "Banknote": "cash", "Tag": "pricetag", "Tags": "pricetags", "Truck": "car", "Car": "car", "Plane": "airplane",
+    "Utensils": "restaurant", "ChefHat": "restaurant", "GraduationCap": "school", "Briefcase": "briefcase",
+    "Building": "business", "Store": "storefront", "Camera": "camera", "Image": "image", "Music": "musical-notes",
+    "Dumbbell": "fitness", "Leaf": "leaf", "Bed": "bed", "Star": "star", "Bookmark": "bookmark", "Trophy": "trophy",
+    "Ticket": "ticket", "Gift": "gift", "Shield": "shield-checkmark", "Search": "search", "Clock": "time",
+    "Activity": "pulse", "Layers": "layers",
+}
+#: A word in a page's name -> a glyph, for a navigation that names no icon (or one this table does not know).
+_ICON_BY_WORD = (
+    ("pet", "paw"), ("paw", "paw"), ("invoice", "receipt"), ("bill", "receipt"), ("receipt", "receipt"),
+    ("payment", "card"), ("order", "cart"), ("cart", "cart"), ("product", "pricetag"), ("customer", "people"),
+    ("client", "people"), ("owner", "people"), ("patient", "medkit"), ("appointment", "calendar"),
+    ("booking", "calendar"), ("schedule", "calendar"), ("calendar", "calendar"), ("event", "calendar"),
+    ("message", "chatbubbles"), ("chat", "chatbubbles"), ("report", "bar-chart"), ("analytic", "analytics"),
+    ("dashboard", "home"), ("home", "home"), ("setting", "settings"), ("task", "checkbox"), ("todo", "checkbox"),
+    ("project", "folder"), ("document", "document-text"), ("inventory", "cube"), ("stock", "cube"),
+    ("job", "construct"), ("crew", "people"), ("team", "people"), ("member", "people"), ("staff", "people"),
+    ("ticket", "ticket"), ("course", "school"), ("lesson", "school"), ("recipe", "restaurant"),
+    ("menu", "restaurant"), ("expense", "cash"), ("budget", "wallet"), ("map", "map"), ("location", "location"),
+    ("notification", "notifications"), ("review", "star"), ("favourite", "heart"), ("favorite", "heart"),
+    ("workout", "fitness"), ("vehicle", "car"), ("delivery", "car"), ("board", "albums"),
+)
+_ICON_BY_PATTERN = {"entity_list": "list", "dashboard": "stats-chart", "calendar": "calendar", "board": "albums",
+                    "report": "bar-chart", "settings": "settings", "feed": "newspaper"}
+#: What a tab takes when everything it would prefer is already on the bar.
+_ICON_SPARE = ("apps", "grid", "layers", "folder", "albums", "ellipse")
+
+
+def tab_icons(items: list[tuple[str | None, str, str]]) -> list[str]:
+    """One distinct Ionicons glyph for each `(navigation icon, page name, pattern)`, in order."""
+    used: set[str] = set()
+    out: list[str] = []
+    for nav_icon, name, pattern in items:
+        words = re.sub(r"[^a-z ]", " ", str(name or "").lower())
+        candidates = [_ICON_BY_NAME.get(str(nav_icon or ""))]
+        candidates += [glyph for word, glyph in _ICON_BY_WORD if word in words]
+        candidates += [_ICON_BY_PATTERN.get(str(pattern or ""))]
+        candidates += list(_ICON_SPARE)
+        pick = next(c for c in candidates if c and c not in used)
+        used.add(pick)
+        out.append(pick)
+    return out
 
 #: Files the fixed half owns at the top of `app/`: a Blueprint page whose route
 #: lands on one is not drawn natively — the sign-in is the SDK's, and a
 #: generated route must never overwrite them.
 FIXED_ROUTES = frozenset({"login", "signup", "organisation", "_layout", "+not-found"})
+
+#: The sign-in and sign-up screens: the fixed half ships a fallback at each, and the Blueprint's own page (drawn by
+#: the native engineer as a frame around the kit's `SignInForm` / `SignUpForm`) replaces it when there is one.
+AUTH_FILES = {"/login": "app/login.tsx", "/signup": "app/signup.tsx"}
 
 #: What the projector wrote for the pages, so a page that goes takes its files.
 MANIFEST = ".forge-generated.json"
@@ -180,14 +236,17 @@ def project_fixed_half(doc: dict, output_dir: str | Path) -> list[str]:
         "__DEPLOYED_URL__": "", "__EAS_PROJECT_ID__": prior,
     }
     written: list[str] = []
+    drawn_auth = drawn_auth_files(doc)
     for src in sorted(TEMPLATE_DIR.rglob("*")):
         if src.is_dir():
             continue
         rel = src.relative_to(TEMPLATE_DIR)
         if rel.parts[0] in _NOT_SHIPPED_DIRS or rel.name in _NOT_SHIPPED_FILES:
             continue
-        if rel.as_posix() in (TABS_LAYOUT, ACCOUNT_TAB):
+        if rel.as_posix() in (TABS_LAYOUT, ACCOUNT_TAB, MORE_TAB):
             continue                        # written with the tabs, by `project_screens`
+        if rel.as_posix() in drawn_auth:
+            continue                        # the Blueprint's own page is drawn: `project_screens` writes this one
         dst = root / rel
         if rel.name in _SUBSTITUTED and len(rel.parts) == 1:
             text = src.read_text(encoding="utf-8")
@@ -219,20 +278,29 @@ def _with_font_packages(package_json: str, doc: dict) -> str:
 
 
 def _placeholder_icons(doc: dict, root: Path) -> list[str]:
-    """The icon, adaptive icon, splash and favicon `app.json` names: solid
-    brand-colour PNGs, so the project builds before anyone draws a mark. Never
-    over a file that is there — a person's own icon, or the monogram
-    `mobile_branding` made, stays."""
+    """The icon, adaptive icon, splash and favicon `app.json` names. WITH NO LOGO FROM THE OWNER the mark is the
+    first letter of the app's name on the design's primary colour (the same tile the sign-in screen draws);
+    the splash carries the name. Never over a file that is there: an owner's own logo stays."""
+    from services import mobile_branding as mb
     from services.mobile_scaffold import _write_solid_png
-    brand = brand_hex(doc)
+
+    name = str((doc.get("application") or {}).get("name") or "App")
+    primary = str(((doc.get("designSystem") or {}).get("colors") or {}).get("primary") or "")
+    brand = (primary if re.fullmatch(r"#[0-9a-fA-F]{6}", primary) else brand_hex(doc)).upper()
+    letter = next((c for c in name if c.isalpha()), "A").upper()
+    tile, splash = mb.MobileSpec(name=letter, slug="app", brand_hex=brand), mb.MobileSpec(name=name, slug="app", brand_hex=brand)
     written = []
-    for name, w, h in (("icon.png", 1024, 1024), ("adaptive-icon.png", 1024, 1024),
-                       ("splash.png", 1242, 2436), ("favicon.png", 48, 48)):
-        path = root / "assets" / name
-        if not path.exists():
-            path.parent.mkdir(parents=True, exist_ok=True)
+    for file, w, h, kind in (("icon.png", 1024, 1024, "icon"), ("adaptive-icon.png", 1024, 1024, "adaptive"),
+                             ("splash.png", 1242, 2436, "splash"), ("favicon.png", 48, 48, "icon")):
+        path = root / "assets" / file
+        if path.exists():
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            mb._write_asset(path, (w, h), kind, splash if kind == "splash" else tile)
+        except Exception:  # noqa: BLE001  - no imaging library: a solid colour still builds
             _write_solid_png(path, w, h, brand)
-            written.append(f"assets/{name}")
+        written.append(f"assets/{file}")
     return written
 
 
@@ -273,8 +341,19 @@ def theme_module(doc: dict) -> str:
         if re.fullmatch(r"[0-9.]+\s+[0-9.]+%\s+[0-9.]+%", value) or re.fullmatch(r"#[0-9a-fA-F]{3,8}", value):
             camel = re.sub(r"-([a-z0-9])", lambda m: m.group(1).upper(), name)
             colors[camel] = value
+    from services.blueprint import native_tokens as tk
+
     return (_HEADER + "\n" + "export const colors: Record<string, string> = " + _ts(colors) + ";\n\n"
-            + f"export const radius: number = {round(radius, 2):g};\n\n"
+            + f"export const radius: number = {tk.radii(doc)['md']};\n\n"
+            # THE MEASURES ARE THE DESIGN'S (`native_tokens`): corner radii, the spacing scale and page margin,
+            # three shadows, the type scale, the hairline. The kit draws from these and from nothing else.
+            + "export const radii = " + _ts(tk.radii(doc)) + " as const;\n\n"
+            + "export const spacing = " + _ts(tk.spacing(doc)) + " as const;\n\n"
+            + f"export const pagePadding: number = {tk.page_padding(doc)};\n\n"
+            + "export const shadows = " + _ts(tk.shadows(doc)) + ";\n\n"
+            + f"export const typeScale: number = {tk.type_scale(doc)};\n\n"
+            + f"export const borderWidth: number = {tk.border_width(doc)};\n\n"
+            + "export const heading = " + _ts(tk.heading(doc)) + " as const;\n\n"
             + "export const fonts: {\n"
               "  body?: { regular: string; medium?: string; semibold?: string; bold?: string };\n"
               "  heading?: { regular: string; medium?: string; semibold?: string; bold?: string };\n"
@@ -307,15 +386,17 @@ def config_module(doc: dict) -> str:
                                         "labelField": ent.get("labelField"), "locationField": location}
     public = access_map(doc)["public"]
     from services.blueprint.account_model import after_signup_route
+    home = phone_route(doc, home_route(doc))
+    after_signup = phone_route(doc, after_signup_route(doc))
     return (_HEADER + "\n"
             + f"export const APP_NAME: string = {json.dumps(str((doc.get('application') or {}).get('name') or 'App'), ensure_ascii=False)};\n"
             + f"export const CURRENCY: string = {json.dumps(currency_of(doc))};\n"
             + f"export const LOCALE: string = {json.dumps(tags[0])};\n"
             + f"export const LANGUAGES: readonly {{ tag: string; dir: \"ltr\" | \"rtl\" }}[] = {_ts(rows)};\n"
             + f"export const PRIMARY: string = {json.dumps(tags[0])};\n"
-            + f"export const HOME: string = {json.dumps(home_route(doc))};\n"
+            + f"export const HOME: string = {json.dumps(home)};\n"
             + f"export const CAN_SIGN_UP: boolean = {json.dumps(can_sign_up(doc))};\n"
-            + f"export const AFTER_SIGNUP: string = {json.dumps(after_signup_route(doc))};\n"
+            + f"export const AFTER_SIGNUP: string = {json.dumps(after_signup)};\n"
             + f"export const PUBLIC_ROUTES: readonly string[] = {_ts(public)};\n"
             + "export const ACCOUNT: null | {\n  entity: string;\n"
               "  fields: { name: string; label: string; kind: string; required: boolean; options?: { label: string; value: string }[] }[];\n"
@@ -367,11 +448,10 @@ def has_account_tab(doc: dict) -> bool:
     return has_sign_in(doc) and not any(str(p.get("route") or "").strip("/") == "account" for p in drawn_pages(doc))
 
 
-def tab_pages(doc: dict) -> list[dict]:
-    """The application's MAIN pages, for the bottom tab bar: the pages its navigation lists (the rail the
-    web app shows), in that order, that are destinations — not a form, not one record, nothing with a
-    parameter in its route — and that get a native screen. Two to five make a tab bar; fewer or more is
-    no tabs (a lone page needs no bar; a long list is a menu's job, not a bar's)."""
+def main_pages(doc: dict) -> list[dict]:
+    """The application's MAIN pages: the pages its navigation lists (the rail the web app shows), in that
+    order, that are destinations — not a form, not one record, nothing with a parameter in its route — and
+    that get a native screen."""
     drawn = {str(p.get("id")): p for p in drawn_pages(doc)}
     out: list[dict] = []
     seen: set[str] = set()
@@ -385,30 +465,91 @@ def tab_pages(doc: dict) -> list[dict]:
             continue
         seen.add(pid)
         out.append({**page, "_icon": item.get("icon"), "_label": item.get("label")})
-    # With the account tab at the end, one main page is a bar (two tabs); without it, two are needed.
+    return out
+
+
+def nav_style(doc: dict) -> str:
+    """`tabs` (a bottom bar) or `drawer` (a hamburger menu): how this application's phone navigates.
+
+    The Blueprint's `navigation.mobile` - the navigation agent's own decision, which the web follows too - when
+    it says. When it does not, a handful of main pages (four, with the account tab) is a bar and more is a menu:
+    the same number the bar can hold."""
+    said = str(((doc.get("navigation") or {}).get("mobile")) or "")
+    if said in ("tabs", "drawer"):
+        return said
+    return "tabs" if len(main_pages(doc)) <= (MAX_TABS - 1 if has_account_tab(doc) else MAX_TABS) else "drawer"
+
+
+def tab_layout(doc: dict) -> tuple[list[dict], list[dict]]:
+    """`(tabs, more)`: the main pages that get a tab, and the ones that go behind the More tab.
+
+    A bar holds MAX_TABS (the account tab is one of them). With the account tab one main page is a bar (two
+    tabs); without it two are needed. When the main pages do not all fit, the first ones get a tab and the
+    rest are LISTED on a More tab, which takes the last slot before Account: a long application is not left
+    with no bar (and no way to reach its pages), nor with a bar too crowded to tap."""
+    out = main_pages(doc)
     account = has_account_tab(doc)
-    low, high = (1, MAX_TABS - 1) if account else (2, MAX_TABS)
-    return out if low <= len(out) <= high else []
+    capacity = MAX_TABS - 1 if account else MAX_TABS
+    if nav_style(doc) == "drawer" or len(out) < (1 if account else 2):
+        return [], []
+    if len(out) <= capacity:
+        return out, []
+    return out[:capacity - 1], out[capacity - 1:]
+
+
+def tab_pages(doc: dict) -> list[dict]:
+    """The pages that have a tab of their own."""
+    return tab_layout(doc)[0]
+
+
+def more_pages(doc: dict) -> list[dict]:
+    """The main pages listed on the More tab; they open on top of the bar like any other page."""
+    return tab_layout(doc)[1]
 
 
 def is_tab(doc: dict, page_id: str) -> bool:
     return any(str(p.get("id")) == page_id for p in tab_pages(doc))
 
 
+def is_menu_page(doc: dict, page_id: str) -> bool:
+    """A main page of a drawer app: it is in the hamburger menu, so its header draws the hamburger, not a back arrow."""
+    return nav_style(doc) == "drawer" and any(str(p.get("id")) == page_id for p in main_pages(doc))
+
+
 def navigation_module(doc: dict) -> str:
     """`src/navigation.generated.ts`: the tabs, in order."""
     tabs = []
-    pages_in_bar = tab_pages(doc)
-    for p in pages_in_bar:
+    pages_in_bar, listed = tab_layout(doc)
+    shown = pages_in_bar + listed
+    icons = tab_icons([(p.get("_icon"), str(p.get("_label") or p.get("name") or ""), str(p.get("pattern") or "")) for p in shown])
+    for p, icon in zip(pages_in_bar, icons):
         route = str(p.get("route") or "/")
         name = (route.strip("/").split("/")[-1] or "index")
-        icon = _ICON_BY_NAME.get(str(p.get("_icon") or "")) or _ICON_BY_PATTERN.get(str(p.get("pattern") or "")) or "apps"
         tabs.append({"name": name, "title": str(p.get("_label") or p.get("name") or name), "icon": icon, "route": route})
+    more = [{"title": str(p.get("_label") or p.get("name") or ""), "icon": icon, "route": str(p.get("route") or "/")}
+            for p, icon in zip(listed, icons[len(pages_in_bar):])]
+    if more:
+        tabs.append({"name": "more", "title": "More", "icon": "ellipsis-horizontal", "route": "/more"})
     if pages_in_bar and has_account_tab(doc):
         tabs.append({"name": "account", "title": "Account", "icon": ACCOUNT_ICON, "route": "/account"})
+    # The drawer's menu: every main page, in the navigation's order, then Account.
+    menu: list[dict] = []
+    if nav_style(doc) == "drawer":
+        mains = main_pages(doc)
+        menu = [{"title": str(p.get("_label") or p.get("name") or ""), "icon": icon, "route": str(p.get("route") or "/")}
+                for p, icon in zip(mains, tab_icons([(p.get("_icon"), str(p.get("_label") or p.get("name") or ""),
+                                                      str(p.get("pattern") or "")) for p in mains]))]
+        if has_account_tab(doc):
+            menu.append({"title": "Account", "icon": ACCOUNT_ICON, "route": "/account"})
     return (_HEADER + "\n"
             + "export const TABS: readonly { name: string; title: string; icon: string; route: string }[] = "
-            + _ts(tabs) + ";\n")
+            + _ts(tabs) + ";\n\n"
+            + "/** The main pages that do not fit the bar, listed on the More tab. */\n"
+            + "export const MORE: readonly { title: string; icon: string; route: string }[] = " + _ts(more) + ";\n\n"
+            + "/** How a phone navigates: a bottom bar of tabs, or a hamburger menu. */\n"
+            + f"export const NAV_STYLE: \"tabs\" | \"drawer\" = {json.dumps(nav_style(doc))};\n\n"
+            + "/** The drawer's menu: every main page, then Account. Empty for a tab app. */\n"
+            + "export const MENU: readonly { title: string; icon: string; route: string }[] = " + _ts(menu) + ";\n")
 
 
 def route_file(route: str, *, tab: bool = False) -> str | None:
@@ -436,6 +577,54 @@ def drawn_pages(doc: dict) -> list[dict]:
     return [p for p in _live(doc.get("pages")) if str(p.get("id")) in wanted]
 
 
+def auth_file(page: dict) -> str | None:
+    """The fixed sign-in / sign-up file a page of the Blueprint stands in for, or None."""
+    if str(page.get("pattern") or "") != "auth":
+        return None
+    return AUTH_FILES.get("/" + str(page.get("route") or "").strip("/"))
+
+
+def screen_gaps(doc: dict) -> list[dict]:
+    """THE CHECK: the pages of a native application that have no phone screen of their own.
+
+    A native app has one screen per page. When the writer could not produce one (it did not compile in its
+    rounds, it needed a workflow that does not exist, or the run stopped first) the page is simply missing from the
+    phone: a tab or a menu entry that led to "This screen does not exist". The sign-in and sign-up pages are not
+    gaps: the fixed ones stand in. Empty for an app that is not native."""
+    if not enabled(doc):
+        return []
+    have = {str(r.get("page")) for r in _live(doc.get("nativeCode")) if r.get("screen")}
+    return [p for p in drawn_pages(doc) if str(p.get("id")) not in have and not auth_file(p)]
+
+
+#: What a page with no phone screen opens: its name, a plain sentence, and a way to the web page.
+MISSING_SCREEN = (
+    'import {{ MissingScreen }} from "@/ui";\n\n'
+    "export default function Screen() {{\n"
+    "  return <MissingScreen title={title} route={route} />;\n"
+    "}}\n")
+
+
+def phone_route(doc: dict, route: str) -> str:
+    """A route the phone can OPEN: "/" only when a page really is "/".
+
+    `app/index.tsx` forwards "/" to `HOME`, so a `HOME` of "/" in an app with no page there sent the root to itself for
+    ever: the person saw the loading circle and the log said "Maximum update depth exceeded" (Iron Log, 2026-10-15; every
+    app that has no page at "/"). The web has no such loop: it sends "/" to its landing page. The phone does the same."""
+    if route != "/":
+        return route
+    from services.blueprint.projection import landing_route
+    if any(str(p.get("route")) == "/" for p in _live(doc.get("pages"))):
+        return route
+    return landing_route(doc) or route
+
+
+def drawn_auth_files(doc: dict) -> set[str]:
+    """The fixed auth files that a drawn page replaces: the page is a native page and has its screen."""
+    rows = {str(r.get("page")) for r in _live(doc.get("nativeCode")) if r.get("screen")}
+    return {f for p in drawn_pages(doc) if (f := auth_file(p)) and str(p.get("id")) in rows}
+
+
 def project_screens(doc: dict, output_dir: str | Path) -> list[str]:
     """One `src/screens/<PAGE-ID>.tsx` (and its parts) for each `nativeCode`
     row, and the `app/<route>.tsx` that serves it. A page with no row has no
@@ -455,6 +644,15 @@ def project_screens(doc: dict, output_dir: str | Path) -> list[str]:
             expected.add(ACCOUNT_TAB)
             if _write(root / ACCOUNT_TAB, (TEMPLATE_DIR / ACCOUNT_TAB).read_text(encoding="utf-8")):
                 written.append(ACCOUNT_TAB)
+        if more_pages(doc):
+            expected.add(MORE_TAB)
+            if _write(root / MORE_TAB, (TEMPLATE_DIR / MORE_TAB).read_text(encoding="utf-8")):
+                written.append(MORE_TAB)
+    elif nav_style(doc) == "drawer" and main_pages(doc) and has_account_tab(doc):
+        # No tab group: the menu lists Account, and its screen is an ordinary route.
+        expected.add(ACCOUNT_ROUTE)
+        if _write(root / ACCOUNT_ROUTE, (TEMPLATE_DIR / ACCOUNT_TAB).read_text(encoding="utf-8")):
+            written.append(ACCOUNT_ROUTE)
     for row in _live(doc.get("nativeCode")):
         pid = str(row.get("page") or "")
         page = pages.get(pid)
@@ -463,13 +661,25 @@ def project_screens(doc: dict, output_dir: str | Path) -> list[str]:
         files = {screen_path(pid): str(row["screen"])}
         for key, code in (row.get("parts") or {}).items():
             files[f"src/screens/{pid}/{key}.tsx"] = str(code)
-        target = route_file(str(page.get("route") or "/"), tab=pid in tabs)
+        target = auth_file(page) or route_file(str(page.get("route") or "/"), tab=pid in tabs)
         if target:
             files[target] = f'export {{ default }} from "@/screens/{pid}";\n'
         for rel, text in files.items():
             expected.add(rel)
             if _write(root / rel, text if text.endswith("\n") else text + "\n"):
                 written.append(rel)
+    # A PAGE WITH NO PHONE SCREEN STILL HAS A ROUTE. The tab, the menu entry or the link leads somewhere that says what
+    # happened and where the page is, instead of "This screen does not exist". When a screen is written for it later
+    # the same file is overwritten with the real one.
+    for page in screen_gaps(doc):
+        pid = str(page.get("id"))
+        target = route_file(str(page.get("route") or "/"), tab=pid in tabs)
+        if not target:
+            continue
+        expected.add(target)
+        if _write(root / target, MISSING_SCREEN.format(title=json.dumps(str(page.get("name") or page.get("route") or "This page")),
+                                                         route=json.dumps(str(page.get("route") or "/")))):
+            written.append(target)
     # "/" IS WHERE THE APP OPENS. Most applications declare no page at "/" (the web's root merely forwards
     # to the entry page), and a native app opened there showed "This screen does not exist". Without a
     # page of its own at "/", it forwards to where a signed-in person lands.
@@ -485,9 +695,18 @@ def project_screens(doc: dict, output_dir: str | Path) -> list[str]:
         before = set()
     for rel in sorted(before - expected):
         stale = root / rel
-        if stale.is_file():
+        if rel in AUTH_FILES.values():
+            # A drawn sign-in that goes gives the FALLBACK back, never an app with no way in.
+            if _write(stale, (TEMPLATE_DIR / rel).read_text(encoding="utf-8")):
+                written.append(rel)
+        elif stale.is_file():
             stale.unlink()
             written.append(f"-{rel}")
+            # a route group or folder left empty (`app/(tabs)` once the app goes to a drawer) goes with its files
+            for parent in stale.parents:
+                if parent == root or parent.name in ("app", "src") or any(parent.iterdir()):
+                    break
+                parent.rmdir()
     if expected != before:
         _write(manifest, json.dumps(sorted(expected), indent=2) + "\n")
     return written

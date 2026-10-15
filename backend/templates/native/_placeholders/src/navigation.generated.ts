@@ -6,3 +6,13 @@
 export const TABS: readonly { name: string; title: string; icon: string; route: string }[] = [
   { name: "index", title: "Home", icon: "home", route: "/" },
 ];
+
+/** The main pages that do not fit the bar, listed on the More tab (empty when they all fit). */
+export const MORE: readonly { title: string; icon: string; route: string }[] = [];
+
+/** How a phone navigates: `tabs` (a bottom bar, plus a More tab when the main pages do not all fit) or `drawer` (a hamburger
+ *  menu listing every main page). The Blueprint's `navigation.mobile`, else decided from the number of main pages. */
+export const NAV_STYLE: "tabs" | "drawer" = "tabs";
+
+/** The main pages (then Account, when the app has a sign-in), for the drawer's menu. Empty for a tab app. */
+export const MENU: readonly { title: string; icon: string; route: string }[] = [];

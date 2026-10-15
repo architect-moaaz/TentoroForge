@@ -11,13 +11,18 @@
 // Blueprint, not something the kit guesses.
 
 import type { ViewStyle } from "react-native";
-import { colors as generatedColors, radius as generatedRadius, fonts as generatedFonts } from "./theme.generated";
-import { resolveColors, withAlpha, type ColorToken } from "./sdk/colors";
+import {
+  colors as generatedColors, radius as generatedRadius, fonts as generatedFonts, radii as generatedRadii,
+  spacing as generatedSpacing, pagePadding as generatedPagePadding, shadows as generatedShadows,
+  typeScale as generatedTypeScale, borderWidth as generatedBorderWidth, heading as generatedHeading,
+} from "./theme.generated";
+import { resolveColors, toColor, withAlpha, type ColorToken } from "./sdk/colors";
 
 export type { ColorToken };
 
-/** The spacing scale, in points. Use these, not literals: a screen's rhythm is one scale. */
-export const space = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 } as const;
+/** The spacing scale, in points - THE DESIGN'S (`designSystem.spacing`, by its density). Use these, never a
+ *  literal: a screen's rhythm is one scale, and a design that asks for compact gets it everywhere. */
+export const space: { readonly xs: number; readonly sm: number; readonly md: number; readonly lg: number; readonly xl: number; readonly xxl: number } = generatedSpacing;
 export type Space = keyof typeof space;
 
 /** A typeface as the platforms need it: ONE FAMILY NAME PER WEIGHT. On Android and iOS a custom font is
@@ -36,9 +41,22 @@ export type Elevation = 0 | 1 | 2 | 3;
 
 export interface Theme {
   colors: Record<ColorToken, string>;
-  /** Corner radius of a control; cards use `radius + 4`, pills use `radiusPill`. */
+  /** Corner radius of a control (the design's `md`); pills use `radiusPill`. */
   radius: number;
+  /** The design's three corner radii: `sm` a small box, `md` a control, `lg` a card or a sheet. */
+  radii: { readonly sm: number; readonly md: number; readonly lg: number };
   radiusPill: number;
+  /** The margin around a screen's content (the design's `page-padding`). */
+  pagePadding: number;
+  /** A hairline's width: the design's `border-width`. */
+  borderWidth: number;
+  /** The kit's type scale is multiplied by this: the design's base size over 16. */
+  typeScale: number;
+  /** The design's brand gradient, start to end (the web's `bg-brand-gradient`): its `gradientStart` and `gradientEnd`
+   *  when it names them, else the primary colour into the accent. A hero band is drawn with it. */
+  gradient: readonly [string, string];
+  /** How the design's headings look: weight, colour (a tone) and a page title's size (null: the kit's). */
+  heading: { readonly weight: "regular" | "medium" | "semibold" | "bold"; readonly tone: "default" | "primary" | "accent"; readonly titleSize: number | null };
   space: typeof space;
   /** Typefaces when the app loads them (`fonts.generated.ts`); undefined is the system font. */
   fonts: { body?: FontSet; heading?: FontSet };
@@ -68,25 +86,24 @@ function familyFor(set: FontSet | undefined, weight: FontWeight): string | undef
   return set.regular;
 }
 
-const SHADOWS: Record<Elevation, ViewStyle> = {
-  0: {},
-  1: { shadowColor: "#0f172a", shadowOpacity: 0.06, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 1 },
-  2: { shadowColor: "#0f172a", shadowOpacity: 0.1, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 3 },
-  3: { shadowColor: "#0f172a", shadowOpacity: 0.16, shadowRadius: 20, shadowOffset: { width: 0, height: 8 }, elevation: 8 },
-};
-
 function build(): Theme {
   const colors = resolveColors(generatedColors);
-  const radius = Number.isFinite(generatedRadius) && generatedRadius >= 0 ? generatedRadius : 8;
+  const raw = generatedColors as Readonly<Record<string, string | undefined>>;
   const fonts = (generatedFonts ?? {}) as { body?: FontSet; heading?: FontSet };
   return {
-    colors, radius, radiusPill: 999, space, fonts, touch: 44,
+    colors, radius: Number.isFinite(generatedRadius) && generatedRadius >= 0 ? generatedRadius : generatedRadii.md,
+    radii: generatedRadii, radiusPill: 999, pagePadding: generatedPagePadding, borderWidth: generatedBorderWidth,
+    typeScale: generatedTypeScale > 0 ? generatedTypeScale : 1, heading: generatedHeading, space, fonts, touch: 44,
+    gradient: [
+      raw.gradientStart ? toColor(raw.gradientStart) : colors.primary,
+      raw.gradientEnd ? toColor(raw.gradientEnd) : colors.accent,
+    ],
     alpha: (token, alpha) => withAlpha(colors[token], alpha),
     font: (weight, face = "body") => {
       const family = familyFor(face === "heading" ? fonts.heading ?? fonts.body : fonts.body, weight);
       return family ? { fontFamily: family } : {};
     },
-    shadow: (level) => SHADOWS[level],
+    shadow: (level) => (level === 0 ? {} : (generatedShadows[level] as ViewStyle)),
   };
 }
 

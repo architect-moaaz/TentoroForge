@@ -1106,16 +1106,22 @@ def _native_present(doc: Mapping[str, Any], page_id: str) -> bool:
 def native_page_subjects(doc: Mapping[str, Any]) -> list[str]:
     """The pages `native_code` writes a screen for: the pages the web writes
     code for, and only when the application is native (`mobile.native.enabled`).
-    One-to-one — a page with a web screen has a native one — except the
-    sign-in and sign-up pages: signing in is the native SDK's own screen (the
-    session cookie flow), and a page drawn over it would be a second login."""
-    from services.blueprint.native_projection import enabled
+    One-to-one — a page with a web screen has a native one. The sign-in and sign-up
+    pages (at /login and /signup, where the native app's gate sends people) are
+    written too, but only as a FRAME: the session cookie flow is the kit's
+    `SignInForm` / `SignUpForm`, which the screen must place and cannot replace."""
+    from services.blueprint.native_projection import AUTH_FILES, enabled
     if not enabled(doc):
         return []
+
+    def route(p: Mapping[str, Any]) -> str:
+        return "/" + str(p.get("route") or "").strip("/")
+
     return [p["id"] for p in (doc.get("pages") or [])
             if p.get("id") and p.get("status") != "DEPRECATED"
             and p["id"] not in _deferred_pages(doc)
-            and str(p.get("pattern") or "") not in ("audit_trail", "auth")]
+            and str(p.get("pattern") or "") != "audit_trail"
+            and (str(p.get("pattern") or "") != "auth" or route(p) in AUTH_FILES)]
 
 
 def _fields_present(doc: Mapping[str, Any], entity_id: str) -> bool:

@@ -770,6 +770,14 @@ def _look(doc: dict) -> str:
     body = typo.get("fontFamilyBase") or typo.get("fontFamily") or typo.get("fontFamilyBody")
     if head or body:
         lines.append(f"- font-heading: {head or body}; body: {body or head}")
+    # HOW A TITLE LOOKS, from the design: the phone draws it from the same three words (`native_tokens.heading`).
+    from services.blueprint import native_tokens as _tk
+    look = _tk.heading({"designSystem": design})
+    if any(typo.get(k) for k in ("headingWeight", "headingColor", "titleSize")):
+        weight = {"regular": "font-normal", "medium": "font-medium", "semibold": "font-semibold", "bold": "font-bold"}[look["weight"]]
+        colour = {"primary": "text-primary", "accent": "text-accent"}.get(look["tone"], "text-foreground")
+        size = f"{look['titleSize']}px (text-4xl is 36px, text-3xl 30px)" if look["titleSize"] else "text-3xl or text-4xl"
+        lines.append(f"- a page title (`h1`): `font-heading {weight} {colour}`, {size} - the design says so, and the phone draws it the same")
     gs, ge = colors.get("gradientStart"), colors.get("gradientEnd")
     lines.append("- bg-brand-gradient" + (f" ({gs} → {ge})" if gs and ge else " (primary → accent)")
                  + ": the brand gradient — the leading card, the sign-in panel, a hero band; its text is set")
@@ -1353,8 +1361,11 @@ def _static_findings(load: str, view: str) -> list[str]:
         out.append("view.tsx: uses a hex colour — use the semantic token classes.")
     if re.search(r"\bfetch\(", load + view):
         out.append("load.ts/view.tsx: calls fetch — read through @/sdk/server, write through workflows.")
-    if re.search(r"@/lib/|@/db", load + view):
-        out.append("load.ts/view.tsx: imports app internals — only @/sdk, @/sdk/server, @/sdk/client, @/sdk/camera, @/sdk/i18n.")
+    # `@/lib/money` is the one internal a page may read: the prompt names it (`CURRENCY`, the application's own
+    # currency) and it holds a single constant. Every other `@/lib/` file and the database are the app's own.
+    if re.search(r"@/lib/(?!money['\"])|@/db", load + view):
+        out.append("load.ts/view.tsx: imports app internals — only @/sdk, @/sdk/server, @/sdk/client, @/sdk/camera, @/sdk/i18n "
+                   "(and CURRENCY from @/lib/money).")
     # SIGNING IN IS THE SDK'S. F&B's sign-in page was rewritten to call
     # next-auth itself and send everyone to two fixed addresses, so a person
     # landed wherever the page guessed rather than on their role's own page

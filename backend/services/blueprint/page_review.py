@@ -315,7 +315,10 @@ class RunningApp:
         if self.proc is not None:
             from services import dev_servers
             dev_servers.forget(self.proc.pid)
-            for sig in (signal.SIGTERM, signal.SIGKILL):
+            if os.name == "nt":
+                subprocess.run(["taskkill", "/PID", str(self.proc.pid), "/T", "/F"], capture_output=True)
+                self.proc.wait(timeout=10)
+            for sig in (() if os.name == "nt" else (signal.SIGTERM, signal.SIGKILL)):
                 try:
                     os.killpg(os.getpgid(self.proc.pid), sig)
                     self.proc.wait(timeout=10)

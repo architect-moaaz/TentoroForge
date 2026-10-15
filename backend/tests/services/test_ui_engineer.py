@@ -363,3 +363,12 @@ def test_the_writing_is_asked_plainly_once_the_deciding_is_done(monkeypatch, tmp
     # they share: the plan, then the writing, each asked in its own budget.
     assert asked == [("low", PLAN_MAX_TOKENS, "plan"), ("low", WRITE_MAX_TOKENS, "write")]
     assert WRITE_MAX_TOKENS < 64000 and PLAN_MAX_TOKENS < WRITE_MAX_TOKENS
+
+
+def test_a_page_may_read_the_currency_but_no_other_app_internal():
+    from services.blueprint.ui_engineer import _static_findings
+
+    view = '"use client";\nimport { CURRENCY } from "@/lib/money";\nexport default function View() { return null; }\n'
+    assert not [f for f in _static_findings("", view) if "app internals" in f]
+    bad = view.replace("@/lib/money", "@/lib/auth")
+    assert [f for f in _static_findings("", bad) if "app internals" in f]

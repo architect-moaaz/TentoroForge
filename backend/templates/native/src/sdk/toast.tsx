@@ -56,7 +56,7 @@ function ToastCard({ message, onDone }: { message: ToastMessage; onDone: (id: nu
         accessibilityRole="alert"
         accessibilityLiveRegion="polite"
         accessibilityLabel={message.description ? `${message.title}. ${message.description}` : message.title}
-        style={[styles.card, { backgroundColor: tone.bg, borderRadius: theme.radius + 4 }]}>
+        style={[styles.card, { backgroundColor: tone.bg, borderRadius: theme.radii.md }]}>
         <Text style={[styles.title, { color: tone.fg }]}>{message.title}</Text>
         {message.description ? <Text style={[styles.body, { color: tone.fg }]}>{message.description}</Text> : null}
       </Pressable>

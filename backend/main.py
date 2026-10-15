@@ -21,6 +21,10 @@ os.environ.pop("CLAUDE_CODE_ENTRYPOINT", None)
 # inherit this process's environment at spawn time. setdefault keeps any explicit override.
 os.environ.setdefault("CLAUDE_CODE_MAX_OUTPUT_TOKENS", "64000")
 
+from services.windows_commands import resolve_tools_on_windows
+
+resolve_tools_on_windows()  # Windows: npm is npm.cmd, so the build's install step could not start
+
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware

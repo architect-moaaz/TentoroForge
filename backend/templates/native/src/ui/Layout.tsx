@@ -49,12 +49,12 @@ export interface RowProps extends StackProps {
 }
 
 /** A row; centres its children vertically unless told otherwise. */
-export function Row({ gap, padding, align = "center", justify, flex, wrap, style, ...rest }: RowProps) {
+export function Row({ gap, padding, align, justify, flex, wrap, style, ...rest }: RowProps) {
   const theme = useTheme();
   return (
     <View {...rest} style={[
       { flexDirection: "row", flexWrap: wrap ? "wrap" : "nowrap", gap: px(theme, gap), padding: px(theme, padding),
-        alignItems: ALIGN[align], justifyContent: justify ? JUSTIFY[justify] : undefined, flex: flex ? 1 : undefined },
+        alignItems: ALIGN[align ?? (wrap ? "stretch" : "center")], justifyContent: justify ? JUSTIFY[justify] : undefined, flex: flex ? 1 : undefined },
       style,
     ]} />
   );
@@ -86,7 +86,7 @@ export function Card({ onPress, variant = "filled", padding = "lg", style, acces
   const c = theme.colors;
   const surface: ViewStyle = {
     backgroundColor: variant === "inverse" ? c.inverse : variant === "muted" ? c.muted : c.card,
-    borderColor: theme.alpha("border", 0.7), borderWidth: variant === "inverse" ? 0 : 1, borderRadius: theme.radius + 8, padding: px(theme, padding),
+    borderColor: theme.alpha("border", 0.7), borderWidth: variant === "inverse" ? 0 : theme.borderWidth, borderRadius: theme.radii.lg, padding: px(theme, padding),
     ...(variant === "filled" ? theme.shadow(1) : {}),
   };
   if (onPress) {

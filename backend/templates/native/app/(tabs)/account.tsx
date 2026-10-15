@@ -53,7 +53,7 @@ export default function AccountScreen() {
       <Button variant="outline" icon="log-out-outline" fullWidth loading={leaving} onPress={() => setAsking(true)}>Sign out</Button>
       <Text variant="caption" tone="muted" align="center">{APP_NAME} · version {Constants.expoConfig?.version ?? "1.0.0"}</Text>
 
-      <Dialog visible={asking} message="Sign out of this app on this phone?" confirmLabel="Sign out" variant="danger"
+      <Dialog visible={asking} message="Sign out of this app on this phone?" confirmLabel="Sign out"
         onCancel={() => setAsking(false)} onConfirm={() => { void leave(); }} />
     </Screen>
   );

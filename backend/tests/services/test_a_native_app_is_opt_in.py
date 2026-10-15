@@ -44,9 +44,11 @@ def test_an_application_that_asks_gets_a_screen_for_each_page_the_web_writes():
     assert native_page_subjects(doc) == ["PAGE-001", "PAGE-002"], "one-to-one with page_code's pages"
     web = subjects_for(DAG["page_code"], doc)
     assert native_page_subjects(doc) == web
-    # …except the sign-in and sign-up pages: signing in is the native SDK's own screen.
-    doc["pages"] = doc["pages"] + [{"id": "PAGE-005", "route": "/login", "pattern": "auth"}]
-    assert "PAGE-005" in subjects_for(DAG["page_code"], doc) and "PAGE-005" not in native_page_subjects(doc)
+    # The sign-in and sign-up pages are written too - as a frame around the kit's form - but only at the routes
+    # the native gate sends people to; an auth page anywhere else has nothing to replace.
+    doc["pages"] = doc["pages"] + [{"id": "PAGE-005", "route": "/login", "pattern": "auth"},
+                                   {"id": "PAGE-006", "route": "/auth/other", "pattern": "auth"}]
+    assert "PAGE-005" in native_page_subjects(doc) and "PAGE-006" not in native_page_subjects(doc)
 
 
 def test_a_page_with_a_screen_is_not_written_again():

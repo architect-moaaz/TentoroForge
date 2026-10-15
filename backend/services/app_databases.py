@@ -56,10 +56,19 @@ def _exists(cur: Any, name: str) -> bool:
     return cur.fetchone() is not None
 
 
+def app_facing(url: str) -> str:
+    """The URL as the APP should read it: `localhost` spelled `127.0.0.1`. Node tries `localhost`'s IPv6 address
+    (`::1`) first, and on a machine where something else listens there - WSL's relay on a Windows host with Docker -
+    every connection hangs until it times out: sign-in took 30 seconds and then failed (pawsco01, 2026-10-15)
+    although Postgres was up. The loopback address is the same server without the detour."""
+    return re.sub(r"(@)localhost(?=[:/]|$)", r"\g<1>127.0.0.1", url)
+
+
 def _write_url(app_root: Path, url: str) -> None:
     """The app reads its database from `.env.local`, then `.env` — both say
     this one. Replaced, not kept: the address the scaffold wrote
     (`localhost:5432`) is nothing inside the platform's container."""
+    url = app_facing(url)
     for env in (".env.local", ".env"):
         path = app_root / env
         if not path.exists() and env == ".env":

@@ -97,11 +97,13 @@ def test_a_screen_and_its_route_for_each_page(tmp_path):
     assert "src/screens/PAGE-002.tsx" in out["files"]
 
 
-def test_the_sign_in_and_the_fixed_routes_are_never_drawn(tmp_path):
+def test_the_fixed_routes_are_never_overwritten_by_another_page(tmp_path):
     project_native(DOC, tmp_path)
     root = native_root(tmp_path)
-    assert [p["id"] for p in drawn_pages(DOC)] == ["PAGE-001", "PAGE-002", "PAGE-004"]
+    # the sign-in page is a native page now (a frame around the kit's form), but DOC gives it no screen yet:
+    assert [p["id"] for p in drawn_pages(DOC)] == ["PAGE-001", "PAGE-002", "PAGE-003", "PAGE-004"]
     assert not (root / "src/screens/PAGE-003.tsx").exists()
+    assert "SignInForm" in (root / "app/login.tsx").read_text("utf-8"), "the fallback is in place"
     # PAGE-004's route is the fixed organisation screen: its screen is written, the fixed route stays.
     assert route_file("/organisation") is None and route_file("/login") is None
     assert "@/screens/PAGE-004" not in (root / "app/organisation.tsx").read_text("utf-8")

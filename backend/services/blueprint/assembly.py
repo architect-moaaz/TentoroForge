@@ -1192,6 +1192,14 @@ def verify_boot(app_root: str | Path, *, entry: str = "/",
     dev_servers.track(proc.pid, port=port, root=root, kind="boot-check")
 
     def _kill_tree() -> None:
+        if os.name == "nt":
+            # Windows has no process groups to signal: `taskkill /T` ends the whole tree (npm, next, next-server).
+            subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True)
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                pass
+            return
         for sig in (signal.SIGTERM, signal.SIGKILL):
             try:
                 os.killpg(os.getpgid(proc.pid), sig)

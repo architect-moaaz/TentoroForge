@@ -91,7 +91,7 @@ export function Chips<K extends string>({ items, value, onChange }: { items: Chi
             hitSlop={{ top: 6, bottom: 6 }}
             style={({ pressed }) => ({
               flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14, height: 36, borderRadius: theme.radiusPill,
-              backgroundColor: on ? c.primary : c.card, borderWidth: 1, borderColor: on ? c.primary : c.border, opacity: pressed ? 0.85 : 1,
+              backgroundColor: on ? c.primary : c.card, borderWidth: theme.borderWidth, borderColor: on ? c.primary : c.border, opacity: pressed ? 0.85 : 1,
             })}>
             <Text variant="label" style={{ color: on ? c.primaryForeground : c.foreground }}>{it.label}</Text>
             {it.count !== undefined ? (
@@ -111,7 +111,7 @@ export function Tag({ children, onPress, selected }: { children: string; onPress
   const theme = useTheme();
   const c = theme.colors;
   const body = (
-    <View style={{ borderRadius: theme.radiusPill, borderWidth: 1, borderColor: selected ? c.primary : c.border,
+    <View style={{ borderRadius: theme.radiusPill, borderWidth: theme.borderWidth, borderColor: selected ? c.primary : c.border,
                    backgroundColor: selected ? c.primary : "transparent", paddingHorizontal: 12, paddingVertical: 5 }}>
       <Text variant="caption" weight="medium" style={{ color: selected ? c.primaryForeground : c.foreground }}>{children}</Text>
     </View>

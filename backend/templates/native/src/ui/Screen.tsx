@@ -18,11 +18,13 @@ import * as React from "react";
 import { KeyboardAvoidingView, Platform, Pressable, RefreshControl, ScrollView, View, type StyleProp, type ViewStyle } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
-import { useSegments } from "expo-router";
+import { usePathname, useSegments } from "expo-router";
 import { useTheme } from "../theme";
 import { useNav } from "../sdk/nav";
 import { Text } from "./Text";
 import { ErrorState, Loading } from "./States";
+import { MenuButton, isMenuRoute } from "./Menu";
+import { NAV_STYLE } from "../navigation.generated";
 
 export interface HeaderProps {
   title?: string;
@@ -39,10 +41,15 @@ export function Header({ title, subtitle, back, right }: HeaderProps) {
   // A TAB IS A ROOT: switching tabs leaves history behind it, so "there is a screen to go back to" is true on a
   // tab that was reached by tapping the bar — and a tab has nothing to go back to. Its address starts in `(tabs)`.
   const inTabs = useSegments()[0] === "(tabs)";
-  const showBack = back ?? (!inTabs && nav.canGoBack());
-  if (!title && !showBack && !right) return null;
+  // A DRAWER APP'S MAIN PAGE has the hamburger where a back arrow would be (it is a root, like a tab): the menu
+  // is how a person moves between main pages. Every other page, opened from one of them, keeps its back arrow.
+  const pathname = usePathname();
+  const onMenu = NAV_STYLE === "drawer" && back !== true && isMenuRoute(pathname);
+  const showBack = back ?? (!inTabs && !onMenu && nav.canGoBack());
+  if (!title && !showBack && !onMenu && !right) return null;
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: theme.space.sm, paddingHorizontal: theme.space.lg, paddingVertical: theme.space.sm, minHeight: 56 }}>
+    <View style={{ flexDirection: "row", alignItems: "center", gap: theme.space.sm, paddingHorizontal: theme.pagePadding, paddingVertical: theme.space.sm, minHeight: 56 }}>
+      {onMenu ? <MenuButton /> : null}
       {showBack ? (
         <Pressable onPress={nav.back} accessibilityRole="button" accessibilityLabel="Back" hitSlop={8}
           style={{ width: theme.touch, height: theme.touch, marginLeft: -theme.space.sm, alignItems: "center", justifyContent: "center" }}>
@@ -87,7 +94,7 @@ export function Screen({
     : error ? <ErrorState message={error} onRetry={onRetry} />
     : empty ? empty
     : children;
-  const pad = padded ? theme.space.lg : 0;
+  const pad = padded ? theme.pagePadding : 0;
   const content = scroll ? (
     <ScrollView
       style={{ flex: 1 }}

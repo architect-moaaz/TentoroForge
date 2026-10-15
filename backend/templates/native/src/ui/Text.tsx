@@ -14,7 +14,7 @@ import { Text as RNText, type TextProps as RNTextProps, type TextStyle } from "r
 import { useTheme, type Theme } from "../theme";
 
 export type TextVariant = "display" | "title" | "heading" | "body" | "label" | "caption";
-export type TextTone = "default" | "muted" | "primary" | "danger" | "success" | "warning" | "inverse";
+export type TextTone = "default" | "accent" | "muted" | "primary" | "danger" | "success" | "warning" | "inverse";
 
 export interface TextProps extends RNTextProps {
   variant?: TextVariant;
@@ -45,6 +45,7 @@ function toneColor(theme: Theme, tone: TextTone): string {
   switch (tone) {
     case "muted": return c.mutedForeground;
     case "primary": return c.primary;
+    case "accent": return c.accent;
     case "danger": return c.destructive;
     case "success": return c.success;
     case "warning": return c.warning;
@@ -53,10 +54,16 @@ function toneColor(theme: Theme, tone: TextTone): string {
   }
 }
 
-export function Text({ variant = "body", tone = "default", weight, align, style, accessibilityRole, ...rest }: TextProps) {
+export function Text({ variant = "body", tone, weight: asked, align, style, accessibilityRole, ...rest }: TextProps) {
   const theme = useTheme();
-  const size = SIZES[variant];
+  const base = SIZES[variant];
   const heading = variant === "display" || variant === "title" || variant === "heading";
+  // THE DESIGN'S HEADINGS: its weight for every heading, its colour for a page title, its title size.
+  const weight = asked ?? (heading ? theme.heading.weight : undefined);
+  const page = variant === "display" || variant === "title";
+  const size = page && theme.heading.titleSize
+    ? { ...base, fontSize: theme.heading.titleSize / theme.typeScale, lineHeight: Math.round(theme.heading.titleSize * 1.2) / theme.typeScale }
+    : base;
   const fontWeight = weight ? WEIGHTS[weight] : size.fontWeight;
   // A custom typeface is one file per weight: pick the file, and leave `fontWeight` out (on Android the
   // two together fall back to the system font). On the system font, `fontWeight` does the work.
@@ -66,7 +73,7 @@ export function Text({ variant = "body", tone = "default", weight, align, style,
       {...rest}
       accessibilityRole={accessibilityRole ?? (heading ? "header" : undefined)}
       style={[
-        { color: toneColor(theme, tone), fontSize: size.fontSize, lineHeight: size.lineHeight },
+        { color: toneColor(theme, tone ?? (page ? theme.heading.tone : "default")), fontSize: Math.round(size.fontSize * theme.typeScale * 10) / 10, lineHeight: Math.round(size.lineHeight * theme.typeScale * 10) / 10 },
         face.fontFamily ? face : { fontWeight },
         align ? { textAlign: align } : null,
         style,

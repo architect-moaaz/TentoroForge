@@ -91,6 +91,12 @@ def coverage(doc: dict, kinds: tuple[str, ...] = tuple(KINDS)) -> list[CoverageI
     ref = doc.get("domainReference") or {}
     declines = [d for d in ref.get("declined") or [] if isinstance(d, dict) and d.get("name")]
     out: list[CoverageItem] = []
+    # THE PLATFORM'S OWN WAYS IN ARE BUILT LATER. `/login` and `/signup` are added by the `auth_pages` step, two steps
+    # AFTER the page set is written and checked, so on that first check "Sign In" and "Sign Up" were always open and the
+    # page set was sent back twice for pages nobody writes (Iron Log, 2026-10-15: two model calls and two edits).
+    # An application with a sign-in that has not got the page yet is about to get it: that answers the item.
+    from services.blueprint.account_model import auth_page_bodies
+    coming = {str(b.get("auth")) for b in auth_page_bodies(doc)}
     for kind in kinds:
         list_key = KINDS[kind][0]
         artifacts = _artifacts(doc, kind)
@@ -99,6 +105,12 @@ def coverage(doc: dict, kinds: tuple[str, ...] = tuple(KINDS)) -> list[CoverageI
                 continue
             name = str(item["name"])
             by = next((a for a in artifacts if _answers(a, name, str(item.get("kind") or "") if kind == "screen" else "")), None)
+            if by is None and kind == "screen" and _AUTH_KINDS.get(str(item.get("kind") or "")) in coming:
+                out.append(CoverageItem(
+                    kind=kind, name=name, purpose=str(item.get("purpose") or item.get("statement") or ""),
+                    for_roles=tuple(str(r) for r in item.get("forRoles") or item.get("roles") or []),
+                    covered_by="platform:auth_pages", declined=None))
+                continue
             declined = next((d for d in declines if d.get("kind") == kind
                              and _norm(d.get("name")) == _norm(name)), None)
             out.append(CoverageItem(

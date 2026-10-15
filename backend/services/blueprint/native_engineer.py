@@ -94,21 +94,60 @@ NATIVE_RULES = """\
   and a list's search box, chips and cards sit inside it. `padded={false}` is for content that bleeds to
   the screen's edge (a map, a full-width image) and removes the margin from EVERYTHING inside — a list
   with `padded={false}` touches the glass. A list is `<Screen scroll={false}>` with the default padding.
-- A TAB HAS NO BACK. When the screen is one of the app's bottom tabs (the brief says so), it has no `back`
-  button; every other screen — a form, one record — has `back`.
+- A TAB OR A MENU PAGE HAS NO BACK. When the screen is one of the app's bottom tabs, or a main page of its
+  hamburger menu (the brief says which), it has no `back` button - the header draws the hamburger itself; every
+  other screen — a form, one record — has `back`.
 - MAKE IT LOOK DESIGNED, NOT ASSEMBLED. The kit has what a polished phone app uses; reach for it:
-  `Chips` for status filters (they scroll sideways, never wrap), `Dots` for a 1-5 value, `StatusBadge` for a
+  `ListView spaced` for a list of cards (they touch, with only a hairline between them, without it), `Chips` for status filters (they scroll sideways, never wrap), `Dots` for a 1-5 value, `StatusBadge` for a
   status, a `Button` with an `icon` (`variant="ghost" size="sm"` for a row's action), `Empty` with an `icon` for an
   empty state, `Icon` beside a label. A card shows ONE thing first (the title, in the heading face) and the rest
   quietly: do not repeat five equal rows. Whitespace between groups, not borders. The type faces are the
   design's own - use `Text` variants (`title`, `heading`, `label`, `caption`) and never set a font yourself.
-- COLOUR AND SIZE COME FROM THE THEME. `useTheme().colors.<token>`, `space.<size>`: never a hex colour and never
-  a magic number for a margin. The kit's parts are already styled — use `Card`, `Badge`, `StatTile`, `Button`
+- THE DESIGN SYSTEM IS THE SCREEN'S ONLY RULER. `useTheme().colors.<token>` for colour, `space.<xs..xxl>` for
+  every padding, margin and gap (a `Stack`/`Row` takes the same names), `useTheme().radii.<sm|md|lg>` for a
+  corner, a `Text` variant for every size and face, `Card` or `theme.shadow(1|2|3)` for depth. Never a hex
+  colour, never a number written as a margin, radius, font size or shadow, never `Text` from react-native: the
+  checks refuse them, because those are the measures the designer chose and the web keeps to. The kit's parts are already styled — use `Card`, `Badge`, `StatTile`, `Button`
   variants rather than styling a View.
 - MONEY is in major units (12.50): `<Money value={…} />` or `formatMoney`. Dates through `formatDate`. Every
   visible string through `useT()` when the application has more than one language.
+- ONE FILLED ACTION PER SCREEN. The one thing to do now is a single `variant="accent"` button: in the title bar (`right`)
+  OR in the `footer` OR at the end of a form, never two of them for the same action.
+- DATES AND SUMS ARE CHECKED, NOT TRUSTED. Before using a subtraction say its sign: `due - today` is NEGATIVE when the
+  due date has passed and POSITIVE when it is still to come, so overdue is `due < today`. A status that reads "Overdue" for
+  a future date is a failure the compiler cannot see.
 - WRITE IT AS YOU WOULD SHIP IT: no TODOs, no placeholder copy, no console.log, no unused imports. Real labels
   from the page's contract, real empty states in the application's own voice."""
+
+#: Said once in the system prompt, for the two screens it is about.
+AUTH_RULES = """\
+- THE SIGN-IN AND SIGN-UP SCREENS ARE A FRAME AROUND THE KIT'S FORM. The brief may be the web's sign-in or
+  sign-up page. You write what the person SEES around the form - the words, the band, the layout, the mood of
+  this product - and place `<SignInForm />` (sign-in) or `<SignUpForm />` (sign-up) from "@/ui": the only parts that
+  make a session or an account. Never read or call the session yourself (`useSession`, `signIn`, `apiJson`), never
+  draw an email or password field, never a `WorkflowForm`: a screen that does can lock everyone out, and the checks
+  refuse it. Start from `AuthFrame` (`title`, `tagline`, `footer`: a band in the primary colour with the app's mark
+  and name, a card for the form) and put the web page's own words in it; `SwitchAuthLink to="signup"` / `"signin"`
+  is the link to the other screen (it hides itself where the app does not let people sign up) and `LanguageSwitch`
+  the language. There is no `back` and no tab bar here: the person is signed out."""
+
+#: The web direction and rhythm are written in the web's words (a 1100px column, Tailwind classes, `bg-brand-gradient`).
+#: Said once, for the writer: what each means on a phone.
+PHONE_TRANSLATION = """\
+THE DIRECTION AND THE RHYTHM ABOVE WERE WRITTEN FOR THE WEB. Take their INTENT, not their CSS: the hierarchy, the one
+primary action, the voice of an empty state, which fact leads. On the phone that reads as:
+- a page frame / column width / px padding -> the screen's own margin (`Screen`); never a width or a number of yours.
+- `header: band` -> the screen's title in the heading face (`Screen title`/`subtitle`), the primary action in the
+  `footer` or beside the title (`right`); a gradient band is for the page's LEAD only, one per screen.
+- `lead: gradient-band` -> a `GradientBand` at the top of the screen holding the facts in large `Text variant="title"`
+  with `tone="inverse"`; a page whose lead is not a band opens with the title and its first facts.
+- `lists: cards` -> `Card`s in a `ListView` (one fact first, in the heading face, then two or three quietly);
+  `lists: table` -> the same cards with the two facts that matter. Space between cards is `space.md` as a top margin.
+- `figures: inline` -> `label · value` in muted `Text`; a dashboard's KPI widgets are `StatTile`s (`WidgetView`) in a
+  wrapping `Row`.
+- `sections: open` -> a `Text variant="heading"` with the content under it, no card; `cards` -> a `Card` per section.
+- tokens like `text-primary`, `bg-accent` -> `tone="primary"`, `variant="accent"`, `theme.colors.primary|accent`.
+- The accent marks the ONE thing to do now (`Button variant="accent"`): once per screen, never on every row."""
 
 NATIVE_DESIGN = """\
 Design for the thumb and for glancing. Lead with what the person came to do or know: the primary number or the
@@ -169,8 +208,12 @@ comes straight back to you with the errors, up to {_rounds()} times. Begin writi
 # Its look — the tokens the theme carries
 {_look(doc)}
 
+# On the phone
+{PHONE_TRANSLATION}
+
 # Rules
 {NATIVE_RULES}
+{AUTH_RULES}
 
 # The native SDK and kit
 ```
@@ -187,17 +230,51 @@ comes straight back to you with the errors, up to {_rounds()} times. Begin writi
 Reply with the rationale, the full contents of Screen.tsx, and `needs` (empty when every change has a workflow)."""
 
 
+def auth_kind(page: dict) -> str | None:
+    """`signin` for the page at /login, `signup` for the one at /signup (a page of the `auth` pattern), else None."""
+    if str(page.get("pattern") or "") != "auth":
+        return None
+    return {"/login": "signin", "/signup": "signup"}.get("/" + str(page.get("route") or "").strip("/"))
+
+
+def _web_words(doc: dict, page: dict) -> str:
+    """What the web page says (its view), so the phone says the same: the words are the product's.
+    Empty when the web page has not been written yet (the two are written in parallel in a first build; a Smith
+    change and the Publish-time pass find it written)."""
+    row = next((r for r in doc.get("pageCode") or [] if isinstance(r, dict) and str(r.get("page")) == str(page.get("id"))), None)
+    return str((row or {}).get("view") or "")
+
+
 def user_prompt(doc: dict, page: dict, *, feedback: str = "", brief: str = "", current: dict | None = None) -> str:
-    from services.blueprint.native_projection import is_tab
+    from services.blueprint.native_projection import is_menu_page, is_tab
     from services.blueprint.ui_engineer import _page_brief
 
     out = ["Write this page as a native screen. The brief below is the web page's; its `load.ts`, `searchParams`, "
            "`useSearchParams` and `view.tsx` are the web's words — on the phone a hook reads the data, `useParams` "
            "gives the route's id and query, and the screen is one component.\n\n```json\n"
            + json.dumps(_page_brief(doc, page), indent=2) + "\n```"]
-    out.append("\nThis screen IS one of the app's bottom tabs: it has no `back` button, and its title is the tab's."
-               if is_tab(doc, str(page.get("id"))) else
-               "\nThis screen is NOT a tab: it is opened from another screen, so it has a `back` button.")
+    kind = auth_kind(page)
+    if kind:
+        form = "<SignInForm />" if kind == "signin" else "<SignUpForm />"
+        out.append(f"\nThis is the {'sign-in' if kind == 'signin' else 'sign-up'} screen: a frame around {form}, with no `back` and "
+                   "no tab bar (see the rules). Use the web page's own words and mood below, in the phone's parts.")
+        words = _web_words(doc, page)
+        if words:
+            out.append("\nThe web page, for its words, its mood and what it puts beside the form (do not copy its markup):\n```tsx\n"
+                       + words + "\n```")
+    elif is_menu_page(doc, str(page.get("id"))):
+        out.append("\nThis screen is a MAIN PAGE of the app's hamburger menu: it has no `back` button (its header draws the "
+                   "hamburger by itself), and its title is the menu item's.")
+    else:
+        out.append("\nThis screen IS one of the app's bottom tabs: it has no `back` button, and its title is the tab's."
+                   if is_tab(doc, str(page.get("id"))) else
+                   "\nThis screen is NOT a tab: it is opened from another screen, so it has a `back` button.")
+    if not kind:
+        words = _web_words(doc, page)
+        if words:
+            out.append("\nThe web page as it is written now - what it shows, how it words things, which status is which "
+                       "colour. Make the phone's screen say the same (translate it to the kit, do not copy its markup):\n"
+                       "```tsx\n" + words + "\n```")
     if brief:
         out.append(f"\nWhat is wanted of it now:\n{brief}")
     if current:
@@ -217,6 +294,21 @@ _WEB_IMPORT = re.compile(r"""from\s+["'](next/[^"']*|next|react-dom[^"']*|lucide
 _HTML_TAG = re.compile(r"<(div|span|button|img|a|p|ul|li|table|tr|td|th|input|form|section|main|header|footer|h[1-6])[\s>/]")
 _CLASSNAME = re.compile(r"\bclassName\s*=")
 _HEX = re.compile(r"""["']#[0-9a-fA-F]{3,8}["']""")
+#: THE DESIGN SYSTEM'S MEASURES ARE NOT THE SCREEN'S TO INVENT. Spacing, corner radii, type and shadows come
+#: from the theme (`space.md`, `useTheme().radii.md`, a `Text` variant, `Card`): a number written into a style
+#: is a measure the design never chose, and it is the web's strictness the phone would lose.
+_NUM = r"-?[1-9]\d*(?:\.\d+)?"
+_SPACING_LITERAL = re.compile(r"\b(?:padding|paddingHorizontal|paddingVertical|paddingTop|paddingBottom|paddingLeft|paddingRight|"
+                              r"margin|marginHorizontal|marginVertical|marginTop|marginBottom|marginLeft|marginRight|"
+                              r"gap|rowGap|columnGap)\s*:\s*" + _NUM)
+_RADIUS_LITERAL = re.compile(r"\bborder(?:Top|Bottom)?(?:Left|Right)?Radius\s*:\s*" + _NUM)
+_TYPE_LITERAL = re.compile(r"\b(?:fontSize|lineHeight|fontFamily|fontWeight|letterSpacing)\s*:")
+_SHADOW_LITERAL = re.compile(r"\b(?:shadow(?:Color|Offset|Opacity|Radius)|elevation)\s*:")
+_RAW_TEXT_IMPORT = re.compile(r"import\s*\{[^}]*\b(?:Text|TextInput)\b[^}]*\}\s*from\s*[\"']react-native[\"']")
+_ONDONE_BLIND = re.compile(r"\bonDone\s*=\s*\{\s*\(\s*\)\s*=>")
+_SCROLL_OFF = re.compile(r"\bscroll\s*=\s*\{\s*false\s*\}")
+_LISTVIEW = re.compile(r"<ListView\b")
+_SCROLLER = re.compile(r"import\s*\{[^}]*\b(?:ScrollView|FlatList|SectionList|VirtualizedList)\b[^}]*\}\s*from\s*[\"']react-native[\"']")
 _FETCH = re.compile(r"\bfetch\s*\(")
 _CONSOLE = re.compile(r"\bconsole\.(log|debug)\s*\(")
 
@@ -237,8 +329,55 @@ def _native_findings(screen: str) -> list[str]:
         out.append("Screen.tsx: a hard-coded hex colour — take it from `useTheme().colors`.")
     if _FETCH.search(screen):
         out.append("Screen.tsx: `fetch` — read with the SDK's hooks and change with a workflow.")
+    if _SPACING_LITERAL.search(screen):
+        out.append("Screen.tsx: a number written as padding, margin or gap — spacing is the design's scale: `space.xs`..`space.xxl` "
+                   "(import `space` from \"@/ui\"), or the kit's `Stack`/`Row` `gap` and `padding`.")
+    if _RADIUS_LITERAL.search(screen):
+        out.append("Screen.tsx: a number written as a corner radius — the design has three: `useTheme().radii.sm|md|lg` "
+                   "(or let `Card`/`Button` draw their own).")
+    if _TYPE_LITERAL.search(screen):
+        out.append("Screen.tsx: fontSize, lineHeight, fontFamily or fontWeight set by hand — the design's type scale and typefaces are "
+                   "the `Text` variants (`title`, `heading`, `label`, `body`, `caption`) and its `weight` prop.")
+    if _SHADOW_LITERAL.search(screen):
+        out.append("Screen.tsx: a shadow or elevation written by hand — depth is the design's: `Card`, or `...useTheme().shadow(1|2|3)`.")
+    if _ONDONE_BLIND.search(screen):
+        out.append("Screen.tsx: `onDone={() => …}` ignores the result - `WorkflowForm` calls `onDone(result)` after EVERY attempt, a "
+                   "refused one too, so this leaves the screen (or closes the sheet) when a rule refused the input and the person "
+                   "loses what they typed. Take the result and test it: `onDone={(r) => { if (r.ok) … }}` - or use `redirectTo`.")
+    if _SCROLL_OFF.search(screen) and not _LISTVIEW.search(screen):
+        out.append("Screen.tsx: `scroll={false}` with no `<ListView>` - nothing on this screen scrolls, so a long list is cut "
+                   "off. Put the records in a `ListView` (with the header, search and chips in its `header`), or leave `scroll` on.")
+    if _SCROLLER.search(screen):
+        out.append("Screen.tsx: ScrollView/FlatList from react-native - `Screen` scrolls its content and `ListView` is the list "
+                   "(with `<Screen scroll={false}>`); two scrollers nested is a bug.")
+    if _RAW_TEXT_IMPORT.search(screen):
+        out.append("Screen.tsx: `Text`/`TextInput` from react-native draw the system font — use `Text` and the fields from \"@/ui\", "
+                   "which carry the design's typefaces and colours.")
     if _CONSOLE.search(screen):
         out.append("Screen.tsx: a console.log is left in.")
+    return out
+
+
+_AUTH_OWN = re.compile(r"\b(useSession|useSignInMethods|signIn|signOut|apiJson|SecureStore|useWorkflow|WorkflowForm|WorkflowButton)\b")
+_AUTH_FIELD = re.compile(r"""kind\s*=\s*["'](?:password|email)["']""")
+
+
+def _auth_findings(page: dict, screen: str) -> list[str]:
+    """The sign-in and sign-up screens may draw the frame, never the form."""
+    kind = auth_kind(page)
+    if not kind:
+        return []
+    form = "SignInForm" if kind == "signin" else "SignUpForm"
+    out = []
+    if not re.search(r"<" + form + r"\b", screen):
+        out.append(f"Screen.tsx: the {'sign-in' if kind == 'signin' else 'sign-up'} screen must place `<{form} />` from \"@/ui\" - it is the "
+                   "only part that makes a " + ("session" if kind == "signin" else "account") + ".")
+    own = sorted({m.group(1) for m in _AUTH_OWN.finditer(screen)})
+    if own:
+        out.append("Screen.tsx: " + ", ".join(f"`{n}`" for n in own[:5]) + " - this screen draws the frame only; "
+                   f"`<{form} />` holds the session, the account and the way in.")
+    if _AUTH_FIELD.search(screen):
+        out.append(f"Screen.tsx: an email or password field of its own - `<{form} />` draws them; do not ask twice.")
     return out
 
 
@@ -413,7 +552,7 @@ def compose_screen(doc: dict, page: dict, native_root: Path, client: Any, *, fee
         if needs and current is not None:
             # NOTHING IS WRITTEN AROUND A MISSING WORKFLOW — the web's rule.
             raise NeedsWorkflow(needs)
-        errors = _native_findings(screen) + _page_findings(doc, page, screen)
+        errors = _native_findings(screen) + _page_findings(doc, page, screen) + _auth_findings(page, screen)
         compiled = check(screen)
         if compiled is None:
             logger.info("[native_engineer] %s not compiled (no compiler); accepted on its page rules", page.get("id"))

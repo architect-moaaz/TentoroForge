@@ -42,9 +42,11 @@ export interface ListViewProps<T> {
   header?: React.ReactNode;
   /** Hairlines between rows (default true). */
   separators?: boolean;
+  /** Space between rows instead of hairlines - for a list of cards, which touch otherwise. */
+  spaced?: boolean;
 }
 
-export function ListView<T>({ list, renderItem, keyExtractor, empty, header, separators = true }: ListViewProps<T>) {
+export function ListView<T>({ list, renderItem, keyExtractor, empty, header, separators = true, spaced = false }: ListViewProps<T>) {
   const theme = useTheme();
   if (list.loading) return <Loading />;
   if (list.error && !list.data) return <ErrorState message={list.error} onRetry={() => { void list.refetch(); }} />;
@@ -54,8 +56,8 @@ export function ListView<T>({ list, renderItem, keyExtractor, empty, header, sep
       data={rows}
       keyExtractor={keyExtractor ?? ((item, i) => String((item as { id?: unknown }).id ?? i))}
       renderItem={({ item, index }) => renderItem(item, index)}
-      ItemSeparatorComponent={separators ? () => <Divider /> : undefined}
-      ListHeaderComponent={header ? <View>{header}{list.error ? <Text tone="danger" style={{ paddingVertical: theme.space.sm }}>{list.error}</Text> : null}</View> : undefined}
+      ItemSeparatorComponent={spaced ? () => <View style={{ height: theme.space.md }} /> : separators ? () => <Divider /> : undefined}
+      ListHeaderComponent={header ? <View style={spaced && rows.length ? { marginBottom: theme.space.md } : undefined}>{header}{list.error ? <Text tone="danger" style={{ paddingVertical: theme.space.sm }}>{list.error}</Text> : null}</View> : undefined}
       ListEmptyComponent={empty ? <View>{empty}</View> : undefined}
       ListFooterComponent={list.loadingMore ? <View style={{ padding: theme.space.lg }}><ActivityIndicator color={theme.colors.primary} /></View> : null}
       onEndReached={list.loadMore ? () => { void list.loadMore?.(); } : undefined}

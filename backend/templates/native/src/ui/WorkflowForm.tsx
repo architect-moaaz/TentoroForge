@@ -232,7 +232,7 @@ export function WorkflowForm<I extends Json>({
         : stepped ? section(parts[step])
         : <View style={{ gap: theme.space.xl }}>{parts.map(section)}</View>}
       {error ? (
-        <View accessibilityRole="alert" style={{ backgroundColor: theme.colors.destructiveSubtle, borderRadius: theme.radius, padding: theme.space.md }}>
+        <View accessibilityRole="alert" style={{ backgroundColor: theme.colors.destructiveSubtle, borderRadius: theme.radii.sm, padding: theme.space.md }}>
           <Text tone="danger">{error}</Text>
         </View>
       ) : null}

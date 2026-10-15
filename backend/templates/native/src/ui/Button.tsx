@@ -52,7 +52,7 @@ export function Button({ children, onPress, variant = "primary", size = "md", ic
       hitSlop={size === "sm" ? 6 : 0}
       style={({ pressed }) => [
         styles.base,
-        { backgroundColor: t.bg, borderColor: t.border, borderRadius: theme.radius + 2,
+        { backgroundColor: t.bg, borderColor: t.border, borderRadius: theme.radii.md, borderWidth: theme.borderWidth,
           minHeight: size === "sm" ? 38 : theme.touch + 4, paddingHorizontal: size === "sm" ? 14 : 22,
           opacity: off ? 0.55 : 1, transform: [{ scale: pressed ? 0.97 : 1 }],
           alignSelf: fullWidth ? "stretch" : "flex-start" },
@@ -71,6 +71,6 @@ export function Button({ children, onPress, variant = "primary", size = "md", ic
 }
 
 const styles = StyleSheet.create({
-  base: { alignItems: "center", justifyContent: "center", borderWidth: 1 },
+  base: { alignItems: "center", justifyContent: "center" },
   content: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
 });
