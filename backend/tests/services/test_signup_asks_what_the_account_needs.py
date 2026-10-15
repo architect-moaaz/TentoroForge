@@ -66,3 +66,17 @@ def test_a_required_field_a_process_owns_starts_with_a_value_of_its_kind():
     assert initial["currency"] == "" and initial["budgetStartDate"] == 0 and initial["onboardingCompleted"] is False
     assert initial["kycStatus"] == "pending"
     assert "displayName" not in initial
+
+
+def test_the_catch_up_carries_the_current_signup_route_to_a_built_app(tmp_path):
+    """An app built before this fix keeps the old route until its next turn
+    brings the platform's — the same way the engine files are carried."""
+    from services.smith.sync_app import SIGNUP_ROUTE, refresh_engine
+    app = tmp_path / "app"
+    old = app / SIGNUP_ROUTE
+    old.parent.mkdir(parents=True)
+    old.write_text("const ACCOUNT_TYPES: { value: string }[] = [];\n// the route as built yesterday\n")
+    changed = refresh_engine(app)
+    assert SIGNUP_ROUTE in changed
+    assert "accountValues(data.account ?? {}, data.email, data.name)" in old.read_text()
+    assert refresh_engine(app) == []            # current: nothing written again
