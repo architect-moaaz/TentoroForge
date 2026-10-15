@@ -30,6 +30,7 @@ import { AgentNodeProperties } from "./AgentNodeProperties";
 import { AgentTemplateSelector } from "./AgentTemplateSelector";
 import { AgentTestConsole } from "./AgentTestConsole";
 import { AgentWatchPanel } from "./AgentWatchPanel";
+import { WatchComingSoon } from "./WatchComingSoon";
 import { useAgentWatch } from "./useAgentWatch";
 import { nodeStates } from "@/lib/agent-watch";
 import { applyFix, revertFix } from "@/lib/agent-blast";
@@ -47,6 +48,9 @@ import type {
 
 /** An agent saves itself this long after the last change, so typing is not a save per key. */
 const AUTOSAVE_MS = 1200;
+
+/** Watch live is built but not open yet: its page says "Coming soon". Switch this on to bring the real page back. */
+const WATCH_LIVE_READY = false;
 
 interface AgentBuilderPanelProps {
   projectId: string;
@@ -675,6 +679,9 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
           >
             <Radio className="mr-1 h-3.5 w-3.5" />
             Watch live
+            {!WATCH_LIVE_READY && (
+              <span className="ml-1.5 rounded bg-amber-100 px-1 py-px text-[9px] font-semibold uppercase leading-none text-amber-800">Soon</span>
+            )}
             {watch.link === "connected" && <span className="ml-1.5 inline-block h-2 w-2 rounded-full bg-green-500" aria-label="connected" />}
           </Button>
           <Button
@@ -778,6 +785,8 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
               agentName={editName}
               nodes={nodes}
             />
+          ) : showWatch && !WATCH_LIVE_READY ? (
+            <WatchComingSoon />
           ) : (
             <AgentCanvas
               initialNodes={nodes}
@@ -808,7 +817,7 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
             />
           )}
         </div>
-        {showWatch && !showTestConsole && !showBlast && (
+        {WATCH_LIVE_READY && showWatch && !showTestConsole && !showBlast && (
           <AgentWatchPanel
             state={watch.state}
             link={watch.link}
