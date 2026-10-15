@@ -13,6 +13,7 @@ import {
   type Edge,
   type Connection,
   type OnConnect,
+  type ReactFlowInstance,
   MarkerType,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
@@ -42,6 +43,13 @@ const nodeTypes = {
   human_handoff: HumanHandoffNode,
   router: RouterNode,
 };
+
+// Settings handed to React Flow are constants, not objects made again on every render: React Flow compares them by
+// identity, so a fresh object each time made it redo its internal work (and the minimap redraw) on every mouse move
+// of a drag.
+const PRO_OPTIONS = { hideAttribution: true } as const;
+const DEFAULT_EDGE_OPTIONS = { markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16 } };
+const MINIMAP_STYLE = { height: 80, width: 120 } as const;
 
 interface AgentCanvasProps {
   initialNodes?: AgentNodeSerialized[];
@@ -116,6 +124,10 @@ export function AgentCanvas({
   onNodesChangeRef.current = onNodesChangeProp;
   onEdgesChangeRef.current = onEdgesChangeProp;
   useEffect(() => {
+    // A box that is being dragged moves on the canvas alone. Reporting every move made the whole page render several
+    // times for each mouse move (it re-read every box's settings each time), so dragging crawled on a real agent. The
+    // drop is reported: when the drag ends the box's `dragging` goes off, and this runs once with the final position.
+    if (nodes.some((n) => n.dragging)) return;
     onNodesChangeRef.current?.(nodes);
   }, [nodes]);
   useEffect(() => {
@@ -141,7 +153,9 @@ export function AgentCanvas({
     let changed = false;
     const next = nodesRef.current.map((n) => {
       const data = fromParent.get(n.id);
-      if (data && JSON.stringify(data) !== JSON.stringify(n.data)) {
+      // The same object is the same settings (the canvas reports a box's `data` as it holds it): only two different
+      // objects are worth the cost of comparing as text.
+      if (data && data !== n.data && JSON.stringify(data) !== JSON.stringify(n.data)) {
         changed = true;
         return { ...n, data };
       }
@@ -155,7 +169,7 @@ export function AgentCanvas({
       let edgeType: AgentEdgeType = "default";
 
       // Router nodes may have named output handles for routes
-      const sourceNode = nodes.find((n) => n.id === params.source);
+      const sourceNode = nodesRef.current.find((n) => n.id === params.source);
       if (sourceNode?.type === "router" && params.sourceHandle) {
         edgeType = "route";
       }
@@ -169,7 +183,8 @@ export function AgentCanvas({
 
       setEdges((eds) => addEdge(newEdge, eds));
     },
-    [setEdges, nodes],
+    // read through a ref, not listed: listed, `onConnect` was a new function for every mouse move of a drag
+    [setEdges],
   );
 
   const onNodeClick = useCallback(
@@ -182,6 +197,12 @@ export function AgentCanvas({
   const onPaneClick = useCallback(() => {
     setSelectedNodeId(null);
   }, [setSelectedNodeId]);
+
+  // The canvas's own handle on the drawing (zoom, pan), given once it is ready.
+  const flowRef = useRef<ReactFlowInstance | null>(null);
+  const onInit = useCallback((instance: ReactFlowInstance) => {
+    flowRef.current = instance;
+  }, []);
 
   // Drag-and-drop from palette
   const onDragOver = useCallback((event: React.DragEvent) => {
@@ -198,13 +219,18 @@ export function AgentCanvas({
 
       if (!nodeType) return;
 
-      const reactFlowBounds = reactFlowWrapper.current?.getBoundingClientRect();
-      if (!reactFlowBounds) return;
-
-      const position = {
-        x: event.clientX - reactFlowBounds.left - 80,
-        y: event.clientY - reactFlowBounds.top - 20,
-      };
+      // Where the pointer is in the DRAWING, not on the screen: once the diagram is zoomed or moved, screen and drawing
+      // differ, and the box landed far from where it was dropped. A box is about 160 by 40, centred on the pointer.
+      const flow = flowRef.current;
+      let position: { x: number; y: number };
+      if (flow) {
+        const at = flow.screenToFlowPosition({ x: event.clientX, y: event.clientY });
+        position = { x: at.x - 80, y: at.y - 20 };
+      } else {
+        const reactFlowBounds = reactFlowWrapper.current?.getBoundingClientRect();
+        if (!reactFlowBounds) return;
+        position = { x: event.clientX - reactFlowBounds.left - 80, y: event.clientY - reactFlowBounds.top - 20 };
+      }
 
       const newNode: Node = {
         id: generateNodeId(),
@@ -265,19 +291,15 @@ export function AgentCanvas({
         onPaneClick={onPaneClick}
         onDragOver={onDragOver}
         onDrop={onDrop}
+        onInit={onInit}
         nodeTypes={nodeTypes}
         fitView
-        proOptions={{ hideAttribution: true }}
-        defaultEdgeOptions={{
-          markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16 },
-        }}
+        proOptions={PRO_OPTIONS}
+        defaultEdgeOptions={DEFAULT_EDGE_OPTIONS}
       >
         <Background />
         <Controls showInteractive={false} />
-        <MiniMap
-          nodeStrokeWidth={2}
-          style={{ height: 80, width: 120 }}
-        />
+        <MiniMap nodeStrokeWidth={2} style={MINIMAP_STYLE} />
       </ReactFlow>
     </div>
   );

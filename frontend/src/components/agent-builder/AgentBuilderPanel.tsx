@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { api } from "@/lib/api";
+import { checkKeyOf, draftKeyOf } from "@/lib/agent-draft";
 import { useAgentBuilderStore } from "@/stores/agent-builder";
 import { AgentCanvas } from "./AgentCanvas";
 import { AgentChecksBar } from "./AgentChecksBar";
@@ -49,15 +50,6 @@ const AUTOSAVE_MS = 1200;
 interface AgentBuilderPanelProps {
   projectId: string;
   orgId?: string;
-}
-
-/**
- * What an agent is, for telling whether it has changed since it was saved: its name, description, the boxes' settings,
- * what connects to what, and the agent-level config. Box positions and what is selected are left out on purpose: moving
- * a box is not a change worth warning about (the same reason the check below is keyed on data, not on positions).
- */
-function draftKeyOf(name: string, description: string, nodes: AgentNodeSerialized[], edges: AgentEdgeSerialized[], config: unknown): string {
-  return JSON.stringify([name, description, nodes.map((n) => [n.id, n.data]), edges.map((e) => [e.source, e.target]), config ?? null]);
 }
 
 export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) {
@@ -235,15 +227,7 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
 
   // Re-check a moment after the drawing stops changing. Keyed on what the check READS (not on
   // selection or box positions, which change on every click and drag).
-  const checkKey = useMemo(
-    () =>
-      JSON.stringify([
-        currentAgent?.id,
-        nodes.map((n) => [n.id, n.data]),
-        edges.map((e) => [e.source, e.target]),
-      ]),
-    [currentAgent?.id, nodes, edges],
-  );
+  const checkKey = useMemo(() => checkKeyOf(currentAgent?.id, nodes, edges), [currentAgent?.id, nodes, edges]);
   useEffect(() => {
     if (!currentAgent) {
       setFindings([]);
