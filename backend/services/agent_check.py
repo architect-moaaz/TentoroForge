@@ -126,6 +126,8 @@ def _classify_compile_warning(text: str) -> tuple[str, str] | None:
     t = text.lower()
     if "not executed yet" in t:
         return None  # said once per box below, in words that fit the box
+    if "router box has no routes" in t:
+        return "warning", "router_empty"
     if "human-handoff box names no one" in t:
         return "warning", "handoff_no_handlers"
     if "handoff assignment" in t:
@@ -183,16 +185,13 @@ def check_agent(graph: dict[str, Any], app_root: Path | None = None) -> dict[str
             node_id = next((str(n.get("id")) for n in nodes if _kind(n) == "memory"), None)
         elif code == "custom_filter":
             node_id = next((str(n.get("id")) for n in nodes if _kind(n) == "guardrail"), None)
+        elif code == "router_empty":
+            node_id = next((str(n.get("id")) for n in nodes if _kind(n) == "router"), None)
         elif code.startswith("handoff_"):
             node_id = next((str(n.get("id")) for n in nodes if _kind(n) == "human_handoff"), None)
         findings.append(_finding(severity, code, _friendly(w), node_id))
 
-    # 2 — boxes that are saved but do nothing yet (human handoff is real now; the router is not)
-    for n in nodes:
-        if _kind(n) == "router":
-            findings.append(_finding(
-                "info", "router_not_running",
-                "The router is saved but does not run yet: one agent handles every message.", str(n.get("id"))))
+    # 2 — (the router is real now: its routes are given to the agent as a routing guide; an empty one is said above)
 
     # 3 — the agent as a whole
     tools = compiled.config.get("tools") or []

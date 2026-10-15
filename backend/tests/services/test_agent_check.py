@@ -57,11 +57,13 @@ def test_names_are_matched_even_when_two_boxes_share_one():
     assert nodes == {"a", "b"}, "the second 'lookup' is compiled as lookup_2 and still points at its own box"
 
 
-def test_a_router_says_it_does_nothing_yet():
-    r = check_agent(graph(PROMPT, node("r", "router", "Route", {"strategy": "intent_classification"})))
-    router = by_code(r, "router_not_running")[0]
-    assert router["nodeId"] == "r" and router["severity"] == "info"
-    assert not by_code(r, "compile"), "the compiler's generic line is not said a second time"
+def test_a_router_with_no_routes_is_a_warning_on_its_box_and_one_with_routes_is_fine():
+    empty = check_agent(graph(PROMPT, node("r", "router", "Route", {"strategy": "intent_classification"})))
+    said = by_code(empty, "router_empty")[0]
+    assert said["nodeId"] == "r" and said["severity"] == "warning"
+    assert not by_code(empty, "compile"), "the compiler's generic line is not said a second time"
+    routed = check_agent(graph(PROMPT, node("r", "router", "Route", {"routes": [{"id": "a", "label": "Orders", "condition": "Questions about orders."}]})))
+    assert not by_code(routed, "router_empty") and not by_code(routed, "router_not_running")
 
 
 def test_a_missing_prompt_points_at_the_prompt_box():
@@ -130,9 +132,9 @@ def test_a_missing_ai_key_is_a_warning_and_a_present_one_is_not(tmp_path):
 
 def test_findings_come_errors_first():
     g = graph(PROMPT, tool("a", "orphan", tool_type="data_engine", operation="list"),
-              tool("b", "stub", tool_type="function"), node("r", "router", "R", {}))
+              tool("b", "stub", tool_type="function"), node("r", "router", "R", {}), node("m", "memory", "M", {"memory_type": "vector"}))
     order = [f["severity"] for f in check_agent(g)["findings"]]
-    assert order == sorted(order, key=["error", "warning", "info"].index) and order[0] == "error" and order[-1] == "info"
+    assert order == sorted(order, key=["error", "warning", "info"].index) and order[0] == "error"
 
 
 def test_checking_never_changes_the_graph(tmp_path):

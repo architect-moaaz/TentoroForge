@@ -366,6 +366,28 @@ def _handoff_tool(handoff: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _routing_guide(cfg: dict[str, Any], tool_names: set[str]) -> str:
+    """The router box, as something that really steers. One agent still handles every message, but it is handed the
+    routes the builder drew: what each kind of request is, and which tools belong to it. That is what a router is for
+    (sending a request down the right path), and it needs no new runtime: it is part of the instructions."""
+    routes = [r for r in (cfg.get("routes") or []) if isinstance(r, dict) and str(r.get("label") or "").strip()]
+    if not routes:
+        return ""
+    lines = ["", "", "How to choose what to do (a guide to what people ask):"]
+    for r in routes[:10]:
+        label = str(r["label"]).strip()
+        condition = str(r.get("condition") or "").strip()
+        names = [str(n) for n in (r.get("tools") or []) if str(n) in tool_names]
+        parts = [f"- {label}:"]
+        if condition:
+            parts.append(condition)
+        if names:
+            parts.append(f"Use: {', '.join(names)}.")
+        lines.append(" ".join(parts))
+    lines.append("If a request fits none of these, answer briefly yourself, or ask one short question.")
+    return "\n".join(lines)
+
+
 def _confirm_prompt() -> str:
     """Said to an assistant that has tools which change data. The app holds each such change until the person has
     agreed, and hands the assistant the wording to ask; an assistant that asks first as well asks twice."""
@@ -563,8 +585,8 @@ def compile_agent(agent_data: dict[str, Any]) -> CompiledAgent:
     if len(memory_nodes) > 1:
         warnings.append("more than one memory node — the first is used")
     routers, handoffs = of("router"), of("human_handoff")
-    if routers:
-        warnings.append("router nodes are carried in the definition but not executed yet")
+    if len(routers) > 1:
+        warnings.append("more than one router box — the first is used")
 
     max_turns = config_in.get("max_turns")
     turns = int(max_turns) if isinstance(max_turns, (int, float)) and max_turns > 0 else _DEFAULT_MAX_TURNS
@@ -583,8 +605,6 @@ def compile_agent(agent_data: dict[str, Any]) -> CompiledAgent:
     }
     if description:
         config["description"] = str(description)
-    if routers:
-        config["router"] = ((routers[0].get("data") or {}).get("config")) or {}
     if len(handoffs) > 1:
         warnings.append("more than one human-handoff box — the first is used")
     if handoffs:
@@ -592,6 +612,15 @@ def compile_agent(agent_data: dict[str, Any]) -> CompiledAgent:
         config["handoff"] = handoff
         config["tools"] = [*config["tools"], _handoff_tool(handoff)]
         config["systemPrompt"] = str(config["systemPrompt"]).rstrip() + _handoff_prompt(handoff)
+
+    if routers:
+        router_cfg = ((routers[0].get("data") or {}).get("config")) or {}
+        config["router"] = router_cfg
+        guide = _routing_guide(router_cfg, {t["name"] for t in config["tools"]})
+        if guide:
+            config["systemPrompt"] = str(config["systemPrompt"]).rstrip() + guide
+        else:
+            warnings.append("the router box has no routes, so it guides nothing yet")
 
     if any(t.get("confirm") for t in config["tools"]):
         config["systemPrompt"] = str(config["systemPrompt"]).rstrip() + _confirm_prompt()
