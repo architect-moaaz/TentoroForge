@@ -10,7 +10,9 @@ To make the **Connect with <provider>** button appear:
    secrets as `FORGE_DOMAIN_CONNECT_KEY`; never commit it.
 2. Publish its public half as TXT records at `_dck1.tentoro.ai`:
    `python -m services.deploy.domain_connect key-records dc-key.pem` prints them (public key only).
-3. Set `FORGE_DOMAIN_CONNECT_DOMAIN=tentoro.ai` and `FORGE_APP_BASE_URL` (where owners come back to).
+3. Set `FORGE_DOMAIN_CONNECT_DOMAIN=tentoro.ai`. Owners come back to the platform's own address,
+   `FORGE_APP_BASE_URL` or else `FORGE_PUBLIC_URL` (forge-v3 uses `FORGE_PUBLIC_URL`; its `.env`'s
+   `FORGE_APP_BASE_URL` names the older stack and is not passed to the backend).
 4. Submit these files to https://github.com/Domain-Connect/Templates and ask each DNS provider to onboard them.
    A provider shows the button only once it holds the template.
 

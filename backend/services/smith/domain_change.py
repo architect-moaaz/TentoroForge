@@ -37,7 +37,7 @@ async def _return_to(output_dir: str, root: Path, name: str) -> str:
     """Where the owner lands after approving at their provider (App settings →
     Domains of this app), or "" when the platform's address is not known."""
     from urllib.parse import quote
-    base = (os.environ.get("FORGE_APP_BASE_URL") or "").rstrip("/")
+    base = (os.environ.get("FORGE_APP_BASE_URL") or os.environ.get("FORGE_PUBLIC_URL") or "").rstrip("/")
     if not base:
         return ""
     from sqlalchemy import select

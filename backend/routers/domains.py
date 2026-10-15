@@ -197,13 +197,13 @@ def _return_to(request: Request, project: Project, name: str) -> str:
     """Where the owner lands after approving at their provider: this app's
     Domains settings, on the platform's own address (never one the caller
     names), told which address to check."""
-    base = (os.environ.get("FORGE_APP_BASE_URL") or "").rstrip("/")
+    base = (os.environ.get("FORGE_APP_BASE_URL") or os.environ.get("FORGE_PUBLIC_URL") or "").rstrip("/")
     if not base:
         origin = request.headers.get("origin") or ""
         if urlsplit(origin).scheme in ("http", "https") and urlsplit(origin).netloc:
             base = origin.rstrip("/")
     if not base:
-        raise HTTPException(503, "The platform's own address is not known (FORGE_APP_BASE_URL), so the provider "
+        raise HTTPException(503, "The platform's own address is not known (FORGE_PUBLIC_URL), so the provider "
                                  "would have nowhere to send the owner back to.")
     return f"{base}/org/{project.org_id}/projects/{project.id}?settings=domains&dc={quote(name, safe='')}"
 
