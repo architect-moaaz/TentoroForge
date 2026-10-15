@@ -47,7 +47,8 @@ class Feature:
 
 CATALOGUE: tuple[Feature, ...] = (
     # Build
-    Feature("drafts_room", "Drafts Room", "Study references and compose drafts before a build.", "build", True),
+    # Off until the super admin opens it: the platform owner's call, 2026-10-15.
+    Feature("drafts_room", "Drafts Room", "Study references and compose drafts before a build.", "build", False),
     Feature("discover", "Discover", "Guided discovery conversations that write a brief.", "build", True),
     Feature("templates", "Templates", "Start an app from a template or a suggested app.", "build", True),
     Feature("portal", "Portal", "The organisation's portal of apps, tasks and activity.", "build", True),
