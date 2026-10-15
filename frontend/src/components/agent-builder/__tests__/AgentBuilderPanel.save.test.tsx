@@ -125,16 +125,43 @@ async function click(el: Element) {
   });
 }
 
+/** The agent's own saves: the platform's answer for the save URL, and the calls made to it. */
+const SAVE_URL = "/api/projects/p1/agent-definitions";
+const saves = () => apiPost.mock.calls.filter((c) => String(c[0]).split("?")[0] === SAVE_URL);
+const wait = (ms: number) => act(async () => { await new Promise((r) => setTimeout(r, ms)); });
+/** Long enough for the builder's own save-after-a-pause (1.2 seconds) to have happened. */
+const AUTOSAVE_WAIT = 1500;
+const nameBox = () => container.querySelector('input[placeholder="Agent name"]') as HTMLInputElement;
+const rename = (value: string) =>
+  act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(nameBox(), value);
+    nameBox().dispatchEvent(new Event("input", { bubbles: true }));
+  });
+const saveState = () => container.querySelector('[data-testid="save-state"]')?.textContent ?? "";
+
 describe("AgentBuilderPanel — a failed save is reported, not thrown", () => {
-  it("Save shows the server's words in the status bar", async () => {
-    apiPost.mockRejectedValueOnce(new Error("FileNotFoundError: the project folder is missing"));
+  it("a save that fails by itself shows the server's words in the status bar, and can be tried again", async () => {
+    apiPost.mockImplementation(async (url: string) => {
+      if (url.split("?")[0] === SAVE_URL) throw new Error("FileNotFoundError: the project folder is missing");
+      return { findings: [] };
+    });
     await mountEditor();
-    await click(button(/^\s*Save\s*$/));
+    await rename("A better name");
+    await wait(AUTOSAVE_WAIT);
 
     const bar = container.querySelector('[role="status"]');
     expect(bar?.textContent).toBe("Error: FileNotFoundError: the project folder is missing");
     expect(bar?.className).toMatch(/red/);
+    expect(saveState()).toBe("Not saved. Try again");
+    expect(saves(), "it does not keep hammering a server that said no").toHaveLength(1);
     expect(unhandled).toEqual([]);
+
+    // the server is back: pressing the status tries again, the message goes away and the toolbar says so
+    apiPost.mockImplementation(async () => ({ saved: true }));
+    await click(container.querySelector('[data-testid="save-state"]')!);
+    expect(saves()).toHaveLength(2);
+    expect(container.querySelector('[role="status"]')).toBeNull();
+    expect(saveState()).toBe("Saved");
   });
 
   it("Apply stops at a failed save and never calls the server's apply", async () => {
@@ -147,12 +174,13 @@ describe("AgentBuilderPanel — a failed save is reported, not thrown", () => {
     expect(unhandled).toEqual([]);
   });
 
-  it("a good save says so", async () => {
+  it("a good save is quiet: no message in the status bar, just Saved in the toolbar", async () => {
     await mountEditor();
-    await click(button(/^\s*Save\s*$/));
-    const bar = container.querySelector('[role="status"]');
-    expect(bar?.textContent).toBe("Saved.");
-    expect(bar?.className).not.toMatch(/red/);
+    await rename("A better name");
+    await wait(AUTOSAVE_WAIT);
+    expect(saves()).toHaveLength(1);
+    expect(container.querySelector('[role="status"]')).toBeNull();
+    expect(saveState()).toBe("Saved");
   });
 
   it("the server's final message stays visible after Apply finishes", async () => {
@@ -180,15 +208,134 @@ describe("AgentBuilderPanel — a failed save is reported, not thrown", () => {
   });
 
   it("opening the list again clears the last message", async () => {
-    apiPost.mockRejectedValueOnce(new Error("boom"));
+    apiPost.mockImplementation(async (url: string) => {
+      if (url.split("?")[0] === SAVE_URL) throw new Error("boom");
+      return { findings: [] };
+    });
     await mountEditor();
-    await click(button(/^\s*Save\s*$/));
+    await rename("A better name");
+    await wait(AUTOSAVE_WAIT);
     expect(container.querySelector('[role="status"]')).not.toBeNull();
+    apiPost.mockImplementation(async () => ({ saved: true }));
 
     // back to the list, then into a new agent
     const back = container.querySelector("button svg.lucide-arrow-left")?.closest("button") as HTMLButtonElement;
     await click(back);
     await click(button(/New Agent/));
     expect(container.querySelector('[role="status"]')).toBeNull();
+  });
+});
+
+
+// ── no Save button: the agent saves itself ───────────────────────────────
+
+describe("AgentBuilderPanel — the agent saves itself", () => {
+  it("has no Save button any more", async () => {
+    await mountEditor();
+    expect(button(/^\s*Save\s*$/)).toBeUndefined();
+    expect(container.textContent).toContain("Saves as you edit");
+  });
+
+  it("does not save an agent nobody has touched: opening a new agent and leaving leaves nothing behind", async () => {
+    await mountEditor();
+    await wait(AUTOSAVE_WAIT);
+    expect(saves()).toHaveLength(0);
+    expect(saveState()).toBe("Saves as you edit");
+  });
+
+  it("saves a change a moment after it, with what was typed, and says Saved", async () => {
+    await mountEditor();
+    await rename("Refund helper");
+    expect(saveState(), "between the change and the save").toBe("Unsaved changes");
+    expect(saves()).toHaveLength(0);
+    await wait(AUTOSAVE_WAIT);
+    expect(saves()).toHaveLength(1);
+    expect((saves()[0][1] as any).name).toBe("Refund helper");
+    expect(saveState()).toBe("Saved");
+    await wait(AUTOSAVE_WAIT);
+    expect(saves(), "nothing changed since: nothing saved again").toHaveLength(1);
+  });
+
+  it("saves once for a burst of typing, not once per key", async () => {
+    await mountEditor();
+    await rename("R");
+    await wait(300);
+    await rename("Re");
+    await wait(300);
+    await rename("Refund");
+    await wait(AUTOSAVE_WAIT);
+    expect(saves()).toHaveLength(1);
+    expect((saves()[0][1] as any).name).toBe("Refund");
+  });
+
+  it("saves a change made just before going back to the list, instead of losing it", async () => {
+    await mountEditor();
+    await rename("Quick change");
+    const back = container.querySelector("button svg.lucide-arrow-left")?.closest("button") as HTMLButtonElement;
+    await click(back);
+    expect(saves()).toHaveLength(1);
+    expect((saves()[0][1] as any).name).toBe("Quick change");
+  });
+
+  it("Apply still saves first, so what is installed is what is on screen", async () => {
+    await mountEditor();
+    await rename("Applied name");
+    fetchSpy.mockResolvedValue({ ok: true, body: { getReader: () => ({ read: async () => ({ done: true, value: undefined }) }) } });
+    await click(button(/Apply/));
+    expect(saves().length).toBeGreaterThanOrEqual(1);
+    expect((saves()[0][1] as any).name).toBe("Applied name");
+  });
+});
+
+// ── the Diagram button and the components ────────────────────────────────
+
+describe("AgentBuilderPanel — the diagram page and its components", () => {
+  const palette = () => container.textContent?.includes("Agent Nodes") ?? false;
+  const diagram = () => button(/^\s*Diagram\s*$/);
+
+  it("has a Diagram button where Save used to be, in front of Test, Find problems and Watch live", async () => {
+    await mountEditor();
+    const labels = [...container.querySelectorAll("button")].map((b) => (b.textContent ?? "").trim());
+    const at = (re: RegExp) => labels.findIndex((l) => re.test(l));
+    expect(at(/^Diagram$/)).toBeGreaterThan(-1);
+    expect(at(/^Diagram$/)).toBeLessThan(at(/^Test$/));
+    expect(at(/^Test$/)).toBeLessThan(at(/Find problems/));
+    expect(at(/Find problems/)).toBeLessThan(at(/Watch live/));
+  });
+
+  it("shows the components only on the diagram page", async () => {
+    await mountEditor();
+    expect(palette(), "on the diagram page").toBe(true);
+    expect(diagram().getAttribute("aria-pressed")).toBe("true");
+
+    await click(button(/^\s*Test\s*$/));
+    expect(palette(), "on the Test page").toBe(false);
+    expect(diagram().getAttribute("aria-pressed")).toBe("false");
+
+    await click(diagram());
+    expect(palette()).toBe(true);
+
+    await click(button(/Find problems/));
+    expect(palette(), "on the Find problems page").toBe(false);
+    expect(container.querySelector('[data-testid="agent-blast"]')).not.toBeNull();
+
+    await click(diagram());
+    expect(palette()).toBe(true);
+    expect(container.querySelector('[data-testid="agent-blast"]'), "the page is gone: the drawing is back").toBeNull();
+
+    await click(button(/Watch live/));
+    expect(palette(), "on the Watch live page").toBe(false);
+    await click(diagram());
+    expect(palette()).toBe(true);
+  });
+
+  it("takes the person back to the drawing from wherever they are, with one press", async () => {
+    await mountEditor();
+    await click(button(/Find problems/));
+    await click(button(/^\s*Test\s*$/));
+    await click(diagram());
+    expect(diagram().getAttribute("aria-pressed")).toBe("true");
+    expect(container.querySelector('[data-testid="agent-blast"]')).toBeNull();
+    expect(palette()).toBe(true);
   });
 });
