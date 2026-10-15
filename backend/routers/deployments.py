@@ -220,6 +220,7 @@ async def latest_deployment(
         "target": r.target,
         "status": r.status,
         "url": r.url,
+        "deployment_url": r.deployment_url,
         "error": r.error,
         "created_at": r.created_at.isoformat() if r.created_at else None,
         "finished_at": r.finished_at.isoformat() if r.finished_at else None,
@@ -279,6 +280,7 @@ async def list_deployments(
             "target": r.target,
             "status": r.status,
             "url": r.url,
+            "deployment_url": r.deployment_url,
             "error": r.error,
             "created_at": r.created_at.isoformat() if r.created_at else None,
             "started_at": r.started_at.isoformat() if r.started_at else None,
@@ -330,7 +332,9 @@ async def rollback(
         project_id=d.project_id,
         target="vercel",
         status="succeeded",
+        # The app's address serves this build again; the build's own address is its own.
         url=d.url,
+        deployment_url=d.deployment_url or d.url,
         vercel_project_id=d.vercel_project_id,
         vercel_deployment_id=d.vercel_deployment_id,
         neon_project_id=d.neon_project_id,
@@ -341,4 +345,4 @@ async def rollback(
     db.add(row)
     await db.commit()
 
-    return {"url": d.url, "rollback_id": str(row.id)}
+    return {"url": d.url, "deployment_url": d.deployment_url or d.url, "rollback_id": str(row.id)}

@@ -51,7 +51,9 @@ interface LatestDeployment {
   id: string;
   target: string;
   status: string;
+  /** The app's own address: its main domain, else the production alias — the same after every publish. */
   url: string | null;
+  deployment_url?: string | null;
   error: string | null;
   created_at: string | null;
   finished_at: string | null;

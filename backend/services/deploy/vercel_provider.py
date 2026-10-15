@@ -505,8 +505,17 @@ class VercelDeployProvider:
                 info = await self.vercel.get_deployment(deployment_id)
                 state = info.get("readyState") or info.get("state") or ""
                 if state in ("READY", "READY_STATE_READY"):
-                    url = f"https://{info.get('url', vercel_url)}"
-                    row.url = url
+                    # THIS BUILD'S ADDRESS, and THE APP'S. Vercel mints one
+                    # per deployment, frozen at that build; the app's own is
+                    # its main domain or the production alias, which moves to
+                    # the newest publish. People are given the app's.
+                    deployment_url = f"https://{info.get('url', vercel_url)}"
+                    from services.deploy.sign_in_address import stable_address
+                    aliases = [a for a in (info.get("alias") or []) if isinstance(a, str)]
+                    row.deployment_url = deployment_url
+                    row.url = stable_address(snapshot.output_dir, _slugify(snapshot.project_slug),
+                                             next((a for a in aliases if a.endswith(".vercel.app")), ""))
+                    url = row.url
                     row.finished_at = datetime.now(timezone.utc)
 
                     # THE APP'S OTHER ADDRESSES: its Tentoro address, and any
