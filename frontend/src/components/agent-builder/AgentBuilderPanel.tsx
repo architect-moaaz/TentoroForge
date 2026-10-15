@@ -80,7 +80,9 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
   // The agent as it was when opened or drawn (saved or not). "Touched" means the person has changed it since, and only
   // a touched agent saves itself: opening "New Agent" and leaving again leaves nothing behind.
   const [baseKey, setBaseKey] = useState<string | null>(null);
-  const [saveState, setSaveState] = useState<"idle" | "saving" | "error">("idle");
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "error" | "blocked">("idle");
+  // A save the server refused after verifying the drawing: what is wrong, and whether it could be saved on purpose.
+  const [blocked, setBlocked] = useState<{ kind: string; problems: AgentFinding[] } | null>(null);
   const [showTestConsole, setShowTestConsole] = useState(false);
   // Watch the running app's real chats live: the canvas lights up as they happen.
   const [showWatch, setShowWatch] = useState(false);
@@ -259,8 +261,9 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
     return out;
   }, [findings]);
 
-  // Save current agent
-  const saveAgent = useCallback(async () => {
+  // Save current agent. The server verifies the drawing first and refuses a corrupt one outright; `force` is the builder
+  // saying "save it anyway" about problems that are not corruption (Apply does, since it asks its own question).
+  const saveAgent = useCallback(async (force = false) => {
     if (!currentAgent) return;
     const payload = {
       id: currentAgent.id,
@@ -270,7 +273,7 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
       edges,
       config: currentAgent.config,
     };
-    await api.post(`/api/projects/${projectId}/agent-definitions`, payload);
+    await api.post(`/api/projects/${projectId}/agent-definitions${force ? "?force=true" : ""}`, payload);
     setSavedKey(draftKeyOf(editName, editDescription, nodes, edges, currentAgent.config));
     queryClient.invalidateQueries({
       queryKey: ["project", projectId, "agent-definitions"],
@@ -289,15 +292,26 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
 
   // A failed save is said in the status bar, in words. The message is kept so a later good save can take it away again.
   const saveFailure = useRef<string | null>(null);
-  const autoSave = useCallback(async () => {
+  const autoSave = useCallback(async (force = false) => {
     setSaveState("saving");
     try {
-      await saveAgent();
+      await saveAgent(force);
       setSaveState("idle");
+      setBlocked(null);
       const earlier = saveFailure.current;
       saveFailure.current = null;
       if (earlier) setApplyStatus((now) => (now === earlier ? null : now));
     } catch (e) {
+      // The server verified the drawing and said no (HTTP 422 with the problems): that is not a failure of saving, it is
+      // a drawing that is not right yet. It says what and where, and the last saved version stays as it was.
+      const refused = (e as { status?: number; body?: { detail?: { kind?: string; problems?: AgentFinding[] } } })?.body;
+      if ((e as { status?: number })?.status === 422 && Array.isArray(refused?.detail?.problems)) {
+        const problems = refused!.detail!.problems!;
+        setBlocked({ kind: refused!.detail!.kind ?? "problems", problems });
+        setSaveState("blocked");
+        setFindings((now) => (now.length ? now : problems));
+        return;
+      }
       const message = `Error: ${e instanceof Error ? e.message : String(e)}`;
       saveFailure.current = message;
       setApplyStatus(message);
@@ -315,7 +329,7 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
   // Leaving the builder (going back, or the page closing the panel) must not lose a change made a moment ago.
   const leaving = useRef<() => void>(() => {});
   leaving.current = () => {
-    if (needsSave) void saveAgent().catch(() => {});
+    if (needsSave && saveState !== "blocked") void saveAgent().catch(() => {});
   };
   useEffect(() => () => leaving.current(), []);
 
@@ -338,7 +352,7 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
     if (!currentAgent) return;
     setConfirmingApply(false);
     try {
-      await saveAgent();
+      await saveAgent(true);
     } catch (e) {
       // Reported where the person is looking; thrown from a click handler it
       // surfaced as an uncaught "Runtime ApiError" overlay with no way forward.
@@ -428,14 +442,20 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
 
   // Back to list
   const backToList = useCallback(() => {
-    if (needsSave) void saveAgent().catch(() => {});
+    if (needsSave && saveState === "blocked") {
+      // refused by the verification: leaving would lose them, so ask
+      if (typeof window !== "undefined" && !window.confirm("Your changes have problems, so they are not saved. Leave without saving them?")) return;
+    } else if (needsSave) {
+      void saveAgent().catch(() => {});
+    }
     saveFailure.current = null;
     setSaveState("idle");
+    setBlocked(null);
     setCurrentAgent(null);
     setSelectedNodeId(null);
     setShowTestConsole(false);
     setApplyStatus(null);
-  }, [needsSave, saveAgent, setCurrentAgent, setSelectedNodeId]);
+  }, [needsSave, saveState, saveAgent, setCurrentAgent, setSelectedNodeId]);
 
   // The diagram page: the drawing, with the components to build it. The other pages (Test, Find problems, Watch live)
   // are closed to get back to it.
@@ -588,6 +608,15 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
             <button type="button" className="mr-1 text-xs text-red-700 underline" onClick={() => void autoSave()} data-testid="save-state">
               Not saved. Try again
             </button>
+          ) : saveState === "blocked" && blocked ? (
+            <span className="mr-1 flex items-center gap-1.5 text-xs text-red-700" data-testid="save-state" title={blocked.problems[0]?.message}>
+              Not saved: {blocked.problems.length === 1 ? "1 problem" : `${blocked.problems.length} problems`} to fix
+              {blocked.kind !== "corrupt" && (
+                <button type="button" className="underline" onClick={() => void autoSave(true)} data-testid="save-anyway">
+                  Save anyway
+                </button>
+              )}
+            </span>
           ) : saveState === "saving" ? (
             <span className="mr-1 text-xs text-muted-foreground" data-testid="save-state">
               Saving…

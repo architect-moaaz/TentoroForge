@@ -4,6 +4,7 @@ import json
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -359,20 +360,49 @@ async def blast_fixes(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+def _verified_for_save(project, graph: dict[str, Any], force: bool) -> None:
+    """The drawing is verified BEFORE anything is written, and a save that fails says why (HTTP 422 with the problems).
+
+    * A drawing that is corrupt (an unsafe id, two boxes with one id, an arrow to nowhere...) is never saved, even when
+      the builder says to: it could not be loaded back, and the id becomes a file name.
+    * A drawing with errors (no System Prompt box, a tool for a table the app does not have...) is held back unless
+      ``force`` is set, which is the builder saying "save it anyway, on purpose". Apply does that, because it asks its
+      own question about the same problems first.
+    Warnings and notes never hold a save back."""
+    from services.agent_check import check_agent, verify_graph
+    from services.agent_runtime_install import resolve_roots
+
+    sound = verify_graph(graph)
+    if sound["corrupt"]:
+        raise HTTPException(status_code=422, detail={
+            "msg": "This drawing cannot be saved: " + sound["corrupt"][0]["message"], "kind": "corrupt", "problems": sound["corrupt"]})
+    if force:
+        return
+    _, app_root = resolve_roots(project.output_dir)
+    errors = [f for f in check_agent(graph, app_root)["findings"] if f["severity"] == "error"]
+    if errors:
+        n = len(errors)
+        raise HTTPException(status_code=422, detail={
+            "msg": f"Not saved: {n} problem{'s' if n != 1 else ''} to fix first. {errors[0]['message']}", "kind": "problems", "problems": errors})
+
+
 @router.post("/api/projects/{project_id}/agent-definitions", status_code=201)
 async def save_agent_definition(
     project_id: uuid.UUID,
     req: AgentDefinitionSave,
+    force: bool = False,
     user: PlatformUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create or update an agent definition."""
+    """Create or update an agent definition, after verifying the drawing (see ``_verified_for_save``)."""
     project = await get_project_with_auth(project_id, user, db)
     if not project.output_dir:
         raise HTTPException(status_code=400, detail="No output directory")
 
+    data = req.model_dump()
+    _verified_for_save(project, data, force)
     agent_file = _agent_defs_path(project.output_dir, create=True) / f"{req.id}.json"
-    agent_file.write_text(json.dumps(req.model_dump(), indent=2))
+    agent_file.write_text(json.dumps(data, indent=2))
     return {"id": req.id, "saved": True}
 
 
@@ -381,20 +411,22 @@ async def update_agent_definition(
     project_id: uuid.UUID,
     agent_id: str,
     req: AgentDefinitionSave,
+    force: bool = False,
     user: PlatformUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update an existing agent definition."""
+    """Update an existing agent definition, after verifying the drawing (see ``_verified_for_save``)."""
     project = await get_project_with_auth(project_id, user, db)
     if not project.output_dir:
         raise HTTPException(status_code=400, detail="No output directory")
 
+    data = req.model_dump()
+    data["id"] = agent_id
+    _verified_for_save(project, data, force)
     agent_file = _agent_defs_path(project.output_dir) / f"{agent_id}.json"
     if not agent_file.exists():
         raise HTTPException(status_code=404, detail="Agent definition not found")
 
-    data = req.model_dump()
-    data["id"] = agent_id
     agent_file.write_text(json.dumps(data, indent=2))
     return {"id": agent_id, "saved": True}
 
