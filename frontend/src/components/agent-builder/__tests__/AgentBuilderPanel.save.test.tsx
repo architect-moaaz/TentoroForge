@@ -341,6 +341,27 @@ describe("AgentBuilderPanel — the diagram page and its components", () => {
 });
 
 
+// ── a message can be put away ────────────────────────────────────────────
+
+describe("AgentBuilderPanel — putting a message away", () => {
+  it("the status message has an X, and pressing it removes the message", async () => {
+    apiPost.mockImplementation(async (url: string) => {
+      if (url.split("?")[0] === SAVE_URL) throw new Error("The platform said no");
+      return { findings: [] };
+    });
+    await mountEditor();
+    await rename("A better name");
+    await wait(AUTOSAVE_WAIT);
+    const bar = container.querySelector('[role="status"]')!;
+    expect(bar.textContent).toBe("Error: The platform said no");
+    const close = bar.querySelector('[aria-label="Dismiss this message"]') as HTMLButtonElement;
+    expect(close).not.toBeNull();
+    await click(close);
+    expect(container.querySelector('[role="status"]')).toBeNull();
+  });
+});
+
+
 // ── the drawing is verified before it is saved ───────────────────────────
 
 /** What the platform answers when it verified the drawing and refused: HTTP 422 with the problems. */

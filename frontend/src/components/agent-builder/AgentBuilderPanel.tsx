@@ -7,6 +7,7 @@ import {
   Plus,
   Trash2,
   Workflow,
+  X,
   Play,
   ArrowLeft,
   Loader2,
@@ -697,19 +698,29 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
           role="status"
           className={
             /^(error|failed)/i.test(applyStatus)
-              ? "border-b bg-red-50 px-4 py-1.5"
-              : "border-b bg-blue-50 px-4 py-1.5"
+              ? "flex items-start gap-2 border-b bg-red-50 px-4 py-1.5"
+              : "flex items-start gap-2 border-b bg-blue-50 px-4 py-1.5"
           }
         >
           <p
             className={
               /^(error|failed)/i.test(applyStatus)
-                ? "text-xs text-red-700"
-                : "text-xs text-blue-700"
+                ? "flex-1 text-xs text-red-700"
+                : "flex-1 text-xs text-blue-700"
             }
           >
             {applyStatus}
           </p>
+          {/* a message that has been read can be put away */}
+          <button
+            type="button"
+            aria-label="Dismiss this message"
+            title="Dismiss"
+            className="mt-0.5 shrink-0 rounded p-0.5 text-slate-500 hover:bg-black/5 hover:text-slate-800"
+            onClick={() => setApplyStatus(null)}
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
         </div>
       )}
 
