@@ -60,6 +60,15 @@ REAP_EVERY_S = 60
 #: server fails on its own instead of taking the host and everyone's turns.
 HEAP_MB = int(os.environ.get("FORGE_DEV_SERVER_HEAP_MB") or 2560)
 
+#: The heap a server for TRYING an app runs with — the page review, the
+#: statements, Smith's trials. A try opens every page of the app in one
+#: sitting, and `next dev` keeps each page it compiled (~6,500 modules a
+#: page); at 2.5 GB Next's own watchdog restarted the server ten times in one
+#: turn (Personal Finance, forge-v3, 2026-10-15 05:00), each restart dropping
+#: the request in flight. A Preview a person browses keeps the smaller cap;
+#: at most `MAX_TRIALS` of these run at once.
+TRIAL_HEAP_MB = int(os.environ.get("FORGE_TRIAL_HEAP_MB") or 4096)
+
 #: How many dev servers for trying an app — the statements, Smith's trials,
 #: the page review — may run at once. More wait for a slot.
 MAX_TRIALS = int(os.environ.get("FORGE_MAX_TRIAL_SERVERS") or 2)
@@ -68,13 +77,14 @@ MAX_TRIALS = int(os.environ.get("FORGE_MAX_TRIAL_SERVERS") or 2)
 SLOT_WAIT_S = float(os.environ.get("FORGE_TRIAL_SLOT_WAIT_S") or 900)
 
 
-def capped_env(env: dict[str, str]) -> dict[str, str]:
+def capped_env(env: dict[str, str], *, heap_mb: int | None = None) -> dict[str, str]:
     """`env` with the dev server's heap cap in `NODE_OPTIONS` (one already
-    there is kept)."""
+    there is kept). `heap_mb` names the cap; a Preview's by default."""
+    cap = HEAP_MB if heap_mb is None else int(heap_mb)
     opts = str(env.get("NODE_OPTIONS") or "")
-    if "--max-old-space-size" in opts or HEAP_MB <= 0:
+    if "--max-old-space-size" in opts or cap <= 0:
         return dict(env)
-    return {**env, "NODE_OPTIONS": f"{opts} --max-old-space-size={HEAP_MB}".strip()}
+    return {**env, "NODE_OPTIONS": f"{opts} --max-old-space-size={cap}".strip()}
 
 
 class SlotUnavailable(RuntimeError):

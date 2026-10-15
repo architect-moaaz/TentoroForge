@@ -188,8 +188,10 @@ def _listening(port: int | None) -> bool:
 
 
 def _capped(env: dict) -> dict:
-    from services.dev_servers import capped_env
-    return capped_env(env)
+    """A server for trying the app runs with the trial heap (`TRIAL_HEAP_MB`):
+    it opens every page in one sitting."""
+    from services.dev_servers import TRIAL_HEAP_MB, capped_env
+    return capped_env(env, heap_mb=TRIAL_HEAP_MB)
 
 
 class RunningApp:
