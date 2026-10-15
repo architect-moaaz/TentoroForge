@@ -33,6 +33,76 @@ def _finding(severity: str, code: str, message: str, node_id: str | None = None)
     return {"severity": severity, "code": code, "message": message, "nodeId": node_id}
 
 
+#: What an agent's id may be: it becomes the name of a file, so nothing that could name another place.
+SAFE_AGENT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$")
+#: The kinds of box there are.
+BOX_TYPES = {"system_prompt", "tool", "guardrail", "memory", "human_handoff", "router"}
+
+
+def verify_graph(graph: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    """Is this drawing a sound agent at all? Said before anything is saved, in two groups:
+
+    * ``corrupt``: a drawing that cannot be stored or loaded back (an id that is not safe to use as a file name, two
+      boxes with one id, a box of a kind that does not exist, an arrow to a box that is not there, a box whose settings
+      are not settings). Never saved, however it is asked.
+    * ``wrong``: a drawing that is intact but is not an agent that can work (no System Prompt box, or several). Saved
+      only when the builder says to on purpose.
+
+    Each finding is an ``error`` pinned to the box it is about. Pure rules, no model, no app."""
+    corrupt: list[dict[str, Any]] = []
+    wrong: list[dict[str, Any]] = []
+
+    agent_id = graph.get("id")
+    if not isinstance(agent_id, str) or not SAFE_AGENT_ID.match(agent_id):
+        corrupt.append(_finding("error", "bad_agent_id", "The agent's id is not valid: it may use letters, numbers, '-' and '_' only (and at most 80).", None))
+
+    raw_nodes = graph.get("nodes")
+    nodes = [n for n in raw_nodes if isinstance(n, dict)] if isinstance(raw_nodes, list) else []
+    if not isinstance(raw_nodes, list) or len(nodes) != len(raw_nodes):
+        corrupt.append(_finding("error", "bad_boxes", "The drawing's boxes are not a list of boxes.", None))
+
+    ids: set[str] = set()
+    for n in nodes:
+        nid = n.get("id")
+        if not isinstance(nid, str) or not nid.strip():
+            corrupt.append(_finding("error", "box_without_id", "A box has no id.", None))
+            continue
+        if nid in ids:
+            corrupt.append(_finding("error", "duplicate_box", f"Two boxes share the id '{nid}'.", nid))
+        ids.add(nid)
+        if _kind(n) not in BOX_TYPES:
+            corrupt.append(_finding("error", "unknown_box", f"A box is of a kind that does not exist ('{_kind(n)}').", nid))
+        config = (n.get("data") or {}).get("config") if isinstance(n.get("data"), dict) else None
+        if isinstance(n.get("data"), dict) and config is not None and not isinstance(config, dict):
+            corrupt.append(_finding("error", "bad_config", "A box's settings are not a set of settings.", nid))
+
+    raw_edges = graph.get("edges")
+    seen: set[tuple[Any, Any, Any]] = set()
+    for e in (raw_edges if isinstance(raw_edges, list) else []):
+        if not isinstance(e, dict):
+            corrupt.append(_finding("error", "bad_arrow", "An arrow in the drawing is not an arrow.", None))
+            continue
+        s, t = e.get("source"), e.get("target")
+        if s not in ids or t not in ids:
+            corrupt.append(_finding("error", "dangling_arrow", "An arrow points to a box that is not in the drawing.", s if s in ids else t if t in ids else None))
+            continue
+        if s == t:
+            corrupt.append(_finding("error", "self_arrow", "A box has an arrow to itself.", s))
+            continue
+        key = (s, t, e.get("sourceHandle"))
+        if key in seen:
+            corrupt.append(_finding("error", "duplicate_arrow", "Two identical arrows join the same two boxes.", s))
+        seen.add(key)
+
+    prompts = [n for n in nodes if _kind(n) == "system_prompt"]
+    if not prompts:
+        wrong.append(_finding("error", "no_prompt_box", "The agent has no System Prompt box, so it has no instructions to follow.", None))
+    elif len(prompts) > 1:
+        wrong.append(_finding("error", "many_prompt_boxes",
+                              f"There are {len(prompts)} System Prompt boxes and only the first is used: keep one.", str(prompts[1].get("id"))))
+    return {"corrupt": corrupt, "wrong": wrong}
+
+
 def _kind(node: dict[str, Any]) -> str:
     return str((node.get("data") or {}).get("nodeType") or node.get("type") or "")
 
@@ -94,6 +164,10 @@ def check_agent(graph: dict[str, Any], app_root: Path | None = None) -> dict[str
 
     sp = next((n for n in nodes if _kind(n) == "system_prompt"), None)
     sp_id = str(sp.get("id")) if sp else None
+
+    # 0 — is it a sound drawing at all? The same rules a save is held to, so what is said here is what stops a save
+    sound = verify_graph(graph)
+    findings.extend(sound["corrupt"] + sound["wrong"])
 
     # 1 — what the compiler already says, each pinned to its box
     for w in compiled.warnings:

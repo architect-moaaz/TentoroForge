@@ -200,3 +200,85 @@ def test_email_for_handoffs_is_optional_and_a_missing_setup_is_only_a_warning(tm
     assert not by_code(check_agent(g, app), "handoff_email_not_set_up")
     (app / ".env.local").write_text("ANTHROPIC_API_KEY=sk-ant-test\n", encoding="utf-8")
     assert not by_code(check_agent(graph(PROMPT, handoff_box(notify={"email": False})), app), "handoff_email_not_set_up")
+
+
+# ── is the drawing a sound agent at all? (verified before anything is saved) ──────────────────────────
+
+import copy  # noqa: E402
+
+from services.agent_check import verify_graph  # noqa: E402
+
+
+def prompt():
+    """The shared PROMPT box is never edited in place: these tests change what they are given."""
+    return copy.deepcopy(PROMPT)
+
+
+def sound(g):
+    return verify_graph(g)
+
+
+def codes(found):
+    return [f["code"] for f in found]
+
+
+def test_a_sound_drawing_has_nothing_corrupt_and_nothing_wrong():
+    g = graph(prompt(), tool("t1", "lookup", tool_type="function", code="return 1;"))
+    g["id"] = "support-1"
+    g["edges"] = [{"id": "e1", "source": "sp", "target": "t1"}]
+    assert sound(g) == {"corrupt": [], "wrong": []}
+
+
+@pytest.mark.parametrize("bad", ["../../etc/passwd", "a/b", "a b", "", ".hidden", "x" * 81, "é"])
+def test_an_id_that_could_name_another_place_is_corrupt(bad):
+    g = graph(prompt())
+    g["id"] = bad
+    assert "bad_agent_id" in codes(sound(g)["corrupt"])
+
+
+def test_boxes_must_have_unique_ids_real_kinds_and_settings():
+    g = graph(prompt(), node("sp", "tool", "Same id", {}), node("x", "wizard", "Not a kind", {}))
+    g["id"] = "a"
+    assert {"duplicate_box", "unknown_box"} <= set(codes(sound(g)["corrupt"]))
+    h = graph(prompt())
+    h["id"] = "a"
+    h["nodes"][0]["data"]["config"] = "not settings"
+    assert "bad_config" in codes(sound(h)["corrupt"])
+    k = graph(prompt())
+    k["id"] = "a"
+    k["nodes"].append({"data": {"nodeType": "tool"}})
+    assert "box_without_id" in codes(sound(k)["corrupt"])
+
+
+def test_arrows_must_join_two_boxes_that_are_there_once_each():
+    g = graph(prompt(), tool("t1", "lookup", tool_type="function", code="return 1;"))
+    g["id"] = "a"
+    g["edges"] = [
+        {"id": "1", "source": "sp", "target": "ghost"},
+        {"id": "2", "source": "t1", "target": "t1"},
+        {"id": "3", "source": "sp", "target": "t1"},
+        {"id": "4", "source": "sp", "target": "t1"},
+        "not an arrow",
+    ]
+    got = set(codes(sound(g)["corrupt"]))
+    assert {"dangling_arrow", "self_arrow", "duplicate_arrow", "bad_arrow"} <= got
+
+
+def test_a_drawing_that_is_intact_but_cannot_be_an_agent_is_wrong_not_corrupt():
+    none = graph(tool("t1", "lookup", tool_type="function", code="return 1;"))
+    none["id"] = "a"
+    assert codes(sound(none)["corrupt"]) == [] and codes(sound(none)["wrong"]) == ["no_prompt_box"]
+    two = graph(prompt(), node("sp2", "system_prompt", "Second", {"prompt": "Also."}))
+    two["id"] = "a"
+    assert codes(sound(two)["wrong"]) == ["many_prompt_boxes"]
+    assert sound(two)["wrong"][0]["nodeId"] == "sp2", "pinned to the box to remove"
+
+
+def test_the_checks_strip_says_all_of_it_as_errors_so_it_matches_what_stops_a_save():
+    none = graph(tool("t1", "lookup", tool_type="function", code="return 1;"))
+    none["id"] = "a"
+    found = {f["code"]: f for f in check_agent(none)["findings"]}
+    assert found["no_prompt_box"]["severity"] == "error"
+    bad = graph(prompt())
+    bad["id"] = "../x"
+    assert any(f["code"] == "bad_agent_id" and f["severity"] == "error" for f in check_agent(bad)["findings"])

@@ -314,3 +314,90 @@ async def test_apply_on_a_project_with_no_app_says_so_and_scaffolds_nothing(draf
     assert "complete" not in [n for n, _ in events], "it must not claim success"
     assert not (Path(draft.output_dir) / "src").exists()
 
+
+
+# ---------------------------------------------------------------------------
+# A save is verified first: a corrupt drawing is never written, an error is held back unless asked for
+# ---------------------------------------------------------------------------
+
+def _body(**over):
+    from schemas.agent_builder import AgentDefinitionSave
+
+    return AgentDefinitionSave(**{**{k: GRAPH[k] for k in ("id", "name", "nodes", "edges")}, **over})
+
+
+async def _save(draft, body, **kw):
+    from routers import agent_builder
+
+    return await agent_builder.save_agent_definition(project_id=draft.id, req=body, user=_User(), db=None, **kw)
+
+
+@pytest.mark.asyncio
+async def test_a_corrupt_drawing_is_never_saved_even_when_the_builder_insists(draft):
+    from pathlib import Path
+
+    from fastapi import HTTPException
+
+    bad = _body(edges=[{"id": "e", "source": "sp", "target": "ghost"}])
+    for force in (False, True):
+        with pytest.raises(HTTPException) as e:
+            await _save(draft, bad, force=force)
+        assert e.value.status_code == 422
+        assert e.value.detail["kind"] == "corrupt"
+        assert [p["code"] for p in e.value.detail["problems"]] == ["dangling_arrow"]
+        assert e.value.detail["msg"].startswith("This drawing cannot be saved:")
+    assert not Path(draft.output_dir).exists(), "nothing was written, not even the folder"
+
+
+@pytest.mark.asyncio
+async def test_an_id_that_climbs_out_of_the_folder_writes_nothing_anywhere(draft, tmp_path):
+    from fastapi import HTTPException
+
+    for evil in ("../evil", r"..\evil", "a/b", "/abs"):
+        with pytest.raises(HTTPException) as e:
+            await _save(draft, _body(id=evil), force=True)
+        assert e.value.status_code == 422 and e.value.detail["kind"] == "corrupt"
+    assert not list(tmp_path.rglob("evil*")) and not list(tmp_path.rglob("b.json"))
+
+
+@pytest.mark.asyncio
+async def test_a_drawing_with_an_error_is_held_back_and_saved_only_on_purpose(draft):
+    from pathlib import Path
+
+    from fastapi import HTTPException
+
+    no_prompt = _body(nodes=[n for n in GRAPH["nodes"] if n["id"] != "sp"])
+    with pytest.raises(HTTPException) as e:
+        await _save(draft, no_prompt)
+    assert e.value.status_code == 422 and e.value.detail["kind"] == "problems"
+    assert e.value.detail["msg"].startswith("Not saved: 1 problem to fix first.")
+    assert [p["code"] for p in e.value.detail["problems"]] == ["no_prompt_box"]
+    assert not (Path(draft.output_dir) / "agent-definitions" / "support.json").exists()
+
+    out = await _save(draft, no_prompt, force=True)
+    assert out == {"id": "support", "saved": True}
+    assert (Path(draft.output_dir) / "agent-definitions" / "support.json").is_file()
+
+
+@pytest.mark.asyncio
+async def test_a_warning_or_a_note_never_holds_a_save_back(draft):
+    # no tools is only a warning, and a router is only a note
+    quiet = _body(nodes=[GRAPH["nodes"][0]])
+    assert (await _save(draft, quiet)) == {"id": "support", "saved": True}
+
+
+@pytest.mark.asyncio
+async def test_updating_verifies_too_and_the_id_comes_from_the_address(project):
+    from fastapi import HTTPException
+
+    from routers import agent_builder
+
+    no_prompt = _body(id="ignored", nodes=[n for n in GRAPH["nodes"] if n["id"] != "sp"])
+    with pytest.raises(HTTPException) as e:
+        await agent_builder.update_agent_definition(project_id=project.id, agent_id="support", req=no_prompt, user=_User(), db=None)
+    assert e.value.status_code == 422
+    out = await agent_builder.update_agent_definition(project_id=project.id, agent_id="support", req=no_prompt, force=True, user=_User(), db=None)
+    assert out == {"id": "support", "saved": True}
+    from pathlib import Path
+
+    assert json.loads((Path(project.output_dir) / "agent-definitions" / "support.json").read_text())["id"] == "support"

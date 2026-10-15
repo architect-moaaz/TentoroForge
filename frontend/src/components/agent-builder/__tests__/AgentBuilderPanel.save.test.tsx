@@ -339,3 +339,106 @@ describe("AgentBuilderPanel — the diagram page and its components", () => {
     expect(palette()).toBe(true);
   });
 });
+
+
+// ── the drawing is verified before it is saved ───────────────────────────
+
+/** What the platform answers when it verified the drawing and refused: HTTP 422 with the problems. */
+const refusal = (kind: "problems" | "corrupt", problems: Array<{ code: string; message: string }>) =>
+  Object.assign(new Error(`Not saved: ${problems.length} problem${problems.length === 1 ? "" : "s"} to fix first. ${problems[0].message}`), {
+    status: 422,
+    body: { detail: { msg: "…", kind, problems: problems.map((p) => ({ severity: "error", nodeId: null, ...p })) } },
+  });
+const NO_PROMPT = { code: "no_prompt_box", message: "The agent has no System Prompt box, so it has no instructions to follow." };
+const OTHER = { code: "unknown_table", message: "Tool 'list_x' reads 'x', and this app has no such table." };
+const savesWith = (query: string) => saves().filter((c) => String(c[0]).endsWith(query));
+
+describe("AgentBuilderPanel — verified before it is saved", () => {
+  it("says what is wrong when the drawing was refused, instead of calling it a failed save, and offers to save it anyway", async () => {
+    apiPost.mockImplementation(async (url: string) => {
+      if (url.split("?")[0] === SAVE_URL) throw refusal("problems", [NO_PROMPT, OTHER]);
+      return { findings: [] };
+    });
+    await mountEditor();
+    await rename("A better name");
+    await wait(AUTOSAVE_WAIT);
+    expect(saveState()).toContain("Not saved: 2 problems to fix");
+    expect(container.querySelector('[data-testid="save-state"]')?.getAttribute("title")).toContain("no System Prompt box");
+    expect(container.querySelector('[role="status"]'), "a refusal is not an error message").toBeNull();
+    expect(container.querySelector('[data-testid="save-anyway"]')).not.toBeNull();
+    expect(saves(), "it asked once and does not keep asking").toHaveLength(1);
+  });
+
+  it("Save anyway sends the drawing on purpose, and then says Saved", async () => {
+    apiPost.mockImplementation(async (url: string) => {
+      if (url === SAVE_URL) throw refusal("problems", [NO_PROMPT]);
+      return url.startsWith(SAVE_URL) ? { saved: true } : { findings: [] };
+    });
+    await mountEditor();
+    await rename("A better name");
+    await wait(AUTOSAVE_WAIT);
+    expect(saveState()).toContain("Not saved: 1 problem to fix");
+    await click(container.querySelector('[data-testid="save-anyway"]')!);
+    expect(savesWith("?force=true")).toHaveLength(1);
+    expect(saveState()).toBe("Saved");
+  });
+
+  it("a corrupt drawing cannot be saved on purpose: there is no Save anyway", async () => {
+    apiPost.mockImplementation(async (url: string) => {
+      if (url.split("?")[0] === SAVE_URL) throw refusal("corrupt", [{ code: "dangling_arrow", message: "An arrow points to a box that is not in the drawing." }]);
+      return { findings: [] };
+    });
+    await mountEditor();
+    await rename("A better name");
+    await wait(AUTOSAVE_WAIT);
+    expect(saveState()).toContain("Not saved: 1 problem to fix");
+    expect(container.querySelector('[data-testid="save-anyway"]')).toBeNull();
+  });
+
+  it("is verified again with the next change, and saved once it is right", async () => {
+    let right = false;
+    apiPost.mockImplementation(async (url: string) => {
+      if (url.split("?")[0] === SAVE_URL) {
+        if (!right) throw refusal("problems", [NO_PROMPT]);
+        return { saved: true };
+      }
+      return { findings: [] };
+    });
+    await mountEditor();
+    await rename("First try");
+    await wait(AUTOSAVE_WAIT);
+    expect(saveState()).toContain("Not saved");
+    right = true; // the person fixed the drawing
+    await rename("Second try");
+    await wait(AUTOSAVE_WAIT);
+    expect(saves()).toHaveLength(2);
+    expect(saveState()).toBe("Saved");
+  });
+
+  it("Apply saves on purpose, because it asks its own question about the same problems", async () => {
+    await mountEditor();
+    fetchSpy.mockResolvedValue({ ok: true, body: { getReader: () => ({ read: async () => ({ done: true, value: undefined }) }) } });
+    await click(button(/Apply/));
+    expect(savesWith("?force=true").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("going back with changes that were refused asks first, and stays when the person says no", async () => {
+    apiPost.mockImplementation(async (url: string) => {
+      if (url.split("?")[0] === SAVE_URL) throw refusal("problems", [NO_PROMPT]);
+      return { findings: [] };
+    });
+    await mountEditor();
+    await rename("A better name");
+    await wait(AUTOSAVE_WAIT);
+    const back = () => container.querySelector("button svg.lucide-arrow-left")?.closest("button") as HTMLButtonElement;
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    await click(back());
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(confirm.mock.calls[0][0]).toContain("have problems");
+    expect(container.querySelector('input[placeholder="Agent name"]'), "still in the editor").not.toBeNull();
+    confirm.mockReturnValue(true);
+    await click(back());
+    expect(container.querySelector('input[placeholder="Agent name"]'), "left, as the person said").toBeNull();
+    expect(saves(), "the refused drawing was not sent again behind their back").toHaveLength(1);
+  });
+});
