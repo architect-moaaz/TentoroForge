@@ -165,6 +165,8 @@ export interface RouteDefinition {
   label: string;
   target_node_id?: string;
   condition?: string;
+  /** The tools this route points the assistant to (the "routing guide" it reads). */
+  tools?: string[];
 }
 
 export interface RouterConfig {

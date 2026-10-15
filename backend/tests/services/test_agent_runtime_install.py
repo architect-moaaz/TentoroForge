@@ -200,10 +200,31 @@ def test_memory_defaults_and_unsupported_kinds_degrade_loudly():
     assert c.config["memory"] == {"type": "conversation", "maxMessages": 8, "summarizeAfter": 18}
 
 
-def test_a_router_is_carried_but_flagged_as_not_executed():
+def test_a_router_with_no_routes_guides_nothing_and_says_so():
     c = compile_agent(graph(node("r", "router", "R", {"strategy": "fallback"})))
     assert c.config["router"] == {"strategy": "fallback"}
-    assert any("router nodes are carried" in w and "not executed yet" in w for w in c.warnings)
+    assert any("router box has no routes" in w for w in c.warnings)
+    assert "How to choose what to do" not in c.config["systemPrompt"]
+
+
+def test_a_routers_routes_become_a_routing_guide_the_agent_is_given():
+    """The router steers by guiding: each route says what kind of request it is and which of the tools belong to it."""
+    routes = [{"id": "r1", "label": "Tickets", "condition": "Questions about tickets.", "tools": ["list_tickets", "ghost_tool"]},
+              {"id": "r2", "label": "Talk to a person", "condition": "The person asks for a human.", "tools": ["request_human"]},
+              {"id": "r3", "label": "   ", "condition": "ignored: no label"}]
+    c = compile_agent(graph(
+        node("sp", "system_prompt", "P", {"prompt": "You help."}),
+        tool("t1", "list_tickets", tool_type="data_engine", entity="tickets", operation="list"),
+        node("h", "human_handoff", "H", {"handlers": {"roles": ["Admin"]}}),
+        node("r", "router", "R", {"strategy": "intent_classification", "routes": routes})))
+    prompt = c.config["systemPrompt"]
+    assert "How to choose what to do" in prompt
+    assert "- Tickets: Questions about tickets. Use: list_tickets." in prompt, "only tools that exist are named"
+    assert "ghost_tool" not in prompt
+    assert "- Talk to a person: The person asks for a human. Use: request_human." in prompt, "the handoff tool is a tool too"
+    assert "no label" not in prompt
+    assert "If a request fits none of these" in prompt
+    assert c.warnings == [] and c.config["router"]["routes"] == routes
 
 
 def test_turns_are_capped_and_the_ui_has_a_welcome_line():
