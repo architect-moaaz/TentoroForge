@@ -10,10 +10,15 @@
  * just the tests it was meant to help, then says whether it worked (and can take it back out); a fix is only an AI's
  * guess until then. Your own saved tests live here too ("My tests"), save themselves, and run in the same round. Only
  * the failed ones can be run again, from the results bar. Nothing is applied by itself.
+ *
+ * "Test one tool" picks a tool and has an AI study it and write the tests that would break it: normal use, bad input,
+ * extremes, hidden orders, permission, secrets, failures and whether the reply is true to what the tool returned. And
+ * after any fix, EVERYTHING is run again (not only the tests the fix was for), so a fix that breaks something that held
+ * is caught and said plainly.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  AlertCircle, AlertTriangle, Bomb as BombIcon, Check, ChevronDown, ChevronRight, EyeOff, Flame, Hash, HelpCircle, KeyRound, Loader2, PauseCircle,
+  AlertCircle, AlertTriangle, Bomb as BombIcon, Check, ChevronDown, ChevronRight, EyeOff, Flame, FlaskConical, Hash, HelpCircle, KeyRound, Loader2, PauseCircle,
   Play, Plus, RotateCcw, Save, ShieldAlert, ShieldCheck, Sparkles, Trash2, User, Wrench, Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -25,8 +30,8 @@ import { appendLines, linesForEvent, type LogKind, type LogLine, type Printed } 
 import { BlastTerminal } from "./BlastTerminal";
 import {
   applyFix, changesDrawing, didNotPass, emptyBlast, estimateCalls, fixKindLabel, fixOutcome, FIX_HINT, isBad, kindWords, outcomeSentence, reduceBlast,
-  roundSummary, tally, verdict,
-  type BlastFix, type BlastResult, type BlastState, type BlastTest, type Bomb, type FixOutcome,
+  regression, roundSummary, suspects, tally, toolNames, verdict,
+  type BlastFix, type BlastResult, type BlastState, type BlastTest, type Bomb, type FixOutcome, type Regression, type ToolAngle, type ToolStudy,
 } from "@/lib/agent-blast";
 import type { AgentNodeSerialized, AgentScenario } from "@/types/agent-builder";
 
@@ -64,7 +69,9 @@ const AUTOSAVE_MS = 1000;
 const RETEST_RUNS = 2;
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
-const FALLBACK_LIMITS = { maxTests: 20, maxRepeats: 3, perBomb: 2 };
+const FALLBACK_LIMITS = { maxTests: 20, maxRepeats: 3, perBomb: 2, perAngle: 2 };
+/** The platform runs at most this many tests in one go: a longer list is run in turns. */
+const CHUNK = 40;
 /** How many everyday tests "Write tests with AI" asks for. */
 const WRITE_COUNT = 10;
 
@@ -92,6 +99,11 @@ const asMessage = (e: unknown) => (e instanceof Error ? e.message : String(e));
 export function AgentBlastPanel({ projectId, agentId, graph, onApplyFix, onRevertFix, agentUnsaved, onSaveAgent }: Props) {
   const base = `/api/projects/${projectId}/agent-definitions`;
   const [bombs, setBombs] = useState<Bomb[]>([]);
+  const [toolAngles, setToolAngles] = useState<ToolAngle[]>([]);
+  const [testTool, setTestTool] = useState("");
+  /** What the AI worked out about the tool it was asked to examine: shown above the results until the next round. */
+  const [study, setStudy] = useState<ToolStudy | null>(null);
+  const [toolBusy, setToolBusy] = useState(false);
   const [limits, setLimits] = useState(FALLBACK_LIMITS);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [repeats, setRepeats] = useState(1);
@@ -142,13 +154,17 @@ export function AgentBlastPanel({ projectId, agentId, graph, onApplyFix, onRever
   // the kinds of bomb, and the limits on one blast
   useEffect(() => {
     api
-      .get<{ bombs?: Bomb[]; maxTests?: number; maxRepeats?: number; perBomb?: number }>(`${base}/blast/bombs`)
+      .get<{ bombs?: Bomb[]; maxTests?: number; maxRepeats?: number; perBomb?: number; toolAngles?: ToolAngle[]; perAngle?: number }>(`${base}/blast/bombs`)
       .then((r) => {
         if (!live.current) return;
         const list = r?.bombs ?? [];
         setBombs(list);
+        setToolAngles(r?.toolAngles ?? []);
         setPicked(new Set(list.map((b) => b.key)));
-        setLimits({ maxTests: r?.maxTests ?? FALLBACK_LIMITS.maxTests, maxRepeats: r?.maxRepeats ?? FALLBACK_LIMITS.maxRepeats, perBomb: r?.perBomb ?? FALLBACK_LIMITS.perBomb });
+        setLimits({
+          maxTests: r?.maxTests ?? FALLBACK_LIMITS.maxTests, maxRepeats: r?.maxRepeats ?? FALLBACK_LIMITS.maxRepeats,
+          perBomb: r?.perBomb ?? FALLBACK_LIMITS.perBomb, perAngle: r?.perAngle ?? FALLBACK_LIMITS.perAngle,
+        });
       })
       .catch(() => live.current && setNote("The kinds of bomb could not be loaded."));
   }, [base]);
@@ -226,9 +242,14 @@ export function AgentBlastPanel({ projectId, agentId, graph, onApplyFix, onRever
   const testOf = findTest;
 
   const tools = toolCount(graph);
+  const toolList = useMemo(() => toolNames(graph), [graph]);
+  // the picker holds a tool that is still drawn: if it was deleted, or nothing was picked, the first one stands in
+  const pickedTool = toolList.includes(testTool) ? testTool : toolList[0] ?? "";
+  const toolTests = Math.min(toolAngles.length * limits.perAngle, 24);
   const inventing = Math.min(picked.size * limits.perBomb, limits.maxTests);
   const runnableMine = includeMine ? mine.filter((s) => s.message.trim()).length : 0;
   const estimate = estimateCalls(inventing + runnableMine, repeats, inventing);
+  const toolEstimate = estimateCalls(toolTests + runnableMine, repeats, toolTests);
   const held = useMemo(() => tally(state.results), [state.results]);
   /** Everything that did not pass (exploded, unstable, or could not be run): what "Re-run failed" runs. */
   const notPassed = useMemo(() => Object.values(state.results).filter(didNotPass), [state.results]);
@@ -266,6 +287,8 @@ export function AgentBlastPanel({ projectId, agentId, graph, onApplyFix, onRever
   };
   useEffect(() => stopBeat, []);
   const bombTitle = useCallback((key?: string | null) => (key ? bombs.find((b) => b.key === key)?.title ?? null : null), [bombs]);
+  /** "tool_data_exposure" → "Secrets and privacy". */
+  const angleTitle = useCallback((kind?: string | null) => (kind ? toolAngles.find((a) => `tool_${a.key}` === kind)?.title ?? null : null), [toolAngles]);
 
   // ── fixes ───────────────────────────────────────────────────────────────
 
@@ -333,15 +356,13 @@ export function AgentBlastPanel({ projectId, agentId, graph, onApplyFix, onRever
    * applied is in the platform's drawing only after the next render, so the caller says what the drawing now is) and
    * `repeats` the number of runs. Resolves true when the run finished.
    */
-  const run = useCallback(
-    async (
-      tests: Array<BlastTest | AgentScenario>,
-      opts: { merge?: boolean; withFixes?: boolean; graph?: Record<string, unknown>; repeats?: number } = {},
-    ): Promise<boolean> => {
+  type RunOpts = { merge?: boolean; withFixes?: boolean; graph?: Record<string, unknown>; repeats?: number };
+  const runOnce = useCallback(
+    async (tests: Array<BlastTest | AgentScenario>, opts: RunOpts = {}): Promise<boolean> => {
       const token = typeof window !== "undefined" ? window.localStorage.getItem("token") : null;
       const drawing = opts.graph ?? graph;
       const times = opts.repeats ?? repeats;
-      const ctx = { total: tests.length, bombTitle };
+      const ctx = { total: tests.length, bombTitle, kindTitle: angleTitle };
       update((s) => reduceBlast({ ...s, phase: "running" }, { type: "start", total: tests.length, repeats: times }, opts));
       let finished = false;
       try {
@@ -383,7 +404,21 @@ export function AgentBlastPanel({ projectId, agentId, graph, onApplyFix, onRever
       }
       return finished;
     },
-    [base, agentId, graph, repeats, fetchFixes, update, push, bombTitle],
+    [base, agentId, graph, repeats, fetchFixes, update, push, bombTitle, angleTitle],
+  );
+
+  /** Any number of tests, in turns of at most CHUNK (the platform's limit for one go); the fixes are asked for once, at the end. */
+  const run = useCallback(
+    async (tests: Array<BlastTest | AgentScenario>, opts: RunOpts = {}): Promise<boolean> => {
+      if (tests.length <= CHUNK) return runOnce(tests, opts);
+      let finished = true;
+      for (let i = 0; i < tests.length && finished; i += CHUNK) {
+        finished = await runOnce(tests.slice(i, i + CHUNK), { ...opts, merge: opts.merge || i > 0, withFixes: false });
+      }
+      if (finished && opts.withFixes !== false && live.current) await fetchFixes(Object.values(stateRef.current.results), opts.graph ?? graph);
+      return finished;
+    },
+    [runOnce, fetchFixes, graph],
   );
 
   const blast = async () => {
@@ -391,6 +426,7 @@ export function AgentBlastPanel({ projectId, agentId, graph, onApplyFix, onRever
     forgetFixes();
     inventedRef.current = [];
     setInvented([]);
+    setStudy(null);
     update(() => ({ ...emptyBlast(), phase: "inventing" }));
     const name = typeof graph.name === "string" && graph.name ? graph.name : agentId;
     beginLog(`$ blast "${name}" --kinds ${picked.size} --each ${limits.perBomb} --runs ${repeats}`);
@@ -422,9 +458,83 @@ export function AgentBlastPanel({ projectId, agentId, graph, onApplyFix, onRever
     }
   };
 
+  /**
+   * Pick one tool and have an AI study it and write the tests that would break it (normal use, bad input, extremes, hidden
+   * orders, permission, secrets, failure, truth), then run them, with the saved tests when asked. A new round, like Blast.
+   */
+  const testOneTool = async () => {
+    if (!pickedTool || busy) return;
+    setNote(null);
+    forgetFixes();
+    inventedRef.current = [];
+    setInvented([]);
+    setStudy(null);
+    setToolBusy(true);
+    update(() => ({ ...emptyBlast(), phase: "inventing" }));
+    beginLog(`$ test-tool ${pickedTool} --angles ${toolAngles.length} --each ${limits.perAngle} --runs ${repeats}`);
+    if (dirtyRef.current) await persistMine();
+    push([{ kind: "info", text: `Studying ${pickedTool} and writing tests that try to break it (${toolAngles.length} angles)…` }]);
+    const asked = Date.now();
+    stopBeat();
+    beat.current = setInterval(() => push([{ kind: "dim", text: `… still studying (${Math.round((Date.now() - asked) / 1000)}s)` }]), 8000);
+    try {
+      const r = await api.post<{ analysis?: { whatItDoes?: string; needs?: string[]; risks?: string[] }; tests?: BlastTest[] }>(
+        `${base}/${agentId}/blast/tool-tests`,
+        { graph, tool: pickedTool, per_angle: limits.perAngle },
+      );
+      stopBeat();
+      if (!live.current) return;
+      const tests = r?.tests ?? [];
+      inventedRef.current = tests;
+      setInvented(tests);
+      const a = r?.analysis;
+      if (a && (a.whatItDoes || a.risks?.length)) setStudy({ tool: pickedTool, whatItDoes: a.whatItDoes ?? "", needs: a.needs ?? [], risks: a.risks ?? [] });
+      push([
+        { kind: "good", text: `Wrote ${tests.length} tests in ${Math.round((Date.now() - asked) / 1000)}s.` },
+        ...(a?.whatItDoes ? [{ kind: "info" as LogKind, text: `  What it does: ${a.whatItDoes}` }] : []),
+        ...(a?.risks ?? []).map((x) => ({ kind: "warn" as LogKind, text: `  Could go wrong: ${x}` })),
+        ...tests.map((t) => ({ kind: "dim" as LogKind, text: `  [${angleTitle(t.kind) ?? "test"}] ${t.name}` })),
+      ]);
+      const mineToRun = includeMine ? mineRef.current.filter((x) => x.message.trim()) : [];
+      if (mineToRun.length) push([{ kind: "info", text: `Adding your ${mineToRun.length} saved test${mineToRun.length === 1 ? "" : "s"}.` }]);
+      await run([...tests, ...mineToRun]);
+    } catch (e) {
+      stopBeat();
+      if (live.current) {
+        update((s) => reduceBlast(s, { type: "error", message: asMessage(e) }));
+        push([{ kind: "bad", text: `✗ ${asMessage(e)}` }]);
+      }
+    } finally {
+      if (live.current) setToolBusy(false);
+    }
+  };
+
+  /** Run EVERY test of the round again, on the drawing as it is now, and say what held before and does not hold now. */
+  const rerunAll = async () => {
+    setNote(null);
+    const before = { ...stateRef.current.results };
+    const ids = Object.keys(before).filter((id) => findTest(id));
+    const tests = ids.map((id) => findTest(id)).filter((t): t is BlastTest => !!t);
+    if (tests.length === 0) {
+      setNote("Nothing to run again: those tests are gone. Blast again to get new ones.");
+      return;
+    }
+    beginLog(`— running all ${tests.length} test${tests.length === 1 ? "" : "s"} again —`, true);
+    if (dirtyRef.current) await persistMine();
+    const finished = await run(tests, { merge: true });
+    if (!finished || !live.current) return;
+    const gone = regression(before, stateRef.current.results, ids);
+    push(
+      gone.broke.length || gone.shaky.length
+        ? [{ kind: "warn", text: `${gone.broke.length + gone.shaky.length} that held last time did not this time: ${[...gone.broke, ...gone.shaky].slice(0, 3).map((x) => `“${x.name}”`).join(", ")}. Answers vary: run again to be sure.` }]
+        : [{ kind: "good", text: `✔ Everything that held last time still holds (${gone.checked} checked).` }],
+    );
+  };
+
   const runMine = async () => {
     setNote(null);
     forgetFixes();
+    setStudy(null);
     const tests = mineRef.current.filter((s) => s.message.trim());
     beginLog(`$ run my tests (${tests.length})`);
     if (dirtyRef.current) await persistMine();
@@ -525,7 +635,8 @@ export function AgentBlastPanel({ projectId, agentId, graph, onApplyFix, onRever
   const keep = (id: string) => {
     const t = inventedRef.current.find((x) => x.id === id);
     if (!t || mineRef.current.some((s) => s.id === id)) return;
-    changeMine((all) => [...all, { id: t.id, name: t.name, message: t.message, expect: t.expect as AgentScenario["expect"], ...(t.judge ? { judge: t.judge } : {}), ...(t.bomb ? { bomb: t.bomb } : {}) }]);
+    changeMine((all) => [...all, { id: t.id, name: t.name, message: t.message, expect: t.expect as AgentScenario["expect"], ...(t.judge ? { judge: t.judge } : {}), ...(t.bomb ? { bomb: t.bomb } : {}),
+      ...(t.kind ? { kind: t.kind } : {}), ...(t.tool ? { tool: t.tool } : {}), ...(t.sim ? { sim: t.sim } : {}), ...(t.canary ? { canary: t.canary } : {}) }]);
     setNote("Kept as one of My tests. It saves by itself and runs in every round.");
   };
 
@@ -537,8 +648,13 @@ export function AgentBlastPanel({ projectId, agentId, graph, onApplyFix, onRever
     return own.length ? own : fallback;
   };
 
-  /** Run again just the tests the fixes were for, on the drawing as it is with them, and say how each fix did. */
+  /**
+   * Run again the tests the fixes were for (at least twice each), then EVERY other test of the round once, on the drawing as it
+   * is with them, and say how each fix did. A test that held before and does not now is run twice more before it is called
+   * broken, since one run can be bad luck.
+   */
   const retest = async (entries: FixEntry[], forGraph: Record<string, unknown>) => {
+    const before = { ...stateRef.current.results };
     const fallback = Object.values(stateRef.current.results).filter(didNotPass).map((r) => r.id);
     const idsOf = new Map(entries.map((e) => [e.key, testsFor(e, fallback)] as const));
     const tests = [...new Set([...idsOf.values()].flat())].map((id) => findTest(id)).filter((t): t is BlastTest => !!t);
@@ -554,8 +670,27 @@ export function AgentBlastPanel({ projectId, agentId, graph, onApplyFix, onRever
     if (dirtyRef.current) await persistMine();
     const finished = await run(tests, { merge: true, withFixes: false, graph: forGraph, repeats: Math.max(repeats, RETEST_RUNS) });
     if (!live.current) return;
+    // everything else, so a fix that fixes one thing and breaks another cannot hide
+    let others: Regression | undefined;
+    if (finished) {
+      const targeted = new Set(tests.map((t) => t.id));
+      const otherIds = Object.keys(before).filter((id) => !targeted.has(id) && findTest(id));
+      if (otherIds.length) {
+        push([{ kind: "cmd", text: `— checking that nothing else broke: running ${otherIds.length} other test${otherIds.length === 1 ? "" : "s"} again —` }]);
+        const others1 = await run(otherIds.map((id) => findTest(id) as BlastTest), { merge: true, withFixes: false, graph: forGraph, repeats: 1 });
+        if (!live.current) return;
+        let sure = others1;
+        const worse = others1 ? suspects(before, stateRef.current.results, otherIds) : [];
+        if (worse.length) {
+          push([{ kind: "info", text: `${worse.length} that held before did not this time. Running ${worse.length === 1 ? "it" : "them"} again to be sure…` }]);
+          sure = await run(worse.map((id) => findTest(id) as BlastTest), { merge: true, withFixes: false, graph: forGraph, repeats: RETEST_RUNS });
+          if (!live.current) return;
+        }
+        if (sure) others = regression(before, stateRef.current.results, otherIds);
+      }
+    }
     const results = stateRef.current.results;
-    const outcomes = new Map(entries.map((e) => [e.key, finished ? fixOutcome(idsOf.get(e.key) ?? [], results) : undefined] as const));
+    const outcomes = new Map(entries.map((e) => [e.key, finished ? fixOutcome(idsOf.get(e.key) ?? [], results, others) : undefined] as const));
     mark((t, key) => ({ changed: t?.changed ?? true, outcome: outcomes.get(key) }));
     push(
       entries.flatMap((e) => {
@@ -619,7 +754,7 @@ export function AgentBlastPanel({ projectId, agentId, graph, onApplyFix, onRever
 
   const nothingYet = state.order.length === 0 && state.phase === "idle";
   const exploded = held.failed + held.flaky;
-  const progress = `${state.order.length} of ${state.total}`;
+  const progress = `${state.ran} of ${state.total}`;
   const showTerminal = log.length > 0 || busy;
 
   return (
@@ -669,6 +804,42 @@ export function AgentBlastPanel({ projectId, agentId, graph, onApplyFix, onRever
             );
           })}
         </div>
+
+        {/* Pick one tool and have it examined in depth */}
+        {toolList.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 rounded border border-dashed px-2 py-1.5 text-[11px]" data-testid="tool-tester">
+            <FlaskConical className="h-3.5 w-3.5 text-primary" />
+            <span className="font-medium">Test one tool</span>
+            <select
+              aria-label="Tool to test"
+              className="h-6 max-w-[14rem] rounded border bg-transparent px-1 text-[11px]"
+              value={pickedTool}
+              disabled={busy}
+              onChange={(e) => setTestTool(e.target.value)}
+            >
+              {toolList.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-6 border-primary/40 text-[11px] text-primary hover:bg-primary/5 hover:text-primary"
+              onClick={() => void testOneTool()}
+              disabled={busy || !pickedTool || toolAngles.length === 0}
+              title="An AI studies this tool and writes tests that try to break it, then they are run"
+              data-testid="test-tool"
+            >
+              {toolBusy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <FlaskConical className="mr-1 h-3 w-3" />}
+              Test this tool
+            </Button>
+            <span className="text-muted-foreground" data-testid="tool-estimate">
+              {toolAngles.map((a) => a.title).join(", ")}. About {toolEstimate} AI calls.
+            </span>
+          </div>
+        )}
 
         <div className="flex flex-wrap items-center gap-3 text-[11px]">
           <label className="flex items-center gap-1">
@@ -746,6 +917,19 @@ export function AgentBlastPanel({ projectId, agentId, graph, onApplyFix, onRever
               <Count n={notPassed.length} tone="red" />
             </Button>
           )}
+          {!busy && state.order.length > 0 && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="ml-2 h-6 text-[11px]"
+              onClick={() => void rerunAll()}
+              title="Runs every test of this round again on the agent as drawn now, and says what held before and does not now"
+              data-testid="rerun-all"
+            >
+              <RotateCcw className="mr-1 h-3 w-3" /> Re-run all
+              <Count n={state.order.length} />
+            </Button>
+          )}
           {state.error && (
             <span role="alert" className="ml-3 font-medium text-red-700">
               {state.error}
@@ -761,7 +945,7 @@ export function AgentBlastPanel({ projectId, agentId, graph, onApplyFix, onRever
             <p className="font-medium text-foreground">Nothing thrown yet.</p>
             <p className="mt-1">
               Press <b>Blast</b> to have an AI attack this agent with about {inventing} tricky messages
-              {mine.length ? `, plus your ${mine.length} saved test${mine.length === 1 ? "" : "s"}` : ""}. Or build up your own tests first:
+              {mine.length ? `, plus your ${mine.length} saved test${mine.length === 1 ? "" : "s"}` : ""}. Or pick one tool above and press <b>Test this tool</b> to have it examined from every side. Or build up your own tests first:
             </p>
             <div className="mt-3 grid gap-2 sm:grid-cols-3" data-testid="start-options">
               <StartCard
@@ -792,6 +976,27 @@ export function AgentBlastPanel({ projectId, agentId, graph, onApplyFix, onRever
           </div>
         )}
 
+        {/* What the AI worked out about the tool it examined */}
+        {study && (
+          <div className="rounded border border-primary/30 bg-primary/5 p-2 text-xs" data-testid="tool-study">
+            <p className="flex items-center gap-1 font-semibold">
+              <FlaskConical className="h-3.5 w-3.5 text-primary" /> About <span className="font-mono">{study.tool}</span>
+            </p>
+            {study.whatItDoes && <p className="mt-0.5">{study.whatItDoes}</p>}
+            {study.needs.length > 0 && <p className="mt-0.5 text-muted-foreground">It needs: {study.needs.join("; ")}.</p>}
+            {study.risks.length > 0 && (
+              <div className="mt-0.5">
+                <p className="text-[10px] font-semibold uppercase text-muted-foreground">How it could go wrong</p>
+                <ul className="list-disc pl-4 text-amber-900">
+                  {study.risks.map((r, i) => (
+                    <li key={i}>{r}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* What went off */}
         {state.order.length > 0 && (
           <div className="space-y-1.5" data-testid="blast-results">
@@ -808,6 +1013,7 @@ export function AgentBlastPanel({ projectId, agentId, graph, onApplyFix, onRever
                   kept={invented.some((t) => t.id === id) && mine.some((s) => s.id === id)}
                   onKeep={() => keep(id)}
                   test={testOf(id)}
+                  angle={angleTitle(state.results[id].kind ?? testOf(id)?.kind)}
                 />
               ))}
           </div>
@@ -955,9 +1161,10 @@ function StartCard({ icon: Icon, title, text, onClick, disabled, featured, busy 
 
 // ── one bomb that went off, or was defused ────────────────────────────────
 
-function ResultCard({ result, open, onToggle, bombs, canKeep, kept, onKeep, test }: {
-  result: BlastResult; open: boolean; onToggle: () => void; bombs: Bomb[]; canKeep: boolean; kept: boolean; onKeep: () => void; test?: BlastTest;
+function ResultCard({ result, open, onToggle, bombs, canKeep, kept, onKeep, test, angle }: {
+  result: BlastResult; open: boolean; onToggle: () => void; bombs: Bomb[]; canKeep: boolean; kept: boolean; onKeep: () => void; test?: BlastTest; angle?: string | null;
 }) {
+  const tool = result.tool ?? test?.tool;
   const word = verdict(result.status);
   const kind = bombs.find((b) => b.key === result.bomb);
   const Icon = (kind && ICONS[kind.icon]) || BombIcon;
@@ -972,7 +1179,11 @@ function ResultCard({ result, open, onToggle, bombs, canKeep, kept, onKeep, test
         <span className={`text-[11px] font-semibold ${statusTone}`}>{word}</span>
         <Icon className="h-3 w-3 shrink-0 text-muted-foreground" />
         <span className="flex-1 truncate text-xs font-medium">{result.name}</span>
-        {(kind || test?.kind) && <span className="hidden text-[10px] text-muted-foreground sm:inline">{kind ? kind.title : kindWords(test?.kind)}</span>}
+        {(kind || test?.kind || tool) && (
+          <span className="hidden text-[10px] text-muted-foreground sm:inline" data-testid="result-kind">
+            {kind ? kind.title : tool ? `${tool}${angle ? ` · ${angle}` : ""}` : kindWords(test?.kind)}
+          </span>
+        )}
         {(result.runs ?? 1) > 1 && <span className="text-[10px] text-muted-foreground">{result.passedRuns} of {result.runs} held</span>}
       </button>
       {result.status !== "passed" && (
@@ -1019,6 +1230,30 @@ function ResultCard({ result, open, onToggle, bombs, canKeep, kept, onKeep, test
             )}
             <p className="whitespace-pre-wrap text-slate-700">{result.response ? result.response.slice(0, 500) : result.blocked ? "(blocked by the safety rules)" : "(it said nothing)"}</p>
           </div>
+          {/* what the app handed the assistant, so a reply can be checked against it */}
+          {result.toolCalls.some((c) => c.output) && (
+            <div data-testid="what-came-back">
+              <p className="text-[10px] font-semibold uppercase text-muted-foreground">What the tools returned</p>
+              <ul className="space-y-0.5">
+                {result.toolCalls.filter((c) => c.output).map((c, i) => (
+                  <li key={i} className="break-words font-mono text-[10px] text-slate-600">
+                    <b>{c.name}</b>: {c.output!.slice(0, 220)}
+                    {c.output!.length > 220 ? "…" : ""}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {result.notes && result.notes.length > 0 && (
+            <div data-testid="guardrail-notes">
+              <p className="text-[10px] font-semibold uppercase text-muted-foreground">What the guardrails did</p>
+              <ul className="list-disc pl-4 text-slate-700">
+                {result.notes.map((n, i) => (
+                  <li key={i}>{n}</li>
+                ))}
+              </ul>
+            </div>
+          )}
           {/* (a bomb that went off has its Keep button up in the card, not here) */}
           {result.status === "passed" && canKeep && (
             <Button size="sm" variant="outline" className="h-6 text-[11px]" onClick={onKeep}>
@@ -1038,6 +1273,7 @@ const OUTCOME_LOOK: Record<FixOutcome["state"], { chip: (o: FixOutcome) => strin
   worked: { chip: (o) => `✓ Worked · ${o.fixed} of ${o.total}`, chipTone: "bg-green-100 text-green-800", textTone: "text-green-800", card: "border-green-400 bg-green-50" },
   partly: { chip: (o) => `Partly · ${o.fixed} of ${o.total}`, chipTone: "bg-amber-100 text-amber-800", textTone: "text-amber-900", card: "border-amber-300 bg-amber-50" },
   no: { chip: () => "✗ Did not help", chipTone: "bg-red-100 text-red-800", textTone: "text-red-800", card: "border-red-300 bg-red-50" },
+  broke: { chip: (o) => `✗ Broke ${o.broke?.length ?? 0} other${o.broke?.length === 1 ? "" : "s"}`, chipTone: "bg-red-100 text-red-800", textTone: "text-red-800", card: "border-red-400 bg-red-50" },
   unknown: { chip: () => "Could not be tested", chipTone: "bg-slate-200 text-slate-700", textTone: "text-slate-700", card: "border-slate-300 bg-slate-50" },
 };
 
@@ -1093,6 +1329,14 @@ function FixCard({ fix, status, tried, busy, canUndo, testCount, onApplyAndTest,
         <p className="mt-1" data-testid="fix-change">
           <span className="text-red-800 line-through">{fix.before}</span> → <span className="text-green-900">{fix.after}</span>
         </p>
+      )}
+      {fix.kind === "response_filter" && (
+        <div className="mt-1 space-y-0.5" data-testid="fix-change">
+          <p className="text-[10px] font-semibold uppercase text-muted-foreground">The assistant is shown</p>
+          <p className="rounded bg-red-50 px-2 py-0.5 text-red-800 line-through">{fix.before || "everything the app returns"}</p>
+          <p className="rounded bg-green-50 px-2 py-0.5 font-mono text-green-900">{fix.after}</p>
+          <p className="text-[10px] text-amber-800">Any other field is hidden from the assistant. Re-testing checks that it can still do its job.</p>
+        </div>
       )}
       {fix.kind === "advice" && fix.text && <p className="mt-1">{fix.text}</p>}
       {!status && (

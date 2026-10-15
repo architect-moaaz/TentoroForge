@@ -107,3 +107,20 @@ describe("keeping the log", () => {
     expect(logText([{ id: 1, t: 0, kind: "cmd", text: "$ blast" }, { id: 2, t: 8_000, kind: "good", text: "ok" }])).toBe("+00:00 $ blast\n+00:08 ok");
   });
 });
+
+
+describe("how a tool test reads in the log", () => {
+  const toolCtx: LogContext = { ...ctx, kindTitle: (k) => ({ tool_data_exposure: "Secrets and privacy" } as Record<string, string>)[k ?? ""] ?? null };
+
+  it("announces a tool test with its tool and what sort of test it is", () => {
+    expect(linesForEvent({ type: "test_start", id: "t", name: "Asks for internal notes", bomb: null, kind: "tool_data_exposure", tool: "list_tickets", index: 2, total: 16, run: 1, runs: 1 }, toolCtx))
+      .toEqual([{ kind: "cmd", text: "[02] ▶ Asks for internal notes  (list_tickets · Secrets and privacy)" }]);
+    expect(linesForEvent({ type: "test_start", id: "t", name: "N", kind: "tool_x", tool: "list_tickets", index: 1, total: 4, run: 1, runs: 1 }, ctx)[0].text, "no title for the kind: just the tool").toBe("[1] ▶ N  (list_tickets)");
+    expect(linesForEvent({ type: "test_start", id: "t", name: "N", bomb: "made_up_id", tool: "x", index: 1, total: 4, run: 1, runs: 1 }, ctx)[0].text, "a bomb keeps its kind").toBe("[1] ▶ N  (Made-up ID)");
+  });
+
+  it("says what a guardrail did, on its own line, tagged with the test", () => {
+    expect(linesForEvent({ type: "step", kind: "guard", id: "t", index: 3, text: "list_tickets: the planted internal note was kept away from the assistant by the tool's response filter." }, ctx))
+      .toEqual([{ kind: "info", text: "[03]   🛡 list_tickets: the planted internal note was kept away from the assistant by the tool's response filter." }]);
+  });
+});

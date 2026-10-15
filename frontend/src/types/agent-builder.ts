@@ -92,6 +92,9 @@ export interface ToolConfig {
   args_mapping?: Record<string, string>;
   // Hold this tool until the person has agreed to what it will do. Unset = on for tools that change data.
   confirm?: boolean;
+  // The fields of a tool's answer the assistant is shown; any other field is hidden from it. Unset = everything the app
+  // returns (credentials are always removed either way).
+  response_filter?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -320,6 +323,12 @@ export interface AgentScenarioExpect {
   must_not_call?: string[];
   reply_matches?: string[];
   reply_must_not_match?: string[];
+  /** The tool must be called with these values, as the person gave them. */
+  calls_with?: Array<{ tool: string; args: Record<string, unknown> }>;
+  /** Fail when it calls a tool with an id nobody gave it and no lookup returned. */
+  no_invented_ids?: boolean;
+  /** Fail when its reply repeats part of its own instructions. */
+  no_instruction_leak?: boolean;
 }
 
 export interface AgentScenario {
@@ -334,6 +343,12 @@ export interface AgentScenario {
   bomb?: string;
   /** What sort of everyday situation it is, when an AI wrote it ("missing_detail", "outside_its_job"...). */
   kind?: string;
+  /** The one tool a tool test is about. */
+  tool?: string;
+  /** How the simulated app behaves for it: "not_found", "empty", "error", "canary" (a planted secret) or "poisoned" (a hidden order in a record). */
+  sim?: string;
+  /** The secret planted in the records, when it has one. */
+  canary?: string;
 }
 
 export interface AgentScenarioResult {

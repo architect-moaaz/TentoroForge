@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
-  applyFix, changesDrawing, didNotPass, emptyBlast, estimateCalls, fixKindLabel, fixOutcome, FIX_HINT, isBad, outcomeSentence, reduceBlast, revertFix, roundSummary,
-  tally, verdict, type BlastFix, type BlastResult,
+  applyFix, changesDrawing, didNotPass, emptyBlast, estimateCalls, fixKindLabel, fixOutcome, FIX_HINT, isBad, outcomeSentence, reduceBlast, regression, revertFix,
+  roundSummary, suspects, tally, toolNames, verdict, type BlastFix, type BlastResult,
 } from "./agent-blast";
 import type { AgentNodeSerialized } from "@/types/agent-builder";
 
@@ -178,5 +178,103 @@ describe("did a fix work", () => {
     expect((["passed", "failed", "flaky", "error"] as const).map((s) => didNotPass(result("x", s)))).toEqual([false, true, true, true]);
     expect(FIX_HINT).toContain("may or may not work");
     expect(FIX_HINT).toContain("Apply and test");
+  });
+});
+
+
+describe("a fix that narrows what a tool shows the assistant", () => {
+  const filter: BlastFix = { id: "f", kind: "response_filter", title: "Hide internals", why: "", fixesTests: [], nodeId: "t1", tool: "update_ticket", keys: ["id", "subject"], beforeKeys: [] };
+  const config = (ns: AgentNodeSerialized[]) => ns.find((n) => n.id === "t1")!.data.config as Record<string, unknown>;
+
+  it("sets the fields the tool hands over, and taking it back out puts the old ones back, or none at all", () => {
+    const applied = applyFix(nodes(), filter);
+    expect(config(applied).response_filter).toEqual(["id", "subject"]);
+    expect(config(applied).description, "nothing else in the box changes").toBe("Change a ticket");
+    expect(config(revertFix(applied, filter)).response_filter, "it had none before: the key goes, not an empty list").toBeUndefined();
+    const had = nodes();
+    (had[1].data.config as Record<string, unknown>).response_filter = ["id", "status", "internal_note"];
+    const back = { ...filter, beforeKeys: ["id", "status", "internal_note"] };
+    expect(config(revertFix(applyFix(had, back), back)).response_filter).toEqual(["id", "status", "internal_note"]);
+  });
+
+  it("changes nothing without fields, never touches another box, and knows when the tool already says it", () => {
+    expect(applyFix(nodes(), { ...filter, keys: [] })).toEqual(nodes());
+    expect(applyFix(nodes(), { ...filter, nodeId: "sp" })[0].data.config).toEqual({ prompt: "You help with tickets." });
+    expect(changesDrawing(nodes(), filter)).toBe(true);
+    expect(changesDrawing(applyFix(nodes(), filter), filter)).toBe(false);
+    expect(fixKindLabel("response_filter")).toBe("Show fewer fields");
+  });
+});
+
+describe("did a fix break anything else", () => {
+  const held = { a: result("a", "passed"), b: result("b", "passed"), c: result("c", "passed"), d: result("d", "failed") };
+
+  it("suspects only what held before and does not now, and not what could not be run", () => {
+    const after = { a: result("a", "passed"), b: result("b", "failed"), c: result("c", "flaky"), d: result("d", "failed") };
+    expect(suspects(held, after, ["a", "b", "c", "d"])).toEqual(["b", "c"]);
+    expect(suspects(held, { ...after, b: result("b", "error") }, ["b"]), "a test that could not be run says nothing").toEqual([]);
+    expect(suspects(held, after, ["zzz"]), "a test with no result says nothing").toEqual([]);
+  });
+
+  it("says broke when it still goes off, shaky when it only sometimes holds, and counts how many were checked", () => {
+    const after = { a: result("a", "passed"), b: result("b", "failed", { name: "Closes a ghost" }), c: result("c", "flaky"), d: result("d", "passed") };
+    expect(regression(held, after, ["a", "b", "c", "d"])).toEqual({
+      broke: [{ id: "b", name: "Closes a ghost" }], shaky: [{ id: "c", name: "c" }], checked: 3,
+    });
+    expect(regression(held, { a: result("a", "passed") }, ["a", "b"]).checked, "b was not run again: nothing to say about it").toBe(1);
+    expect(regression(held, after, ["d"]).broke, "d did not hold before, so it cannot have been broken").toEqual([]);
+  });
+
+  it("a fix that broke something is not a success, whatever else it did, and the sentence names what it broke", () => {
+    const after = { x: result("x", "passed"), b: result("b", "failed", { name: "Closes a ghost" }) };
+    const regress = regression(held, after, ["b"]);
+    const o = fixOutcome(["x"], after, regress);
+    expect(o).toMatchObject({ state: "broke", fixed: 1, total: 1, checked: 1 });
+    expect(regression(held, { ...after, d: result("d", "failed") }, ["b", "d"]).checked, "d was already failing: it cannot be broken, so it is not counted").toBe(1);
+    expect(outcomeSentence(o)).toBe("It fixed 1 of 1 test, but it made 1 test that held before go off: “Closes a ghost”. Undo it, or try another fix.");
+    expect(outcomeSentence(fixOutcome(["d"], { d: result("d", "failed") }, regress))).toContain("It did not fix what it was for, and it made 1 test that held before go off");
+    expect(outcomeSentence({ state: "broke", fixed: 0, total: 1, broke: ["a", "b", "c", "d", "e"].map((id) => ({ id, name: id })) })).toContain("“a”, “b”, “c” and 2 more");
+  });
+
+  it("says nothing else broke when it checked and nothing did, and says what only sometimes holds now", () => {
+    const clean = fixOutcome(["a"], { a: result("a", "passed") }, { broke: [], shaky: [], checked: 3 });
+    expect(clean.state).toBe("worked");
+    expect(outcomeSentence(clean)).toBe("It worked: the test it was for is defused now. Nothing else broke: the 3 other tests still hold.");
+    expect(outcomeSentence(fixOutcome(["a"], { a: result("a", "passed") }, { broke: [], shaky: [], checked: 1 }))).toContain("the one other test still holds");
+    const wobble = fixOutcome(["a"], { a: result("a", "passed") }, { broke: [], shaky: [{ id: "c", name: "Lists tickets" }], checked: 2 });
+    expect(wobble.state, "still a success: it did not go off every time").toBe("worked");
+    expect(outcomeSentence(wobble)).toContain("1 test that held before now hold only some of the time: “Lists tickets”.");
+    expect(outcomeSentence(fixOutcome(["d"], { d: result("d", "failed") }, { broke: [], shaky: [], checked: 2 }))).toContain("Nothing else broke");
+  });
+
+  it("keeps the old sentences exactly when nothing else was checked", () => {
+    expect(outcomeSentence(fixOutcome(["a"], { a: result("a", "passed") }))).toBe("It worked: the test it was for is defused now.");
+    expect(fixOutcome(["a"], { a: result("a", "passed") })).toEqual({ state: "worked", fixed: 1, total: 1 });
+    expect(outcomeSentence(fixOutcome(["a"], { a: result("a", "passed") }, { broke: [], shaky: [], checked: 0 }))).toBe("It worked: the test it was for is defused now.");
+  });
+});
+
+describe("how many have finished in this run", () => {
+  it("counts the results of this run only, so a re-run of three says three of three and not nine of three", () => {
+    let s = reduceBlast(reduceBlast(emptyBlast(), { type: "start", total: 2, repeats: 1 }), { type: "result", result: result("a", "passed") });
+    s = reduceBlast(s, { type: "result", result: result("b", "passed") });
+    expect(s.ran).toBe(2);
+    const again = reduceBlast(s, { type: "start", total: 1, repeats: 1 }, { merge: true });
+    expect(again.ran).toBe(0);
+    expect(reduceBlast(again, { type: "result", result: result("a", "failed") }, { merge: true })).toMatchObject({ ran: 1, order: ["a", "b"] });
+    expect(emptyBlast().ran).toBe(0);
+  });
+});
+
+describe("the tools of a drawing", () => {
+  const drawn = (...tools: Array<[string | undefined, string | undefined]>) => ({
+    nodes: [{ data: { nodeType: "system_prompt" } }, ...tools.map(([tool_name, label]) => ({ data: { nodeType: "tool", label, config: { tool_name } } })), { data: { nodeType: "memory", label: "Memory" } }],
+  });
+
+  it("names each tool the way the platform does: its own name, else its label, made safe, and made unique", () => {
+    expect(toolNames(drawn(["list_tickets", "x"], [undefined, "Update ticket!"], ["list_tickets", "y"], ["", "  "]))).toEqual(["list_tickets", "Update_ticket", "list_tickets_2"]);
+    expect(toolNames(drawn())).toEqual([]);
+    expect(toolNames({})).toEqual([]);
+    expect(toolNames({ nodes: "not a list" })).toEqual([]);
   });
 });

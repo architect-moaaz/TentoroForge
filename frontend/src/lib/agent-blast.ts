@@ -26,6 +26,51 @@ export interface BlastTest {
   bomb?: string;
   /** What sort of everyday situation it is, when an AI wrote it as a normal test rather than an attack. */
   kind?: string;
+  /** The one tool a tool test is about, how the simulated app behaves for it, and the secret planted in its records. */
+  tool?: string;
+  sim?: string;
+  canary?: string;
+}
+
+/** One thing a tool was asked for during a test: what, whether the app held it, and what came back. */
+export interface BlastToolCall {
+  name: string;
+  input?: Record<string, unknown>;
+  held?: boolean;
+  kind?: "lookup" | "change" | "handoff";
+  /** What the assistant was handed back (the start of it). */
+  output?: string;
+}
+
+/** What an AI worked out about the one tool it was asked to examine. */
+export interface ToolStudy {
+  tool: string;
+  whatItDoes: string;
+  needs: string[];
+  risks: string[];
+}
+
+/** One way a tool is examined ("Bad input", "Secrets and privacy"...). */
+export interface ToolAngle {
+  key: string;
+  title: string;
+}
+
+/** The names the platform gives the tools drawn on a canvas: what the AI is told, and what a test is about. */
+export function toolNames(graph: { nodes?: unknown }): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const n of (Array.isArray(graph.nodes) ? graph.nodes : []) as Array<{ data?: { nodeType?: string; label?: string; config?: Record<string, unknown> } }>) {
+    if (n?.data?.nodeType !== "tool") continue;
+    const raw = String(n.data.config?.tool_name || n.data.label || "").trim();
+    const base = raw.replace(/[^A-Za-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 60);
+    if (!base) continue;
+    let name = base;
+    for (let i = 2; seen.has(name); i++) name = `${base}_${i}`;
+    seen.add(name);
+    out.push(name);
+  }
+  return out;
 }
 
 /** A kind of test in plain words: "missing_detail" becomes "Missing detail". */
@@ -44,8 +89,14 @@ export interface BlastResult {
   status: BlastStatus;
   failures: string[];
   response: string;
-  toolCalls: Array<{ name: string; input?: Record<string, unknown> }>;
+  toolCalls: BlastToolCall[];
   blocked?: boolean;
+  /** For a tool test: what sort of test, which tool, and how the simulated app behaved. */
+  kind?: string;
+  tool?: string;
+  sim?: string;
+  /** What the app's own guardrails did during the test (a field hidden, a credential removed, a reply stopped). */
+  notes?: string[];
   runs?: number;
   passedRuns?: number;
   failedRuns?: number;
@@ -64,7 +115,7 @@ export interface BlastSummary {
 
 export interface BlastFix {
   id: string;
-  kind: "instruction_add" | "tool_description" | "ask_first" | "advice";
+  kind: "instruction_add" | "tool_description" | "ask_first" | "response_filter" | "advice";
   title: string;
   why: string;
   fixesTests: string[];
@@ -73,6 +124,9 @@ export interface BlastFix {
   text?: string;
   before?: string;
   after?: string;
+  /** For "response_filter": the fields the tool will hand the assistant, and the ones it handed over before. */
+  keys?: string[];
+  beforeKeys?: string[];
 }
 
 export interface BlastState {
@@ -83,11 +137,13 @@ export interface BlastState {
   results: Record<string, BlastResult>;
   /** Result ids in the order they finished. */
   order: string[];
+  /** How many tests have finished in THIS run (a re-run adds to the results above, so they cannot say). */
+  ran: number;
   summary?: BlastSummary;
   error?: string;
 }
 
-export const emptyBlast = (): BlastState => ({ phase: "idle", total: 0, repeats: 1, results: {}, order: [] });
+export const emptyBlast = (): BlastState => ({ phase: "idle", total: 0, repeats: 1, results: {}, order: [], ran: 0 });
 
 type Event = { type: string; [key: string]: any };
 
@@ -102,11 +158,12 @@ export function reduceBlast(state: BlastState, e: Event, opts: { merge?: boolean
         repeats: e.repeats ?? 1,
         error: undefined,
         summary: undefined,
+        ran: 0,
         ...(opts.merge ? {} : { results: {}, order: [] }),
       };
     case "result": {
       const r = e.result as BlastResult;
-      return { ...state, results: { ...state.results, [r.id]: r }, order: state.order.includes(r.id) ? state.order : [...state.order, r.id] };
+      return { ...state, ran: (state.ran ?? 0) + 1, results: { ...state.results, [r.id]: r }, order: state.order.includes(r.id) ? state.order : [...state.order, r.id] };
     }
     case "done":
       return { ...state, phase: "done", summary: e.summary };
@@ -166,6 +223,8 @@ export function applyFix(nodes: AgentNodeSerialized[], fix: BlastFix): AgentNode
       config.description = fix.text;
     } else if (fix.kind === "ask_first") {
       config.confirm = true;
+    } else if (fix.kind === "response_filter" && fix.keys?.length && n.data.nodeType === "tool") {
+      config.response_filter = [...fix.keys];
     } else {
       return n;
     }
@@ -197,6 +256,9 @@ export function revertFix(nodes: AgentNodeSerialized[], fix: BlastFix): AgentNod
       else delete config.description;
     } else if (fix.kind === "ask_first") {
       config.confirm = false;
+    } else if (fix.kind === "response_filter" && n.data.nodeType === "tool") {
+      if (fix.beforeKeys?.length) config.response_filter = [...fix.beforeKeys];
+      else delete config.response_filter;
     } else {
       return n;
     }
@@ -206,7 +268,10 @@ export function revertFix(nodes: AgentNodeSerialized[], fix: BlastFix): AgentNod
 
 /** What a fix does, in a phrase. */
 export function fixKindLabel(kind: BlastFix["kind"]): string {
-  return { instruction_add: "Add to the instructions", tool_description: "Clearer tool description", ask_first: "Ask the person first", advice: "Worth a look" }[kind];
+  return {
+    instruction_add: "Add to the instructions", tool_description: "Clearer tool description", ask_first: "Ask the person first",
+    response_filter: "Show fewer fields", advice: "Worth a look",
+  }[kind];
 }
 
 /** Said on every proposed fix: it is a guess until it has been tried. */
@@ -215,31 +280,76 @@ export const FIX_HINT = "An AI's guess: it may or may not work. “Apply and tes
 /** Everything that did not pass, and so is worth running again: exploded, unstable, or could not be run. */
 export const didNotPass = (r: BlastResult) => r.status !== "passed";
 
+/** A test, by id and name, as the sentences about a fix mention it. */
+export interface Named {
+  id: string;
+  name: string;
+}
+
+/** What a fix did to the tests that were NOT about it: the ones that held before and now go off, or only sometimes hold. */
+export interface Regression {
+  broke: Named[];
+  shaky: Named[];
+  /** How many other tests that held before were run again (a test that was already failing cannot have been broken). */
+  checked: number;
+}
+
 export interface FixOutcome {
-  state: "worked" | "partly" | "no" | "unknown";
+  /** "broke": it may have fixed its own tests, but tests that held before now go off. */
+  state: "worked" | "partly" | "no" | "broke" | "unknown";
   /** How many of the re-tested tests now hold. */
   fixed: number;
   total: number;
+  /** Present when everything else was checked again too. */
+  broke?: Named[];
+  shaky?: Named[];
+  checked?: number;
+}
+
+/** Tests that held before and do not hold now: worth running once more before saying they broke (one run can be bad luck). */
+export function suspects(before: Record<string, BlastResult>, after: Record<string, BlastResult>, ids: string[]): string[] {
+  return ids.filter((id) => before[id]?.status === "passed" && (after[id]?.status === "failed" || after[id]?.status === "flaky"));
+}
+
+/** What a change did to the other tests: broke = held before and goes off every time now; shaky = held before and only sometimes now. */
+export function regression(before: Record<string, BlastResult>, after: Record<string, BlastResult>, ids: string[]): Regression {
+  // only a test that held before and has been run again can have been broken: those are the ones "checked"
+  const held = ids.filter((id) => before[id]?.status === "passed" && after[id]);
+  const named = (id: string): Named => ({ id, name: after[id]?.name ?? before[id]?.name ?? id });
+  return {
+    broke: held.filter((id) => after[id]?.status === "failed").map(named),
+    shaky: held.filter((id) => after[id]?.status === "flaky").map(named),
+    checked: held.length,
+  };
 }
 
 /**
  * Did a fix work? Looks at the tests it was meant to help, after they were run again. A test that is only unstable still
  * counts as not fixed, and a test that could not be run says nothing either way.
  */
-export function fixOutcome(testIds: string[], results: Record<string, BlastResult>): FixOutcome {
+export function fixOutcome(testIds: string[], results: Record<string, BlastResult>, others?: Regression): FixOutcome {
   const seen = testIds.map((id) => results[id]).filter(Boolean);
   const fixed = seen.filter((r) => r.status === "passed").length;
-  if (seen.length === 0 || seen.every((r) => r.status === "error")) return { state: "unknown", fixed, total: seen.length };
-  return { state: fixed === seen.length ? "worked" : fixed === 0 ? "no" : "partly", fixed, total: seen.length };
+  const extra = others ? { broke: others.broke, shaky: others.shaky, checked: others.checked } : {};
+  // a fix that broke something that held is not a success whatever else it did
+  if (others && others.broke.length > 0) return { state: "broke", fixed, total: seen.length, ...extra };
+  if (seen.length === 0 || seen.every((r) => r.status === "error")) return { state: "unknown", fixed, total: seen.length, ...extra };
+  return { state: fixed === seen.length ? "worked" : fixed === 0 ? "no" : "partly", fixed, total: seen.length, ...extra };
 }
 
 /** The outcome of a fix in a sentence. */
 export function outcomeSentence(o: FixOutcome): string {
   const n = (k: number) => `${k} test${k === 1 ? "" : "s"}`;
+  const names = (list: Named[]) => `${list.slice(0, 3).map((x) => `“${x.name}”`).join(", ")}${list.length > 3 ? ` and ${list.length - 3} more` : ""}`;
+  // the rest of the tests were run again too: say so when they held, and say which ones when they did not
+  const shaky = o.shaky?.length ? ` ${n(o.shaky.length)} that held before now hold only some of the time: ${names(o.shaky)}.` : "";
+  const checked = o.checked && !o.broke?.length ? ` Nothing else broke: ${o.checked === 1 ? "the one other test" : `the ${o.checked} other tests`} still hold${o.checked === 1 ? "s" : ""}.` : "";
   switch (o.state) {
-    case "worked": return `It worked: ${o.total === 1 ? "the test it was for is" : `all ${n(o.total)} it was for are`} defused now.`;
-    case "partly": return `Partly: ${o.fixed} of ${n(o.total)} defused now, the rest still go off.`;
-    case "no": return `It did not help: ${o.total === 1 ? "the test still goes" : `all ${n(o.total)} still go`} off. Undo it, or try another fix.`;
+    case "worked": return `It worked: ${o.total === 1 ? "the test it was for is" : `all ${n(o.total)} it was for are`} defused now.${checked}${shaky}`;
+    case "partly": return `Partly: ${o.fixed} of ${n(o.total)} defused now, the rest still go off.${checked}${shaky}`;
+    case "no": return `It did not help: ${o.total === 1 ? "the test still goes" : `all ${n(o.total)} still go`} off. Undo it, or try another fix.${checked}${shaky}`;
+    case "broke":
+      return `${o.fixed > 0 ? `It fixed ${o.fixed} of ${n(o.total)}, but` : "It did not fix what it was for, and"} it made ${n(o.broke?.length ?? 0)} that held before go off: ${names(o.broke ?? [])}. Undo it, or try another fix.${shaky}`;
     default: return "It could not be tested: the tests could not be run. Try again.";
   }
 }
