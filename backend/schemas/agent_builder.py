@@ -61,6 +61,15 @@ class AgentBlastWrite(BaseModel):
     count: int = 10
 
 
+class AgentBlastTool(BaseModel):
+    """Have an AI study ONE tool of the agent as drawn and write the tests that would break it: normal use, bad input,
+    extremes, hidden orders, permission, secrets, failure, truthfulness. ``angles`` limits them (all when omitted)."""
+    graph: AgentDefinitionSave
+    tool: str
+    angles: list[str] | None = None
+    per_angle: int = 2
+
+
 class AgentBlastFixes(BaseModel):
     """Propose fixes for the tests that exploded."""
     graph: AgentDefinitionSave
