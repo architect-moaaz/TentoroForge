@@ -25,8 +25,10 @@ To make the **Connect with <provider>** button appear:
   --query Parameter.Value --output text` written straight into the server's environment file, never printed.
 - Public key: two TXT records at `_dck1.tentoro.ai` (tentoro.ai's DNS is at GoDaddy), published 2026-10-15
   and checked against the private key.
-- Templates submitted: https://github.com/Domain-Connect/Templates/pull/2333 (both pass `dc-template-linter`
-  full, logo and fast-track checks; Online Editor tests linked in the PR).
+- Templates: added by https://github.com/Domain-Connect/Templates/pull/2333 (merged 2026-10-15); version 2,
+  which lists every return domain (tentoro.ai, forge.tentoro.ai, forge-v3.tentoro.ai), in
+  https://github.com/Domain-Connect/Templates/pull/2350. Both pass `dc-template-linter` full, logo and fast-track
+  checks; Online Editor tests are linked in each PR.
 
 ## Onboarding, after the templates merge
 
