@@ -341,7 +341,7 @@ describe("AgentBuilderPanel — the diagram page and its components", () => {
 });
 
 
-// ── a message can be put away ────────────────────────────────────────────
+// ── a message can be put away; Watch live says it is coming ──────────────
 
 describe("AgentBuilderPanel — putting a message away", () => {
   it("the status message has an X, and pressing it removes the message", async () => {
@@ -358,6 +358,27 @@ describe("AgentBuilderPanel — putting a message away", () => {
     expect(close).not.toBeNull();
     await click(close);
     expect(container.querySelector('[role="status"]')).toBeNull();
+  });
+});
+
+describe("AgentBuilderPanel — Watch live is coming soon", () => {
+  it("shows a Coming soon page in its place, not the live panel", async () => {
+    await mountEditor();
+    await click(button(/Watch live/));
+    const page = container.querySelector('[data-testid="watch-coming-soon"]');
+    expect(page?.textContent).toContain("Coming soon");
+    expect(page?.textContent).toContain("Watch live");
+    expect(container.querySelector('[data-testid="watch-panel"]'), "the real panel is not offered").toBeNull();
+    expect(container.textContent, "the components belong to the diagram page").not.toContain("Agent Nodes");
+  });
+
+  it("marks the button as coming soon, and Diagram takes the person back to the drawing", async () => {
+    await mountEditor();
+    expect(button(/Watch live/).textContent).toContain("Soon");
+    await click(button(/Watch live/));
+    await click(button(/^\s*Diagram\s*$/));
+    expect(container.querySelector('[data-testid="watch-coming-soon"]')).toBeNull();
+    expect(container.textContent).toContain("Agent Nodes");
   });
 });
 
