@@ -16,6 +16,10 @@ import {
   UserCog, Users, Wallet, Wrench, Zap,
 } from "lucide-react";
 import { icons as lucideIcons } from "lucide-react";
+// The package's top-level exports carry the ALIASES (`PlusCircle` for
+// `CirclePlus`, `BarChart3` for `ChartBar`…) that the `icons` object does
+// not: a shell naming "plus-circle" drew a bare circle (pcn4owv7, 2026-10-15).
+import * as lucideAll from "lucide-react";
 import { ShellStateProvider } from "@tentoroforge/renderer";
 import { MobileNav } from "./MobileNav";
 import { NotificationBell } from "./NotificationBell";
@@ -96,11 +100,24 @@ const ICON_MAP: [RegExp, string][] = [
   [/timeline|activity|log|event/, "activity"],
   [/message|inbox|chat|mail|notification/, "inbox"],
   [/document|file|record|note/, "file-text"],
+  // Pages a finance, lifestyle or onboarding app adds to the menu after the
+  // shell was drawn ("Onboarding Setup" drew a bare circle, pcn4owv7 2026-10-15).
+  [/onboard|setup|welcome|getting.started|wizard/, "compass"],
+  [/import|upload/, "upload"],
+  [/export|download|backup/, "download"],
+  [/budget|wallet|allowance/, "wallet"],
+  [/categor|folder|taxonomy/, "folder-tree"],
+  [/recur|repeat|subscription|standing/, "repeat"],
+  [/scenario|simulat|what.if|forecast/, "sliders-horizontal"],
+  [/goal|target|saving/, "target"],
+  [/account|profile/, "user"],
+  [/help|support|faq/, "life-buoy"],
 ];
 function iconFor(label: string, route: string): string {
   const hay = `${label} ${route}`.toLowerCase();
   for (const [re, icon] of ICON_MAP) if (re.test(hay)) return icon;
-  return "circle";
+  // No keyword: the rail draws the label's initial (`RailGlyph`), never a bare circle.
+  return "";
 }
 
 function findSideNav(node: unknown): { props?: NavProps } | null {
@@ -726,15 +743,33 @@ const GLYPHS: Record<string, React.ComponentType<{ size?: number; strokeWidth?: 
 // ones listed above: the architect picks the icon that depicts a destination
 // in this product. Resolved here, on the server, so no icon set ships to the
 // browser.
-function lucideByName(name: string): React.ComponentType<{ size?: number; strokeWidth?: number }> | undefined {
+type Glyph = React.ComponentType<{ size?: number; strokeWidth?: number }>;
+function lucideByName(name: string): Glyph | undefined {
   const pascal = name.split(/[-_\s]+/).filter(Boolean).map((w) => w[0]!.toUpperCase() + w.slice(1)).join("");
-  return (lucideIcons as Record<string, React.ComponentType<{ size?: number; strokeWidth?: number }>>)[pascal];
+  const canonical = (lucideIcons as Record<string, Glyph>)[pascal];
+  if (canonical) return canonical;
+  // An alias ("plus-circle", "bar-chart-3") lives on the package, not in `icons`.
+  const alias = (lucideAll as unknown as Record<string, unknown>)[pascal];
+  return typeof alias === "function" || (alias !== null && typeof alias === "object" && "render" in (alias as object))
+    ? (alias as Glyph) : undefined;
 }
 
-function RailGlyph({ name, size = 17 }: { name?: string; size?: number }) {
-  const key = (name || "circle").toLowerCase();
-  const C = GLYPHS[key] ?? lucideByName(key) ?? Circle;
-  return <C size={size} strokeWidth={2} />;
+/** The glyph for a menu item: its icon by name — canonical or alias — else the
+ *  label's initial in a small chip. Never a bare circle: thirteen icons with
+ *  two anonymous circles among them read as a broken menu. */
+function RailGlyph({ name, label, size = 17 }: { name?: string; label?: string; size?: number }) {
+  const key = (name || "").toLowerCase();
+  const C = key ? (GLYPHS[key] ?? lucideByName(key)) : undefined;
+  if (C) return <C size={size} strokeWidth={2} />;
+  const initial = (label || "").trim().charAt(0).toUpperCase();
+  if (!initial) return <Circle size={size} strokeWidth={2} />;
+  return (
+    <span aria-hidden="true" className="grid place-items-center rounded-md font-semibold leading-none"
+      style={{ width: size + 4, height: size + 4, fontSize: Math.max(10, Math.round(size * 0.62)),
+               background: "currentColor", opacity: 0.9 }}>
+      <span style={{ color: "var(--sk-nav-bg, #101418)" }}>{initial}</span>
+    </span>
+  );
 }
 
 /** Wide sectioned rail: 272px, uppercase group labels, pill actives, footer. */
@@ -809,7 +844,7 @@ function WideRail({ props, appName, caption, footer }: {
                   <a key={it.route} href={it.route} data-nav-item="" suppressHydrationWarning
                     className="mb-0.5 flex items-center gap-2.5 rounded-full px-3 py-[7px] text-[13px] opacity-85 transition hover:opacity-100"
                     style={{ color: text }}>
-                    <span data-nav-icon="" className="inline-flex"><RailGlyph name={it.icon} size={16} /></span>
+                    <span data-nav-icon="" className="inline-flex"><RailGlyph name={it.icon} label={it.label} size={16} /></span>
                     <span data-nav-label="">{it.label}</span>
                   </a>
                 ))}
@@ -818,7 +853,7 @@ function WideRail({ props, appName, caption, footer }: {
               <a href={g.route} data-nav-item="" suppressHydrationWarning
                 className="mb-0.5 flex items-center gap-2.5 rounded-full px-3 py-[7px] text-[13px] opacity-85 transition hover:opacity-100"
                 style={{ color: text }}>
-                <span data-nav-icon="" className="inline-flex"><RailGlyph name={g.icon} size={16} /></span>
+                <span data-nav-icon="" className="inline-flex"><RailGlyph name={g.icon} label={g.label} size={16} /></span>
                 <span data-nav-label="">{g.label ?? g.route}</span>
               </a>
             ) : null}
@@ -861,7 +896,7 @@ function IconRail({ props, appName, footer }: { props: NavProps; appName: string
           <a key={it.route} href={it.route} title={it.label} data-nav-item="" suppressHydrationWarning
             className="grid h-10 w-10 place-items-center rounded-[var(--radius)] opacity-75 transition hover:opacity-100"
             style={{ color: text }}>
-            <span data-nav-icon="" className="inline-flex"><RailGlyph name={it.icon} size={18} /></span>
+            <span data-nav-icon="" className="inline-flex"><RailGlyph name={it.icon} label={it.label} size={18} /></span>
           </a>
         ))}
       </div>
@@ -892,7 +927,7 @@ function DockNav({ props, appName }: { props: NavProps; appName: string }) {
         <a key={it.route} href={it.route} data-nav-item="" suppressHydrationWarning title={it.label}
           className="flex flex-col items-center gap-0.5 rounded-xl px-2.5 py-1.5 opacity-80 transition hover:opacity-100"
           style={{ color: text }}>
-          <span data-nav-icon="" className="inline-flex"><RailGlyph name={it.icon} size={17} /></span>
+          <span data-nav-icon="" className="inline-flex"><RailGlyph name={it.icon} label={it.label} size={17} /></span>
           <span data-nav-label="" className="text-[10px] leading-none">{it.label.split(" ")[0]}</span>
         </a>
       ))}
@@ -959,7 +994,7 @@ export default async function DashboardLayout({
           <div aria-hidden="true" className="h-20 md:hidden" />
           <React.Suspense fallback={null}>
             <MobileTabBar tabs={mobileTabs.map((t) => ({ label: t.label ?? t.route, route: t.route,
-                                                        icon: <RailGlyph name={t.icon} size={20} /> }))} />
+                                                        icon: <RailGlyph name={t.icon} label={t.label} size={20} /> }))} />
           </React.Suspense>
         </>
       )}
@@ -1136,8 +1171,8 @@ export default async function DashboardLayout({
             names resolves; the library's own list is short on purpose. */}
         <SideNav {...navProps} appName={appName}
           groups={navProps.groups.map((g) => ({
-            ...g, glyph: <RailGlyph name={g.icon} size={20} />,
-            items: g.items?.map((it) => ({ ...it, glyph: <RailGlyph name={it.icon} size={17} /> })),
+            ...g, glyph: <RailGlyph name={g.icon} label={g.label} size={20} />,
+            items: g.items?.map((it) => ({ ...it, glyph: <RailGlyph name={it.icon} label={it.label} size={17} /> })),
           }))} />
         {main}
       </div>
