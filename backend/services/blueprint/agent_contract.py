@@ -1611,7 +1611,16 @@ def check_audit(result: "AgentResult", doc: dict | None) -> None:
             if level == "none":
                 problems.append(f"{name}: an `audit_trail` page needs a trail — `security.audit.level` is none")
             users = [alias.get(str(u), str(u)) for u in p.body.get("users") or []]
-            if not users or any(u not in reviewers for u in users):
+            if not users:
+                # THE TRAIL'S SCREEN IS THE REVIEWERS', AND THE POLICY ALREADY SAYS WHO
+                # THEY ARE. The page writer plans screens and does not author `users`
+                # (roles sit on sections), so the page is given the reviewers rather
+                # than refused for not naming them: refusing killed every build of an
+                # app with a trail at this node, four times over (FitTrackr qpqhdugb,
+                # 2026-10-16). Naming someone who is NOT a reviewer is still refused.
+                if reviewers:
+                    p.body["users"] = [alias.get(str(r), str(r)) for r in audit.get("reviewers") or []]
+            elif any(u not in reviewers for u in users):
                 problems.append(f"{name}: an `audit_trail` page is for the reviewers the audit policy names; "
                                 f"`users` must be among {reviewer_names or ['(none declared)']}")
     if problems:

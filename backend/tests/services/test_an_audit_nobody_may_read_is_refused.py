@@ -91,3 +91,24 @@ def test_a_screens_users_by_id_match_reviewers_by_name():
     check_audit(page(["Supervisor"]), doc)
     with pytest.raises(InvalidAudit):
         check_audit(page(["ROLE-001"]), doc)
+
+
+def test_an_audit_screen_that_names_nobody_is_given_the_reviewers():
+    """The page writer plans screens and does not author `users` (roles sit on
+    sections). FitTrackr (qpqhdugb, 2026-10-16) declared its Audit Log with no
+    users and was refused at page_contracts in four builds running; the policy
+    already says who reads the trail, so the page is given them."""
+    res = _page([])
+    check_audit(res, DOC)
+    assert res.proposals[0].body["users"] == ["ROLE-001"]
+
+    # Reviewers named by role NAME land on the page as the role's id.
+    res = _page([])
+    check_audit(res, {**DOC, "security": {"audit": {"level": "writes", "reviewers": ["Compliance"]}}})
+    assert res.proposals[0].body["users"] == ["ROLE-001"]
+
+    # Someone who is not a reviewer is still refused; a trail of level none still needs declaring.
+    with pytest.raises(InvalidAudit):
+        check_audit(_page(["ROLE-002"]), DOC)
+    with pytest.raises(InvalidAudit):
+        check_audit(_page([]), {**DOC, "security": {"audit": {"level": "none"}}})

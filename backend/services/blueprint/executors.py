@@ -1487,7 +1487,7 @@ NODE_TASKS: dict[str, str] = {
     "page_contracts": (
         "When the application keeps an audit trail (`security.audit.level` is "
         "not none), declare one page of pattern `audit_trail` for its reviewers "
-        "(`users` are the reviewer roles): it is the runtime's own screen of who "
+        "(its `users` are the policy's reviewers and are filled in for you): it is the runtime's own screen of who "
         "did what, when, before and after; nothing else is written for it. "
         "Decide the page set, feature by feature, from the slots below: fill "
         "a feature completely or decline it completely, and for every page "
