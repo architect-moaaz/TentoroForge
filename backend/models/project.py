@@ -2,7 +2,7 @@
 
 import uuid
 import string
-import random
+import secrets
 from datetime import datetime
 from enum import Enum as PyEnum
 
@@ -70,8 +70,14 @@ class AgentJobStatus(str, PyEnum):
 
 
 def _generate_short_id(length: int = 8) -> str:
+    # `secrets`, not `random`: a short id is a unique key (DB unique constraint,
+    # and the on-disk project directory `OUTPUT_BASE/<short_id>`), so it must
+    # not come from the global PRNG, which anything may seed. Under a fixed seed
+    # — pytest-randomly reseeds it before every test — `random` handed each test
+    # the same id, and projects collided on one directory in the shared test
+    # output, failing whichever test reused another's.
     chars = string.ascii_lowercase + string.digits
-    return "".join(random.choices(chars, k=length))
+    return "".join(secrets.choice(chars) for _ in range(length))
 
 
 # ---------------------------------------------------------------------------
