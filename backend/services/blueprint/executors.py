@@ -1587,8 +1587,18 @@ NODE_TASKS: dict[str, str] = {
         "records the screen holds and where they sit), `addsHere: true` on a "
         "page whose main records are added on it, `menuEntry` (the menu entry "
         "the screen answers), and `figmaFrame` where a slot carries one. "
+        # WHO MAY OPEN IT IS DECIDED HERE, NOT LATER. This brief said "no
+        # users" while the checks on the same reply refused every restricted
+        # page without them and every role without a door: FitTrackr
+        # (qpqhdugb, 2026-10-16) died at this node in five builds running,
+        # the writer repairing what it had been told not to write.
+        "A page with `access: \"role_restricted\"` names in `users` the role ids "
+        "that may open it — restricted and nameless is the administrator's "
+        "alone. Mark with `entry: true` the page each role arrives at after "
+        "signing in: one per role among the pages only it may open, a concrete "
+        "route, never one with `[id]`. "
         "NOTHING ELSE: no tasks, states, views, "
-        "actions, users or widgets — the contracts are written afterwards, "
+        "actions or widgets — the contracts are written afterwards, "
         "one feature per call, against the set you decide here, and anything "
         "beyond the set is dropped. A page earns its route when it has a "
         "different job, a different primary entity, or a different audience; "

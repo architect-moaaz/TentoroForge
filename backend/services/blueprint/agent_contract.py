@@ -1156,6 +1156,14 @@ def check_page_access(result: "AgentResult", doc: dict | None) -> None:
             (k for k, v in merged.items() if v.get("route") == body.get("route")), str(body.get("route")))
         page = merged.get(key) or body
         if str(page.get("access") or "") == "role_restricted" and not page.get("users"):
+            # THE SECTIONS MAY ALREADY SAY WHO. A screen whose parts each name
+            # their roles is for the union of them; that is written onto the
+            # page rather than asked for a second time.
+            from_sections = sorted({str(r) for sec in (page.get("sections") or []) if isinstance(sec, dict)
+                                    for r in (sec.get("roles") or []) if r})
+            if from_sections:
+                body["users"] = from_sections
+                continue
             problems.append(f"{page.get('route') or page.get('name')}: `access: \"role_restricted\"` names no "
                             "role — put the roles that may open it in `users` (the people this screen is "
                             "for); a restricted page nobody is named for is the administrator's alone")
@@ -1193,11 +1201,26 @@ def check_role_doors(result: "AgentResult", doc: dict | None) -> None:
     after = {**(doc or {}), "pages": list(merged.values())}
     theirs = {str(n) for page in touched for n in restricted_roles(after, page)}
     missing = [r for r in roles_without_a_door(after) if r in theirs]
-    if missing:
+    # A ROLE WITH PAGES AND NO DOOR IS GIVEN ONE. The author's own reply holds
+    # the pages that role may open; the first concrete one — a dashboard before
+    # a list before anything else — becomes where it lands, rather than the
+    # whole build dying for a flag (FitTrackr qpqhdugb, 2026-10-16: five builds).
+    # The author may still say otherwise with `entry: true` of its own.
+    rank = {"dashboard": 0, "list": 1, "kanban": 1, "calendar": 1, "map": 1}
+    still: list[str] = []
+    for role in missing:
+        mine = [b for b in proposed if role in {str(n) for n in restricted_roles(after, b)}
+                and "[" not in str(b.get("route") or "")]
+        mine.sort(key=lambda b: rank.get(str(b.get("pattern") or ""), 2))
+        if mine:
+            mine[0]["entry"] = True
+        else:
+            still.append(role)
+    if still:
         raise RoleWithoutADoor(_all_of([
             f"{role} has pages only {role} may open and none marked as where {role} arrives — "
             f"give the page {role} opens first `entry: true` (a concrete route, no `[id]`)"
-            for role in missing]))
+            for role in still]))
 
 
 class InvalidNavigation(AuthorRefusal):
