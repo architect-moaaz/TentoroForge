@@ -27,9 +27,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api, ApiError } from "@/lib/api";
 import { useAuthStore } from "@/stores/auth";
-import { type BrandIdentity, type BrandProfile, brand, describeDesign } from "@/lib/brand";
+import { COLOR_ROLES, type BrandIdentity, type BrandProfile, brand, describeDesign } from "@/lib/brand";
 import { cleanedForSave } from "@/components/brand/BrandProfileEditor";
-import { DiscoveryQuestionField, useBrandLogo } from "@/components/brand/fields";
+import { DiscoveryQuestionField, IdentityDetailFields, ReadFromNote, useBrandLogo } from "@/components/brand/fields";
 import { PaletteStrip, ReadingSequence, TypeSpecimen } from "@/app/onboarding/moments";
 import { ACCOUNT_TYPES, ROLES, type AccountType, type MemberRole, badEmails, parseEmails, slugPreview, slugProblem } from "./lib";
 
@@ -59,6 +59,80 @@ function Mark() {
       <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
         <path d="M12 2L2 7l10 5 10-5-10-5z" /><path d="M2 17l10 5 10-5" /><path d="M2 12l10 5 10-5" />
       </svg>
+    </div>
+  );
+}
+
+/** A row of the readout: a label and what was found, or "not found" said plainly. */
+function Found({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-baseline justify-between gap-4 py-1.5 text-sm">
+      <span className="shrink-0 text-slate-500 dark:text-slate-400">{label}</span>
+      <span className="min-w-0 text-right text-slate-900 dark:text-white">{children ?? <span className="text-slate-400">not found</span>}</span>
+    </div>
+  );
+}
+
+const ROLE_LABEL: Record<string, string> = {
+  ...Object.fromEntries(COLOR_ROLES.map((r) => [r.key, r.label])),
+  primaryForeground: "On brand", secondary: "Secondary", muted: "Muted", mutedForeground: "Muted text", card: "Cards",
+};
+const ROLE_ORDER = ["primary", "primaryForeground", "secondary", "accent", "background", "foreground", "muted", "border"];
+
+/** Everything the site read produced, in the order it matters. */
+function BrandReadout({ profile }: { profile: BrandProfile }) {
+  const design = profile.design ?? {};
+  const identity = profile.identity ?? {};
+  const colors = Object.entries(design.colors ?? {}).filter(([, v]) => typeof v === "string" && v)
+    .sort(([a], [b]) => (ROLE_ORDER.indexOf(a) + 1 || 99) - (ROLE_ORDER.indexOf(b) + 1 || 99));
+  const type = design.typography ?? {};
+  const radius = design.radius ?? {};
+  const elevation = design.elevation ?? {};
+  const voice = [["Industry", identity.industry], ["Audience", identity.audience], ["Tone", identity.tone], ["Voice", identity.voice], ["Values", identity.values]]
+    .filter(([, v]) => v) as [string, string][];
+  const card = "rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900";
+  const head = "mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400";
+  return (
+    <div data-brand-readout="" className="grid gap-4 sm:grid-cols-2">
+      <section className={card} aria-label="Colours">
+        <h2 className={head}>Colours</h2>
+        {colors.length === 0 && <p className="text-sm text-slate-400">No colours could be read.</p>}
+        <ul className="space-y-1.5">
+          {colors.map(([key, hex]) => (
+            <li key={key} className="flex items-center gap-3 text-sm">
+              <span aria-hidden="true" className="h-6 w-6 shrink-0 rounded-md border border-black/10" style={{ background: hex }} />
+              <span className="flex-1 text-slate-700 dark:text-slate-200">{ROLE_LABEL[key] ?? key.replace(/([A-Z])/g, " $1").toLowerCase()}</span>
+              <code className="text-xs text-slate-500">{hex}</code>
+            </li>
+          ))}
+        </ul>
+      </section>
+      <section className={card} aria-label="Type">
+        <h2 className={head}>Type</h2>
+        <Found label="Headings"><span style={{ fontFamily: type.fontFamilyHeading }}>{type.fontFamilyHeading}</span></Found>
+        <Found label="Body"><span style={{ fontFamily: type.fontFamilyBase }}>{type.fontFamilyBase}</span></Found>
+        {type.fontWeightHeading && <Found label="Heading weight">{type.fontWeightHeading}</Found>}
+        {type.fontSizeBase && <Found label="Base size">{type.fontSizeBase}</Found>}
+        <h2 className={`${head} mt-4`}>Shape & density</h2>
+        <Found label="Corners">{radius.md || radius.base || Object.values(radius)[0]}</Found>
+        <Found label="Shadows">{elevation.md || elevation.base || Object.values(elevation)[0]}</Found>
+        <Found label="Density">{design.informationDensity}</Found>
+      </section>
+      <section className={card} aria-label="Voice">
+        <h2 className={head}>Voice</h2>
+        {voice.length === 0 && <p className="text-sm text-slate-400">Nothing about the voice could be read.</p>}
+        {voice.map(([label, value]) => <Found key={label} label={label}>{value}</Found>)}
+      </section>
+      <section className={card} aria-label="Brand guidelines">
+        <h2 className={head}>Brand guidelines</h2>
+        <p className="text-sm text-slate-600 dark:text-slate-300">What every agent that builds for you will be shown about your company and its design language.</p>
+        {profile.design_md ? (
+          <details className="mt-2 group">
+            <summary className="cursor-pointer text-sm font-medium text-slate-900 dark:text-white">Read the guidelines</summary>
+            <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap rounded-md bg-slate-50 p-3 text-xs leading-relaxed text-slate-700 dark:bg-slate-950 dark:text-slate-300">{profile.design_md}</pre>
+          </details>
+        ) : <p className="mt-2 text-sm text-slate-400">Written once the profile is saved.</p>}
+      </section>
     </div>
   );
 }
@@ -341,6 +415,13 @@ function StartInner() {
                     </div>
                   </div>
                 </div>
+
+                {/* EVERYTHING THE READ FOUND, laid out so a wrong value is seen here
+                    rather than discovered in the first app: each colour with its
+                    role and hex, each typeface with its job, shape and density,
+                    the voice, and the guidelines the agents will be shown. */}
+                <BrandReadout profile={profile} />
+                <ReadFromNote sourceUrl={profile.source_url} rendered={profile.evidence?.rendered} />
                 {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
                 <div className="flex items-center gap-2">
                   <Button type="button" variant="ghost" className="h-12 rounded-full px-5" onClick={() => { setProfile(null); setSite(""); }} disabled={busy}>Try another site</Button>
@@ -368,6 +449,10 @@ function StartInner() {
                 <DiscoveryQuestionField key={key} which={key} rows={3} value={(identity[key] as string) ?? ""}
                                         onChange={(v) => setIdentity((i) => ({ ...i, [key]: v }))} />
               ))}
+              <div className="border-t border-slate-200 pt-5 dark:border-slate-800">
+                <p className="mb-3 text-sm font-medium text-slate-700 dark:text-slate-300">What the read inferred around them</p>
+                <IdentityDetailFields identity={identity} onChange={(key, value) => setIdentity((i) => ({ ...i, [key]: value }))} />
+              </div>
             </div>
             {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
             <div className="flex items-center gap-2">
