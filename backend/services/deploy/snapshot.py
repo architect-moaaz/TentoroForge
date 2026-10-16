@@ -111,7 +111,7 @@ def build_snapshot(root: Path) -> list[dict[str, Any]]:
             raise SnapshotTooLarge(
                 f"snapshot exceeds {_MAX_TOTAL_BYTES} bytes total"
             )
-        rel = str(path.relative_to(root))
+        rel = path.relative_to(root).as_posix()   # Vercel keys files by a/b: a Windows path with backslashes is ONE file whose name holds them
         try:
             text = raw.decode("utf-8")
             files.append({"file": rel, "data": text})
@@ -151,7 +151,7 @@ def build_snapshot_upload(root: Path) -> list[dict[str, Any]]:
             raise SnapshotTooLarge(
                 f"snapshot exceeds {_MAX_TOTAL_BYTES} bytes total"
             )
-        rel = str(path.relative_to(root))
+        rel = path.relative_to(root).as_posix()   # Vercel keys files by a/b: a Windows path with backslashes is ONE file whose name holds them
         sha = hashlib.sha1(raw).hexdigest()
         files.append({"file": rel, "sha": sha, "size": size, "raw": raw})
     return files

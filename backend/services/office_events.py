@@ -70,6 +70,7 @@ ROOM_OF: dict[str, str] = {
     # them into what the engine renders (§34)
     "page_template": "composition",
     "ui_engineer": "composition",
+    "native_engineer": "composition",
     "ui_director": "design_studio",
     "page_reviewer": "qa",
     "testing": "qa",
@@ -110,6 +111,7 @@ NODE_LABEL: dict[str, str] = {
     "page_layouts": "Laying out each page",
     "ui_direction": "Setting the app's look and conventions",
     "page_code": "Writing each page in React",
+    "native_code": "Writing each page for the phone in React Native",
     "figma_intelligence": "Reading the design out of Figma",
     "figma_design_system": "Turning Figma into design tokens",
     "frontend": "Projecting the page schemas",

@@ -192,7 +192,9 @@ def _write_asset(path: Path, size: tuple[int, int], kind: str, spec: MobileSpec)
             target_fraction=0.55,  # width the text should span
         )
     else:
-        safe_fraction = 0.66 if kind == "adaptive" else 0.72
+        # ANDROID MASKS an adaptive icon (and the Android 12 splash) to a circle of about 66% of the canvas: a mark must sit
+        # well inside it, or its corners are cut off.
+        safe_fraction = 0.4 if kind == "adaptive" else 0.6
         _draw_centered_text(
             draw, (W, H), spec.monogram, fg,
             target_fraction=safe_fraction,
@@ -230,19 +232,19 @@ def _draw_centered_text(
     for _ in range(12):  # log2(900) ≈ 10 — 12 is generous
         mid = (lo + hi) // 2
         f = _pick_font(size=mid)
-        w = _text_width(draw, text, f)
-        if w > target_w:
+        w, h = _text_size(draw, text, f)
+        if w > target_w or h > int(H * 0.6):
             hi = mid - 1
         else:
             best_font = f
             lo = mid + 1
     font = best_font
 
-    tw, th = _text_size(draw, text, font)
-    x = (W - tw) // 2
-    # Slight optical bias — centering by baseline puts the text a hair
-    # low, so nudge up by 6% of canvas height.
-    y = (H - th) // 2 - int(H * 0.06)
+    x0, y0, x1, y1 = draw.textbbox((0, 0), text, font=font)
+    tw, th = x1 - x0, y1 - y0
+    x = (W - tw) // 2 - x0
+    # Centred by the glyphs' own box, exactly: a nudge "for optical balance" put a lone letter 12% above the middle.
+    y = (H - th) // 2 - y0
     draw.text((x, y), text, fill=fill, font=font)
 
 
@@ -273,6 +275,9 @@ _FONT_CANDIDATES = (
     # Common Linux
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
     "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+    # Windows
+    "C:/Windows/Fonts/segoeuib.ttf",
+    "C:/Windows/Fonts/arialbd.ttf",
     # Docker default (Pillow bundled DejaVu — always present)
     "DejaVuSans-Bold.ttf",
 )
@@ -289,8 +294,11 @@ def _pick_font(size: int):
             return ImageFont.truetype(path, size=size)
         except (OSError, IOError):
             continue
-    # Absolute fallback — bitmap default, non-scalable but always there.
-    return ImageFont.load_default()
+    # Absolute fallback — Pillow 10.1+ draws its built-in face at any size; older ones, a fixed bitmap.
+    try:
+        return ImageFont.load_default(size=size)
+    except TypeError:
+        return ImageFont.load_default()
 
 
 # --------------------------------------------------------------------------- #

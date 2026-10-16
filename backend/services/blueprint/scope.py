@@ -98,7 +98,7 @@ def built_view(doc: Mapping[str, Any]) -> dict:
     held = deferred_modules(doc)
     view["modules"] = [m for m in doc.get("modules") or []
                        if not (isinstance(m, dict) and str(m.get("id")) in held)]
-    for section in ("pageLayouts", "pageCode"):
+    for section in ("pageLayouts", "pageCode", "nativeCode"):
         if doc.get(section):
             view[section] = [r for r in doc.get(section) or []
                              if not (isinstance(r, dict) and str(r.get("page")) in gone)]

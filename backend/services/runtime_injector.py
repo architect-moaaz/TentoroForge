@@ -200,7 +200,7 @@ def _remove_except(target: Path, root: Path, preserve: tuple[str, ...]) -> None:
     generated — keeps that decision with the caller that projects them.
     """
     for child in sorted(target.rglob("*"), key=lambda p: -len(p.parts)):
-        rel = str(child.relative_to(root))
+        rel = child.relative_to(root).as_posix()      # `/`, as `preserve` names paths; `\` on Windows kept nothing
         if any(rel == p or rel.startswith(p + "/") for p in preserve):
             continue
         if child.is_file() or child.is_symlink():
@@ -1623,6 +1623,14 @@ export async function POST(
     workflowId = id;
     const body = await request.json();
     const input = body.input || {};
+    // THE ENGINE'S OWN KEYS ARE NOT THE CALLER'S TO WRITE. `__step_<node>_completed`
+    // marks a node already run: a caller who wrote it on a fresh run skipped that
+    // node, an approval too. This route sets what it means to (a resume's markers,
+    // the guest token, the origin) after this line; what a client sent under those
+    // names is dropped. `__decision` and `__form` are the caller's, on a resume.
+    for (const k of Object.keys(input)) {
+      if (/^__(step_|user$|guest$|origin$)/.test(k)) delete (input as any)[k];
+    }
     // WHERE THE APPLICATION IS, for a step that builds an absolute address
     // (a checkout's return pages): the request's own origin, behind a proxy too.
     try {
@@ -1704,11 +1712,12 @@ export async function POST(
     // in the block below). The pre-fix gate was `!taskId` — so the branch
     // that seeded markers was skipped exactly when the Tasks UI sent a
     // taskId, which is the common case. See workflow-audit P0-1.
-    let resumeTaskRow: { id: string; node_id: string; process_variables: any } | null = null;
+    let resumeTaskRow: { id: string; node_id: string; process_variables: any;
+      assignee_id?: string | null; assignee_role?: string | null } | null = null;
     try {
       if (taskId) {
         const res: any = await db.execute(sql`
-          SELECT id, node_id, process_variables
+          SELECT id, node_id, process_variables, assignee_id, assignee_role
           FROM workflow_tasks
           WHERE id = ${String(taskId)}::uuid
           LIMIT 1
@@ -1718,7 +1727,7 @@ export async function POST(
         const entityId = (input as any).entityId ?? (input as any).id ?? null;
         if (entityId) {
           const res: any = await db.execute(sql`
-            SELECT id, node_id, process_variables
+            SELECT id, node_id, process_variables, assignee_id, assignee_role
             FROM workflow_tasks
             WHERE entity_id = ${String(entityId)} AND status = 'pending'
             ORDER BY created_at DESC
@@ -1730,6 +1739,21 @@ export async function POST(
       }
     } catch (dbErr) {
       console.warn("[workflow] Could not resolve resume task:", dbErr);
+    }
+
+    // A TASK IS COMPLETED BY WHO IT IS ASSIGNED TO. The inbox lists a task for
+    // its assignee, a person holding its role, or anyone when it names neither
+    // (`/api/tasks`); completing it asked only for the launch role, so a
+    // signed-in caller who knew a task's id could approve another person's.
+    // The same three answers decide who may complete it.
+    if (resumeTaskRow) {
+      const a = resumeTaskRow;
+      const mine = (!a.assignee_id && !a.assignee_role)
+        || (Boolean(user?.id) && a.assignee_id === String(user?.id))
+        || (Boolean(user?.role) && String(a.assignee_role ?? "").split(",").map((r) => r.trim()).includes(String(user?.role)));
+      if (!mine) {
+        return NextResponse.json({ error: "This task is not yours to complete" }, { status: user?.id ? 403 : 401 });
+      }
     }
 
     if (resumeTaskRow) {

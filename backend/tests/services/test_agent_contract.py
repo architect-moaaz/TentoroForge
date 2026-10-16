@@ -103,9 +103,11 @@ def test_figma_intelligence_is_registered_from_section_101():
     # analytics writes each page's widgets — the KPIs and charts, as queries
     # of measures by dimensions — with every page and entity in view, where
     # page design wrote them one feature at a time.
+    # native_engineer writes one native screen per page, beside ui_engineer, for
+    # an application whose `mobile.native` is on (and nothing otherwise).
     assert extra == {"figma_intelligence", "page_template", "a2ui_pages",
                      "memory", "smith", "observer",
-                     "ui_director", "ui_engineer", "page_reviewer", "analytics"}
+                     "ui_director", "ui_engineer", "native_engineer", "page_reviewer", "analytics"}
     cap = capability_for("figma_intelligence")
     assert "mcp:figma" in cap.tools
     # §48 — Figma is design evidence, not confirmed requirements; it may not

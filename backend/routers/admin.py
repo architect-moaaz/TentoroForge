@@ -24,7 +24,7 @@ from auth import IMPERSONATION_EXPIRE_MINUTES, create_impersonation_token
 from database import get_db
 from models.audit import AuditLog
 from models.auth import SUPER_ADMIN, PlatformUser
-from models.deployment import Deployment
+from models.deployment import LIVE_STATUSES, Deployment
 from models.org import InviteStatus, Organization, OrgMember, OrgMemberRole, OrgStatus
 from models.project import Project, ProjectStatus
 from platform_admin import require_super_admin
@@ -603,7 +603,7 @@ async def _deployed_urls(db: AsyncSession, project_ids: list[uuid.UUID]) -> dict
         return {}
     rows = (await db.execute(
         select(Deployment.project_id, Deployment.url, Deployment.created_at).where(
-            Deployment.project_id.in_(project_ids), Deployment.url.is_not(None), Deployment.status == "succeeded"
+            Deployment.project_id.in_(project_ids), Deployment.url.is_not(None), Deployment.status.in_(LIVE_STATUSES)
         ).order_by(Deployment.created_at.desc())
     )).all()
     out: dict[uuid.UUID, str] = {}

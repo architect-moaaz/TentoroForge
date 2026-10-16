@@ -297,15 +297,19 @@ def copy_scaffold(app_root: str | Path, *, project_short_id: str) -> list[str]:
                 continue
             rel = src.relative_to(layer)
             dst_rel = rel.with_suffix("") if rel.suffix == _TMPL_SUFFIX else rel
-            if (any(str(dst_rel).startswith(p) for p in PROJECTED_PATHS)
-                    and str(dst_rel) not in SCAFFOLD_OWNED
-                    and str(dst_rel) not in SCAFFOLD_DEFAULTS):
+            # POSIX SPELLING, ALWAYS: the lists name paths with `/`. `str(Path)` is `src\middleware.ts` on
+            # Windows, which matched none of them — the scaffold overwrote every projected file
+            # (the middleware, the tokens, the schemas) and the app ran without what the Blueprint said.
+            rel_s = dst_rel.as_posix()
+            if (any(rel_s.startswith(p) for p in PROJECTED_PATHS)
+                    and rel_s not in SCAFFOLD_OWNED
+                    and rel_s not in SCAFFOLD_DEFAULTS):
                 continue
             dst = out / dst_rel
             # A default only fills a hole. The projection ran first and its
             # output is the application's; this is what stands in when it did
             # not run at all.
-            if str(dst_rel) in SCAFFOLD_DEFAULTS and dst.exists():
+            if rel_s in SCAFFOLD_DEFAULTS and dst.exists():
                 continue
             dst.parent.mkdir(parents=True, exist_ok=True)
             if rel.suffix == _TMPL_SUFFIX:
@@ -313,7 +317,7 @@ def copy_scaffold(app_root: str | Path, *, project_short_id: str) -> list[str]:
                                             project_short_id=project_short_id))
             else:
                 shutil.copyfile(src, dst)
-            written.append(str(dst_rel))
+            written.append(rel_s)
     # WHAT THE SCAFFOLD NO LONGER SHIPS IS REMOVED. Copying only adds, so a
     # file a template retired stayed in every application built before: the
     # root page that redirected to a hard-coded /home sat beside the group's
@@ -1188,6 +1192,14 @@ def verify_boot(app_root: str | Path, *, entry: str = "/",
     dev_servers.track(proc.pid, port=port, root=root, kind="boot-check")
 
     def _kill_tree() -> None:
+        if os.name == "nt":
+            # Windows has no process groups to signal: `taskkill /T` ends the whole tree (npm, next, next-server).
+            subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True)
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                pass
+            return
         for sig in (signal.SIGTERM, signal.SIGKILL):
             try:
                 os.killpg(os.getpgid(proc.pid), sig)

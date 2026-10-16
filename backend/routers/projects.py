@@ -68,6 +68,7 @@ async def create_project_endpoint(
         name=req.name,
         description=req.description,
         db=db,
+        mobile_target=req.mobile_target,
     )
     await db.commit()
     await db.refresh(project)

@@ -48,6 +48,8 @@ interface MobileBuild {
   artifact_url: string | null;
   logs_url: string | null;
   error_message: string | null;
+  submit_status: string | null; // null | submitting | submitted | submit_failed
+  submit_message: string | null;
   created_at: string;
   updated_at: string;
   completed_at: string | null;
@@ -92,7 +94,11 @@ export function MobileBuildsPanel({ projectId, orgId }: Props) {
   const [error, setError] = useState<{ message: string; missing_keys?: string[]; action?: string } | null>(null);
   const mounted = useRef(true);
 
-  useEffect(() => () => { mounted.current = false; }, []);
+  // Set to true on every mount: in development React mounts, unmounts and mounts again, and the cleanup alone would leave it false.
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   const authHeaders = useMemo<Record<string, string>>(() => (
     token ? { Authorization: `Bearer ${token}` } : {}
@@ -117,7 +123,7 @@ export function MobileBuildsPanel({ projectId, orgId }: Props) {
   }, [fetchList]);
 
   useEffect(() => {
-    const anyLive = builds.some((b) => !isTerminal(b.status));
+    const anyLive = builds.some((b) => !isTerminal(b.status) || b.submit_status === "submitting");
     if (!anyLive) return;
     const id = setInterval(() => void fetchList(), POLL_INTERVAL_MS);
     return () => clearInterval(id);
@@ -156,6 +162,37 @@ export function MobileBuildsPanel({ projectId, orgId }: Props) {
         setError({ message: e instanceof Error ? e.message : String(e) });
       } finally {
         if (mounted.current) setLoading(null);
+      }
+    },
+    [projectId, authHeaders, fetchList],
+  );
+
+  const submitBuild = useCallback(
+    async (build: MobileBuild) => {
+      setError(null);
+      try {
+        const res = await authFetch(`/api/projects/${projectId}/mobile-builds/${build.id}/submit`, {
+          method: "POST",
+          headers: authHeaders,
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          const detail = body?.detail;
+          if (typeof detail === "object" && detail !== null) {
+            setError({
+              message: (detail as any).message ?? "Could not start the submit.",
+              missing_keys: (detail as any).missing_keys,
+              action: (detail as any).action,
+            });
+          } else {
+            setError({ message: typeof detail === "string" ? detail : `HTTP ${res.status}` });
+          }
+          return;
+        }
+        toast.success(`Sending the ${build.platform === "ios" ? "iOS" : "Android"} build to the store`);
+        await fetchList();
+      } catch (e) {
+        setError({ message: e instanceof Error ? e.message : String(e) });
       }
     },
     [projectId, authHeaders, fetchList],
@@ -220,7 +257,7 @@ export function MobileBuildsPanel({ projectId, orgId }: Props) {
           </div>
         )}
         {builds.map((b) => (
-          <BuildRow key={b.id} build={b} />
+          <BuildRow key={b.id} build={b} onSubmit={() => void submitBuild(b)} />
         ))}
       </div>
 
@@ -293,7 +330,11 @@ function PlatformRow({
 // Build row — one entry in the history list                                   //
 // --------------------------------------------------------------------------- //
 
-function BuildRow({ build }: { build: MobileBuild }) {
+function BuildRow({ build, onSubmit }: { build: MobileBuild; onSubmit: () => void }) {
+  const store = build.platform === "ios" ? "App Store" : "Google Play";
+  const canSubmit =
+    build.profile === "production" && build.status === "completed" &&
+    build.submit_status !== "submitting" && build.submit_status !== "submitted";
   const created = new Date(build.created_at);
   const timeStr = created.toLocaleString(undefined, {
     month: "short",
@@ -305,7 +346,7 @@ function BuildRow({ build }: { build: MobileBuild }) {
     ? <Apple className="h-3 w-3" />
     : <Smartphone className="h-3 w-3" />;
   return (
-    <div className="rounded border bg-background px-3 py-2 flex items-center gap-2 text-xs">
+    <div className="rounded border bg-background px-3 py-2 flex flex-wrap items-center gap-2 text-xs">
       <StatusIcon status={build.status} />
       <div className="flex items-center gap-1 min-w-[64px]">
         {iconForPlatform}
@@ -326,6 +367,23 @@ function BuildRow({ build }: { build: MobileBuild }) {
           <Download className="h-3 w-3" />
           Download
         </a>
+      )}
+      {canSubmit && (
+        <Button size="sm" variant="outline" className="h-6 text-[11px]" onClick={onSubmit}
+                title={`Send this build to ${store} (EAS submit)`}>
+          {build.submit_status === "submit_failed" ? "Retry submit" : "Submit"}
+        </Button>
+      )}
+      {build.submit_status === "submitting" && (
+        <span className="inline-flex items-center gap-1 text-blue-600">
+          <Loader2 className="h-3 w-3 animate-spin" />Submitting to {store}
+        </span>
+      )}
+      {build.submit_status === "submitted" && (
+        <span className="text-green-700" title={build.submit_message ?? undefined}>Sent to {store}</span>
+      )}
+      {build.submit_status === "submit_failed" && build.submit_message && (
+        <span className="text-red-600 max-w-[200px] truncate" title={build.submit_message}>{build.submit_message}</span>
       )}
       {build.logs_url && (
         <a

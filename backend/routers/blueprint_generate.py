@@ -753,6 +753,23 @@ def _check_score(doc: dict) -> str:
     return said
 
 
+def _phone_line(doc: dict | None) -> str:
+    """The phone's screens that could not be written, in the hand-over message. Empty when every page has one (or the
+    app is not native): the web app is complete either way, so this says only what the phone is missing."""
+    try:
+        from services.blueprint.native_projection import screen_gaps
+        gaps = screen_gaps(doc or {})
+    except Exception:  # noqa: BLE001 - the message is never held up by a check
+        return ""
+    if not gaps:
+        return ""
+    names = ", ".join(str(p.get("name") or p.get("route")) for p in gaps[:6]) + (" and more" if len(gaps) > 6 else "")
+    n = len(gaps)
+    return (f"\n\nOn the phone, {n} screen{'s' if n != 1 else ''} could not be written ({names}). The web app is complete; on the phone "
+            f"{'that page shows' if n == 1 else 'those pages show'} a notice with a link to the web version. "
+            f"Tell me to write the phone screens and I will try again.")
+
+
 def _build_complete_message(doc: dict | None) -> str | None:
     """One line, in Smith's voice, saying the build finished — or ``None``
     when nothing was built to announce.
@@ -796,7 +813,7 @@ def _build_complete_message(doc: dict | None) -> str | None:
         # is not a built application, and saying so would be a false claim.
         return None
 
-    later += _sign_in_line(full) + _failing_processes_line(full)
+    later += _sign_in_line(full) + _failing_processes_line(full) + _phone_line(full)
 
     # THE CARD, WHEN THE APP WAS HANDED OVER WITH ONE: what is proven so far,
     # what is not yet, what the checks could not try; the checks fill it in

@@ -1351,6 +1351,30 @@ export const PageCode = z.object({
   ...artifactBase,
 });
 
+/**
+ * A page as the phone shows it: one native screen per page, written as React
+ * Native against the app's native SDK and kit (`templates/native`), beside the
+ * web page's `PageCode`. One-to-one by design — the same Blueprint page, so the
+ * same entities, workflows and rules, reached over the same HTTP API; the
+ * parity check refuses a page that has a web screen and no native one.
+ *
+ * Present only when `mobile.native.enabled`.
+ */
+export const NativeCode = z.object({
+  /** Natural key — the page this screen renders. */
+  page: PageId,
+  /** Why the screen is built this way, in terms of what the user asked for. */
+  rationale: z.string().default(""),
+  /** `src/screens/<page>.tsx` — a React Native component, the screen itself. */
+  screen: z.string().min(1),
+  /**
+   * A large screen's parts, by section key: `src/screens/<page>/<key>.tsx`,
+   * each a component the screen renders. Empty for a screen that is one file.
+   */
+  parts: z.record(z.string(), z.string()).default({}),
+  ...artifactBase,
+});
+
 // ===========================================================================
 // §34 · app-level composition — the one call that sees every page at once
 // ===========================================================================
@@ -2124,7 +2148,7 @@ export const BusinessRule = z.object({
   when: z.string().optional(),
   then: z.array(RuleAction).default([]),
   otherwise: z.array(RuleAction).default([]),
-  scope: z.enum(["entity", "form", "server"]).default("form"),
+  scope: z.enum(["entity", "form", "server"]).default("entity"),
   salience: z.number().int().default(0),
   ...artifactBase,
 });
@@ -3237,6 +3261,19 @@ export const Blueprint = z.object({
           bundleId: z.string().regex(/^[a-zA-Z][a-zA-Z0-9]*(\.[a-zA-Z][a-zA-Z0-9]*)+$/).optional(),
         })
         .default({}),
+      /**
+       * A NATIVE APP BESIDE THE WEB ONE. `enabled`: every page is also written
+       * as a React Native screen (`nativeCode`) in an Expo project that reads
+       * and writes through this application's own API — the same data, the
+       * same workflows, the same rules. Opt-in, because it is a second page
+       * writer's cost; it needs password sign-in (the phone signs in with the
+       * session cookie), and its bundle id is `store.bundleId`.
+       */
+      native: z
+        .object({
+          enabled: z.boolean().default(false),
+        })
+        .default({}),
     })
     .default({}),
 
@@ -3256,6 +3293,8 @@ export const Blueprint = z.object({
   /** §34 — pages written as React against the library and the typed SDK.
    *  Takes precedence over the page's `pageLayouts` tree when both exist. */
   pageCode: z.array(PageCode).default([]),
+  /** One native screen per page, when `mobile.native.enabled` (see `NativeCode`). */
+  nativeCode: z.array(NativeCode).default([]),
   /** The frame files this application owns (see `FrameCode`). */
   frameCode: z.array(FrameCode).default([]),
 

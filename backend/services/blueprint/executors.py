@@ -1366,7 +1366,12 @@ NODE_TASKS: dict[str, str] = {
         "Inter is the body face nearly every generated application has had, and "
         "that is why they read as one product: choose it only when its neutrality "
         "is the point, and otherwise a face with the character this product needs "
-        "(a warm humanist sans, a geometric, a grotesque, a readable serif)."
+        "(a warm humanist sans, a geometric, a grotesque, a readable serif).\n\n"
+        "AND HOW A TITLE LOOKS IS THREE MORE, because the web and the phone must draw the same title: "
+        "`typography.headingWeight` (\"400\" light and editorial, \"600\" firm, \"700\" bold — a display serif is "
+        "usually best at 400 or 500), `typography.headingColor` (\"primary\" to set page titles in the brand "
+        "colour, or \"foreground\" for the text colour) and `typography.titleSize` (a page title in px, 28 to "
+        "40: \"36px\"). Choose them with the faces, from the same personality."
     ),
     "requirements": (
         "Extract the application's requirements from the description. Each is one "
@@ -1559,7 +1564,11 @@ NODE_TASKS: dict[str, str] = {
         "mobile-first product — then mark with `tab: true` the three to five "
         "destinations people open every visit, which become its bottom tab "
         "bar — or `drawer` when phones are occasional and the menu can sit "
-        "behind a hamburger. A destination that is a filtered view of a page "
+        "behind a hamburger. The native phone app follows this choice: `tabs` is a "
+        "bottom bar (a More tab holds what does not fit), `drawer` a hamburger "
+        "menu listing every main page — choose `tabs` for an app of a few "
+        "destinations used all day, `drawer` for many destinations or an app "
+        "opened for one task at a time. A destination that is a filtered view of a page "
         "(\"My listings\" on the listings page) names that page and the view's "
         "key in `view`, so it is its own address. Give every navigation node an `icon`: the "
         "lucide-react name (kebab-case) that depicts that destination in this "
@@ -4038,6 +4047,8 @@ MAX_TOKENS_BY_NODE: dict[str, int] = {
     # runs to several hundred lines — and a compile round re-sends the code.
     # 48k ran out on a fifteen-fact record page (0l133sp2); headroom is free.
     "page_code": 64000,
+    # The same page for the phone: one screen's thinking and its whole file.
+    "native_code": 64000,
 }
 
 
@@ -4585,6 +4596,53 @@ def make_executor(
                            proposals=[ArtifactProposal(section="pageCode",
                                                        natural_key=spec.subject, body=body)])
 
+    def _compose_native(spec: TaskSpec) -> AgentResult:
+        """One page as a React Native screen (see ``native_engineer``): the web
+        writer's twin, for an application whose `mobile.native` is on. It writes
+        `nativeCode` and nothing else, and what it adds to the Blueprint (a
+        workflow the screen needs) is the web's to use too."""
+        import copy as _copy
+
+        from services.blueprint import native_engineer, ui_engineer
+        from services.blueprint.native_projection import native_root
+        from services.llm_client import tell
+
+        client = after_no_answer(model.for_task(spec.node, spec.agent)
+                                 if isinstance(model, ModelRouter) else model, spec.feedback)
+        project = str((svc.doc.get("application") or {}).get("id", ""))
+        with svc.lock:
+            doc = _copy.deepcopy(svc.doc)
+        page = next((p for p in doc.get("pages") or [] if str(p.get("id")) == spec.subject), None)
+        if page is None:
+            raise ValueError(f"{spec.subject} is not a page of this application")
+        current = next((row for row in doc.get("nativeCode") or []
+                        if str(row.get("page")) == spec.subject), None)
+        tell(reasoning, f"Writing {page.get('route')} for the phone, in React Native.", "step", spec.node)
+        root = native_root(svc.output_dir)
+
+        def compose(doc: dict, page: dict) -> tuple[Any, list]:
+            return native_engineer.compose_screen(
+                doc, page, root, client, feedback=spec.feedback or "", brief=getattr(spec, "brief", "") or "",
+                current=current if (spec.feedback or getattr(spec, "brief", "")) else None, node=spec.node)
+
+        try:
+            body, spent = compose(doc, page)
+        except ui_engineer.NeedsWorkflow as need:
+            # The same answer as the web page's: the screen was right not to draw a
+            # Save that saves nothing; the build adds what it named, then writes it.
+            if not _add_needed_workflows(page, need.needs, reasoning):
+                raise
+            with svc.lock:
+                doc = _copy.deepcopy(svc.doc)
+            page = next((p for p in doc.get("pages") or [] if str(p.get("id")) == spec.subject), page)
+            body, spent = compose(doc, page)
+        for u, elapsed, *who in spent:
+            if usage is not None and u is not None:
+                usage.record(node=spec.node, agent=who[0] if who else spec.agent, usage=u,
+                             elapsed_s=elapsed, project=project)
+        return AgentResult(task_id=spec.task_id, agent=spec.agent, confidence=0.9,
+                           proposals=[ArtifactProposal(section="nativeCode", natural_key=spec.subject, body=body)])
+
     def _add_needed_workflows(page: dict, needs: list[str], reasoning: Any) -> list[str]:
         """Each workflow a page named as missing, declared, authored and
         projected — one at a time under the document's lock, so pages written
@@ -4630,6 +4688,8 @@ def make_executor(
     def executor(spec: TaskSpec) -> AgentResult:
         if spec.agent in ("ui_director", "ui_engineer"):
             return _compose_ui(spec)
+        if spec.agent == "native_engineer":
+            return _compose_native(spec)
         # A REPAIR EDITS WHAT WAS ACCEPTED, AND A RETRY EDITS WHAT WAS
         # REFUSED. An observer repair carries the accepted answer in
         # `current`; a retry after a contract refusal now carries the refused

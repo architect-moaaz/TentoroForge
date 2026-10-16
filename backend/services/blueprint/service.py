@@ -95,6 +95,8 @@ KEYED_LIST_SECTIONS: dict[str, tuple[str, ...]] = {
     "pageLayouts": ("page",),
     # One page module per page, the same way.
     "pageCode": ("page",),
+    # …and one native screen per page, the same way.
+    "nativeCode": ("page",),
     "data.relationships": ("from", "to", "kind"),
     "data.constraints": ("entity", "kind", "expression"),
 }
@@ -339,6 +341,10 @@ class BlueprintService:
         svc.doc = empty_blueprint(
             app_id=app_id, name=name, domain=domain, description=description
         )
+        # WHAT THE PERSON CHOSE WHEN THEY CREATED THE APP (a website, or a website and a mobile app) becomes the
+        # Blueprint's own field here, once; after this the Blueprint is the only truth.
+        from services.blueprint import app_target
+        app_target.apply(svc.doc, app_target.read(output_dir))
         svc.validate()
         svc.save()
         return svc

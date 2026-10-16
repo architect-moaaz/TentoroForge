@@ -19,6 +19,11 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
 
+#: A deployment that is up and answering. `succeeded_with_warnings` is the same app, live, with a note (the post-publish
+#: health check could not confirm something): its address is the app's address. Looking only for "succeeded" made a live
+#: app look unpublished to the mobile build ("No deployed URL is available") and to the admin apps list.
+LIVE_STATUSES = ("succeeded", "succeeded_with_warnings")
+
 
 class Deployment(Base):
     __tablename__ = "deployments"

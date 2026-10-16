@@ -145,6 +145,16 @@ WRITES = WRITES + (
      {"routes": "array", "brief": "string"}),
 )
 
+WRITES = WRITES + (
+    ("write_phone_screens",
+     "Write the PHONE's screens of a native application - only the phone's, the web pages are not touched. With no "
+     "`routes` it writes every page that has none (the build says which could not be written: \"On the phone, N screens "
+     "could not be written\"); with `routes` it writes those pages' phone screens. `brief` is optional: what they should "
+     "be. In parallel, one version. Use it when the person asks for the phone screens, or after a build that left some out.",
+     {"routes": "array", "brief": "string"}),
+)
+
+
 def _frame_files_said() -> str:
     from services.smith.frame_change import FRAME_PARTS
     return "; ".join(f"`{f}` — {what}" for f, what in FRAME_PARTS.items())
@@ -385,10 +395,46 @@ def rewrite_pages(output_dir: str, routes: list[str], brief: str, *, reasoning: 
             + ", ".join(f"`{r}`" for r in done) + "." if done else "")
     finding = ("; ".join(f"{r} was not laid out again: {why}" for r, why in sorted(failed.items()))
                if failed else "")
+    # THE PHONE'S SCREENS, when the app has them: said as a whole when they all followed, page by page when not.
+    phone = out.get("native") or {}
+    if done and phone:
+        if all(v == "updated" for v in phone.values()) and len(phone) == len(done):
+            said += " The phone screens were laid out again to match."
+        else:
+            gaps = "; ".join(f"{r}: {why}" for r, why in sorted(phone.items()) if why != "updated")
+            if gaps:
+                finding = (finding + "; " if finding else "") + f"phone screens left as they were — {gaps}"
+            ok = [r for r, v in sorted(phone.items()) if v == "updated"]
+            if ok:
+                said += f" The phone screens of {', '.join(f'`{r}`' for r in ok)} were laid out again to match."
     if not done:
         return _finding(finding or "No screen was laid out again.")
     return {"applied": True, "said": said, "finding": finding, "touched": list(out.get("committed") or []),
             "version": out.get("version")}
+
+
+def write_phone_screens(output_dir: str, routes: list[str] | None = None, brief: str = "", *, reasoning: Any = None) -> dict:
+    """The phone's screens of a native app written (`compose.native_pass`): the pages that have none, or the named ones."""
+    from services.blueprint.service import BlueprintService
+    from services.smith.compose import native_pass
+
+    try:
+        svc = BlueprintService.load(output_dir=str(output_dir))
+    except FileNotFoundError:
+        return _finding("This project has no Blueprint, so there are no phone screens to write.")
+    try:
+        out = native_pass(svc, routes or [], only_missing=True, brief=brief, reasoning=reasoning)
+    except Exception as exc:  # noqa: BLE001 - a tool degrades, it does not crash
+        logger.exception("[smith] write_phone_screens failed")
+        return _finding(f"The phone screens were not written — {type(exc).__name__}: {exc}")
+    written, failed = out.get("written") or [], out.get("failed") or {}
+    finding = "; ".join(f"{r}: {why}" for r, why in sorted(failed.items()))
+    if not written:
+        return _finding(out.get("reason") or finding or "No phone screen was written.")
+    return {"applied": True, "said": f"Wrote {len(written)} phone screen(s) (version {out.get('version')}): "
+                                     + ", ".join(f"`{r}`" for r in written) + ".",
+            "finding": f"still without a phone screen — {finding}" if finding else "",
+            "touched": [], "version": out.get("version")}
 
 
 def write_page_code(output_dir: str, route: str, brief: str, *,
@@ -438,6 +484,11 @@ def write_page_code(output_dir: str, route: str, brief: str, *,
     # button away (Test 5); the writer's own account of the change is said.
     what = str(out.get("rationale") or "").strip()
     said = f"Rewrote **{route}** (version {version})" + (f": {what}" if what else ".")
+    phone = str(out.get("native") or "")
+    if phone == "updated":
+        said += " The phone screen was changed to match."
+    elif phone:
+        said += f" Note: {phone}."
     if missing:
         return {"applied": True, "said": said, "touched": list(out.get("committed") or []),
                 "version": version,
@@ -594,6 +645,10 @@ def run(name: str, args: dict, *, output_dir: str, reasoning: Any = None) -> dic
         return rewrite_pages(output_dir, list(routes) if isinstance(routes, list) else
                              ([str(routes)] if routes else []), str(args.get("brief") or ""),
                              reasoning=reasoning)
+    if name == "write_phone_screens":
+        routes = args.get("routes")
+        return write_phone_screens(output_dir, list(routes) if isinstance(routes, list) else
+                                   ([str(routes)] if routes else []), str(args.get("brief") or ""), reasoning=reasoning)
     if name == "verify_pages":
         routes = args.get("routes")
         return verify_pages(output_dir, list(routes) if isinstance(routes, list) else [], reasoning=reasoning)
@@ -617,5 +672,5 @@ def run(name: str, args: dict, *, output_dir: str, reasoning: Any = None) -> dic
     raise KeyError(name)
 
 
-__all__ = ["WRITES", "WRITE_NAMES", "SECTION_NODE", "SECTION_WORDS", "run", "rewrite_pages", "set_field",
+__all__ = ["WRITES", "WRITE_NAMES", "SECTION_NODE", "SECTION_WORDS", "run", "rewrite_pages", "write_phone_screens", "set_field",
            "verify_pages", "write_page_code", "write_section"]

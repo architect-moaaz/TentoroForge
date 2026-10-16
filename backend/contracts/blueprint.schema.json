@@ -2629,7 +2629,7 @@
               "form",
               "server"
             ],
-            "default": "form"
+            "default": "entity"
           },
           "salience": {
             "type": "integer",
@@ -3156,6 +3156,17 @@
             "bundleId": {
               "type": "string",
               "pattern": "^[a-zA-Z][a-zA-Z0-9]*(\\.[a-zA-Z][a-zA-Z0-9]*)+$"
+            }
+          },
+          "additionalProperties": false,
+          "default": {}
+        },
+        "native": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
             }
           },
           "additionalProperties": false,
@@ -4124,6 +4135,53 @@
           "page",
           "load",
           "view"
+        ],
+        "additionalProperties": false
+      },
+      "default": []
+    },
+    "nativeCode": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "$ref": "#/properties/modules/items/properties/pages/items"
+          },
+          "rationale": {
+            "type": "string",
+            "default": ""
+          },
+          "screen": {
+            "type": "string",
+            "minLength": 1
+          },
+          "parts": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": {}
+          },
+          "status": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/status"
+          },
+          "requirements": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/requirements"
+          },
+          "decisions": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/decisions"
+          },
+          "confidence": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/confidence"
+          },
+          "syncNote": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/syncNote"
+          }
+        },
+        "required": [
+          "page",
+          "screen"
         ],
         "additionalProperties": false
       },

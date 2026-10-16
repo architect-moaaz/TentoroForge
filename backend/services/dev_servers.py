@@ -201,7 +201,9 @@ def track(pid: int, *, port: int, root: str | Path, kind: str, key: str = "") ->
     seen = _proc(int(pid), ask_ps=False)
     try:
         ours = (seen is None or seen[0] == os.getpid()) and os.getpgid(int(pid)) == int(pid)
-    except OSError:
+    except (OSError, AttributeError):
+        # AttributeError: Windows has no process groups (`os.getpgid`). Nothing is recorded there, and the callers that
+        # start a server end it themselves (`taskkill /T`): the build's last step used to die on this line.
         ours = False
     if not ours:
         return
