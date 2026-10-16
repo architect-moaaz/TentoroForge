@@ -133,6 +133,7 @@ async def create_build(
     deployed_url: str,
     apple_env: Optional[dict[str, str]] = None,
     google_env: Optional[dict[str, str]] = None,
+    extra_env: Optional[dict[str, str]] = None,
     run: RunFn = _default_run,
 ) -> BuildState:
     """Enqueue an EAS build for the app in ``mobile_dir``.
@@ -164,7 +165,7 @@ async def create_build(
         "--json",
         "--no-wait",
     ]
-    env = _build_env(expo_token, deployed_url, {**(apple_env or {}), **(google_env or {})})
+    env = _build_env(expo_token, deployed_url, {**(apple_env or {}), **(google_env or {}), **(extra_env or {})})
 
     rc, stdout, stderr = await run(argv, mobile_dir, env)
     if rc != 0:
@@ -178,6 +179,31 @@ async def create_build(
     if not entries:
         raise EasClientError("eas build returned no build entries")
     return _to_build_state(entries[0])
+
+
+# --------------------------------------------------------------------------- #
+# link_project                                                                 #
+# --------------------------------------------------------------------------- #
+
+#: A folder under `output/` is not a git repository of its own, and may sit INSIDE ours: EAS would take our repository as
+#: the project and upload (or ignore) the wrong thing. `EAS_NO_VCS=1` makes the folder itself the project.
+NO_VCS = {"EAS_NO_VCS": "1"}
+
+
+async def link_project(
+    native_dir: str,
+    *,
+    expo_token: str,
+    run: RunFn = _default_run,
+) -> None:
+    """Link the folder to an EAS project (made under the token's account when there is none): ``eas init``, which
+    writes the project id into ``app.json``. Raises :class:`EasClientError` with the CLI's words when it cannot."""
+    if not expo_token:
+        raise EasClientError("expo_token is required")
+    argv = ["npx", "eas-cli", "init", "--non-interactive", "--force"]
+    rc, stdout, stderr = await run(argv, native_dir, _build_env(expo_token, "", NO_VCS))
+    if rc != 0:
+        raise EasClientError(f"eas init exited {rc}: {stderr[:500] or stdout[:500]}")
 
 
 # --------------------------------------------------------------------------- #

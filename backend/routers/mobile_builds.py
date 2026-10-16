@@ -18,7 +18,10 @@ Three endpoints:
 
 Auth: the standard org-membership gate via ``get_project_with_auth``.
 Gating:
-  * requires the project to have a ``mobile/`` folder (Slice A output)
+  * builds the project's own Expo project when it is a native app (``mobile.native.enabled``: ``native/``), else the
+    ``mobile/`` shell (Slice A output). A native build is prepared and checked first (``services.native_build``): the
+    phone project made current from the Blueprint, the web app's address written into it, and every reason it cannot
+    work said before an EAS build is queued
   * requires the project to have a deployed URL (or the shell has
     nothing to point at)
   * requires the org's EAS credentials via Slice B's loader
@@ -44,7 +47,9 @@ from database import async_session, get_db
 from models.auth import PlatformUser
 from models.mobile_build import MobileBuild
 from models.project import Project
+from services import native_build
 from services.eas_client import (
+    NO_VCS,
     BuildState,
     EasClientError,
     create_build,
@@ -160,6 +165,15 @@ def _google_env(creds: MobileCredentials) -> dict[str, str]:
     return env
 
 
+def _blueprint_of(output_dir: str) -> dict:
+    """The project's Blueprint, or {} for one that has none (a project from before Blueprints)."""
+    try:
+        from services.blueprint.service import BlueprintService
+        return BlueprintService.load(output_dir=output_dir).doc
+    except Exception:  # noqa: BLE001 - no Blueprint is the shell's case, not an error
+        return {}
+
+
 async def _run_build_and_poll(
     build_row_id: uuid.UUID,
     mobile_dir: str,
@@ -167,14 +181,20 @@ async def _run_build_and_poll(
     platform: str,
     creds: MobileCredentials,
     deployed_url: str,
+    kind: str = "shell",
 ) -> None:
     """Background task: kick off the EAS build, then poll until terminal.
+
+    ``kind`` is "native" for the project's own Expo project: it is linked to an EAS project first (once; the shell's
+    owner ran `eas init` by hand) and EAS is told the folder has no git repository.
 
     Any failure updates the DB row with a human-readable
     ``error_message`` so the UI surfaces it — the task itself never
     re-raises to avoid noisy tracebacks in the background scheduler.
     """
     try:
+        if kind == "native":
+            await native_build.ensure_eas_project(Path(mobile_dir), creds.expo_eas_token)
         state = await create_build(
             mobile_dir,
             profile=profile,
@@ -183,6 +203,7 @@ async def _run_build_and_poll(
             deployed_url=deployed_url,
             apple_env=_apple_env(creds) if platform == "ios" else None,
             google_env=_google_env(creds) if platform == "android" else None,
+            extra_env=NO_VCS if kind == "native" else None,
         )
     except EasClientError as exc:
         await _mark_failed(build_row_id, str(exc))
@@ -275,8 +296,10 @@ async def create_mobile_build(
             status_code=400,
             detail="This project doesn't have generated output yet.",
         )
-    mobile_dir = Path(project.output_dir) / "mobile"
-    if not mobile_dir.is_dir():
+    # WHAT IS BUILT: a native app's own Expo project (`native/`), else the shell (`mobile/`).
+    doc = _blueprint_of(project.output_dir)
+    target = native_build.choose_target(project.output_dir, doc)
+    if target is None:
         raise HTTPException(
             status_code=400,
             detail=(
@@ -284,6 +307,7 @@ async def create_mobile_build(
                 "generation to produce it."
             ),
         )
+    mobile_dir = target.dir
 
     if req.platform not in ("android", "ios"):
         raise HTTPException(
@@ -356,6 +380,25 @@ async def create_mobile_build(
             ),
         )
 
+    # A NATIVE BUILD IS PREPARED AND CHECKED BEFORE IT IS QUEUED: the phone project made current, the web app's address
+    # written into it, and every reason it cannot work said now, not 15 minutes into an EAS build.
+    if target.kind == "native":
+        try:
+            native_build.prepare(project.output_dir, doc, deployed_url)
+        except native_build.NativeBuildError as exc:
+            raise HTTPException(status_code=400, detail={"message": str(exc), "problems": [str(exc)], "action": "fix_app"}) from exc
+        report = native_build.preflight(mobile_dir, doc, profile=req.profile, platform=req.platform, deployed_url=deployed_url)
+        if not report.ok:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": "The phone app cannot be built yet: " + " ".join(report.problems),
+                    "problems": report.problems,
+                    "warnings": report.warnings,
+                    "action": "fix_app",
+                },
+            )
+
     row = MobileBuild(
         project_id=project.id,
         triggered_by=user.id,
@@ -376,6 +419,7 @@ async def create_mobile_build(
         req.platform,
         creds,
         deployed_url,
+        target.kind,
     )
 
     return MobileBuildResponse.from_row(row)
