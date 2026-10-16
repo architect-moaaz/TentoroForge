@@ -45,8 +45,8 @@
  * throw the three answers away.
  */
 
-import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Check, Loader2 } from "lucide-react";
 import { AuthGuard } from "@/components/auth-guard";
 import { Button } from "@/components/ui/button";
@@ -341,6 +341,9 @@ function BrandPreview({
 
 function OnboardingInner() {
   const router = useRouter();
+  // `?org=<id>`: the organisation was made on /start and this is the brand
+  // interview for it, so belonging to one is not a reason to bounce.
+  const forOrg = useSearchParams().get("org");
   const [index, setIndex] = useState(0);
   const [url, setUrl] = useState("");
   const [org, setOrg] = useState<Org | null>(null);
@@ -384,14 +387,19 @@ function OnboardingInner() {
       .get<Org[]>("/api/orgs")
       .then((orgs) => {
         if (cancelled) return;
-        if (orgs.length > 0) router.replace(`/org/${orgs[0].id}`);
+        const named = forOrg ? orgs.find((o) => o.id === forOrg) : undefined;
+        if (named) {
+          setOrg(named);
+          setName(named.name);
+          setChecked(true);
+        } else if (orgs.length > 0) router.replace(`/org/${orgs[0].id}`);
         else setChecked(true);
       })
       .catch(() => !cancelled && setChecked(true));
     return () => {
       cancelled = true;
     };
-  }, [router]);
+  }, [router, forOrg]);
 
   /** Make the workspace that will hold the profile. Retries a taken slug. */
   async function createOrg(orgName: string): Promise<Org> {
@@ -744,7 +752,10 @@ function OnboardingInner() {
 export default function OnboardingPage() {
   return (
     <AuthGuard>
-      <OnboardingInner />
+      {/* useSearchParams needs a Suspense boundary above it for the static shell. */}
+      <Suspense fallback={<div className="flex h-screen items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-slate-400" /></div>}>
+        <OnboardingInner />
+      </Suspense>
     </AuthGuard>
   );
 }
