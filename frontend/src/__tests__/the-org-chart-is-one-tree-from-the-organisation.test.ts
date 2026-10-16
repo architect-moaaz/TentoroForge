@@ -64,6 +64,17 @@ describe("the organisation chart", () => {
     expect(y("dept-eng")).toBeLessThan(y("team-forge"));
   });
 
+  it("colours its lines with tokens the browser can resolve", () => {
+    // Wrapping the token in hsl() parses but fails at computed time (the token is
+    // an oklch colour), and a failed var() resets `stroke` to `none`: the lines
+    // were drawn and invisible (Tentoro-IND, 2026-10-16).
+    const page = readFileSync(resolve(process.cwd(), "src/app/org/[orgId]/org-chart/page.tsx"), "utf8");
+    const graph = readFileSync(resolve(process.cwd(), "src/app/org/[orgId]/org-chart/graph.ts"), "utf8");
+    expect(page + graph).not.toMatch(/hsl\(var\(/);
+    expect(page).toContain('stroke: "var(--primary)"');
+    for (const e of edges) if (e.style) expect(String(e.style.stroke)).not.toMatch(/hsl\(/);
+  });
+
   it("gives every node the handles an edge attaches to", () => {
     const page = readFileSync(resolve(process.cwd(), "src/app/org/[orgId]/org-chart/page.tsx"), "utf8");
     expect(page).toContain('<Handle type="target" position={Position.Top}');

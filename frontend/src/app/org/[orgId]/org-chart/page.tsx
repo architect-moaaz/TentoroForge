@@ -167,7 +167,11 @@ function OrgChartFlow({ orgId }: { orgId: string }) {
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           nodeTypes={nodeTypes}
-          defaultEdgeOptions={{ type: "smoothstep", style: { stroke: "hsl(var(--primary) / 0.5)", strokeWidth: 1.5 } }}
+          // A COLOUR TOKEN IS USED AS IT IS. Wrapping --primary in hsl() parsed, but
+          // the app's --primary is an oklch colour, so the value failed at computed
+          // time and `stroke` fell to its initial `none`: eight edges drawn, none
+          // visible. Opacity goes on its own property.
+          defaultEdgeOptions={{ type: "smoothstep", style: { stroke: "var(--primary)", strokeOpacity: 0.45, strokeWidth: 1.5 } }}
           fitView
           nodesDraggable={false}
           nodesConnectable={false}

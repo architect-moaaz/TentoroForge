@@ -124,9 +124,11 @@ export function buildGraph(org: ChartOrganisation, chart: OrgChart): { nodes: No
     if (edges.some((e) => e.id === id)) continue;
     edges.push({
       id, source: to, target: from, type: "default", label: "reports to",
-      style: { strokeDasharray: "6 4", stroke: "hsl(var(--primary))", strokeWidth: 1.25 },
-      labelStyle: { fontSize: 9, fill: "hsl(var(--muted-foreground))" },
-      labelBgStyle: { fill: "hsl(var(--background))" },
+      // Tokens are colours already (oklch); wrapping one in hsl() makes the
+      // whole declaration fail at computed time and the line vanish.
+      style: { strokeDasharray: "6 4", stroke: "var(--primary)", strokeOpacity: 0.8, strokeWidth: 1.25 },
+      labelStyle: { fontSize: 9, fill: "var(--muted-foreground)" },
+      labelBgStyle: { fill: "var(--background)" },
       data: { reporting: true },
     });
   }
