@@ -19,6 +19,11 @@ import re
 from typing import Any
 
 
+#: The SDK read verbs the generated code calls (the `/api/read/*` ops and their `use…` hooks). An entity name is counted
+#: as read by a page only when it is the quoted first argument to one of these, which is how every real read is written.
+_READ_CALL = (r"\b(?:list|records|record|count|total|series|query|similar|near|use[A-Z][A-Za-z0-9]*)\s*\(\s*")
+
+
 def _live(rows: Any) -> list[dict]:
     return [r for r in (rows or []) if isinstance(r, dict)
             and str(r.get("status") or "").upper() not in ("DEPRECATED", "REMOVED", "SUPERSEDED")]
@@ -50,13 +55,17 @@ def page_entities(doc: dict, page: dict, names: dict[str, str]) -> set[str]:
             name = _entity_name(widget.get("dataSource"), names)
             if name:
                 found.add(name)
-    # The entities the page's own code names: what the web page and the phone screen actually read.
+    # The entities the page's own code READS. The web page and the phone screen read through the SDK with the entity name
+    # as the read call's first argument (`list("Order", …)`, `useRecord("Order", id)`), so the name is matched only in
+    # that position — not anywhere it happens to be quoted. A bare-quote match opened an entity to a page's whole audience
+    # because an unrelated label ("Order" on a public page) read as a read: on a public page that is anyone, so an entity
+    # named like a common word leaked to everyone over `/api/read`.
     for key, field in (("pageCode", "load"), ("pageCode", "view"), ("nativeCode", "screen")):
         for row in doc.get(key) or []:
             if isinstance(row, dict) and str(row.get("page")) == pid:
                 code = str(row.get(field) or "")
                 for name in set(names.values()):
-                    if re.search(r"[\"'`]" + re.escape(name) + r"[\"'`]", code):
+                    if re.search(_READ_CALL + r"[\"'`]" + re.escape(name) + r"[\"'`]", code):
                         found.add(name)
     return found
 

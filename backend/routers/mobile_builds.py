@@ -39,7 +39,7 @@ from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import desc, select
+from sqlalchemy import desc, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import get_current_user
@@ -497,8 +497,11 @@ async def submit_mobile_build(
         raise HTTPException(status_code=400, detail="Only a store build (production) can be sent to a store; a preview build is for testing.")
     if row.status != "completed" or not row.eas_build_id:
         raise HTTPException(status_code=400, detail="This build has not finished, so there is nothing to submit yet.")
-    if row.submit_status == "submitting":
-        raise HTTPException(status_code=409, detail="This build is already being submitted.")
+    if row.submit_status in ("submitting", "submitted"):
+        raise HTTPException(status_code=409, detail=(
+            "This build is already being submitted."
+            if row.submit_status == "submitting"
+            else "This build has already been sent to its store."))
     doc = _blueprint_of(project.output_dir or "")
     target = native_build.choose_target(project.output_dir or "", doc)
     if target is None or target.kind != "native":
@@ -515,9 +518,17 @@ async def submit_mobile_build(
         gone = "Apple App Store Connect keys and the app's App Store Connect id are needed to submit."
     if missing:
         raise HTTPException(status_code=400, detail={"message": gone, "missing_keys": missing, "action": "add_credentials"})
-    row.submit_status = "submitting"
-    row.submit_message = None
+    # Claim the submit atomically: only a build that is not already in flight or sent (submit_status unset, or a prior
+    # attempt that failed) moves to "submitting". Two requests that race past the check above, or a double click, cannot
+    # both send the same build to the store — the second claims nothing and is told so.
+    claimed = await db.execute(
+        update(MobileBuild)
+        .where(MobileBuild.id == row.id,
+               or_(MobileBuild.submit_status.is_(None), MobileBuild.submit_status == "submit_failed"))
+        .values(submit_status="submitting", submit_message=None))
     await db.commit()
+    if claimed.rowcount == 0:
+        raise HTTPException(status_code=409, detail="This build has already been sent to its store, or is being sent now.")
     await db.refresh(row)
     background.add_task(_run_submit, row.id, str(target.dir), row.eas_build_id, row.platform, creds)
     return MobileBuildResponse.from_row(row)

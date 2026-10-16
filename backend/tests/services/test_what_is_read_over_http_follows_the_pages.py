@@ -76,6 +76,16 @@ def test_the_entities_a_page_names_in_its_code_are_read_by_it():
     assert read_access(d)["entities"]["Workout"]["signedIn"]
 
 
+def test_an_entity_named_in_code_but_not_read_is_not_opened_by_it():
+    # A PUBLIC page whose code merely MENTIONS an admin-only entity's name — a label, a toast, a heading — must not open
+    # that entity to everyone over /api/read. Only a real read (the name as a read call's argument) counts.
+    d = doc()
+    d["pages"][2]["data"] = {}                      # the public /news page reads nothing of its own now
+    d["pageCode"] = [{"page": "PAGE-003", "view": 'export default () => <h1>{"AuditLog"} history</h1>;'}]
+    a = read_access(d)["entities"]["AuditLog"]
+    assert not a["anyone"] and not a["signedIn"] and a["roles"] == ["Admin"]
+
+
 def test_the_generated_schema_carries_the_access_and_the_route_asks_it():
     text = emit_schema(doc())
     assert "export const READ_ACCESS" in text and '"AuditLog"' in text
