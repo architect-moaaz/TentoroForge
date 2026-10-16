@@ -123,6 +123,16 @@ def blueprint_to_context(
         for i in (8, 2, 4, 1):          # decisions, requirements, rules, domain
             if over <= 0:
                 break
+            if i == 4:
+                # EVERY RULE STAYS NAMED: each cut to its one-line form before
+                # any is cut off the end, so "is there already a rule for
+                # that?" is answered from the page, never from half a list.
+                compact = _render_rules(bp, compact=True)
+                if len(compact) < len(sections[4]):
+                    over -= len(sections[4]) - len(compact)
+                    sections[4] = compact
+                    if over <= 0:
+                        break
             text = sections[i]
             if not text or id(text) in keep_whole:
                 continue
@@ -265,23 +275,55 @@ def _render_entities(bp: Blueprint) -> str:
     return "\n".join(lines)
 
 
-def _render_rules(bp: Blueprint) -> str:
+def _render_rules(bp: Blueprint, *, compact: bool = False) -> str:
     """The rules already in force.
 
     Asked to add one, Smith could not tell whether it was already there, so
     every rule was either a question or a duplicate the seam refused after the
     fact. The seam still refuses duplicates; this is what lets the ANSWER say
     so instead.
+
+    `compact` is the list when the page is short of room: every rule still
+    named, with its record and its state, and where the full text is.
     """
     rules = [r for r in (getattr(bp, "business_rules", None) or []) if isinstance(r, dict)]
     if not rules:
         return "## Rules\n(none yet.)"
-    lines = [f"## Rules ({len(rules)})"]
+    if compact:
+        short = {"everywhere": "enforced", "save": "enforced on save", "form": "form only",
+                 "before": "gates workflows", "nowhere": "written down only"}
+        lines = [f"## Rules ({len(rules)}) — the same list the person sees in the Business Rules tab; "
+                 "shortened to fit, `read_section` \"rules\" shows each in full"]
+        for r in rules:
+            state = "switched off" if r.get("enabled") is False else short.get(str(r.get("runs") or ""), "")
+            on = f" on {r['entity_name']}" if r.get("entity_name") else ""
+            lines.append(f"- {r.get('id') or ''} {r.get('name') or '?'}{on} [{state}; {r.get('origin') or '?'}]")
+        return "\n".join(lines)
+    runs = {"everywhere": "ENFORCED on every save + live on the form", "save": "ENFORCED on every save",
+            "form": "shapes the form only", "before": "checked before its workflows run",
+            "nowhere": "WRITTEN DOWN ONLY — nothing enforces it"}
+    origin = {"brief": "from the person's request", "smith": "added in chat", "editor":
+              "made by the person in the Business Rules tab", "generated": "inferred by Forge"}
+    lines = [f"## Rules ({len(rules)}) — the same list the person sees in the Business Rules tab"]
     for r in rules:
         said = " ".join(str(r.get("statement") or "").split())
-        line = f"- **{r.get('name') or '?'}**: {said}"
+        state = "SWITCHED OFF in the Business Rules tab" if r.get("enabled") is False \
+            else runs.get(str(r.get("runs") or ""), "")
+        head = f"- {r.get('id') or ''} **{r.get('name') or '?'}**"
+        if r.get("entity_name"):
+            head += f" on {r['entity_name']}"
+        line = f"{head} — {said}"
+        meta = [m for m in (state, origin.get(str(r.get("origin") or ""))) if m]
+        if meta:
+            line += f" [{'; '.join(meta)}]"
         if r.get("when"):
-            line += f"  · when `{r['when']}`"
+            line += f" · when `{r['when']}`"
+        if r.get("effects"):
+            line += f" → {', '.join(r['effects'])}"
+        if r.get("kind") == "decision_table" and r.get("outputs"):
+            line += f" · decision table setting {', '.join(map(str, r['outputs']))}"
+        if r.get("gates"):
+            line += f" · gates {', '.join(map(str, r['gates']))}"
         lines.append(line)
     return "\n".join(lines)
 

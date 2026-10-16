@@ -2070,6 +2070,34 @@ export const PrerequisiteRequirement = z.object({
   roles: z.array(RoleId).optional(),
 });
 
+/**
+ * A DMN-style decision table: each row's input cells test the record's fields
+ * (`> 1000`, `"gold"`, `-` = any), and the first matching row sets the output
+ * fields. The shape the Business Rules tab edits and the runtime evaluates.
+ */
+export const DecisionTableColumn = z.object({
+  id: z.string().optional(),
+  /** The record field this column reads (inputs) or writes (outputs). */
+  name: z.string(),
+  label: z.string().optional(),
+  type: z.enum(["string", "number", "boolean", "date", "any"]).default("any"),
+  variableBinding: z.string().optional(),
+});
+
+export const DecisionTableRow = z.object({
+  id: z.string().optional(),
+  inputEntries: z.array(z.string()).default([]),
+  outputEntries: z.array(z.string()).default([]),
+  annotation: z.string().optional(),
+});
+
+export const DecisionTable = z.object({
+  hitPolicy: z.enum(["U", "F", "A", "P", "C", "R"]).default("F"),
+  inputs: z.array(DecisionTableColumn).default([]),
+  outputs: z.array(DecisionTableColumn).default([]),
+  rules: z.array(DecisionTableRow).default([]),
+});
+
 export const BusinessRule = z.object({
   id: RuleId,
   name: z.string(),
@@ -2096,7 +2124,18 @@ export const BusinessRule = z.object({
    * enforced: every gated workflow starts by checking `requires` and refuses
    * with `message` when it is not met.
    */
-  kind: z.enum(["statement", "condition_action", "prerequisite"]).default("statement"),
+  kind: z.enum(["statement", "condition_action", "prerequisite", "decision_table"]).default("statement"),
+  /**
+   * Where the rule came from — what the person is told, and what Smith reads:
+   * `brief` (the person asked for it while describing the app), `smith`
+   * (asked for in chat), `editor` (made in the Business Rules tab),
+   * `generated` (Forge inferred it from the domain).
+   */
+  origin: z.enum(["brief", "smith", "editor", "generated"]).optional(),
+  /** A rule switched off is kept, shown and editable, but never run. */
+  enabled: z.boolean().default(true),
+  /** On a decision table: the table, read against `entity`'s fields. */
+  table: DecisionTable.optional(),
   /** On a prerequisite: the workflows it gates. */
   gates: z.array(WorkflowId).default([]),
   /** On a prerequisite: the record that satisfies it. */

@@ -184,6 +184,13 @@ export function RulesPanel({ projectId, orgId }: RulesPanelProps) {
 
       {subTab === "rules" && (
         <div className="flex flex-1 flex-col overflow-hidden">
+          {/* Business rules have one home: the Business Rules tab, where the
+              rules from the person's request, from Smith and from that tab are
+              listed, edited and switched together. */}
+          <div className="border-b bg-muted/30 px-3 py-1.5 text-[11px] text-muted-foreground">
+            Business rules — the ones from your request, from Smith and your own — are in the{" "}
+            <span className="font-medium text-foreground">Business Rules</span> tab.
+          </div>
           {/* Toolbar */}
           <div className="flex items-center gap-2 border-b px-3 py-2">
             <div className="relative flex-1">

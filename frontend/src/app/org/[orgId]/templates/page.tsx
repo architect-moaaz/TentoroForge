@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { TemplateCard } from "@/components/templates/TemplateCard";
 import { TemplateDetailModal } from "@/components/templates/TemplateDetailModal";
+import { OrgTemplates } from "@/components/templates/OrgTemplates";
 
 interface Template {
   slug: string;
@@ -72,12 +73,11 @@ function TemplatesGallery({ orgId }: { orgId: string }) {
       <div className="mb-6">
         <h1 className="mb-1 text-2xl font-semibold text-foreground">Templates</h1>
         <p className="text-sm text-muted-foreground">
-          Start with a pre-built template and customize it to your needs
+          Start from an app your organisation saved, or a pre-built template
         </p>
       </div>
 
-      {/* Search + category filter */}
-      <div className="mb-6 flex flex-wrap items-center gap-3">
+      <div className="mb-6">
         <div className="relative w-64">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -87,7 +87,13 @@ function TemplatesGallery({ orgId }: { orgId: string }) {
             className="pl-9"
           />
         </div>
+      </div>
 
+      <OrgTemplates orgId={orgId} search={search} />
+
+      <h2 className="mb-3 text-base font-semibold text-foreground">Gallery</h2>
+      {/* Category filter (gallery) */}
+      <div className="mb-6 flex flex-wrap items-center gap-3">
         <div className="flex flex-wrap gap-1">
           <Button
             variant={selectedCategory === null ? "secondary" : "ghost"}

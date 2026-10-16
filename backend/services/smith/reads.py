@@ -287,6 +287,10 @@ def read_section(doc: dict, name: str) -> str:
     name = (name or "").strip()
     if not name:
         raise ReadRefused("No section was named. Top-level sections: " + ", ".join(sorted(doc)) + ".")
+    # The catalogue said `rules`; the section is `businessRules`. Both read it.
+    head, _, rest = name.partition(".")
+    if head in ("rules", "business_rules", "businessrules", "BusinessRules"):
+        name = "businessRules" + (f".{rest}" if rest else "")
     node: Any = doc
     for part in name.split("."):
         if isinstance(node, dict) and part in node:
@@ -457,7 +461,7 @@ READS: tuple[tuple[str, str, dict[str, str]], ...] = (
      {"pattern": "string", "path": "string", "glob": "string"}),
     ("read_section",
      "One section of the Blueprint as JSON — `pages`, `data.entities`, "
-     "`workflows`, `rules`, `navigation`, `designSystem`, `requirements`, "
+     "`workflows`, `businessRules` (the Business Rules tab's rules), `navigation`, `designSystem`, `requirements`, "
      "`product`, `pageCode`, `pageLayouts`. Dotted names reach inside.",
      {"name": "string"}),
     ("find",

@@ -53,6 +53,9 @@ interface DecisionTableModeProps {
   models: string[];
   getFields: (model: string | null | undefined) => ColumnModel[];
   enumValuesForType: (type: string | undefined) => string[] | null;
+  /** The record the table reads and writes — saved with the rule when given. */
+  boundModel?: string | null;
+  onBoundModelChange?: (model: string) => void;
 }
 
 export function DecisionTableMode({
@@ -64,8 +67,14 @@ export function DecisionTableMode({
   models,
   getFields,
   enumValuesForType,
+  boundModel: controlledModel,
+  onBoundModelChange,
 }: DecisionTableModeProps) {
-  const [boundModel, setBoundModel] = useState<string | null>(null);
+  const [localModel, setLocalModel] = useState<string | null>(null);
+  // The panel owns the binding when it saves it (Blueprint rules); otherwise
+  // it is local, as before.
+  const boundModel = onBoundModelChange ? controlledModel ?? null : localModel;
+  const setBoundModel = (m: string) => (onBoundModelChange ? onBoundModelChange(m) : setLocalModel(m));
   // Fall back to the first model so the binder works on first render even if
   // the data model loaded after mount (boundModel still null).
   const effectiveModel = boundModel ?? models[0] ?? null;
@@ -112,7 +121,7 @@ export function DecisionTableMode({
       {models.length > 0 && (
         <div className="flex flex-wrap items-end gap-2 rounded-md border bg-muted/10 p-2.5">
           <div className="space-y-1">
-            <Label className="text-[11px] text-muted-foreground">Bind to model</Label>
+            <Label className="text-[11px] text-muted-foreground">Applies to record</Label>
             <Select value={effectiveModel ?? undefined} onValueChange={setBoundModel}>
               <SelectTrigger className="h-7 w-[160px] text-xs">
                 <SelectValue placeholder="Model" />

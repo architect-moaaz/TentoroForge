@@ -509,6 +509,74 @@ def image_blocks(paths: Sequence[str | Path]) -> list[dict[str, Any]]:
     return blocks
 
 
+def _endpoint_enforces_schema() -> bool:
+    """Whether the Messages endpoint this client talks to holds a reply to
+    ``output_config.format``. Anthropic's does. An Anthropic-COMPATIBLE host
+    (``ANTHROPIC_BASE_URL`` — Kimi's, for one) accepts the field and does not
+    hold to it: Kimi answered `entity_fields` with ``"fields": [{}]`` and,
+    the schema never having been stated in the prompt, every entity of two
+    apps was committed with no columns (live, 2026-10-09). Elsewhere the
+    schema is stated in the prompt and the envelope checks carry the rest."""
+    from urllib.parse import urlparse
+    base = os.environ.get("ANTHROPIC_BASE_URL", "").strip()
+    host = (urlparse(base).hostname or "") if base else "api.anthropic.com"
+    return host == "anthropic.com" or host.endswith(".anthropic.com")
+
+
+#: Property names an Anthropic-compatible endpoint's schema compiler reads as
+#: JSON-Schema keywords. Kimi's answers ``{"fields": [{}, {}]}`` to any schema
+#: with a property named ``required`` (a field's own required flag) — the
+#: same request without it answers in full (measured, 2026-10-09). Sent under
+#: an alias and named back in the reply, so nothing past the transport knows.
+_KEYWORD_PROPERTIES = {"required": "isRequiredField"}
+
+
+def _alias_keyword_properties(schema: Any) -> Any:
+    """``schema`` with every keyword-named property renamed to its alias —
+    in ``properties`` and in the ``required`` list beside it."""
+    if isinstance(schema, list):
+        return [_alias_keyword_properties(v) for v in schema]
+    if not isinstance(schema, dict):
+        return schema
+    out = {}
+    for k, v in schema.items():
+        if k == "properties" and isinstance(v, dict):
+            out[k] = {_KEYWORD_PROPERTIES.get(name, name): _alias_keyword_properties(sub)
+                      for name, sub in v.items()}
+        elif k == "required" and isinstance(v, list):
+            out[k] = [_KEYWORD_PROPERTIES.get(n, n) if isinstance(n, str) else n for n in v]
+        else:
+            out[k] = _alias_keyword_properties(v)
+    return out
+
+
+def _unalias_keyword_properties(text: str) -> str:
+    """The reply with each alias named back. Whole-JSON replies are walked key
+    by key; a reply with a fence or prose around it (the envelope parser reads
+    those too) has the quoted alias keys renamed in place. Either way the alias
+    never reaches anything past this transport — an alias is a property KEY we
+    put in the schema and nothing downstream writes, so renaming the quoted
+    token is safe even when the whole reply will not parse as JSON."""
+    back = {v: k for k, v in _KEYWORD_PROPERTIES.items()}
+    if not any(alias in text for alias in back):
+        return text
+
+    def walk(node: Any) -> Any:
+        if isinstance(node, dict):
+            return {back.get(k, k): walk(v) for k, v in node.items()}
+        if isinstance(node, list):
+            return [walk(v) for v in node]
+        return node
+    try:
+        data = json.loads(text, strict=False)
+    except (TypeError, ValueError):
+        out = text
+        for alias, name in back.items():
+            out = out.replace(f'"{alias}"', f'"{name}"')
+        return out
+    return json.dumps(walk(data), ensure_ascii=False)
+
+
 @dataclass
 class AnthropicModel:
     """The real client. Uses the official SDK — see the claude-api reference.
@@ -521,8 +589,9 @@ class AnthropicModel:
     model: str = DEFAULT_MODEL
     max_tokens: int = DEFAULT_MAX_TOKENS
     effort: str = "high"
-    #: output_config.format is a hard constraint, not a request.
-    enforces_schema: bool = True
+    #: output_config.format is a hard constraint, not a request — on
+    #: Anthropic's own endpoint (see `_endpoint_enforces_schema`).
+    enforces_schema: bool = field(default_factory=_endpoint_enforces_schema)
     #: The only transport here that carries images. The OpenAI-compatible and
     #: Gemini clients take (system, user, schema) and would reject the keyword.
     accepts_images: bool = True
@@ -690,7 +759,8 @@ class AnthropicModel:
             messages=[{"role": "user", "content": _content(shown, user)}],
             output_config={
                 "effort": self.effort,
-                "format": {"type": "json_schema", "schema": schema},
+                "format": {"type": "json_schema", "schema": (
+                    schema if self.enforces_schema else _alias_keyword_properties(schema))},
             },
         )
         client = self._anthropic()
@@ -737,6 +807,8 @@ class AnthropicModel:
                 why = (f"the model stopped ({stop or 'no stop reason'}) without "
                        f"writing an answer")
             raise NoAnswer(why, usage=spent, stop_reason=stop)
+        if not self.enforces_schema:
+            text = _unalias_keyword_properties(text)
         return ModelReply(text=text, usage=spent, stop_reason=stop)
 
 
@@ -1311,6 +1383,15 @@ NODE_TASKS: dict[str, str] = {
         "naming the document (\"document 1\") and `message` quoting the sentence it "
         "came from — so the application can say which requirements the uploaded "
         "document produced. A requirement supported by both cites both.\n\n"
+        "A RULE THE PERSON STATES IS KEPT, IN THEIR WORDS. A limit, a threshold, "
+        "an approval, a must or must-not, a default, an order things happen in "
+        "(\"orders above ₹10,000 need a manager's approval\", \"a candidate "
+        "cannot skip a stage\", \"discount is at most 20%\", \"new tickets "
+        "start as open\") is its own requirement, worded as the rule, with "
+        "`owner: \"businessRules\"` — never softened into something a user "
+        "can do, merged into another requirement, or dropped. Each one becomes "
+        "a rule the application enforces, and the person sees it in the "
+        "Business Rules tab marked as theirs.\n\n"
         "GROUP THEM BY WHAT THE PRODUCT DOES. Give every requirement an `area`: "
         "the capability it belongs to, named in the two or three words the "
         "person asking would use for that part of their product. Requirements "
@@ -1496,7 +1577,7 @@ NODE_TASKS: dict[str, str] = {
     "page_contracts": (
         "When the application keeps an audit trail (`security.audit.level` is "
         "not none), declare one page of pattern `audit_trail` for its reviewers "
-        "(`users` are the reviewer roles): it is the runtime's own screen of who "
+        "(its `users` are the policy's reviewers and are filled in for you): it is the runtime's own screen of who "
         "did what, when, before and after; nothing else is written for it. "
         "Decide the page set, feature by feature, from the slots below: fill "
         "a feature completely or decline it completely, and for every page "
@@ -1939,13 +2020,36 @@ NODE_TASKS: dict[str, str] = {
         "with square brackets, never parentheses; `null` is a value "
         "(`termEnd != null`). A condition the parser refuses is refused "
         "here, with the parser's reason.\n\n"
-        "A rule that changes what a form does is `kind: \"condition_action\"`: "
-        "name the `entity` whose form it governs, a `when` condition in FEEL "
-        "over that entity's fields (`caseType = \"Refund\"`), and `then` "
-        "actions — set_visibility, set_required, set_readonly, set_options, "
-        "set_field, show_error — each naming a field the entity has. Such a "
-        "rule fires on the form as a person types; a rule with only a "
-        "statement constrains people, not forms.\n\n"
+        "EVERY RULE THE PERSON ASKED FOR IS A RULE. A requirement whose `owner` "
+        "is `businessRules` is a rule the person stated: write a rule for each "
+        "one, citing its id in `requirements`, with `origin: \"brief\"`. A rule "
+        "you add from the domain has `origin: \"generated\"`. A stated rule "
+        "left out is still listed for the person, marked as not enforced — so "
+        "enforce it.\n\n"
+        "ENFORCE WHAT A RECORD CAN ENFORCE. A rule that can be checked on a "
+        "record's fields is `kind: \"condition_action\"`, never a statement: "
+        "name the `entity`, a `when` condition in FEEL over that entity's fields "
+        "(`caseType = \"Refund\"`), and `then` actions, each naming a field the "
+        "entity has — show_error (refuse the save with its message), "
+        "set_required (refuse a save without the field), set_field / "
+        "set_default (set a value), clear_field, set_visibility, set_readonly, "
+        "set_options, trigger_workflow (start a workflow, by its FLOW id), "
+        "send_notification (an in-app notification with its message). "
+        "`scope: \"entity\"` runs it on every save AND live on the form — use "
+        "it for every rule that refuses, requires, sets or starts something; "
+        "`form` is only for show/hide/lock/options. A rule about a CHANGE reads "
+        "the value before it as `previous.<field>` (\"a done task cannot go "
+        "back to todo\": `previous.status = \"done\" and status = \"todo\"`). "
+        "\"Is empty\" is `field = null`; a length limit is "
+        "`string length(field) > 60`. Tabular logic (tiers, bands, a value "
+        "decided by two or three fields) is `kind: \"decision_table\"`: "
+        "`entity`, and `table` = {`hitPolicy`: \"F\", `inputs`: [{`name`: "
+        "field}], `outputs`: [{`name`: field}], `rules`: [{`inputEntries`: "
+        "[\"> 1000\", \"-\"], `outputEntries`: [\"0.2\"]}]} — an input cell is "
+        "a test (`> 1000`, `\"gold\"`, `-` for any), an output cell a value; "
+        "the first matching row wins. A statement is only for what no record "
+        "can check (how people must behave); it constrains people, nothing "
+        "enforces it.\n\n"
         "A person must have DONE SOMETHING BEFORE they may do something else — "
         "verified their identity before selling or buying, been approved "
         "before booking, paid before downloading. That is `kind: "
@@ -3610,6 +3714,16 @@ def parse_envelope(raw: str, *, task_id: str, agent: str,
     proposals: list[ArtifactProposal] = []
     if node in SCHEMA_BY_NODE:
         proposals = expand_data_model(data)
+        if node == "entity_fields":
+            # One entity's columns is the whole job; an entity with none is
+            # not an answer (see `_meant_to_store_nothing`). Committed, it
+            # read as done and every page naming a field was refused after.
+            empty = [p.natural_key for p in proposals
+                     if p.section == "data.entities" and not p.body.get("fields")]
+            if empty:
+                raise MalformedEnvelope(
+                    f"entity_fields: {', '.join(empty)} came back with no fields — "
+                    "every field needs at least a name and a type")
         if not proposals and not _meant_to_store_nothing(node, data):
             # A reply that parsed but named nothing is not a data model. Said
             # here rather than committed as an empty section, which is how a

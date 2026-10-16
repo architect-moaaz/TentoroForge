@@ -231,6 +231,39 @@ class Team(Base):
     people: Mapped[list["OrgPerson"]] = relationship(
         back_populates="team", foreign_keys="OrgPerson.team_id"
     )
+    memberships: Mapped[list["TeamMember"]] = relationship(
+        back_populates="team", cascade="all, delete-orphan"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Team ↔ Person membership: A PERSON MAY BE IN MORE THAN ONE TEAM. `team_id`
+# on the person is their home team (kept for every older reader); the rows
+# here are every team they belong to, home team included once it is set.
+# ---------------------------------------------------------------------------
+
+class TeamMember(Base):
+    __tablename__ = "team_members"
+    __table_args__ = (
+        UniqueConstraint("team_id", "person_id", name="uq_team_member"),
+        Index("ix_team_member_person", "person_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    team_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False
+    )
+    person_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("org_people.id", ondelete="CASCADE"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    team: Mapped["Team"] = relationship(back_populates="memberships")
+    person: Mapped["OrgPerson"] = relationship(back_populates="team_memberships")
 
 
 # ---------------------------------------------------------------------------
@@ -291,6 +324,9 @@ class OrgPerson(Base):
         back_populates="person", cascade="all, delete-orphan"
     )
     group_memberships: Mapped[list["OrgGroupMember"]] = relationship(
+        back_populates="person", cascade="all, delete-orphan"
+    )
+    team_memberships: Mapped[list["TeamMember"]] = relationship(
         back_populates="person", cascade="all, delete-orphan"
     )
 

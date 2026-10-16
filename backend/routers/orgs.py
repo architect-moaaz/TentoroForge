@@ -9,7 +9,7 @@ import json
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
+from fastapi import Request, APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
 from pydantic import EmailStr, validate_email
 from sqlalchemy import select, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,6 +20,7 @@ from database import get_db
 from models.auth import PlatformUser
 from services.org_access import require_org_member
 from models.org import (
+    TeamMember,
     Organization,
     OrgMember,
     OrgMemberRole,
@@ -34,6 +35,7 @@ from models.org import (
     OrgGroupMember,
 )
 from schemas.org import (
+    TeamMemberAdd, MemberRow,
     OrgCreate, OrgUpdate, OrgResponse,
     InviteRequest, InviteResponse,
     DepartmentCreate, DepartmentUpdate, DepartmentResponse,
@@ -244,49 +246,164 @@ async def upload_org_logo(
 # Membership & Invitations (0.1.5)
 # ===========================================================================
 
+def _member_row(m: OrgMember) -> MemberRow:
+    return MemberRow(
+        id=m.id, user_id=m.user_id,
+        email=m.user.email if m.user else m.invite_email,
+        name=m.user.name if m.user else None,
+        role=m.role.value, invite_status=m.invite_status.value,
+        joined_at=m.joined_at, created_at=m.created_at,
+    )
+
+
+@router.get("/api/orgs/{org_id}/members", response_model=list[MemberRow])
+async def list_org_members(
+    org_id: uuid.UUID,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Who is in the organisation and who has been invited and not yet joined.
+    (The settings page asked here and nothing answered: every list read "No
+    members yet".)"""
+    await _require_org_member(org_id, user, db)
+    rows = (await db.execute(
+        select(OrgMember).where(OrgMember.org_id == org_id,
+                                OrgMember.invite_status.in_([InviteStatus.accepted, InviteStatus.pending]))
+        .options(selectinload(OrgMember.user)).order_by(OrgMember.created_at)
+    )).scalars().all()
+    return [_member_row(m) for m in rows]
+
+
+@router.get("/api/me/invitations")
+async def my_invitations(
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """What waits for the signed-in person: organisations they were invited
+    into and already belong to (an invitation is taken up at sign-in), and
+    invitations still pending for their email — so somebody who signed up to
+    join a team sees the team, and somebody with nothing yet is told so."""
+    rows = (await db.execute(
+        select(OrgMember).where(
+            (OrgMember.user_id == user.id)
+            | ((OrgMember.user_id.is_(None)) & (func.lower(OrgMember.invite_email) == user.email.lower()))
+        ).options(selectinload(OrgMember.organization)).order_by(OrgMember.created_at)
+    )).scalars().all()
+    memberships, pending = [], []
+    for m in rows:
+        org = m.organization
+        if org is None or getattr(org, "is_removed", False):
+            continue
+        row = {"invite_id": str(m.id), "org_id": str(org.id), "name": org.name, "slug": org.slug,
+               "role": m.role.value, "invited": bool(m.invite_email), "joined_at": m.joined_at}
+        if m.invite_status == InviteStatus.accepted:
+            memberships.append(row)
+        elif m.invite_status == InviteStatus.pending:
+            pending.append(row)
+    return {"email": user.email, "memberships": memberships, "pending": pending}
+
+
 @router.post("/api/orgs/{org_id}/invite", response_model=InviteResponse, status_code=201)
 async def invite_member(
     org_id: uuid.UUID,
     req: InviteRequest,
+    request: Request,
     user: PlatformUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    """Invite somebody into the organisation by email. A person with an
+    account joins at once. A person without one is emailed the sign-up
+    address (when a mail provider is set up) and joins at the sign-in after
+    their sign-up with that email; the address comes back for the inviter to
+    pass on either way."""
     await _require_org_member(org_id, user, db, min_role=OrgMemberRole.admin)
+    org = (await db.execute(select(Organization).where(Organization.id == org_id))).scalar_one()
+    email = req.email.lower()
+    target = (await db.execute(
+        select(PlatformUser).where(func.lower(PlatformUser.email) == email)
+    )).scalar_one_or_none()
 
-    # Check if already a member
-    existing = await db.execute(
-        select(OrgMember).join(PlatformUser).where(
-            OrgMember.org_id == org_id,
-            PlatformUser.email == req.email,
-        )
-    )
-    if existing.scalar_one_or_none():
-        raise HTTPException(status_code=409, detail="User already a member or invited")
+    existing = None
+    if target is not None:
+        existing = (await db.execute(select(OrgMember).where(
+            OrgMember.org_id == org_id, OrgMember.user_id == target.id))).scalar_one_or_none()
+    if existing is None:
+        existing = (await db.execute(select(OrgMember).where(
+            OrgMember.org_id == org_id, OrgMember.user_id.is_(None),
+            func.lower(OrgMember.invite_email) == email))).scalar_one_or_none()
+    if existing is not None and existing.invite_status == InviteStatus.accepted:
+        raise HTTPException(status_code=409, detail="Already a member")
 
-    # Find user by email (may not exist yet)
-    user_result = await db.execute(
-        select(PlatformUser).where(PlatformUser.email == req.email)
-    )
-    target_user = user_result.scalar_one_or_none()
-
-    membership = OrgMember(
-        # NULL until the invitee has an account: the inviter's own id used to
-        # stand in, and their second invite tripped `uq_org_member`.
-        user_id=target_user.id if target_user else None,
-        org_id=org_id,
-        role=OrgMemberRole(req.role),
-        invite_status=InviteStatus.pending,
-        invite_email=req.email,
-    )
-    db.add(membership)
+    membership = existing or OrgMember(org_id=org_id, invite_email=email)
+    membership.role = OrgMemberRole(req.role)
+    membership.invite_email = email
+    if existing is None:
+        db.add(membership)
+    joined = target is not None
+    if joined:
+        membership.user_id = target.id
+        membership.invite_status = InviteStatus.accepted
+        membership.joined_at = datetime.now(timezone.utc)
+    else:
+        membership.invite_status = InviteStatus.pending
     await db.commit()
     await db.refresh(membership)
+
+    from services.invites import platform_base, send_invite_email, signup_url
+    url = "" if joined else signup_url(platform_base(request.headers), email)
+    emailed = False
+    if not joined:
+        emailed = await send_invite_email(to=email, org_name=org.name, inviter=user.name or user.email,
+                                          role=membership.role.value, url=url)
     return InviteResponse(
         id=membership.id,
         invite_email=membership.invite_email,
         role=membership.role.value,
         invite_status=membership.invite_status.value,
+        joined=joined, emailed=emailed, invite_url=url,
     )
+
+
+@router.delete("/api/orgs/{org_id}/invite/{invite_id}", status_code=204)
+async def cancel_invite(
+    org_id: uuid.UUID,
+    invite_id: uuid.UUID,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Withdraw an invitation nobody has taken up."""
+    await _require_org_member(org_id, user, db, min_role=OrgMemberRole.admin)
+    invite = (await db.execute(select(OrgMember).where(
+        OrgMember.id == invite_id, OrgMember.org_id == org_id,
+        OrgMember.invite_status == InviteStatus.pending))).scalar_one_or_none()
+    if not invite:
+        raise HTTPException(status_code=404, detail="Invite not found")
+    await db.delete(invite)
+    await db.commit()
+
+
+@router.post("/api/orgs/{org_id}/invite/{invite_id}/resend", response_model=InviteResponse)
+async def resend_invite(
+    org_id: uuid.UUID,
+    invite_id: uuid.UUID,
+    request: Request,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Send the invitation again, and hand the sign-up address back."""
+    await _require_org_member(org_id, user, db, min_role=OrgMemberRole.admin)
+    org = (await db.execute(select(Organization).where(Organization.id == org_id))).scalar_one()
+    invite = (await db.execute(select(OrgMember).where(
+        OrgMember.id == invite_id, OrgMember.org_id == org_id,
+        OrgMember.invite_status == InviteStatus.pending))).scalar_one_or_none()
+    if not invite or not invite.invite_email:
+        raise HTTPException(status_code=404, detail="Invite not found")
+    from services.invites import platform_base, send_invite_email, signup_url
+    url = signup_url(platform_base(request.headers), invite.invite_email)
+    emailed = await send_invite_email(to=invite.invite_email, org_name=org.name, inviter=user.name or user.email,
+                                      role=invite.role.value, url=url)
+    return InviteResponse(id=invite.id, invite_email=invite.invite_email, role=invite.role.value,
+                          invite_status=invite.invite_status.value, joined=False, emailed=emailed, invite_url=url)
 
 
 @router.post("/api/orgs/{org_id}/invite/{invite_id}/accept")
@@ -297,17 +414,21 @@ async def accept_invite(
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
-        select(OrgMember).where(
-            OrgMember.id == invite_id,
-            OrgMember.org_id == org_id,
-            OrgMember.invite_status == InviteStatus.pending,
-        )
+        select(OrgMember).where(OrgMember.id == invite_id, OrgMember.org_id == org_id)
     )
     invite = result.scalar_one_or_none()
     if not invite:
         raise HTTPException(status_code=404, detail="Invite not found")
+    if invite.invite_status == InviteStatus.accepted:
+        # Taken up already — at the sign-in that followed their sign-up, as a
+        # rule — so saying yes again is simply yes.
+        if invite.user_id == user.id:
+            return {"status": "accepted"}
+        raise HTTPException(status_code=404, detail="Invite not found")
+    if invite.invite_status != InviteStatus.pending:
+        raise HTTPException(status_code=404, detail="Invite not found")
 
-    if invite.invite_email != user.email:
+    if (invite.invite_email or "").lower() != user.email.lower():
         raise HTTPException(status_code=403, detail="This invite is not for you")
 
     invite.user_id = user.id
@@ -346,15 +467,64 @@ async def list_people(
     if department_id:
         query = query.where(OrgPerson.department_id == department_id)
     if team_id:
-        query = query.where(OrgPerson.team_id == team_id)
+        in_team = select(TeamMember.person_id).where(TeamMember.team_id == team_id)
+        query = query.where((OrgPerson.team_id == team_id) | OrgPerson.id.in_(in_team))
     if is_active is not None:
         query = query.where(OrgPerson.is_active == is_active)
 
     query = query.order_by(OrgPerson.last_name, OrgPerson.first_name)
     query = query.offset((page - 1) * limit).limit(limit)
 
-    result = await db.execute(query)
-    return result.scalars().all()
+    people = (await db.execute(query)).scalars().all()
+    teams_of = await _teams_of(db, [p.id for p in people])
+    return [_person_out(p, teams_of.get(p.id, [])) for p in people]
+
+
+async def _teams_of(db: AsyncSession, person_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[uuid.UUID]]:
+    """Every team each person is in: the membership rows, plus the home team
+    for a person whose membership row was never written."""
+    if not person_ids:
+        return {}
+    rows = (await db.execute(
+        select(TeamMember.person_id, TeamMember.team_id).where(TeamMember.person_id.in_(person_ids))
+    )).all()
+    out: dict[uuid.UUID, list[uuid.UUID]] = {}
+    for person_id, team_id in rows:
+        out.setdefault(person_id, []).append(team_id)
+    return out
+
+
+def _person_out(person: OrgPerson, team_ids: list[uuid.UUID]) -> PersonResponse:
+    ids = list(team_ids)
+    if person.team_id and person.team_id not in ids:
+        ids.insert(0, person.team_id)
+    out = PersonResponse.model_validate(person)
+    out.team_ids = ids
+    return out
+
+
+async def _set_teams(db: AsyncSession, person: OrgPerson, team_ids: list[uuid.UUID], org_id: uuid.UUID) -> None:
+    """Make the membership rows match `team_ids` (teams of this organisation
+    only); the home team stays if it is among them, else becomes the first."""
+    wanted = list(dict.fromkeys(team_ids))
+    if wanted:
+        known = set((await db.execute(
+            select(Team.id).where(Team.org_id == org_id, Team.id.in_(wanted))
+        )).scalars().all())
+        unknown = [t for t in wanted if t not in known]
+        if unknown:
+            raise HTTPException(status_code=404, detail=f"Team not found: {unknown[0]}")
+    have = {m.team_id: m for m in (await db.execute(
+        select(TeamMember).where(TeamMember.person_id == person.id)
+    )).scalars().all()}
+    for team_id, row in have.items():
+        if team_id not in wanted:
+            await db.delete(row)
+    for team_id in wanted:
+        if team_id not in have:
+            db.add(TeamMember(team_id=team_id, person_id=person.id))
+    if person.team_id not in wanted:
+        person.team_id = wanted[0] if wanted else None
 
 
 @router.post("/api/orgs/{org_id}/people", response_model=PersonResponse, status_code=201)
@@ -366,11 +536,18 @@ async def create_person(
 ):
     await _require_org_member(org_id, user, db, min_role=OrgMemberRole.admin)
 
-    person = OrgPerson(org_id=org_id, **req.model_dump())
+    fields = req.model_dump()
+    team_ids = fields.pop("team_ids", None)
+    person = OrgPerson(org_id=org_id, **fields)
     db.add(person)
+    await db.flush()
+    teams = list(team_ids or [])
+    if person.team_id and person.team_id not in teams:
+        teams.insert(0, person.team_id)
+    await _set_teams(db, person, teams, org_id)
     await db.commit()
     await db.refresh(person)
-    return person
+    return _person_out(person, teams)
 
 
 @router.put("/api/orgs/{org_id}/people/{person_id}", response_model=PersonResponse)
@@ -389,11 +566,21 @@ async def update_person(
     if not person:
         raise HTTPException(status_code=404, detail="Person not found")
 
-    for field, value in req.model_dump(exclude_unset=True).items():
+    changes = req.model_dump(exclude_unset=True)
+    team_ids = changes.pop("team_ids", None)
+    for field, value in changes.items():
         setattr(person, field, value)
+    if team_ids is not None:
+        await _set_teams(db, person, list(team_ids), org_id)
+    elif "team_id" in changes and person.team_id:
+        # A new home team joins the memberships; the old ones stay.
+        have = (await db.execute(select(TeamMember.team_id).where(TeamMember.person_id == person.id))).scalars().all()
+        if person.team_id not in have:
+            db.add(TeamMember(team_id=person.team_id, person_id=person.id))
     await db.commit()
     await db.refresh(person)
-    return person
+    teams_of = await _teams_of(db, [person.id])
+    return _person_out(person, teams_of.get(person.id, []))
 
 
 @router.delete("/api/orgs/{org_id}/people/{person_id}", status_code=204)
@@ -540,6 +727,87 @@ async def update_team(
     await db.commit()
     await db.refresh(team)
     return team
+
+
+async def _team_of(org_id: uuid.UUID, team_id: uuid.UUID, db: AsyncSession) -> Team:
+    team = (await db.execute(select(Team).where(Team.id == team_id, Team.org_id == org_id))).scalar_one_or_none()
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+    return team
+
+
+@router.get("/api/orgs/{org_id}/teams/{team_id}/members", response_model=list[PersonResponse])
+async def list_team_members(
+    org_id: uuid.UUID,
+    team_id: uuid.UUID,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Everyone in the team: the membership rows plus anyone whose home team it is."""
+    await _require_org_member(org_id, user, db)
+    await _team_of(org_id, team_id, db)
+    in_team = select(TeamMember.person_id).where(TeamMember.team_id == team_id)
+    people = (await db.execute(
+        select(OrgPerson).where(OrgPerson.org_id == org_id, OrgPerson.is_active == True,
+                                (OrgPerson.team_id == team_id) | OrgPerson.id.in_(in_team))
+        .order_by(OrgPerson.last_name, OrgPerson.first_name)
+    )).scalars().all()
+    teams_of = await _teams_of(db, [p.id for p in people])
+    return [_person_out(p, teams_of.get(p.id, [])) for p in people]
+
+
+@router.post("/api/orgs/{org_id}/teams/{team_id}/members", response_model=PersonResponse, status_code=201)
+async def add_team_member(
+    org_id: uuid.UUID,
+    team_id: uuid.UUID,
+    req: TeamMemberAdd,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Put a person in a team they are not in yet; their other teams are untouched."""
+    await _require_org_member(org_id, user, db, min_role=OrgMemberRole.admin)
+    await _team_of(org_id, team_id, db)
+    person = (await db.execute(
+        select(OrgPerson).where(OrgPerson.id == req.person_id, OrgPerson.org_id == org_id)
+    )).scalar_one_or_none()
+    if not person:
+        raise HTTPException(status_code=404, detail="Person not found")
+    have = (await db.execute(select(TeamMember.team_id).where(TeamMember.person_id == person.id))).scalars().all()
+    if team_id not in have:
+        db.add(TeamMember(team_id=team_id, person_id=person.id))
+    if not person.team_id:
+        person.team_id = team_id
+    await db.commit()
+    await db.refresh(person)
+    teams_of = await _teams_of(db, [person.id])
+    return _person_out(person, teams_of.get(person.id, []))
+
+
+@router.delete("/api/orgs/{org_id}/teams/{team_id}/members/{person_id}", status_code=204)
+async def remove_team_member(
+    org_id: uuid.UUID,
+    team_id: uuid.UUID,
+    person_id: uuid.UUID,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Take a person out of one team; if it was their home team, another of
+    their teams (or none) becomes it."""
+    await _require_org_member(org_id, user, db, min_role=OrgMemberRole.admin)
+    await _team_of(org_id, team_id, db)
+    person = (await db.execute(
+        select(OrgPerson).where(OrgPerson.id == person_id, OrgPerson.org_id == org_id)
+    )).scalar_one_or_none()
+    if not person:
+        raise HTTPException(status_code=404, detail="Person not found")
+    rows = (await db.execute(select(TeamMember).where(TeamMember.person_id == person.id))).scalars().all()
+    for row in rows:
+        if row.team_id == team_id:
+            await db.delete(row)
+    if person.team_id == team_id:
+        left = [r.team_id for r in rows if r.team_id != team_id]
+        person.team_id = left[0] if left else None
+    await db.commit()
 
 
 @router.delete("/api/orgs/{org_id}/teams/{team_id}", status_code=204)
@@ -975,7 +1243,7 @@ async def get_org_chart(
         "id": str(d.id), "name": d.name, "description": d.description,
         "parent_id": str(d.parent_id) if d.parent_id else None,
         "head_person_id": str(d.head_person_id) if d.head_person_id else None,
-        "teams": [], "people": [],
+        "teams": [], "people": [], "children": [],
     } for d in depts}
 
     team_map = {t.id: {
@@ -994,11 +1262,25 @@ async def get_org_chart(
         "manager_id": str(p.manager_id) if p.manager_id else None,
     } for p in people]
 
-    # Assign people to teams/departments
+    # A PERSON STANDS UNDER EVERY TEAM THEY ARE IN (the membership rows plus
+    # the home team); only someone in no team hangs off their department.
+    members = (await db.execute(
+        select(TeamMember.person_id, TeamMember.team_id).where(TeamMember.person_id.in_([p.id for p in people]))
+    )).all() if people else []
+    teams_of: dict[str, list[uuid.UUID]] = {}
+    for person_id, team_id in members:
+        teams_of.setdefault(str(person_id), []).append(team_id)
     for p in person_list:
-        if p["team_id"] and uuid.UUID(p["team_id"]) in team_map:
-            team_map[uuid.UUID(p["team_id"])]["people"].append(p)
-        elif p["department_id"] and uuid.UUID(p["department_id"]) in dept_map:
+        mine = list(teams_of.get(p["id"], []))
+        if p["team_id"] and uuid.UUID(p["team_id"]) not in mine:
+            mine.insert(0, uuid.UUID(p["team_id"]))
+        p["team_ids"] = [str(t) for t in mine]
+        placed = False
+        for team_id in mine:
+            if team_id in team_map:
+                team_map[team_id]["people"].append(p)
+                placed = True
+        if not placed and p["department_id"] and uuid.UUID(p["department_id"]) in dept_map:
             dept_map[uuid.UUID(p["department_id"])]["people"].append(p)
 
     # Assign teams to departments
@@ -1006,9 +1288,15 @@ async def get_org_chart(
         if t["department_id"] and uuid.UUID(t["department_id"]) in dept_map:
             dept_map[uuid.UUID(t["department_id"])]["teams"].append(t)
 
-    # Build hierarchy (root departments first)
-    root_depts = [d for d in dept_map.values() if d["parent_id"] is None]
-    unassigned = [p for p in person_list if not p["department_id"] and not p["team_id"]]
+    # Build hierarchy: a sub-department hangs under its parent (it used to be
+    # dropped from the chart altogether); a parent nobody knows makes it a root.
+    for d in dept_map.values():
+        parent = uuid.UUID(d["parent_id"]) if d["parent_id"] else None
+        if parent and parent in dept_map and parent != uuid.UUID(d["id"]):
+            dept_map[parent]["children"].append(d)
+    root_depts = [d for d in dept_map.values()
+                  if not d["parent_id"] or uuid.UUID(d["parent_id"]) not in dept_map or d["parent_id"] == d["id"]]
+    unassigned = [p for p in person_list if not p["department_id"] and not p["team_ids"]]
     orphan_teams = [t for t in team_map.values() if not t["department_id"]]
 
     return {

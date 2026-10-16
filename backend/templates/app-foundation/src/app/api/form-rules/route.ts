@@ -25,6 +25,8 @@ export async function POST(request: Request) {
     return NextResponse.json({
       patches: result.patches ?? {},
       formHints: result.formHints ?? [],
+      // What a save of these values would be refused for, said while typing.
+      errors: (result as { errors?: string[] }).errors ?? [],
     });
   } catch {
     // Rules engine unavailable / bad input — no hints, form unchanged.

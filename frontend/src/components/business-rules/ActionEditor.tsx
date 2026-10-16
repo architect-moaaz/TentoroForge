@@ -31,6 +31,8 @@ interface ActionEditorProps {
   fields: string[];
   /** Optional field -> type metadata (type chips + enum value dropdowns). */
   fieldMeta?: Record<string, FieldMeta>;
+  /** The app's workflows, for "start a workflow" — chosen, not typed. */
+  workflows?: { id: string; name: string }[];
 }
 
 function genActionId() {
@@ -41,7 +43,7 @@ function newAction(): RuleAction {
   return { id: genActionId(), type: "set_field", valueMode: "literal", value: "" };
 }
 
-export function ActionEditor({ branch, value, onChange, fields, fieldMeta }: ActionEditorProps) {
+export function ActionEditor({ branch, value, onChange, fields, fieldMeta, workflows }: ActionEditorProps) {
   const accent =
     branch === "then"
       ? "border-emerald-200 dark:border-emerald-900/50"
@@ -72,7 +74,12 @@ export function ActionEditor({ branch, value, onChange, fields, fieldMeta }: Act
       )}
 
       {value.map((action, i) => {
-        const meta = ACTION_META[action.type];
+        // An action this editor does not know (written by a newer build) is
+        // shown and kept, never dropped or crashed on.
+        const meta = ACTION_META[action.type] ?? {
+          label: action.type, description: "Kept as written.", formOnly: false,
+          needsField: !!action.field, needsValue: false, needsMessage: !!action.message,
+        };
         const targetMeta = action.field ? fieldMeta?.[action.field] : undefined;
         const enumOpts =
           targetMeta?.category === "enum" ? targetMeta.enumValues ?? [] : undefined;
@@ -187,12 +194,48 @@ export function ActionEditor({ branch, value, onChange, fields, fieldMeta }: Act
             {action.type === "set_readonly" && (
               <ToggleRow label="Read-only (locked)" checked={action.readonly ?? true} onChange={(readonly) => update(i, { readonly })} />
             )}
-            {action.type === "trigger_workflow" && (
+            {action.type === "trigger_workflow" &&
+              (workflows && workflows.length > 0 ? (
+                <Select
+                  value={action.workflow || undefined}
+                  onValueChange={(workflow) => update(i, { workflow })}
+                >
+                  <SelectTrigger className="h-7 text-xs">
+                    <SelectValue placeholder="Choose the workflow to start" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {workflows.map((w) => (
+                      <SelectItem key={w.id} value={w.id} className="text-xs">
+                        {w.name} <span className="text-muted-foreground">· {w.id}</span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Input
+                  className="h-7 text-xs"
+                  placeholder="Workflow name"
+                  value={action.workflow ?? ""}
+                  onChange={(e) => update(i, { workflow: e.target.value })}
+                />
+              ))}
+            {action.type === "set_options" && (
               <Input
                 className="h-7 text-xs"
-                placeholder="Workflow name"
-                value={action.workflow ?? ""}
-                onChange={(e) => update(i, { workflow: e.target.value })}
+                placeholder="Options, comma-separated (e.g. todo, doing)"
+                value={(action.options ?? []).map((o) => (o.label && o.label !== o.value ? `${o.value}=${o.label}` : o.value)).join(", ")}
+                onChange={(e) =>
+                  update(i, {
+                    options: e.target.value
+                      .split(",")
+                      .map((x) => x.trim())
+                      .filter(Boolean)
+                      .map((x) => {
+                        const [v, l] = x.split("=");
+                        return { value: v.trim(), label: (l ?? v).trim() };
+                      }),
+                  })
+                }
               />
             )}
           </div>

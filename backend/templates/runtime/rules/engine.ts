@@ -29,6 +29,19 @@ import type {
  */
 let ruleCache: ProjectRule[] = [];
 let rulesLoaded = false;
+/** Rules handed in with setRules (tests, in-memory callers) are never replaced from disk. */
+let rulesPinned = false;
+/** What the rules files looked like when they were read: name, size and mtime of each. */
+let rulesStamp = "";
+let rulesCheckedAt = 0;
+/**
+ * A RULE CHANGED IS A RULE IN FORCE. The cache used to be filled once for the
+ * life of the server, so a rule added or edited in the Business Rules tab or by
+ * Smith — written to rules/*.json while the app ran — did nothing until a
+ * restart nobody made. The files are looked at again at most this often; a
+ * stat per file is the whole cost.
+ */
+const RULES_RECHECK_MS = 1000;
 
 /**
  * Load rules from a directory or in-memory array.
@@ -37,6 +50,29 @@ let rulesLoaded = false;
 export function setRules(rules: ProjectRule[]): void {
   ruleCache = rules;
   rulesLoaded = true;
+  rulesPinned = true;
+}
+
+async function rulesFilesStamp(dirs: string[]): Promise<string> {
+  const { promises: fs } = await import("fs");
+  const path = await import("path");
+  const parts: string[] = [];
+  for (const dir of dirs) {
+    let files: string[];
+    try {
+      files = await fs.readdir(dir);
+    } catch {
+      continue;
+    }
+    for (const file of files.sort()) {
+      if (!file.endsWith(".json")) continue;
+      try {
+        const st = await fs.stat(path.join(dir, file));
+        parts.push(`${dir}/${file}:${st.size}:${st.mtimeMs}`);
+      } catch { /* gone between readdir and stat */ }
+    }
+  }
+  return parts.join("|");
 }
 
 /**
@@ -57,10 +93,25 @@ export function isRuleActive(r: { is_active?: unknown }): boolean {
 }
 
 export async function loadRules(rulesDir?: string): Promise<ProjectRule[]> {
-  if (rulesLoaded) return ruleCache;
+  const isNode = typeof process !== "undefined" && !!process.versions?.node;
+  if (rulesLoaded && (rulesPinned || !isNode)) return ruleCache;
+  let stamp = "";
+  if (rulesLoaded) {
+    const now = Date.now();
+    if (now - rulesCheckedAt < RULES_RECHECK_MS) return ruleCache;
+    rulesCheckedAt = now;
+    try {
+      const path = await import("path");
+      stamp = await rulesFilesStamp(rulesDir ? [rulesDir]
+        : [path.join(process.cwd(), "rules"), path.join(process.cwd(), "src", "rules")]);
+    } catch {
+      return ruleCache;
+    }
+    if (stamp === rulesStamp) return ruleCache;
+  }
 
   // In Node.js (server-side), try to load from filesystem
-  if (typeof process !== "undefined" && process.versions?.node) {
+  if (isNode) {
     try {
       const { promises: fs } = await import("fs");
       const path = await import("path");
@@ -70,6 +121,7 @@ export async function loadRules(rulesDir?: string): Promise<ProjectRule[]> {
       const candidates = rulesDir
         ? [rulesDir]
         : [path.join(process.cwd(), "rules"), path.join(process.cwd(), "src", "rules")];
+      if (!stamp) stamp = await rulesFilesStamp(candidates);
       const rules: ProjectRule[] = [];
       let loadedAny = false;
       for (const dir of candidates) {
@@ -94,13 +146,145 @@ export async function loadRules(rulesDir?: string): Promise<ProjectRule[]> {
         if (loadedAny) break;
       }
       ruleCache = rules.filter(isRuleActive);
+      rulesStamp = stamp;
     } catch {
       ruleCache = [];
     }
   }
 
   rulesLoaded = true;
+  rulesCheckedAt = Date.now();
   return ruleCache;
+}
+
+// ---------------------------------------------------------------------------
+// Which rules govern a write, and where
+// ---------------------------------------------------------------------------
+
+/**
+ * A rule names its record by the ENTITY ("Task"); the data API hands the
+ * engine the URL segment ("tasks") and the workflow path the table name. An
+ * exact comparison meant a Blueprint rule never fired through /api/data.
+ */
+export function ruleGoverns(ruleModel: string | null | undefined, modelName: string): boolean {
+  if (!ruleModel || !modelName) return false;
+  if (ruleModel === modelName) return true;
+  return namesMatch(ruleModel, modelName);
+}
+
+/** Actions that refuse a save or change a value — never left to the form alone. */
+const DATA_ACTIONS = new Set([
+  "show_error", "set_field", "set_default", "clear_field", "set_required",
+  "trigger_workflow", "send_notification",
+]);
+
+/**
+ * Where a condition→action rule runs.
+ *
+ * `form` was the default scope, and the server skipped every `form` rule
+ * while the form route threw their errors and values away — so "a task must
+ * have a title" and "new tasks default to todo" ran nowhere. A rule that
+ * refuses a save or sets a value is the record's rule: it runs on every save
+ * AND live on the form. Only a rule that is purely about how the form looks
+ * (show, hide, lock, narrow options, suggest) stays on the form; `server` keeps
+ * a rule off the form.
+ */
+/** Whether a rule only fills in an empty field (`set_default`, nothing else). */
+function fillsDefaultsOnly(rule: ProjectRule): boolean {
+  const config = rule.config as ConditionActionConfig;
+  const acts = config?.then ?? [];
+  return acts.length > 0 && acts.every((a) => a?.type === "set_default") && !(config?.otherwise ?? []).length;
+}
+
+/**
+ * The order rules fire in. A VALUE IS SETTLED BEFORE IT IS JUDGED: a rule
+ * that only fills in a default runs before the rest, then higher salience
+ * first. "New expenses start as submitted" was written as a default AND a
+ * check that a new expense is submitted; in list order the check saw no
+ * status yet and refused every new expense the form sent (2026-10-14).
+ */
+export function byFiringOrder(a: ProjectRule, b: ProjectRule): number {
+  const first = Number(fillsDefaultsOnly(b)) - Number(fillsDefaultsOnly(a));
+  if (first) return first;
+  return ((b.config as ConditionActionConfig).salience ?? 0) - ((a.config as ConditionActionConfig).salience ?? 0);
+}
+
+// Where a condition→action rule is enforced. The Business Rules tab shows the
+// same decision as a label through `where_it_runs` in
+// backend/services/business_rules.py — keep the two in step, or the tab names
+// a place a rule runs that this does not.
+export function effectiveScope(config: ConditionActionConfig | undefined): "entity" | "form" | "server" {
+  const scope = config?.scope;
+  if (scope === "server") return "server";
+  const acts = [...(config?.then ?? []), ...(config?.otherwise ?? [])];
+  if (acts.some((a) => a && DATA_ACTIONS.has(String((a as RuleAction).type)))) return "entity";
+  return scope ?? "entity";
+}
+
+/**
+ * "Is empty" means blank OR absent. A blank field arrives as "" from a form
+ * and is dropped before a write, so `title = ""` missed the write and
+ * `title = null` missed the form. Each equality test against "" or null is
+ * read as the same "empty" test, and its negation as "has a value". Text
+ * inside quotes is left alone.
+ */
+const _blankCache = new Map<string, string>();
+export function normalizeBlankChecks(feel: string): string {
+  const hit = _blankCache.get(feel);
+  if (hit !== undefined) return hit;
+  const isStart = (c: string) => /[A-Za-z_]/.test(c);
+  const isPart = (c: string) => /[A-Za-z0-9_]/.test(c);
+  let out = "";
+  let i = 0;
+  const n = feel.length;
+  while (i < n) {
+    const c = feel[i];
+    if (c === '"') {                       // a string literal: copied as it stands
+      let j = i + 1;
+      while (j < n && feel[j] !== '"') j += feel[j] === "\\" ? 2 : 1;
+      out += feel.slice(i, Math.min(j + 1, n));
+      i = j + 1;
+      continue;
+    }
+    const prev = i > 0 ? feel[i - 1] : "";
+    if (isStart(c) && !isPart(prev) && prev !== ".") {
+      let j = i;
+      while (j < n && (isPart(feel[j]) || (feel[j] === "." && j + 1 < n && isStart(feel[j + 1])))) j++;
+      const ident = feel.slice(i, j);
+      let k = j;
+      while (k < n && feel[k] === " ") k++;
+      let op = "";
+      if (feel.startsWith("!=", k)) op = "!=";
+      else if (feel[k] === "=" && feel[k + 1] !== "=") op = "=";
+      if (op && !["null", "true", "false", "not", "and", "or", "in"].includes(ident)) {
+        let m = k + op.length;
+        while (m < n && feel[m] === " ") m++;
+        let blankLen = 0;
+        if (feel.startsWith('""', m)) blankLen = 2;
+        else if (feel.startsWith("null", m) && !isPart(feel[m + 4] ?? "")) blankLen = 4;
+        if (blankLen) {
+          out += op === "="
+            ? `(${ident} = null or ${ident} = "")`
+            : `(${ident} != null and ${ident} != "")`;
+          i = m + blankLen;
+          continue;
+        }
+      }
+      out += ident;
+      i = j;
+      continue;
+    }
+    out += c;
+    i++;
+  }
+  _blankCache.set(feel, out);
+  return out;
+}
+
+/** A field name as a person reads it: `dueDate` → "Due date". */
+function fieldLabel(field: string): string {
+  const words = field.replace(/[_-]+/g, " ").replace(/([a-z0-9])([A-Z])/g, "$1 $2").trim().toLowerCase();
+  return words ? words[0].toUpperCase() + words.slice(1) : field;
 }
 
 // ---------------------------------------------------------------------------
@@ -721,8 +905,15 @@ function dispatchActions(
           out.formHints.push({ field: action.field, hidden: action.visible === false });
         break;
       case "set_required":
-        if (action.field)
+        if (action.field) {
           out.formHints.push({ field: action.field, required: action.required !== false });
+          // Required is a rule of the record, not only a red asterisk: a save
+          // with the field empty while the rule holds is refused.
+          if (serverSide && action.required !== false && isEmpty(working[action.field])) {
+            const msg = action.message || `${fieldLabel(action.field)} is required.`;
+            if (!out.errors.includes(msg)) out.errors.push(msg);
+          }
+        }
         break;
       case "set_options":
         if (action.field && Array.isArray(action.options))
@@ -843,7 +1034,7 @@ async function evaluateDecisionTables(
   claims?: FieldClaims,
 ): Promise<void> {
   const rules = ruleCache.filter(
-    (r) => r.rule_type === "decision_table" && r.model_name === modelName && isRuleActive(r),
+    (r) => r.rule_type === "decision_table" && ruleGoverns(r.model_name, modelName) && isRuleActive(r),
   );
   for (const rule of rules) {
     const table = (rule.config as any)?.table;
@@ -921,7 +1112,7 @@ async function applyTypedRules(
   try {
     const want = event === "create" ? "on_create" : event === "update" ? "on_update" : "on_read";
     for (const rule of ruleCache) {
-      if (rule.rule_type !== "business" || rule.model_name !== modelName || !isRuleActive(rule)) continue;
+      if (rule.rule_type !== "business" || !ruleGoverns(rule.model_name, modelName) || !isRuleActive(rule)) continue;
       const config = rule.config as unknown as BusinessRuleConfig & { trigger?: string; errorMessage?: string };
       if (!config.expression || !config.errorMessage) continue;
       if (config.trigger && config.trigger !== want) continue;
@@ -944,6 +1135,7 @@ export async function evaluateRuleSet(
   event: "create" | "update" | "read",
   entity: Record<string, unknown>,
   user?: unknown,
+  previous?: Record<string, unknown> | null,
 ): Promise<RuleSetResult> {
   await loadRules();
 
@@ -953,21 +1145,17 @@ export async function evaluateRuleSet(
     .filter(
       (r) =>
         r.rule_type === "condition_action" &&
-        r.model_name === modelName &&
+        ruleGoverns(r.model_name, modelName) &&
         isRuleActive(r),
     )
-    // Server path runs entity- and server-scoped rules; form-only rules are
-    // evaluated client-side by the renderer, not here.
+    // Server path runs every rule that refuses or changes data (see
+    // effectiveScope); purely visual rules are the form's.
     .filter((r) => {
-      const scope = (r.config as ConditionActionConfig).scope ?? "entity";
+      const scope = effectiveScope(r.config as ConditionActionConfig);
       return scope === "entity" || scope === "server";
     })
     // Higher salience fires first.
-    .sort(
-      (a, b) =>
-        ((b.config as ConditionActionConfig).salience ?? 0) -
-        ((a.config as ConditionActionConfig).salience ?? 0),
-    );
+    .sort(byFiringOrder);
 
   // Working copy: set-value patches propagate to later rules' conditions.
   const working: Record<string, unknown> = { ...entity };
@@ -976,12 +1164,16 @@ export async function evaluateRuleSet(
   // (lower-salience) rule must not overwrite a field an earlier one set.
   const claims: FieldClaims = new Map();
 
+  // `previous` is the record as it stood before this update — what a rule
+  // about a change reads ("a done task cannot go back to todo"). On a create
+  // there is no previous record: every `previous.x` is null.
+  const before = previous ?? {};
   for (const rule of rules) {
     const config = rule.config as ConditionActionConfig;
-    const whenFeel = (config.whenFeel ?? "true").trim() || "true";
+    const whenFeel = normalizeBlankChecks((config.whenFeel ?? "true").trim() || "true");
     let matched = false;
     try {
-      matched = Boolean(evaluateExpression(whenFeel, { ...working, user } as any));
+      matched = Boolean(evaluateExpression(whenFeel, { ...working, user, previous: before } as any));
     } catch (err) {
       // A broken condition must not silently pass — skip the rule, keep going.
       console.error(`[rules] condition of "${rule.name}" failed:`, err);
@@ -1011,36 +1203,39 @@ export async function evaluateFormRules(
   modelName: string,
   entity: Record<string, unknown>,
   user?: unknown,
-): Promise<Pick<RuleSetResult, "patches" | "formHints">> {
+  previous?: Record<string, unknown> | null,
+): Promise<Pick<RuleSetResult, "patches" | "formHints" | "errors">> {
   await loadRules();
   const out: RuleSetResult = { patches: {}, errors: [], formHints: [], sideEffects: [] };
   const rules = ruleCache
     .filter(
       (r) =>
         r.rule_type === "condition_action" &&
-        r.model_name === modelName &&
+        ruleGoverns(r.model_name, modelName) &&
         isRuleActive(r),
     )
     .filter((r) => {
-      const scope = (r.config as ConditionActionConfig).scope ?? "entity";
+      const scope = effectiveScope(r.config as ConditionActionConfig);
       return scope === "entity" || scope === "form";
     })
-    .sort(
-      (a, b) =>
-        ((b.config as ConditionActionConfig).salience ?? 0) -
-        ((a.config as ConditionActionConfig).salience ?? 0),
-    );
+    .sort(byFiringOrder);
   const working: Record<string, unknown> = { ...entity };
+  const before = previous ?? {};
   for (const rule of rules) {
     const config = rule.config as ConditionActionConfig;
-    const whenFeel = (config.whenFeel ?? "true").trim() || "true";
+    const whenFeel = normalizeBlankChecks((config.whenFeel ?? "true").trim() || "true");
     let matched = false;
     try {
-      matched = Boolean(evaluateExpression(whenFeel, { ...working, user } as any));
+      matched = Boolean(evaluateExpression(whenFeel, { ...working, user, previous: before } as any));
     } catch {
       continue;
     }
-    dispatchActions(matched ? config.then : config.otherwise, working, out, false);
+    const acts = matched ? config.then : config.otherwise;
+    dispatchActions(acts, working, out, false);
+    // The form says, while the person types, what the save would refuse.
+    for (const a of acts ?? []) {
+      if (a?.type === "show_error" && a.message && !out.errors.includes(a.message)) out.errors.push(a.message);
+    }
   }
   // computed fields render live on the form too (e.g. a running total).
   try {
@@ -1054,7 +1249,7 @@ export async function evaluateFormRules(
   } catch (err) {
     console.error(`[rules] form computed pass failed for ${modelName}:`, err);
   }
-  return { patches: out.patches, formHints: out.formHints };
+  return { patches: out.patches, formHints: out.formHints, errors: out.errors };
 }
 
 // ---------------------------------------------------------------------------
@@ -1121,10 +1316,11 @@ export async function evaluateRuleSetForTable(
   event: "create" | "update" | "read",
   entity: Record<string, unknown>,
   user?: unknown,
+  previous?: Record<string, unknown> | null,
 ): Promise<RuleSetResult> {
   const model = await entityNameForTable(tableName);
   if (!model) {
     return { patches: {}, errors: [], formHints: [], sideEffects: [] };
   }
-  return evaluateRuleSet(model, event, entity, user);
+  return evaluateRuleSet(model, event, entity, user, previous);
 }

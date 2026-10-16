@@ -58,6 +58,15 @@ TEMPLATES = {
         <p><a href="{task_url}">View Task</a></p>
         """,
     },
+    "org_invite": {
+        "subject": "{inviter} invited you to {org_name} on Forge",
+        "html": """
+        <h2>You are invited to {org_name}</h2>
+        <p>{inviter} has invited you to join <strong>{org_name}</strong> on Forge as {role}.</p>
+        <p>Sign up with this email address and you will find the organisation waiting for you:</p>
+        <p><a href="{signup_url}">{signup_url}</a></p>
+        """,
+    },
     "generation_complete": {
         "subject": "Your app is ready: {project_name}",
         "html": """

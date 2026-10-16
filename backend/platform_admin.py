@@ -48,6 +48,10 @@ async def record_sign_in(user: PlatformUser, db: AsyncSession) -> None:
     """A sign-in: the time is kept, and a listed email takes the role.
     Commits — every caller is about to answer with tokens."""
     user.last_sign_in_at = datetime.now(timezone.utc)
+    # An invitation naming this email is taken up here, so a person who
+    # signed up because they were invited lands in their organisation.
+    from services.invites import claim_pending_invites
+    await claim_pending_invites(user, db)
     if user.platform_role is None and user.email.lower() in super_admin_emails():
         from services.audit_service import audit_log
         user.platform_role = SUPER_ADMIN

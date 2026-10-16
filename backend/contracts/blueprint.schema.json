@@ -2377,9 +2377,114 @@
             "enum": [
               "statement",
               "condition_action",
-              "prerequisite"
+              "prerequisite",
+              "decision_table"
             ],
             "default": "statement"
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "brief",
+              "smith",
+              "editor",
+              "generated"
+            ]
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          },
+          "table": {
+            "type": "object",
+            "properties": {
+              "hitPolicy": {
+                "type": "string",
+                "enum": [
+                  "U",
+                  "F",
+                  "A",
+                  "P",
+                  "C",
+                  "R"
+                ],
+                "default": "F"
+              },
+              "inputs": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "string",
+                        "number",
+                        "boolean",
+                        "date",
+                        "any"
+                      ],
+                      "default": "any"
+                    },
+                    "variableBinding": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name"
+                  ],
+                  "additionalProperties": false
+                },
+                "default": []
+              },
+              "outputs": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/properties/businessRules/items/properties/table/properties/inputs/items"
+                },
+                "default": []
+              },
+              "rules": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "inputEntries": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "default": []
+                    },
+                    "outputEntries": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "default": []
+                    },
+                    "annotation": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "default": []
+              }
+            },
+            "additionalProperties": false
           },
           "gates": {
             "type": "array",

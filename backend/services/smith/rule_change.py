@@ -41,11 +41,20 @@ def _live(doc: dict) -> list[dict]:
     return [r for r in _rules(doc) if r.get("status") != "DEPRECATED"]
 
 
-def _project(svc: Any, app_root: str | None) -> list[str]:
+def _project(svc: Any, app_root: str | None, *, prerequisites: bool = False) -> list[str]:
+    """Write the rules into the running app — and, when a prerequisite moved,
+    the workflows it gates (its check is a step of each)."""
     if not app_root:
         return []
-    from services.blueprint.projection import project_business_rules
-    return list(project_business_rules(svc.doc, app_root).get("files") or [])
+    from services.blueprint.projection import project_business_rules, project_workflows
+    files = list(project_business_rules(svc.doc, app_root).get("files") or [])
+    if prerequisites:
+        try:
+            project_workflows(svc.doc, app_root)
+            files.append("src/lib/workflows/definitions/")
+        except Exception:  # noqa: BLE001 — the rules are written; the guards follow on the next sync
+            logger.exception("[smith] re-writing the gated workflows failed")
+    return files
 
 
 def _rule_line(r: dict) -> str:
@@ -57,7 +66,22 @@ def add_rule(svc: Any, request: str, *, app_root: str | None = None, executor: A
     request = (request or "").strip()
     if not request:
         raise SectionChangeError("no rule was described, so there is nothing to add.")
+    asked_before = {str(r.get("id")) for r in svc.doc.get("requirements") or []
+                    if isinstance(r, dict) and r.get("status") != "DEPRECATED"}
+    live_before = {str(r.get("id")) for r in _live(svc.doc)}
     req = record_requirement(svc, request, owner="businessRules")
+
+    def withdraw(why: str) -> None:
+        # "NOTHING HAS BEEN CHANGED" IS TRUE. The ask was recorded before the
+        # rule was authored; a rule that was not written leaves no ask behind
+        # for the next build to keep as a written-down rule.
+        if str(req.get("id")) in asked_before:
+            return
+        for r in svc.doc.get("requirements") or []:
+            if isinstance(r, dict) and str(r.get("id")) == str(req.get("id")):
+                r["status"] = "DEPRECATED"
+                r["syncNote"] = why
+                svc.save()
     existing = {str(r.get("name") or "").strip().lower() for r in _live(svc.doc)}
     brief = (
         "THIS IS A CHANGE to an application that is already built, not a first authoring.\n"
@@ -68,8 +92,16 @@ def add_rule(svc: Any, request: str, *, app_root: str | None = None, executor: A
         "the rule the user asked for and no other, even if you can see rules the application lacks. "
         "If an existing rule already enforces exactly this, return that one rule under its own name, "
         "revised to say so. "
-        "Where it governs a form field, make it `condition_action` on that entity with a FEEL `when` "
-        "and a `then` the form can act on, so it fires rather than merely being stated."
+        "Where it governs a record, make it `condition_action` on that entity with a FEEL `when` "
+        "and a `then`, so the app enforces it rather than merely stating it: `show_error` refuses the "
+        "save with its message, `set_required` refuses a save without the field, `set_field` / "
+        "`set_default` set a value, `trigger_workflow` starts a workflow (by its FLOW id), "
+        "`send_notification` notifies. Give such a rule `scope: \"entity\"` — it then runs on every "
+        "save AND live on the form; `form` is only for show/hide/lock/options. A rule about a change "
+        "reads the value before it as `previous.<field>` (\"a done task cannot go back to todo\": "
+        "`previous.status = \"done\" and status = \"todo\"`); a length limit is "
+        "`string length(title) > 60`. Tabular logic (tiers, bands) can be "
+        "`kind: \"decision_table\"` with `entity` and a `table`."
     )
     covered: list[str] = []
     def keep(props):
@@ -92,8 +124,24 @@ def add_rule(svc: Any, request: str, *, app_root: str | None = None, executor: A
                            empty=(f"return exactly ONE new rule, for \"{request}\" and nothing else — no "
                                   "existing rule re-stated, no other rule you think the app lacks"),
                            say=f"Authoring a rule for: {request}.")
+    except SectionChangeError:
+        withdraw("the rule could not be written")
+        raise
     except _Covered:
-        rule = find_named(_rules(svc.doc), covered[0]) or {}
+        rule = find_named(_live(svc.doc), covered[0]) or {}
+        if rule.get("enabled") is False:
+            # THE RULE IS THERE, SWITCHED OFF in the Business Rules tab: "already
+            # enforced" would be untrue. Asked for again, it is switched back on.
+            before = svc.snapshot()
+            rule["enabled"] = True
+            if req.get("id") and req["id"] not in (rule.get("requirements") or []):
+                rule["requirements"] = list(rule.get("requirements") or []) + [req["id"]]
+            svc.commit(user_request=request, smith_interpretation=f"Switched {rule.get('id')} back on",
+                       before=before, affected=[str(rule.get("id"))])
+            return {"applied": True, "rule": str(rule["id"]), "name": str(rule.get("name")),
+                    "requirement": req.get("id"), "kind": rule.get("kind"), "statement": rule.get("statement"),
+                    "when": rule.get("when"), "switched_on": True, "edited_paths": _project(svc, app_root)}
+        withdraw("already enforced by an existing rule")
         raise SectionChangeError(f"that is already enforced by the rule {rule.get('name') or covered[0]}"
                                  + (f" ({rule.get('id')}): {rule.get('statement')}" if rule else "")
                                  + " — nothing has been changed. Ask me to change that rule if it should say something else.")
@@ -101,8 +149,25 @@ def add_rule(svc: Any, request: str, *, app_root: str | None = None, executor: A
     rule = next((r for r in _live(svc.doc) if str(r.get("name") or "").strip().lower() == name.strip().lower()), None)
     if rule is None:
         raise SectionChangeError("the rule was committed but cannot be found by its name.")
-    if req.get("id") and req["id"] not in (rule.get("requirements") or []):
-        rule["requirements"] = list(rule.get("requirements") or []) + [req["id"]]
+    changed = False
+    if str(rule["id"]) not in live_before:
+        # A RULE ASKED FOR NOW STARTS NOW. A rule's id follows its wording, so
+        # the same sentence asked again after it was removed is the same id,
+        # merged onto what it was: switched off, "removed in chat", answering
+        # asks withdrawn since. Task Board's re-asked title limit came back
+        # "not enforced" and the app took a 61-character title (2026-10-14).
+        # Asked for in chat: the Business Rules tab says so, and it is on.
+        rule.update(origin="smith", enabled=True, requirements=[req["id"]] if req.get("id") else [])
+        rule.pop("syncNote", None)
+        changed = True
+    else:
+        if req.get("id") and req["id"] not in (rule.get("requirements") or []):
+            rule["requirements"] = list(rule.get("requirements") or []) + [req["id"]]
+            changed = True
+        if not rule.get("origin"):
+            rule["origin"] = "smith"
+            changed = True
+    if changed:
         svc.save()
     return {"applied": True, "rule": str(rule["id"]), "name": name, "requirement": req.get("id"),
             "kind": rule.get("kind"), "statement": rule.get("statement"), "when": rule.get("when"),
@@ -153,6 +218,12 @@ def edit_rule(svc: Any, ref: str, change: str, *, app_root: str | None = None, e
     if str(now["id"]) != old_id:
         old = next(r for r in _rules(svc.doc) if r["id"] == old_id)
         old["status"] = "DEPRECATED"
+        old["syncNote"] = f"replaced by {now['id']} when it was changed in chat"
+        # The same rule, re-stated: it keeps where it came from and whether it
+        # was switched on in the Business Rules tab.
+        for key in ("origin", "enabled"):
+            if key in old and key not in now:
+                now[key] = old[key]
         superseded = old_id
         svc.save()
     try:
@@ -162,21 +233,31 @@ def edit_rule(svc: Any, ref: str, change: str, *, app_root: str | None = None, e
         raise SectionChangeError(str(exc)) from exc
     return {"applied": True, "rule": str(now["id"]), "name": str(now.get("name")), "decision": decision.id,
             "superseded": superseded, "before": before, "after": _rule_line(now),
-            "edited_paths": _project(svc, app_root)}
+            "edited_paths": _project(svc, app_root, prerequisites=now.get("kind") == "prerequisite")}
 
 
 def remove_rule(svc: Any, ref: str, *, app_root: str | None = None, reasoning: Any = None) -> dict:
     rule = find_named(_rules(svc.doc), ref)
     if rule is None:
         raise SectionChangeError(f"I cannot tell which rule {ref!r} means. The rules are: {names(_rules(svc.doc))}.")
+    before = svc.snapshot()
     rule["status"] = "DEPRECATED"
-    svc.save()
+    rule["syncNote"] = "removed in chat"
+    from services.business_rules import retire_asks
+    retire_asks(svc.doc, rule, f"its rule {rule.get('id')} was removed in chat")
+    # Versioned like every change, so the history (and the tab) can say who
+    # removed it and the person can roll it back.
+    svc.commit(user_request=f"Remove the rule {rule.get('name')}", smith_interpretation=f"Retired {rule['id']}",
+               before=before, affected=[str(rule["id"])])
     tell(reasoning, f"Retired the rule {rule.get('name')}.", "step")
     return {"applied": True, "rule": str(rule["id"]), "name": str(rule.get("name")),
-            "edited_paths": _project(svc, app_root)}
+            "edited_paths": _project(svc, app_root, prerequisites=rule.get("kind") == "prerequisite")}
 
 
 def summary_of(verb: str, out: dict) -> str:
+    if verb == "add_rule" and out.get("switched_on"):
+        return (f"The rule {out['name']} ({out['rule']}) already says that, but it was switched off in the "
+                f"Business Rules tab — I switched it back on, so the app applies it again: {out['statement']}")
     if verb == "add_rule":
         fires = (f" It fires on the form when `{out['when']}`." if out.get("when") else
                  " It is stated, not enforced on a form — no field condition was given.")
@@ -189,6 +270,18 @@ def summary_of(verb: str, out: dict) -> str:
 
 
 def run(output_dir: str, verb: str, *, rule: str = "", change: str = "", reasoning: Any = None) -> dict:
+    """One rule change, holding the rules lock for the whole of it — the
+    Business Rules tab saves through the same lock, so a rule saved there
+    while Smith works is never overwritten by Smith's save."""
+    from services.business_rules import write_lock
+    try:
+        with write_lock(output_dir):
+            return _run(output_dir, verb, rule=rule, change=change, reasoning=reasoning)
+    except OSError:
+        return _run(output_dir, verb, rule=rule, change=change, reasoning=reasoning)
+
+
+def _run(output_dir: str, verb: str, *, rule: str = "", change: str = "", reasoning: Any = None) -> dict:
     from services.blueprint.service import BlueprintService
     try:
         svc = BlueprintService.load(output_dir=str(output_dir))

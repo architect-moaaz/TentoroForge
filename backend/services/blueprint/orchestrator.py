@@ -3190,9 +3190,21 @@ def _project_integration(svc: BlueprintService, app_root: str) -> None:
     never made.
     """
     from services.blueprint.projection import (
-        project_dispatches, project_integrations, project_seed, project_workflows,
+        project_business_rules, project_dispatches, project_integrations, project_seed,
+        project_workflows,
     )
 
+    # THE RULES, ONCE THEY EXIST. `backend` writes the rules file too, but it
+    # waits only on `apis` and may run before `business_rules` has written a
+    # rule — this projection waits on `business_rules`, so the app is handed
+    # the rules the build actually authored. First, every rule the person
+    # stated is in the list and every rule says where it came from.
+    try:
+        from services.business_rules import keep_stated_rules
+        keep_stated_rules(svc)
+    except Exception:  # noqa: BLE001 — the rules the build wrote still reach the app
+        logger.exception("[blueprint] keeping the stated rules failed")
+    project_business_rules(svc.doc, app_root)
     result = project_workflows(svc.doc, app_root)
     for entry in result["codeMap"]:
         svc.upsert("codeMap", entry, natural_key=entry["artifact"])

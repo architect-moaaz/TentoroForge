@@ -17,6 +17,8 @@ import {
 } from "@/lib/business-rule-validation";
 import type { BusinessRule, ConditionActionConfig } from "@/types/business-rules";
 import type { DecisionTableDefinition } from "@/types/decision";
+import { BlueprintRulesPanel } from "./BlueprintRulesPanel";
+import type { RulesResponse } from "@/lib/blueprint-rules";
 
 interface BusinessRulesPanelProps {
   projectId: string;
@@ -65,12 +67,50 @@ function toTableDraft(rule: BusinessRule): DecisionTableDraft {
   };
 }
 
-export function BusinessRulesPanel({ projectId }: BusinessRulesPanelProps) {
+/**
+ * The Business Rules tab. An app built from a Living Blueprint keeps its rules
+ * there — the same record the build and Smith read and write — and gets the
+ * Blueprint panel; a project from the older pipeline keeps the table-backed
+ * editor below.
+ */
+export function BusinessRulesPanel(props: BusinessRulesPanelProps) {
+  const query = useQuery({
+    queryKey: ["project", props.projectId, "business-rules"],
+    queryFn: () => api.get<RulesResponse>(`/api/projects/${props.projectId}/business-rules`),
+  });
+  if (query.isLoading) {
+    return (
+      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+        <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading rules…
+      </div>
+    );
+  }
+  if (query.data?.mode === "blueprint") {
+    return <BlueprintRulesPanel projectId={props.projectId} initial={query.data} />;
+  }
+  // A FAILED READ IS NOT AN EMPTY LIST. With Forge's API down the tab fell
+  // through to the old table-backed editor and said "No business rules yet"
+  // over an app with eight (2026-10-16). Only a project the API says is of
+  // the older pipeline gets that editor.
+  if (query.isError || !query.data) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
+        <span>The rules could not be loaded — Forge may be restarting.</span>
+        <Button size="sm" variant="outline" onClick={() => query.refetch()} disabled={query.isFetching}>
+          {query.isFetching ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null} Try again
+        </Button>
+      </div>
+    );
+  }
+  return <LegacyBusinessRulesPanel {...props} />;
+}
+
+function LegacyBusinessRulesPanel({ projectId }: BusinessRulesPanelProps) {
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState<Draft | null>(null);
 
   const rulesQuery = useQuery({
-    queryKey: ["project", projectId, "business-rules"],
+    queryKey: ["project", projectId, "business-rules", "legacy"],
     queryFn: () => api.get<BusinessRule[]>(`/api/projects/${projectId}/rules`),
   });
 
@@ -83,7 +123,7 @@ export function BusinessRulesPanel({ projectId }: BusinessRulesPanelProps) {
   );
 
   const invalidate = () =>
-    queryClient.invalidateQueries({ queryKey: ["project", projectId, "business-rules"] });
+    queryClient.invalidateQueries({ queryKey: ["project", projectId, "business-rules", "legacy"] });
 
   const saveMutation = useMutation({
     mutationFn: async (d: Draft) => {

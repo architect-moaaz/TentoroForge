@@ -1216,6 +1216,27 @@ async def smith_greeting(
     except (FileNotFoundError, ValueError):
         doc = {}
 
+    # A PROJECT STARTED FROM A TEMPLATE opens on the one question that must be
+    # settled first — the same two answers Smith's page offers, as buttons.
+    from services import project_templates
+    staged = project_templates.pending(str(_output_dir(project))) \
+        if not project_templates.is_defined(doc or {}) else None
+    if staged:
+        facts = staged.get("summary") or {}
+        counts = facts.get("counts") or {}
+        held = project_templates.counted(counts, ("pages", "entities", "workflows"))
+        return {
+            "state": "DISCOVERY",
+            "headline": f"Start from “{staged.get('name')}”",
+            "detail": (f"This template holds {held}. " if held else "")
+            + "Do you want the exact same app, or something like it but different? "
+              "Nothing is built until you approve it.",
+            "nextAct": "",
+            "openers": [],
+            "choices": ["The exact same app", "Something like it, but different"],
+            "facts": {"named": False, "template": staged.get("name"), **counts},
+        }
+
     g = greet(doc, open_questions=len(select(doc)) if doc else 0)
     return {
         "state": g.state,
@@ -1223,6 +1244,7 @@ async def smith_greeting(
         "detail": g.detail,
         "nextAct": g.next_act,
         "openers": [{"kind": o.kind, "example": o.example} for o in g.openers],
+        "choices": [],
         "facts": g.facts,
     }
 
@@ -2559,7 +2581,7 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
         RunUsage, make_executor, tiered_router)
     from services.blueprint.observer import anthropic_observer
     from services.blueprint.orchestrator import (
-        STOPPED_BY_PERSON, completed_nodes, levels, nodes_recorded_done, run,
+        DAG, STOPPED_BY_PERSON, completed_nodes, levels, nodes_recorded_done, run,
     )
     from services.blueprint.plan_forecast import forecast
     from services.blueprint.service import BlueprintService
@@ -2669,6 +2691,18 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
         plan = model_nodes()
     already = completed_nodes(svc.doc, confirmed=nodes_recorded_done(output_dir) or None)
     plan = [k for k in plan if k not in already]
+    # AN EXACT COPY OF A TEMPLATE RE-AUTHORS NOTHING THE TEMPLATE HOLDS. Its
+    # sections came whole from the template, so `completed_nodes` already skips
+    # every agent whose work is there; what is left is what the source never
+    # got to (a template saved before its pages were coded is coded now — a
+    # blanket skip left all of them unplanned and 404, live 2026-10-09).
+    from services import project_templates as _templates
+    exact_copy = phase == "build" and approved and _templates.exact_build_pending(output_dir)
+    if exact_copy:
+        authoring = [k for k in plan if DAG[k].kind == "agent"]
+        logger.info("[blueprint] %s: exact copy of a template — %s", Path(output_dir).name,
+                    f"still to author: {', '.join(authoring)}" if authoring
+                    else "nothing to author, building from the template as it is")
 
     emit("plan", _plan_event(plan, already, phase != "build"))
 
@@ -2700,6 +2734,13 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
             logger.info("[blueprint] %s: model drafted at %s", Path(output_dir).name,
                         svc.doc.get("state"))
         _gates.record_version(output_dir, _gates.PRODUCT_MODEL, svc.doc)
+    if exact_copy and not report.failed and not getattr(report, "paused_because", ""):
+        # The source's direct edits to its files (`file_edit`) came with the
+        # template; the build rewrote those files, so they are put back.
+        from services.smith.file_edit import reapply
+        for line in reapply(output_dir):
+            logger.info("[blueprint] %s: template edit %s", Path(output_dir).name, line)
+        _templates.mark_built(output_dir)
     state = str(svc.doc.get("state") or "")
     stopped = getattr(report, "paused_because", "") == STOPPED_BY_PERSON
     built = _booted(svc.doc) and (Path(app_root) / "package.json").is_file()

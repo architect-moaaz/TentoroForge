@@ -345,6 +345,16 @@ def _reproject(svc: Any, app_root: str, section: str) -> list[str]:
             files += list(project_shell_identity(svc.doc, app_root).get("files") or [])
             files += refresh_frame(app_root, svc.doc)
             return files
+        if section == "businessRules" or section.startswith("businessRules."):
+            # The rules are in the running app the moment they are written —
+            # and a prerequisite is a step of each workflow it gates.
+            from services.blueprint.projection import project_business_rules, project_workflows
+            files = list(project_business_rules(svc.doc, app_root).get("files") or [])
+            if any(isinstance(r, dict) and r.get("kind") == "prerequisite"
+                   for r in svc.doc.get("businessRules") or []):
+                project_workflows(svc.doc, app_root)
+                files.append("src/lib/workflows/definitions/")
+            return files
         if section in ("pages", "navigation", "modules"):
             from services.blueprint.projection import apply_frontend_projection
             return list((apply_frontend_projection(svc, app_root) or {}).get("files") or [])

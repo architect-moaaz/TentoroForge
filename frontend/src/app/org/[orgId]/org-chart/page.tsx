@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useMemo } from "react";
+import { use, useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   ReactFlow,
@@ -8,56 +8,52 @@ import {
   Controls,
   Background,
   BackgroundVariant,
+  Handle,
+  Position,
   useNodesState,
   useEdgesState,
   type Node,
   type Edge,
 } from "@xyflow/react";
-import dagre from "dagre";
-import { Building2, Users, User } from "lucide-react";
+import { Building, Building2, Users, User } from "lucide-react";
 import { api } from "@/lib/api";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
+import { buildGraph, type OrgChart } from "./graph";
 
 import "@xyflow/react/dist/style.css";
 
-interface ChartPerson {
-  id: string;
-  email: string;
-  first_name: string;
-  last_name: string;
-  title: string | null;
-  manager_id: string | null;
+// EVERY NODE HAS A HANDLE AT ITS TOP AND ITS BOTTOM. React Flow attaches an
+// edge to a handle; a custom node without them draws no edges at all, which is
+// how the chart showed its boxes with no lines between them.
+const HANDLE = "!h-1.5 !w-1.5 !min-h-0 !min-w-0 !border-0 !bg-transparent";
+function Ports() {
+  return (
+    <>
+      <Handle type="target" position={Position.Top} className={HANDLE} />
+      <Handle type="source" position={Position.Bottom} className={HANDLE} />
+    </>
+  );
 }
 
-interface ChartTeam {
-  id: string;
-  name: string;
-  description: string | null;
-  people: ChartPerson[];
+function OrganizationNode({ data }: { data: { label: string; slug: string; count: number } }) {
+  return (
+    <div className="flex items-center gap-2 rounded-lg border-2 border-primary bg-primary px-4 py-3 text-primary-foreground shadow-md">
+      <Ports />
+      <Building className="h-5 w-5" />
+      <div>
+        <p className="text-sm font-semibold">{data.label}</p>
+        <p className="text-xs opacity-80">
+          {data.slug ? `/${data.slug} · ` : ""}{data.count} department{data.count !== 1 ? "s" : ""}
+        </p>
+      </div>
+    </div>
+  );
 }
-
-interface ChartDepartment {
-  id: string;
-  name: string;
-  description: string | null;
-  teams: ChartTeam[];
-  people: ChartPerson[];
-}
-
-interface OrgChart {
-  departments: ChartDepartment[];
-  unassigned_teams: ChartTeam[];
-  unassigned_people: ChartPerson[];
-}
-
-const NODE_WIDTH = 200;
-const DEPT_HEIGHT = 50;
-const TEAM_HEIGHT = 44;
-const PERSON_HEIGHT = 40;
 
 function DepartmentNode({ data }: { data: { label: string; count: number } }) {
   return (
     <div className="flex items-center gap-2 rounded-lg border-2 border-primary/40 bg-primary/5 px-4 py-3 shadow-sm">
+      <Ports />
       <Building2 className="h-5 w-5 text-primary" />
       <div>
         <p className="text-sm font-semibold">{data.label}</p>
@@ -72,6 +68,7 @@ function DepartmentNode({ data }: { data: { label: string; count: number } }) {
 function TeamNode({ data }: { data: { label: string; count: number } }) {
   return (
     <div className="flex items-center gap-2 rounded-md border border-blue-300 bg-blue-50 px-3 py-2 shadow-sm dark:border-blue-700 dark:bg-blue-950">
+      <Ports />
       <Users className="h-4 w-4 text-blue-600 dark:text-blue-400" />
       <div>
         <p className="text-sm font-medium">{data.label}</p>
@@ -83,194 +80,51 @@ function TeamNode({ data }: { data: { label: string; count: number } }) {
   );
 }
 
-function PersonNode({
-  data,
-}: {
-  data: { label: string; title: string | null };
-}) {
+function PersonNode({ data }: { data: { label: string; title: string | null } }) {
   return (
     <div className="flex items-center gap-2 rounded-md border bg-card px-3 py-2 shadow-sm">
+      <Ports />
       <User className="h-4 w-4 text-muted-foreground" />
       <div>
         <p className="text-xs font-medium">{data.label}</p>
-        {data.title && (
-          <p className="text-[10px] text-muted-foreground">{data.title}</p>
-        )}
+        {data.title && <p className="text-[10px] text-muted-foreground">{data.title}</p>}
       </div>
     </div>
   );
 }
 
 const nodeTypes = {
+  organization: OrganizationNode,
   department: DepartmentNode,
   team: TeamNode,
   person: PersonNode,
 };
-
-function buildGraph(chart: OrgChart): { nodes: Node[]; edges: Edge[] } {
-  const nodes: Node[] = [];
-  const edges: Edge[] = [];
-
-  const g = new dagre.graphlib.Graph();
-  g.setDefaultEdgeLabel(() => ({}));
-  g.setGraph({ rankdir: "TB", ranksep: 60, nodesep: 30 });
-
-  // Add department nodes
-  for (const dept of chart.departments) {
-    const nodeId = `dept-${dept.id}`;
-    g.setNode(nodeId, { width: NODE_WIDTH, height: DEPT_HEIGHT });
-    nodes.push({
-      id: nodeId,
-      type: "department",
-      position: { x: 0, y: 0 },
-      data: { label: dept.name, count: dept.teams.length },
-    });
-
-    // Add teams within this department
-    for (const team of dept.teams) {
-      const teamNodeId = `team-${team.id}`;
-      g.setNode(teamNodeId, { width: NODE_WIDTH, height: TEAM_HEIGHT });
-      nodes.push({
-        id: teamNodeId,
-        type: "team",
-        position: { x: 0, y: 0 },
-        data: { label: team.name, count: team.people.length },
-      });
-      edges.push({
-        id: `e-${nodeId}-${teamNodeId}`,
-        source: nodeId,
-        target: teamNodeId,
-        type: "smoothstep",
-      });
-
-      // Add people within this team
-      for (const person of team.people) {
-        const personNodeId = `person-${person.id}`;
-        g.setNode(personNodeId, { width: NODE_WIDTH, height: PERSON_HEIGHT });
-        nodes.push({
-          id: personNodeId,
-          type: "person",
-          position: { x: 0, y: 0 },
-          data: {
-            label: `${person.first_name} ${person.last_name}`,
-            title: person.title,
-          },
-        });
-        edges.push({
-          id: `e-${teamNodeId}-${personNodeId}`,
-          source: teamNodeId,
-          target: personNodeId,
-          type: "smoothstep",
-        });
-      }
-    }
-
-    // Unassigned people in department (no team)
-    for (const person of dept.people) {
-      const personNodeId = `person-${person.id}`;
-      g.setNode(personNodeId, { width: NODE_WIDTH, height: PERSON_HEIGHT });
-      nodes.push({
-        id: personNodeId,
-        type: "person",
-        position: { x: 0, y: 0 },
-        data: {
-          label: `${person.first_name} ${person.last_name}`,
-          title: person.title,
-        },
-      });
-      edges.push({
-        id: `e-${nodeId}-${personNodeId}`,
-        source: nodeId,
-        target: personNodeId,
-        type: "smoothstep",
-      });
-    }
-  }
-
-  // Unassigned teams (no department)
-  for (const team of chart.unassigned_teams) {
-    const teamNodeId = `team-${team.id}`;
-    g.setNode(teamNodeId, { width: NODE_WIDTH, height: TEAM_HEIGHT });
-    nodes.push({
-      id: teamNodeId,
-      type: "team",
-      position: { x: 0, y: 0 },
-      data: { label: team.name, count: team.people.length },
-    });
-
-    for (const person of team.people) {
-      const personNodeId = `person-${person.id}`;
-      g.setNode(personNodeId, { width: NODE_WIDTH, height: PERSON_HEIGHT });
-      nodes.push({
-        id: personNodeId,
-        type: "person",
-        position: { x: 0, y: 0 },
-        data: {
-          label: `${person.first_name} ${person.last_name}`,
-          title: person.title,
-        },
-      });
-      edges.push({
-        id: `e-${teamNodeId}-${personNodeId}`,
-        source: teamNodeId,
-        target: personNodeId,
-        type: "smoothstep",
-      });
-    }
-  }
-
-  // Unassigned people (no department, no team)
-  for (const person of chart.unassigned_people) {
-    const personNodeId = `person-${person.id}`;
-    g.setNode(personNodeId, { width: NODE_WIDTH, height: PERSON_HEIGHT });
-    nodes.push({
-      id: personNodeId,
-      type: "person",
-      position: { x: 0, y: 0 },
-      data: {
-        label: `${person.first_name} ${person.last_name}`,
-        title: person.title,
-      },
-    });
-  }
-
-  // Add edges to dagre
-  for (const edge of edges) {
-    g.setEdge(edge.source, edge.target);
-  }
-
-  // Run layout
-  dagre.layout(g);
-
-  // Apply positions
-  for (const node of nodes) {
-    const dagreNode = g.node(node.id);
-    if (dagreNode) {
-      node.position = {
-        x: dagreNode.x - NODE_WIDTH / 2,
-        y: dagreNode.y - (dagreNode.height || 40) / 2,
-      };
-    }
-  }
-
-  return { nodes, edges };
-}
 
 function OrgChartFlow({ orgId }: { orgId: string }) {
   const { data: chart } = useQuery({
     queryKey: ["org", orgId, "org-chart"],
     queryFn: () => api.get<OrgChart>(`/api/orgs/${orgId}/org-chart`),
   });
+  // The organisation itself heads the chart; the layout already holds it.
+  const { data: org } = useQuery({
+    queryKey: ["org", orgId],
+    queryFn: () => api.get<{ name: string; slug: string }>(`/api/orgs/${orgId}`),
+  });
 
   const { initialNodes, initialEdges } = useMemo(() => {
     if (!chart)
       return { initialNodes: [] as Node[], initialEdges: [] as Edge[] };
-    const { nodes, edges } = buildGraph(chart);
+    const { nodes, edges } = buildGraph({ name: org?.name ?? "Organisation", slug: org?.slug }, chart);
     return { initialNodes: nodes, initialEdges: edges };
-  }, [chart]);
+  }, [chart, org?.name, org?.slug]);
 
-  const [nodes, , onNodesChange] = useNodesState(initialNodes);
-  const [edges, , onEdgesChange] = useEdgesState(initialEdges);
+  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+  // The chart arrives after the first render; the state was seeded empty.
+  useEffect(() => {
+    setNodes(initialNodes);
+    setEdges(initialEdges);
+  }, [initialNodes, initialEdges, setNodes, setEdges]);
 
   if (!chart) {
     return (
@@ -313,6 +167,11 @@ function OrgChartFlow({ orgId }: { orgId: string }) {
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           nodeTypes={nodeTypes}
+          // A COLOUR TOKEN IS USED AS IT IS. Wrapping --primary in hsl() parsed, but
+          // the app's --primary is an oklch colour, so the value failed at computed
+          // time and `stroke` fell to its initial `none`: eight edges drawn, none
+          // visible. Opacity goes on its own property.
+          defaultEdgeOptions={{ type: "smoothstep", style: { stroke: "var(--primary)", strokeOpacity: 0.45, strokeWidth: 1.5 } }}
           fitView
           nodesDraggable={false}
           nodesConnectable={false}
