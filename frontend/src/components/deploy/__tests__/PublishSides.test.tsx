@@ -25,6 +25,7 @@ if (typeof Element !== "undefined" && !(Element.prototype as any).hasPointerCapt
 }
 
 let status: any;
+let latest: any = null;
 const started: unknown[] = [];
 const puts: [string, unknown][] = [];
 
@@ -34,6 +35,7 @@ vi.mock("@/lib/api", () => ({
       if (u.endsWith("/publish-status")) return status;
       if (u.endsWith("/check")) return { checked: false, pages: 0, working: 0, failing: [], processes: [] };
       if (u.endsWith("/api/projects/p1")) return { status: "ready" };
+      if (u.includes("/deployments/latest")) return latest;
       return null;
     },
     put: async (u: string, b: unknown) => { puts.push([u, b]); return { target: (b as any).target }; },
@@ -77,6 +79,7 @@ beforeEach(() => {
   root = createRoot(host);
   started.length = 0;
   puts.length = 0;
+  latest = null;
 });
 afterEach(() => {
   act(() => root.unmount());
@@ -160,5 +163,14 @@ describe("Publish, Test and Production", () => {
                untested_changes: true, test_ahead: false };
     await render();
     expect(document.body.textContent).toContain("acme.apps.tentoro.ai");
+  });
+
+  it("opening the dialog while a publish runs follows it and never starts another", async () => {
+    status = { target: "test", test: null, production: null, test_address: "https://acme-test.vercel.app",
+               untested_changes: true, test_ahead: false };
+    latest = { id: "d1", status: "snapshot", url: null, error: null, finished_at: null };
+    await render();
+    expect(started).toEqual([]);
+    expect(button("Publish to Test")).toBeUndefined();
   });
 });

@@ -21,6 +21,7 @@ async generator; a top-level session would need locking).
 from __future__ import annotations
 
 import asyncio
+import re
 import secrets
 import uuid
 from datetime import datetime, timezone
@@ -176,22 +177,35 @@ _PLATFORM_REFRESH_FOUNDATION_FILES = (
 )
 
 
+_RIBBON = "\n        <TestRibbon />"
+_RIBBON_IMPORT = 'import { TestRibbon } from "@/components/TestRibbon";\n'
+#: The ribbon once put after a `<body>` written in a comment
+#: ("onto <html>/<body> before React hydrates") instead of the tag.
+_RIBBON_IN_COMMENT = re.compile(r"(//[^\n]*<body\b[^>\n]*>)\n        <TestRibbon />")
+
+
 def _ensure_test_ribbon(output_dir: Path) -> bool:
     """An app whose root layout predates the test version gets the ribbon in
-    its <body>, as a newly built one has it. True when the layout changed."""
+    its <body>, as a newly built one has it — the real tag, never a `<body>`
+    named in a comment; a ribbon once put into a comment is taken back out.
+    True when the layout changed."""
     layout = output_dir / "src" / "app" / "layout.tsx"
     if not layout.is_file():
         return False
-    text = layout.read_text("utf-8")
-    if "TestRibbon" in text or "<body" not in text:
+    before = layout.read_text("utf-8")
+    text = _RIBBON_IN_COMMENT.sub(r"\1", before)
+    if "<TestRibbon />" not in text:
+        for m in re.finditer(r"<body\b[^>]*>", text):
+            line = text[text.rfind("\n", 0, m.start()) + 1: m.start()].lstrip()
+            if line.startswith(("//", "*", "/*", "{/*")):
+                continue
+            text = text[: m.end()] + _RIBBON + text[m.end():]
+            break
+    if "<TestRibbon />" in text and _RIBBON_IMPORT.strip() not in text:
+        text = _RIBBON_IMPORT + text
+    if text == before:
         return False
-    head, sep, rest = text.partition("<body")
-    tag_end = rest.find(">")
-    if tag_end < 0:
-        return False
-    body_open, after = rest[: tag_end + 1], rest[tag_end + 1:]
-    import_line = 'import { TestRibbon } from "@/components/TestRibbon";\n'
-    layout.write_text(import_line + head + sep + body_open + "\n        <TestRibbon />" + after, "utf-8")
+    layout.write_text(text, "utf-8")
     return True
 
 

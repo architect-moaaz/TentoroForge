@@ -148,7 +148,9 @@ export function PublishDialog({
   }, [open, projectId]);
 
   useEffect(() => {
-    if (!open || !projectId) return;
+    // A publish this dialog started is followed by its own stream; reading
+    // the latest row again must not touch it.
+    if (!open || !projectId || started) return;
     let cancelled = false;
     (async () => {
       try {
@@ -159,14 +161,17 @@ export function PublishDialog({
           `/api/projects/${projectId}/deployments/latest?environment=${side}`,
         );
         if (cancelled || !latest) return;
-        // In-flight deploys started elsewhere → attach the stream so
-        // the user sees live progress rather than a stale idle state.
+        // A PUBLISH ALREADY RUNNING is followed, never started again:
+        // `started` with no stream lets the poll below read /latest until it
+        // ends. (Calling publish() here began a second publish that cancelled
+        // the first — Mark 8, 2026-10-16.)
         const inFlight =
           latest.status !== "succeeded" &&
           latest.status !== "succeeded_with_warnings" &&
           latest.status !== "failed";
         if (inFlight) {
-          publish();
+          setPublishedSide(side);
+          setStarted(true);
           return;
         }
         if (

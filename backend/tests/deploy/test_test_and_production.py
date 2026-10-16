@@ -121,6 +121,52 @@ def test_an_older_app_gets_the_test_ribbon_once(tmp_path):
     assert _ensure_test_ribbon(tmp_path) is False, "once"
 
 
+_OLD_LAYOUT = (
+    'import "./globals.css";\n'
+    "export default function RootLayout({ children }) {\n"
+    "  return (\n"
+    "    // suppressHydrationWarning: browser extensions (Grammarly, ColorZilla, Scribe…)\n"
+    "    // inject attributes onto <html>/<body> before React hydrates; without this they\n"
+    "    // trip a benign hydration-mismatch warning. Scoped to these tags only.\n"
+    '    <html lang="en" dir="ltr" suppressHydrationWarning>\n'
+    "      <body suppressHydrationWarning>\n"
+    "        <Providers>{children}</Providers>\n"
+    "      </body>\n"
+    "    </html>\n"
+    "  );\n"
+    "}\n"
+)
+
+
+def test_the_ribbon_goes_in_the_body_tag_not_a_body_named_in_a_comment(tmp_path):
+    """Mark 8 (cxz95dd1, 2026-10-16): the ribbon was put after the `<body>`
+    in the comment above the markup, and every build failed to compile."""
+    from services.deploy.vercel_provider import _ensure_test_ribbon
+    layout = tmp_path / "src" / "app" / "layout.tsx"
+    layout.parent.mkdir(parents=True)
+    layout.write_text(_OLD_LAYOUT)
+    assert _ensure_test_ribbon(tmp_path) is True
+    text = layout.read_text()
+    assert "onto <html>/<body> before React hydrates; without this they\n" in text
+    assert "<body suppressHydrationWarning>\n        <TestRibbon />\n        <Providers>" in text
+    assert text.count("<TestRibbon />") == 1
+
+
+def test_a_ribbon_once_put_into_a_comment_is_taken_back_out(tmp_path):
+    from services.deploy.vercel_provider import _ensure_test_ribbon
+    layout = tmp_path / "src" / "app" / "layout.tsx"
+    layout.parent.mkdir(parents=True)
+    broken = 'import { TestRibbon } from "@/components/TestRibbon";\n' + _OLD_LAYOUT.replace(
+        "onto <html>/<body> before", "onto <html>/<body>\n        <TestRibbon /> before")
+    layout.write_text(broken)
+    assert _ensure_test_ribbon(tmp_path) is True
+    text = layout.read_text()
+    assert "onto <html>/<body> before React hydrates" in text
+    assert "<body suppressHydrationWarning>\n        <TestRibbon />" in text
+    assert text.count("<TestRibbon />") == 1 and text.count("import { TestRibbon }") == 1
+    assert _ensure_test_ribbon(tmp_path) is False, "once"
+
+
 # --------------------------------------------------------------------------- #
 # Publishing
 # --------------------------------------------------------------------------- #
