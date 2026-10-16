@@ -40,6 +40,7 @@ import logging
 import os
 import re
 import shutil
+import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -508,24 +509,36 @@ def prepare_adapt(output_dir: str | Path, *, app_name: str = "", changes: str = 
 
 
 _SYNC_ENGINE = None
+_SYNC_ENGINE_LOCK = threading.Lock()
+
+
+def _sync_engine():
+    """The one sync Engine this module reads through. Made once, under a lock:
+    `project_facts` runs on Smith's worker threads, so two concurrent first
+    calls would otherwise each build an Engine and leak all but one (with its
+    pooled connections)."""
+    global _SYNC_ENGINE
+    if _SYNC_ENGINE is None:
+        from sqlalchemy import create_engine
+        from config import DATABASE_URL_SYNC
+        with _SYNC_ENGINE_LOCK:
+            if _SYNC_ENGINE is None:
+                _SYNC_ENGINE = create_engine(DATABASE_URL_SYNC, pool_pre_ping=True,
+                                             pool_size=1, max_overflow=1)
+    return _SYNC_ENGINE
 
 
 def project_facts(project_id: str) -> dict | None:
     """The project's organisation, owner and name — for a save made from
     inside a Smith turn, which runs on a worker thread with no database
     session of its own. Read-only; one short query."""
-    global _SYNC_ENGINE
     try:
         uuid.UUID(str(project_id))
     except (ValueError, TypeError):
         return None
     try:
-        from sqlalchemy import create_engine, text
-        from config import DATABASE_URL_SYNC
-        if _SYNC_ENGINE is None:
-            _SYNC_ENGINE = create_engine(DATABASE_URL_SYNC, pool_pre_ping=True, pool_size=1,
-                                         max_overflow=1)
-        with _SYNC_ENGINE.connect() as conn:
+        from sqlalchemy import text
+        with _sync_engine().connect() as conn:
             row = conn.execute(text(
                 "SELECT p.org_id, p.owner_id, p.name, u.name AS owner_name "
                 "FROM projects p LEFT JOIN platform_users u ON u.id = p.owner_id "

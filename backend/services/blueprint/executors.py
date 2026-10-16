@@ -551,9 +551,15 @@ def _alias_keyword_properties(schema: Any) -> Any:
 
 
 def _unalias_keyword_properties(text: str) -> str:
-    """The reply with each alias named back. A reply that is not JSON is
-    returned as it came — the envelope checks say what is wrong with it."""
+    """The reply with each alias named back. Whole-JSON replies are walked key
+    by key; a reply with a fence or prose around it (the envelope parser reads
+    those too) has the quoted alias keys renamed in place. Either way the alias
+    never reaches anything past this transport — an alias is a property KEY we
+    put in the schema and nothing downstream writes, so renaming the quoted
+    token is safe even when the whole reply will not parse as JSON."""
     back = {v: k for k, v in _KEYWORD_PROPERTIES.items()}
+    if not any(alias in text for alias in back):
+        return text
 
     def walk(node: Any) -> Any:
         if isinstance(node, dict):
@@ -564,9 +570,10 @@ def _unalias_keyword_properties(text: str) -> str:
     try:
         data = json.loads(text, strict=False)
     except (TypeError, ValueError):
-        return text
-    if not any(alias in text for alias in back):
-        return text
+        out = text
+        for alias, name in back.items():
+            out = out.replace(f'"{alias}"', f'"{name}"')
+        return out
     return json.dumps(walk(data), ensure_ascii=False)
 
 
