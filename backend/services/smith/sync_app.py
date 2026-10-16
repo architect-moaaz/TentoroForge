@@ -134,7 +134,7 @@ ENGINE_FOUNDATION_FILES: tuple[str, ...] = (
 )
 
 
-def refresh_engine(app_root: str | Path, doc: dict | None = None) -> list[str]:
+def refresh_engine(app_root: str | Path, doc: dict | None = None, *, complete: bool = True) -> list[str]:
     """The app's copy of the platform's engine brought up to the platform's.
 
     An app carries the workflow engine, the formula engine and the SDK as
@@ -251,7 +251,8 @@ def refresh_engine(app_root: str | Path, doc: dict | None = None) -> list[str]:
         ensure_sdk(doc, root)
         after = _fingerprint(root)
         changed += sorted(k for k in after if k.startswith("src/sdk/") and before.get(k) != after[k])
-    changed += complete_imports(root)
+    if complete:
+        changed += complete_imports(root)
     if changed:
         logger.info("[engine] %s: %d engine file(s) brought up to the platform's: %s",
                     root, len(changed), ", ".join(changed[:8]))
@@ -305,7 +306,7 @@ def owned_frame(doc: dict) -> dict[str, str]:
             if isinstance(r, dict) and r.get("file") and r.get("code")}
 
 
-def refresh_frame(app_root: str | Path, doc: dict) -> list[str]:
+def refresh_frame(app_root: str | Path, doc: dict, *, complete: bool = True) -> list[str]:
     """The app's frame written out: each file the application owns from its
     `frameCode` row, every other one as the platform's current version, filled
     as a build fills it (`__APP_NAME__`). Written only where the file differs,
@@ -326,7 +327,7 @@ def refresh_frame(app_root: str | Path, doc: dict) -> list[str]:
         dst.parent.mkdir(parents=True, exist_ok=True)
         dst.write_text(text, "utf-8")
         changed.append(rel)
-    return changed + complete_imports(root)
+    return changed + (complete_imports(root) if complete else [])
 
 
 #: Platform modules an app keeps somewhere other than where
@@ -500,8 +501,11 @@ def sync(svc: Any, app_root: str) -> dict:
 
     root = Path(app_root)
     before = _fingerprint(root)
-    refresh_engine(root, svc.doc)
-    refresh_frame(root, svc.doc)
+    # The import completion walks the whole source tree; run it once here, not
+    # once inside each of the two refreshes, which doubled the walk every sync.
+    refresh_engine(root, svc.doc, complete=False)
+    refresh_frame(root, svc.doc, complete=False)
+    complete_imports(root)
     everything(svc, app_root)
     after = _fingerprint(root)
     changed = sorted(k for k in after if k in before and before[k] != after[k])

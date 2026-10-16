@@ -154,6 +154,17 @@ def building(output_dir: str | Path) -> bool:
     return busy(output_dir) in ("building", "checking")
 
 
+def _refuse_if_building(output_dir: str | Path) -> None:
+    """Checked again once the write lock is held. A build and the checks after
+    it rewrite the whole definition WITHOUT taking this lock, so one that began
+    in the gap between `_guard_writable` and the lock would otherwise clobber a
+    tab write that holds the lock. (A Smith turn cannot be here: it holds the
+    same lock, so we would not have acquired it.)"""
+    why = busy(output_dir)
+    if why in ("building", "checking"):
+        raise RuleError(BUSY_SAID[why], status=423)
+
+
 # ---------------------------------------------------------------------------
 # Reading
 # ---------------------------------------------------------------------------
@@ -162,10 +173,22 @@ def _live(rows: Any) -> list[dict]:
     return [r for r in rows or [] if isinstance(r, dict) and r.get("status") not in _RETIRED]
 
 
+#: The fields the platform maintains on a rule, not the person editing it in
+#: the tab: a sync, a catch-up or an adoption rewrites `origin`, `appliesTo`,
+#: `syncNote` and `status` while the person's own wording is untouched. They
+#: are left out of the revision so that routine churn does not make a tab edit
+#: of an otherwise-unchanged rule collide with itself (a spurious 409). A rule
+#: retired out from under the tab is caught separately, by `_find` (404).
+_REVISION_IGNORES = frozenset({"origin", "appliesTo", "syncNote", "status"})
+
+
 def revision(rule: dict) -> str:
     """What the rule looks like now, as a short hash — the tab sends it back
-    with an edit, and an edit of a rule that has changed since is refused."""
-    return hashlib.sha256(json.dumps(rule, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:16]
+    with an edit, and an edit of a rule that has changed since is refused. Only
+    the person-editable content is hashed; the platform-maintained fields
+    (`_REVISION_IGNORES`) are left out."""
+    body = {k: v for k, v in rule.items() if k not in _REVISION_IGNORES}
+    return hashlib.sha256(json.dumps(body, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:16]
 
 
 def _entities(doc: dict) -> dict[str, dict]:
@@ -209,7 +232,14 @@ def where_it_runs(rule: dict) -> str:
     """In the person's terms: `everywhere` (every save and live on the form),
     `form` (how the form looks only), `save` (every save, not the form),
     `before` (checked before the workflows it gates), `nowhere` (written
-    down — nothing enforces it — or switched off)."""
+    down — nothing enforces it — or switched off).
+
+    This is the LABEL for what the running app actually does, so the
+    condition→action decision here (``scope == "server"`` → save; any
+    `DATA_ACTIONS` effect → everywhere; otherwise form) must mirror
+    `effectiveScope` in ``templates/runtime/rules/engine.ts``, which is where
+    the app enforces it. Change the two together, or the tab will say a rule
+    runs somewhere it does not."""
     if rule.get("enabled") is False:
         return "nowhere"
     kind = rule.get("kind") or "statement"
@@ -594,6 +624,7 @@ def create(output_dir: str | Path, payload: dict, *, actor: str = "") -> dict:
     from services.blueprint.service import BlueprintService
     _guard_writable(output_dir)
     with write_lock(output_dir, timeout=TAB_LOCK_WAIT):
+        _refuse_if_building(output_dir)
         svc = BlueprintService.load(output_dir=str(output_dir))
         rule = normalise(payload, svc.doc)
         rule["origin"] = "editor"
@@ -629,6 +660,7 @@ def update(output_dir: str | Path, rule_id: str, payload: dict, *, expected: str
     from services.blueprint.service import BlueprintService
     _guard_writable(output_dir)
     with write_lock(output_dir, timeout=TAB_LOCK_WAIT):
+        _refuse_if_building(output_dir)
         svc = BlueprintService.load(output_dir=str(output_dir))
         current = _find(svc.doc, rule_id)
         if expected and revision(current) != expected:
@@ -682,6 +714,7 @@ def remove(output_dir: str | Path, rule_id: str, *, expected: str | None, actor:
     from services.blueprint.service import BlueprintService
     _guard_writable(output_dir)
     with write_lock(output_dir, timeout=TAB_LOCK_WAIT):
+        _refuse_if_building(output_dir)
         svc = BlueprintService.load(output_dir=str(output_dir))
         current = _find(svc.doc, rule_id)
         if expected and revision(current) != expected:

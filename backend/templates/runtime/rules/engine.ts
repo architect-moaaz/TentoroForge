@@ -209,6 +209,10 @@ export function byFiringOrder(a: ProjectRule, b: ProjectRule): number {
   return ((b.config as ConditionActionConfig).salience ?? 0) - ((a.config as ConditionActionConfig).salience ?? 0);
 }
 
+// Where a condition→action rule is enforced. The Business Rules tab shows the
+// same decision as a label through `where_it_runs` in
+// backend/services/business_rules.py — keep the two in step, or the tab names
+// a place a rule runs that this does not.
 export function effectiveScope(config: ConditionActionConfig | undefined): "entity" | "form" | "server" {
   const scope = config?.scope;
   if (scope === "server") return "server";
