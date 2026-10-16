@@ -56,6 +56,63 @@ _BARE_PROVIDER = "<SessionProvider>"
 _PREFIXED_PROVIDER = '<SessionProvider basePath={`${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/auth`}>'
 
 
+#: The Preview's own build directory. `next dev` compiles into `distDir`, and
+#: the build's trials start the same app without the Preview's base path into
+#: the default `.next` — the Preview then served client code compiled for no
+#: prefix: every link and router push lost `/api/projects/<id>/preview/serve`,
+#: and signing in landed on the platform's 404 (live, 2026-10-09). The review
+#: server keeps its own (`page_review.REVIEW_DIST_DIR`) for the same reason.
+PREVIEW_DIST_DIR = ".next-preview"
+#: Half-second polls before a start is given up on — three minutes.
+_READY_POLLS = 360
+
+#: The platform's own settings file. Everything in it is Forge's — its
+#: database, its secrets, its model keys — and none of it is the app's.
+_PLATFORM_ENV_FILE = Path(__file__).resolve().parent / ".env"
+#: What the platform holds that an app must never inherit, whether or not it
+#: came from the settings file.
+_PLATFORM_ONLY = frozenset({
+    "DATABASE_URL", "DATABASE_URL_SYNC", "SECRET_KEY", "ANTHROPIC_API_KEY",
+    "ANTHROPIC_BASE_URL", "OPENAI_API_KEY", "MOONSHOT_API_KEY", "NEXTAUTH_SECRET",
+    "NEXTAUTH_URL", "AUTH_SECRET", "AUTH_URL", "REDIS_URL",
+})
+
+
+def _env_keys(path: Path) -> set[str]:
+    keys: set[str] = set()
+    try:
+        lines = path.read_text("utf-8").splitlines()
+    except OSError:
+        return keys
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key = line.split("=", 1)[0].removeprefix("export ").strip()
+        if key:
+            keys.add(key)
+    return keys
+
+
+def app_env(output_dir: str, **extra: str) -> dict[str, str]:
+    """The environment an app's own server runs in.
+
+    It used to be the platform's (``{**os.environ}``), and Next.js lets the
+    process environment win over the app's ``.env`` files — so a Preview read
+    FORGE'S ``DATABASE_URL``: every sign-in looked for its user in the
+    platform's database, found none, and answered 401, and the platform's
+    secrets and model keys reached every generated app (2026-10-09). The
+    platform's settings are taken out, and so is anything the app sets for
+    itself, so the app's own files decide. PATH, HOME and the rest a toolchain
+    needs are kept."""
+    drop = set(_PLATFORM_ONLY) | _env_keys(_PLATFORM_ENV_FILE)
+    for name in (".env", ".env.local", ".env.development", ".env.development.local"):
+        drop |= _env_keys(Path(output_dir) / name)
+    env = {k: v for k, v in os.environ.items() if k not in drop}
+    env.update(extra)
+    return env
+
+
 def _session_under_prefix(output_dir: str) -> None:
     """An app scaffolded before the template carried the base path gets it:
     `providers.tsx` is the platform's file, not the app's content."""
@@ -95,7 +152,7 @@ async def _ensure_database(output_dir: str) -> None:
     try:
         with open(log, "w") as out:
             proc = await asyncio.create_subprocess_exec(
-                "bash", "start.sh", "--seed-only", cwd=output_dir,
+                "bash", "start.sh", "--seed-only", cwd=output_dir, env=app_env(output_dir),
                 stdin=asyncio.subprocess.DEVNULL, stdout=out, stderr=out)
             code = await asyncio.wait_for(proc.wait(), timeout=300)
         if code != 0:
@@ -148,16 +205,17 @@ async def start_preview(project_id: str, output_dir: str) -> int:
     # this dev server, so the generated app must know the prefix or
     # its <Link>/asset hrefs point at the wrong origin from the iframe.
     prefix = f"/api/projects/{project_id}/preview/serve"
-    env = {
-        **os.environ,
-        "NEXT_BASE_PATH": prefix,
-        "NEXT_ASSET_PREFIX": prefix,
+    env = app_env(
+        output_dir,
+        NEXT_BASE_PATH=prefix,
+        NEXT_ASSET_PREFIX=prefix,
         # SIGN-IN UNDER THE PREFIX. next-auth's client posts to /api/auth at
         # the origin's root unless told the base path; behind the proxy that
         # reached the platform, and every preview sign-in ended on
         # /api/auth/error (Test4, 2026-09-28). Inlined by next dev.
-        "NEXT_PUBLIC_BASE_PATH": prefix,
-    }
+        NEXT_PUBLIC_BASE_PATH=prefix,
+        NEXT_DIST_DIR=PREVIEW_DIST_DIR,
+    )
     _session_under_prefix(output_dir)
 
     # Start the dev server
@@ -179,10 +237,13 @@ async def start_preview(project_id: str, output_dir: str) -> int:
     }
     dev_servers.track(proc.pid, port=port, root=output_dir, kind="preview", key=project_id)
 
-    # Poll until the server is ready (max 30s)
+    # Poll until the server is ready. A first start compiles from nothing —
+    # its own build directory is empty (PREVIEW_DIST_DIR) — and that took
+    # longer than the 30 seconds this used to allow: the server was answering
+    # pages when it was stopped as "failed to start" (live, 2026-10-09).
     url = f"http://localhost:{port}"
-    async with httpx.AsyncClient(timeout=5) as client:
-        for _ in range(60):
+    async with httpx.AsyncClient(timeout=15) as client:
+        for _ in range(_READY_POLLS):
             await asyncio.sleep(0.5)
             try:
                 resp = await client.get(url)
@@ -338,12 +399,17 @@ async def _restart_preview(project_id: str) -> bool:
         except (ProcessLookupError, OSError):
             pass
 
-    # Start new Next.js dev server on same port
+    # Start new Next.js dev server on same port — under the same prefix it
+    # was first started with: restarted without it, every page and asset URL
+    # it emitted missed the proxy, and the Preview it was meant to heal died.
+    prefix = f"/api/projects/{project_id}/preview/serve"
     new_proc = await asyncio.create_subprocess_exec(
         "npx", "next", "dev", "--port", str(port),
         cwd=output_dir,
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.DEVNULL,
+        env=app_env(output_dir, NEXT_BASE_PATH=prefix, NEXT_ASSET_PREFIX=prefix,
+                    NEXT_PUBLIC_BASE_PATH=prefix, NEXT_DIST_DIR=PREVIEW_DIST_DIR),
         preexec_fn=os.setsid,
     )
 
