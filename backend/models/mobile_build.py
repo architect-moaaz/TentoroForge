@@ -78,6 +78,12 @@ class MobileBuild(Base):
     # anything useful in it without forcing a taxonomy.
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # --- Store submission (`eas submit`) — separate from the build's own status ---
+    # NULL (never submitted) → submitting → submitted / submit_failed.
+    submit_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # What the store step said: where the build went, or why it was refused.
+    submit_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False,

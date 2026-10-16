@@ -58,6 +58,9 @@ class AppleAscCredentials:
     key_id: Optional[str] = None
     issuer_id: Optional[str] = None
     private_key: Optional[str] = None
+    # The app's numeric id in App Store Connect. Only a SUBMIT needs it (EAS cannot pick the app without asking, and a
+    # non-interactive run cannot be asked), so a build does not, and `is_complete` does not count it.
+    app_id: Optional[str] = None
 
     def is_complete(self) -> bool:
         return all([self.team_id, self.key_id, self.issuer_id, self.private_key])
@@ -158,6 +161,7 @@ async def load_mobile_credentials(
             key_id=values.get("APPLE_ASC_KEY_ID"),
             issuer_id=values.get("APPLE_ASC_ISSUER_ID"),
             private_key=values.get("APPLE_ASC_PRIVATE_KEY"),
+            app_id=values.get("APPLE_ASC_APP_ID"),
         ),
         google=GooglePlayCredentials(
             service_account_json=values.get("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON"),

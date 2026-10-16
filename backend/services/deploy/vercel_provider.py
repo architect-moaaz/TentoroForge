@@ -58,9 +58,10 @@ async def _smoke_test_db(url: str) -> tuple[bool, str | None]:
     Returns ``(True, None)`` in two shapes:
     - Endpoint reports 200 with ``{"ok": true, ...}`` — the DB is
       verified reachable and at least one table exists.
-    - The request 3xx-redirects (typical: NextAuth middleware bounces
-      the probe to ``/login`` when the app requires auth) — the redirect
-      itself proves Next.js is up and serving. We can't verify DB from
+    - The request 3xx-redirects, or is answered 401/403 (typical: the
+      app's middleware bounces the probe to ``/login``, or — for an
+      ``/api/*`` call, which a phone app can not follow a redirect for —
+      answers 401 as JSON) — either proves Next.js is up and serving. We can't verify DB from
       here, but a green Vercel build + a live Next.js response is
       enough signal for "deploy succeeded"; a real DB fault would show
       up on the first user request instead.
@@ -88,10 +89,13 @@ async def _smoke_test_db(url: str) -> tuple[bool, str | None]:
                     if body.get("ok") is True:
                         return True, None
                     last_err = f"200 but ok=false: {body.get('error', 'no error')}"
-                elif 300 <= r.status_code < 400:
-                    # Middleware intercepted the probe (typical: NextAuth
-                    # bouncing to /login). The Next.js runtime is up and
-                    # responding — treat as success, no warning.
+                elif 300 <= r.status_code < 400 or r.status_code in (401, 403):
+                    # Middleware intercepted the probe: NextAuth bouncing to
+                    # /login, or the 401 JSON an /api/* call without a session
+                    # now gets (it was a redirect before, and the 401 was
+                    # reported as "database unhealthy" on every gated app).
+                    # The Next.js runtime is up and responding — treat as
+                    # success, no warning.
                     return True, None
                 elif r.status_code == 503:
                     try:

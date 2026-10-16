@@ -21,14 +21,21 @@ reinterpreted.
 from __future__ import annotations
 
 import contextlib
-import fcntl
 import hashlib
 import json
 import logging
 import re
+import threading
 import time
 from pathlib import Path
 from typing import Any, Iterator
+
+try:  # POSIX only; where it is missing (Windows) writers in ONE process are still serialised, by a thread lock
+    import fcntl
+except ImportError:  # pragma: no cover - Windows
+    fcntl = None  # type: ignore[assignment]
+
+_PROCESS_LOCK = threading.Lock()
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +95,14 @@ def write_lock(output_dir: str | Path, *, timeout: float | None = None) -> Itera
     import time
     path = Path(output_dir) / ".forge" / "blueprint" / ".rules.lock"
     path.parent.mkdir(parents=True, exist_ok=True)
+    if fcntl is None:
+        if not _PROCESS_LOCK.acquire(timeout=-1 if timeout is None else timeout):
+            raise RuleError("Smith is changing this app's rules right now. Try again in a moment.", status=423)
+        try:
+            yield
+        finally:
+            _PROCESS_LOCK.release()
+        return
     with open(path, "a+") as fh:
         if timeout is None:
             fcntl.flock(fh.fileno(), fcntl.LOCK_EX)

@@ -1,8 +1,9 @@
 # What EAS does not upload. The platform builds this folder with EAS_NO_VCS=1 (it is not a git repository of its own),
 # so EAS reads THIS file in place of .gitignore.
 
-# Installed on EAS's machines.
-node_modules/
+# Installed on EAS's machines. No trailing slash: in a build the staged copy holds a LINK to the installed packages (EAS reads the
+# config plugins locally), and a link is not a directory to the matcher.
+node_modules
 
 # A native project made by `expo prebuild` on somebody's machine would turn this managed project into a bare one:
 # EAS would build their folder, not the one app.json describes. EAS makes its own.

@@ -56,6 +56,7 @@ from services.eas_client import (
     is_terminal,
     normalize_status,
     poll_build,
+    submit_build,
 )
 from services.mobile_credentials import (
     MissingRequired,
@@ -107,6 +108,8 @@ class MobileBuildResponse(BaseModel):
     artifact_url: Optional[str] = None
     logs_url: Optional[str] = None
     error_message: Optional[str] = None
+    submit_status: Optional[str] = None      # None | submitting | submitted | submit_failed
+    submit_message: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     completed_at: Optional[datetime] = None
@@ -123,6 +126,8 @@ class MobileBuildResponse(BaseModel):
             artifact_url=row.artifact_url,
             logs_url=row.logs_url,
             error_message=row.error_message,
+            submit_status=row.submit_status,
+            submit_message=row.submit_message,
             created_at=row.created_at,
             updated_at=row.updated_at,
             completed_at=row.completed_at,
@@ -192,11 +197,16 @@ async def _run_build_and_poll(
     ``error_message`` so the UI surfaces it — the task itself never
     re-raises to avoid noisy tracebacks in the background scheduler.
     """
+    staged = None
     try:
+        build_dir = mobile_dir
         if kind == "native":
             await native_build.ensure_eas_project(Path(mobile_dir), creds.expo_eas_token)
+            # EAS is run in a clean copy of the phone project, alone: see `native_build.stage`.
+            staged = native_build.stage(Path(mobile_dir))
+            build_dir = str(staged)
         state = await create_build(
-            mobile_dir,
+            build_dir,
             profile=profile,
             platform=platform,
             expo_token=creds.expo_eas_token,
@@ -208,6 +218,12 @@ async def _run_build_and_poll(
     except EasClientError as exc:
         await _mark_failed(build_row_id, str(exc))
         return
+    except OSError as exc:
+        await _mark_failed(build_row_id, f"The phone project could not be copied for the build: {exc}")
+        return
+    finally:
+        if staged is not None:
+            native_build.unstage(staged)
 
     await _apply_state(build_row_id, state)
 
@@ -425,6 +441,88 @@ async def create_mobile_build(
     return MobileBuildResponse.from_row(row)
 
 
+async def _mark_submit(build_row_id: uuid.UUID, status: str, message: str) -> None:
+    async with async_session() as sess:
+        row = await sess.get(MobileBuild, build_row_id)
+        if row is None:
+            return
+        row.submit_status = status
+        row.submit_message = message
+        await sess.commit()
+
+
+async def _run_submit(build_row_id: uuid.UUID, native_dir: str, eas_build_id: str, platform: str, creds: MobileCredentials) -> None:
+    """Background task: send the finished build to its store from a staged copy that holds the keys, then say how it went.
+    Never re-raises: the outcome is written on the row for the panel to show."""
+    staged = None
+    try:
+        staged = native_build.stage(Path(native_dir))
+        native_build.write_submit_keys(
+            staged, platform,
+            google_json=creds.google.service_account_json or "", apple=creds.apple,
+        )
+        said = await submit_build(
+            str(staged), build_id=eas_build_id, platform=platform,
+            expo_token=creds.expo_eas_token, extra_env=NO_VCS,
+        )
+    except (EasClientError, native_build.NativeBuildError, OSError) as exc:
+        await _mark_submit(build_row_id, "submit_failed", str(exc))
+        return
+    finally:
+        if staged is not None:
+            native_build.unstage(staged)
+    where = "Google Play (Internal testing)" if platform == "android" else "App Store Connect (TestFlight)"
+    await _mark_submit(build_row_id, "submitted", f"Sent to {where}. {said}".strip())
+
+
+@router.post(
+    "/api/projects/{project_id}/mobile-builds/{build_id}/submit",
+    response_model=MobileBuildResponse,
+    status_code=202,
+)
+async def submit_mobile_build(
+    project_id: uuid.UUID,
+    build_id: uuid.UUID,
+    background: BackgroundTasks,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MobileBuildResponse:
+    """Send a finished production build to its store (`eas submit`). Returns at once; the row's ``submit_status`` goes
+    submitting → submitted / submit_failed."""
+    project = await _resolve_project(project_id, user, db)
+    row = await db.get(MobileBuild, build_id)
+    if row is None or row.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Build not found.")
+    if row.profile != "production":
+        raise HTTPException(status_code=400, detail="Only a store build (production) can be sent to a store; a preview build is for testing.")
+    if row.status != "completed" or not row.eas_build_id:
+        raise HTTPException(status_code=400, detail="This build has not finished, so there is nothing to submit yet.")
+    if row.submit_status == "submitting":
+        raise HTTPException(status_code=409, detail="This build is already being submitted.")
+    doc = _blueprint_of(project.output_dir or "")
+    target = native_build.choose_target(project.output_dir or "", doc)
+    if target is None or target.kind != "native":
+        raise HTTPException(status_code=400, detail="Submitting to a store is available for a native app's own phone project.")
+    try:
+        creds = await load_mobile_credentials(project.org_id, db)
+    except MissingRequired as exc:
+        raise HTTPException(status_code=400, detail={"message": str(exc), "missing_keys": exc.keys, "action": "add_credentials"}) from exc
+    if row.platform == "android":
+        missing = creds.missing_android_keys()
+        gone = "A Google Play service-account key is needed to submit."
+    else:
+        missing = creds.missing_ios_keys() + ([] if creds.apple.app_id else ["APPLE_ASC_APP_ID"])
+        gone = "Apple App Store Connect keys and the app's App Store Connect id are needed to submit."
+    if missing:
+        raise HTTPException(status_code=400, detail={"message": gone, "missing_keys": missing, "action": "add_credentials"})
+    row.submit_status = "submitting"
+    row.submit_message = None
+    await db.commit()
+    await db.refresh(row)
+    background.add_task(_run_submit, row.id, str(target.dir), row.eas_build_id, row.platform, creds)
+    return MobileBuildResponse.from_row(row)
+
+
 @router.get(
     "/api/projects/{project_id}/mobile-builds",
     response_model=list[MobileBuildResponse],
@@ -475,7 +573,7 @@ async def _latest_deployed_url(project_id: uuid.UUID) -> Optional[str]:
     """Find the URL of the most recent succeeded deployment. Nullable —
     a project without any deployment gets a 400 above."""
     try:
-        from models.deployment import Deployment
+        from models.deployment import LIVE_STATUSES, Deployment
     except Exception:  # noqa: BLE001
         return None
     async with async_session() as sess:
@@ -483,7 +581,7 @@ async def _latest_deployed_url(project_id: uuid.UUID) -> Optional[str]:
             select(Deployment.url)
             .where(
                 Deployment.project_id == project_id,
-                Deployment.status == "succeeded",
+                Deployment.status.in_(LIVE_STATUSES),
                 Deployment.url.isnot(None),
             )
             .order_by(desc(Deployment.created_at))

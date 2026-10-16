@@ -91,6 +91,28 @@ async def _default_run(
 # Env building                                                                 #
 # --------------------------------------------------------------------------- #
 
+#: What Windows needs in a child's environment for Node to work at all. Without SYSTEMROOT, Node cannot look up a host name
+#: (`getaddrinfo EAI_FAIL`: npm could not even download eas-cli), and without USERPROFILE / APPDATA / TEMP npm has no cache.
+#: Nothing on Linux or macOS needs these, so the list is read only there where it is Windows.
+_WINDOWS_ENV = (
+    "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP",
+    "HOMEDRIVE", "HOMEPATH", "PROGRAMDATA", "PROGRAMFILES", "PROGRAMFILES(X86)", "PROCESSOR_ARCHITECTURE",
+    "NUMBER_OF_PROCESSORS", "USERNAME",
+)
+
+
+def _inherited_windows_env() -> dict[str, str]:
+    if os.name != "nt":
+        return {}
+    return {key: os.environ[key] for key in _WINDOWS_ENV if key in os.environ}
+
+
+def _tail(text: str, size: int = 700) -> str:
+    """The END of a command's output: the warnings come first and the reason last (a 500-character head was only
+    "punycode is deprecated ... using EAS without version control")."""
+    return (text or "").strip()[-size:]
+
+
 def _build_env(
     expo_token: str,
     deployed_url: str,
@@ -108,8 +130,9 @@ def _build_env(
         # Inherit path + basic locale so npx resolves and node can print
         # unicode logs.
         "PATH": os.environ.get("PATH", ""),
-        "HOME": os.environ.get("HOME", "/tmp"),
+        "HOME": os.environ.get("HOME") or os.environ.get("USERPROFILE") or "/tmp",
         "LANG": os.environ.get("LANG", "en_US.UTF-8"),
+        **_inherited_windows_env(),
         # eas-cli authentication
         "EXPO_TOKEN": expo_token,
         # WebView shell URL
@@ -170,7 +193,7 @@ async def create_build(
     rc, stdout, stderr = await run(argv, mobile_dir, env)
     if rc != 0:
         raise EasClientError(
-            f"eas build exited {rc}: {stderr[:500] or stdout[:500]}"
+            f"eas build exited {rc}: {_tail(stderr) or _tail(stdout)}"
         )
 
     # CLI --json --no-wait returns a JSON array (one entry per platform requested).
@@ -194,6 +217,7 @@ async def link_project(
     native_dir: str,
     *,
     expo_token: str,
+    project_id: str = "",
     run: RunFn = _default_run,
 ) -> None:
     """Link the folder to an EAS project (made under the token's account when there is none): ``eas init``, which
@@ -201,9 +225,41 @@ async def link_project(
     if not expo_token:
         raise EasClientError("expo_token is required")
     argv = ["npx", "eas-cli", "init", "--non-interactive", "--force"]
+    if project_id:
+        argv += ["--id", project_id]          # link to the project that already exists, never make a second one
     rc, stdout, stderr = await run(argv, native_dir, _build_env(expo_token, "", NO_VCS))
     if rc != 0:
-        raise EasClientError(f"eas init exited {rc}: {stderr[:500] or stdout[:500]}")
+        raise EasClientError(f"eas init exited {rc}: {_tail(stderr) or _tail(stdout)}")
+
+
+# --------------------------------------------------------------------------- #
+# submit_build                                                                 #
+# --------------------------------------------------------------------------- #
+
+async def submit_build(
+    project_dir: str,
+    *,
+    build_id: str,
+    platform: str,
+    expo_token: str,
+    extra_env: Optional[dict[str, str]] = None,
+    run: RunFn = _default_run,
+) -> str:
+    """Send a finished build to its store: ``eas submit --id <build> --profile production``. It WAITS for the upload (a
+    minute or two), so a clean return means the store has the build; the store's own processing and review come after.
+
+    ``project_dir`` must hold an eas.json whose ``submit.production`` names the store key files
+    (``native_build.write_submit_keys``). Returns the CLI's last words (where to find the build). Raises
+    :class:`EasClientError` with the end of its output when it fails."""
+    if platform not in ("android", "ios"):
+        raise EasClientError(f"platform must be android or ios, got {platform!r}")
+    if not expo_token or not build_id:
+        raise EasClientError("expo_token and build_id are required")
+    argv = ["npx", "eas-cli", "submit", "--platform", platform, "--id", build_id, "--profile", "production", "--non-interactive"]
+    rc, stdout, stderr = await run(argv, project_dir, _build_env(expo_token, "", extra_env))
+    if rc != 0:
+        raise EasClientError(f"eas submit exited {rc}: {_tail(stderr) or _tail(stdout)}")
+    return _tail(stdout, 300)
 
 
 # --------------------------------------------------------------------------- #

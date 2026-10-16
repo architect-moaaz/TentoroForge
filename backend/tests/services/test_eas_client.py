@@ -333,3 +333,51 @@ class TestParseCliJson:
     def test_no_json_raises(self):
         with pytest.raises(EasClientError):
             _parse_cli_json("just some text", context="test")
+
+
+class TestWindowsChildEnvironment:
+    """Node cannot resolve a host name on Windows without SYSTEMROOT: `npx eas-cli` died with `getaddrinfo EAI_FAIL` in a child
+    started with a stripped environment. The list is read on Windows only; nothing else changes."""
+
+    def test_windows_gets_what_node_needs(self, monkeypatch):
+        import os
+        import services.eas_client as ec
+        monkeypatch.setattr(ec.os, "name", "nt")
+        monkeypatch.setenv("SYSTEMROOT", r"C:\Windows")
+        monkeypatch.setenv("USERPROFILE", r"C:\Users\x")
+        monkeypatch.setenv("APPDATA", r"C:\Users\x\AppData\Roaming")
+        monkeypatch.delenv("HOME", raising=False)
+        env = ec._build_env("tok", "https://x.io")
+        assert env["SYSTEMROOT"] == r"C:\Windows" and env["APPDATA"].endswith("Roaming")
+        assert env["HOME"] == r"C:\Users\x", "no /tmp on Windows: npm's cache goes in the user's own folder"
+        assert env["EXPO_TOKEN"] == "tok" and env["EXPO_PUBLIC_APP_URL"] == "https://x.io"
+        assert "OPENAI_API_KEY" not in env and "ANTHROPIC_API_KEY" not in env, "still only what is needed: no other secret"
+
+    def test_other_systems_are_exactly_as_before(self, monkeypatch):
+        import services.eas_client as ec
+        monkeypatch.setattr(ec.os, "name", "posix")
+        monkeypatch.setenv("SYSTEMROOT", r"C:\Windows")
+        monkeypatch.setenv("HOME", "/home/x")
+        env = ec._build_env("tok", "")
+        assert set(env) == {"PATH", "HOME", "LANG", "EXPO_TOKEN", "EXPO_PUBLIC_APP_URL"}
+        assert env["HOME"] == "/home/x"
+
+
+class TestTheReasonIsTheEndOfTheOutput:
+    """A failed `eas build` printed ~500 characters of warnings first (punycode, "without version control") and the reason last;
+    the error kept the first 500 and said nothing useful."""
+
+    def test_the_error_shows_the_end_of_stderr(self):
+        import asyncio
+        import services.eas_client as ec
+
+        noise = chr(10).join(["(node) DeprecationWarning: punycode", "Using EAS CLI without version control"] * 20) + chr(10)
+        reason = 'Failed to resolve plugin for module "expo-router" ... Do you have node modules installed?'
+
+        async def run(argv, cwd, env):
+            return 1, "", noise + reason
+
+        import pytest
+        with pytest.raises(ec.EasClientError) as err:
+            asyncio.run(ec.create_build("/x", profile="preview", platform="android", expo_token="t", deployed_url="https://a.b", run=run))
+        assert "expo-router" in str(err.value) and "Do you have node modules installed" in str(err.value)

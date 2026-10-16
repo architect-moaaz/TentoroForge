@@ -19,7 +19,11 @@ unique there. Two organisations each calling an app "Leafy" would otherwise be o
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
+import subprocess
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -88,6 +92,13 @@ def prepare(output_dir: str | Path, doc: dict, deployed_url: str) -> Path:
     would have written; doing it here means a build never ships a project older than the Blueprint."""
     from services.blueprint.native_projection import native_root, project_native
 
+    # THE EXPO ACCOUNT THAT OWNS THE PROJECT IS KEPT. `eas init` writes `expo.owner`, and a robot access token is refused
+    # without it ("Owner of project ... must be specified in the owner field when using a robot access token"). Projecting
+    # the phone project again rewrites app.json from the template, which has no owner: the second build always failed.
+    try:
+        prior_owner = str(((_read_app_json(native_root(output_dir)).get("expo") or {}).get("owner")) or "").strip()
+    except NativeBuildError:
+        prior_owner = ""
     try:
         project_native(doc, output_dir)
     except Exception as exc:  # noqa: BLE001 - said as a reason, not a traceback
@@ -98,6 +109,8 @@ def prepare(output_dir: str | Path, doc: dict, deployed_url: str) -> Path:
     extra = expo.setdefault("extra", {})
     extra["appUrl"] = str(deployed_url or "").strip().rstrip("/")
     expo["slug"] = unique_slug(str(expo.get("slug") or "app"), Path(output_dir).name)
+    if prior_owner:
+        expo["owner"] = prior_owner
     _write_app_json(root, data)
     return root
 
@@ -172,6 +185,110 @@ def preflight(native_dir: Path, doc: dict, *, profile: str, platform: str, deplo
     return report
 
 
+def owner(native_dir: Path) -> str:
+    """The Expo account that owns the linked project (`expo.owner`), or "" when app.json does not name one."""
+    try:
+        return str((_read_app_json(native_dir).get("expo") or {}).get("owner") or "").strip()
+    except NativeBuildError:
+        return ""
+
+
+#: What a build never carries: installed packages (EAS installs its own), a native project made on somebody's machine (it
+#: would turn this managed project into a bare one), local caches, and every kind of secret.
+_STAGE_SKIP_DIRS = {"node_modules", "android", "ios", ".expo", "dist", "web-build", ".git", "__tests__"}
+_STAGE_SKIP_SUFFIXES = (".jks", ".p8", ".p12", ".key", ".mobileprovision")
+
+
+def _stage_ignore(source: Path):
+    def ignore(directory: str, names: list[str]) -> set[str]:
+        skipped = set()
+        for name in names:
+            if Path(directory) == source and name in _STAGE_SKIP_DIRS:
+                skipped.add(name)
+            elif name == "secrets" or name == ".env" or name.startswith(".env.") or name.endswith(_STAGE_SKIP_SUFFIXES):
+                skipped.add(name)
+        return skipped
+
+    return ignore
+
+
+def stage(native_dir: Path) -> Path:
+    """A clean copy of the phone project, alone in a temporary folder: what EAS is run in and what it uploads.
+
+    WITHOUT THIS EAS PACKED THE WHOLE OUTPUT FOLDER. `output/<id>/native` is not a git repository and sits beside `app/`
+    (the web app) and `.forge/`; with no git, EAS took the PARENT as the project root and archived all of it: a 230 MB
+    upload of the web app, a prebuilt `android/` folder and everything else, ten minutes of it, and our `.easignore` (one
+    level down) was never read. Alone in its own folder, the project is the root, and the upload is a few megabytes."""
+    native_dir = Path(native_dir)
+    root = Path(tempfile.mkdtemp(prefix="forge-eas-"))
+    staged = root / "project"
+    shutil.copytree(native_dir, staged, ignore=_stage_ignore(native_dir))
+    _link_packages(native_dir / "node_modules", staged / "node_modules")
+    return staged
+
+
+def _link_packages(target: Path, link: Path) -> bool:
+    """Let the staged copy READ the installed packages without copying them (a gigabyte).
+
+    EAS reads the app's config plugins on this machine before it uploads anything (`Failed to resolve plugin for module
+    "expo-router" ... Do you have node modules installed?`), so the staged project needs `node_modules` to be there. It is
+    a link, and `.easignore` skips it: nothing in it is uploaded. A junction on Windows (no privilege needed), a symlink
+    elsewhere. False when it could not be made (the build then says what EAS said)."""
+    if not target.is_dir():
+        return False
+    try:
+        if os.name == "nt":
+            done = subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(target)], capture_output=True, timeout=30)
+            return done.returncode == 0 and link.exists()
+        os.symlink(target, link, target_is_directory=True)
+        return True
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def _unlink_packages(link: Path) -> None:
+    """Remove the link and ONLY the link: a recursive delete that followed it would empty the real node_modules."""
+    try:
+        if link.is_symlink():
+            link.unlink()
+        elif os.name == "nt" and link.exists():
+            os.rmdir(link)                 # a junction: removes the junction, never what it points at
+    except OSError:
+        pass
+
+
+def unstage(staged: Path) -> None:
+    """Remove a staged copy (and the temporary folder it lives in). Never touches the real project or its packages."""
+    staged = Path(staged)
+    _unlink_packages(staged / "node_modules")
+    shutil.rmtree(staged.parent if staged.name == "project" else staged, ignore_errors=True)
+
+
+def write_submit_keys(staged: Path, platform: str, *, google_json: str = "", apple: Any = None) -> None:
+    """Put the store keys INTO THE STAGED COPY and point the `submit` profile at them: a non-interactive `eas submit` takes
+    its keys from files named in eas.json, not from the environment. They exist only in the staged folder, which
+    `unstage` deletes; the project's own eas.json never names a key."""
+    staged = Path(staged)
+    path = staged / "eas.json"
+    config = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    profile = config.setdefault("submit", {}).setdefault("production", {})
+    if platform == "android":
+        if not google_json:
+            raise NativeBuildError("There is no Google Play service-account key to submit with.")
+        (staged / "play-key.json").write_text(google_json, encoding="utf-8")
+        profile["android"] = {**(profile.get("android") or {}), "serviceAccountKeyPath": "./play-key.json"}
+    else:
+        wanted = {"key_id": "APPLE_ASC_KEY_ID", "issuer_id": "APPLE_ASC_ISSUER_ID", "private_key": "APPLE_ASC_PRIVATE_KEY",
+                  "team_id": "APPLE_TEAM_ID", "app_id": "APPLE_ASC_APP_ID"}
+        missing = [name for field_name, name in wanted.items() if not getattr(apple, field_name, None)]
+        if missing:
+            raise NativeBuildError("An App Store submit needs " + ", ".join(missing) + " in Settings → Integrations.")
+        (staged / "asc-key.p8").write_text(apple.private_key, encoding="utf-8")
+        profile["ios"] = {**(profile.get("ios") or {}), "ascApiKeyPath": "./asc-key.p8", "ascApiKeyId": apple.key_id,
+                          "ascApiKeyIssuerId": apple.issuer_id, "appleTeamId": apple.team_id, "ascAppId": str(apple.app_id)}
+    path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+
+
 def project_id(native_dir: Path) -> str:
     """The EAS project id in app.json, or "" when there is none (or the template's placeholder)."""
     try:
@@ -182,20 +299,24 @@ def project_id(native_dir: Path) -> str:
 
 
 async def ensure_eas_project(native_dir: Path, expo_token: str, *, run: Any = None) -> str:
-    """The folder linked to an EAS project, linking it when it is not: `eas init`, which writes the id into app.json.
+    """The folder linked to an EAS project, linking it when it is not: `eas init`, which writes the id AND the owning
+    account into app.json. A robot token is refused without the owner, so a project that has its id but lost its owner
+    is linked again (to the SAME project: `--id`), which writes the owner back.
 
-    Returns the project id. The id is kept by every later projection, so this runs once per application."""
+    Returns the project id. Both are kept by every later projection, so this runs once per application."""
     from services.eas_client import EasClientError, link_project
 
     have = project_id(native_dir)
-    if have:
+    if have and owner(native_dir):
         return have
-    await link_project(str(native_dir), expo_token=expo_token, **({"run": run} if run else {}))
+    await link_project(str(native_dir), expo_token=expo_token, project_id=have, **({"run": run} if run else {}))
     linked = project_id(native_dir)
     if not linked:
         raise EasClientError("eas init finished but wrote no project id into app.json")
+    if not owner(native_dir):
+        raise EasClientError("eas init finished but wrote no owner into app.json, and a robot token needs one")
     return linked
 
 
 __all__ = ["BUNDLE", "LOCAL_HOSTS", "NativeBuildError", "Report", "Target", "choose_target", "ensure_eas_project",
-           "prepare", "preflight", "project_id", "unique_slug"]
+           "owner", "prepare", "preflight", "project_id", "stage", "unique_slug", "unstage", "write_submit_keys"]
