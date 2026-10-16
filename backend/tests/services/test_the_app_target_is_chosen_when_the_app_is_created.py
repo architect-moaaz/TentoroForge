@@ -28,17 +28,16 @@ def test_a_native_choice_turns_the_mobile_app_on(tmp_path):
     assert json.loads((tmp_path / ".forge/blueprint/current.json").read_text("utf-8"))["mobile"]["native"]["enabled"] is True
 
 
-def test_a_responsive_choice_is_an_explicit_no_that_the_server_default_cannot_override(tmp_path, monkeypatch):
-    monkeypatch.setenv("FORGE_NATIVE_APP", "1")           # the machine's default is ON
+def test_a_responsive_choice_is_an_explicit_no(tmp_path):
     svc = made(tmp_path, "responsive")
     assert svc.doc["mobile"]["native"]["enabled"] is False
     assert not enabled(svc.doc) and native_page_subjects(svc.doc) == [], "the native agent does not run"
 
 
-def test_an_app_created_before_the_choice_existed_keeps_the_old_behaviour(tmp_path, monkeypatch):
-    monkeypatch.setenv("FORGE_NATIVE_APP", "1")
+def test_an_app_created_before_the_choice_existed_stays_a_website(tmp_path, monkeypatch):
+    monkeypatch.setenv("FORGE_NATIVE_APP", "1")           # no longer read: nothing but the Blueprint turns native on
     svc = made(tmp_path, None)
-    assert app_target.read(tmp_path) is None and enabled(svc.doc), "nothing chosen: the server default decides"
+    assert app_target.read(tmp_path) is None and not enabled(svc.doc) and native_page_subjects(svc.doc) == []
 
 
 def test_anything_but_the_two_choices_is_ignored(tmp_path):

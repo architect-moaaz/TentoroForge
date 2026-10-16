@@ -844,6 +844,19 @@ def recode_pages_using(svc: Any, app_root: str | None, pages: list[dict], reques
     return done, notes
 
 
+def with_new_web_page(doc: dict, page: dict, body: dict) -> dict:
+    """The document as it will be once the web page's NEW code is saved.
+
+    The phone's writer is shown "the web page as it is written now". Called with the document as it was before the
+    change, it read the OLD `view.tsx` and wrote the phone screen from the page the person had just asked to change.
+    A copy (nothing is saved here): this page's `pageCode` row is the new body."""
+    pid = str(page.get("id"))
+    rows = [r for r in doc.get("pageCode") or [] if not (isinstance(r, dict) and str(r.get("page")) == pid)]
+    old = next((r for r in doc.get("pageCode") or [] if isinstance(r, dict) and str(r.get("page")) == pid), None)
+    rows.append({**(old or {}), **body, "page": pid})
+    return {**doc, "pageCode": rows}
+
+
 def native_follow(svc: Any, doc: dict, page: dict, *, brief: str, reasoning: Any = None, usage: Any = None,
                   client: Any = None) -> tuple[dict | None, str]:
     """The phone's screen of a page the web page was just changed or added: written to the SAME words.
@@ -987,7 +1000,8 @@ def recode_page(svc: Any, route: str, *, app_root: str, request: str,
         # THE PHONE FOLLOWS THE WEB: a native application's screen of this page is written to the same words, and
         # lands in the SAME version (one change, one undo). It never stops the web change: a screen that cannot be
         # written is said, and the web page stands.
-        native_body, native_note = native_follow(svc, doc, page, brief=brief, reasoning=reasoning, usage=usage)
+        native_body, native_note = native_follow(svc, with_new_web_page(doc, page, body), page, brief=brief,
+                                                 reasoning=reasoning, usage=usage)
         before = svc.snapshot()
         committed: list[str] = []
         steps = [("analytics", list(widgets))] if widgets else []
@@ -1196,7 +1210,7 @@ def relayout_pages(svc: Any, routes: Sequence[str], *, app_root: str, request: s
         for u, elapsed, *who in spent:
             usage.record(node="page_code", agent=who[0] if who else "ui_engineer", usage=u, elapsed_s=elapsed)
         phone[route] = native_follow(
-            svc, doc, page, reasoning=reasoning, usage=usage,
+            svc, with_new_web_page(doc, page, body), page, reasoning=reasoning, usage=usage,
             brief=f"Lay this screen out again from the start to: {request}. Keep every control and every workflow it already has.")
         return route, body, ""
 

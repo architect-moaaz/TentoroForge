@@ -84,11 +84,43 @@ const text = "x".repeat(35);
 await store.write(text);
 eqJson([mem.size, await store.read()], [5, text], "35 characters in pieces of 10: four parts and a count, joined on read");
 await store.write("short");
-eqJson([await store.read(), mem.has("jar.1")], ["short", false], "a shorter write removes the parts it no longer needs");
-mem.delete("jar.0");
+eqJson([await store.read(), mem.size], ["short", 2], "a shorter write leaves one part and the pointer: the old parts are gone");
+mem.delete([...mem.keys()].find((k) => k !== "jar.n")!);
 eqJson(await store.read(), null, "a torn write reads as nothing, not as half a jar");
 await store.write("again");
 await store.remove();
 eqJson([await store.read(), mem.size], [null, 0], "remove leaves nothing behind");
+
+console.log("a write that dies half way");
+const crashMem = new Map<string, string>();
+let setsLeft = Infinity;
+const crashing = {
+  get: async (k: string) => crashMem.get(k) ?? null,
+  set: async (k: string, v: string) => {
+    if (setsLeft-- <= 0) throw new Error("the process died");
+    crashMem.set(k, v);
+  },
+  remove: async (k: string) => { crashMem.delete(k); },
+};
+const dying = chunkedStore(crashing, "jar", 10);
+const first = "a".repeat(35);                                   // four parts
+await dying.write(first);
+setsLeft = 3;                                                   // the next write has six parts and dies on its fourth set
+let died = false;
+try { await dying.write("b".repeat(55)); } catch { died = true; }
+eqJson([died, await dying.read()], [true, first], "the previous jar is read whole, not a mixture of old and new parts");
+setsLeft = Infinity;
+await dying.write("c".repeat(25));
+eqJson(await dying.read(), "c".repeat(25), "and the next write goes through");
+eqJson([...crashMem.keys()].filter((k) => k !== "jar.n").length >= 3, true, "its parts are there");
+
+console.log("a jar saved before generations");
+const old = new Map<string, string>([["jar.n", "3"], ["jar.0", "aaaaaaaaaa"], ["jar.1", "bbbbbbbbbb"], ["jar.2", "cc"]]);
+const legacy = chunkedStore({
+  get: async (k) => old.get(k) ?? null, set: async (k, v) => { old.set(k, v); }, remove: async (k) => { old.delete(k); },
+}, "jar", 10);
+eqJson(await legacy.read(), "aaaaaaaaaabbbbbbbbbbcc", "a jar in the old key format still reads");
+await legacy.write("new");
+eqJson([await legacy.read(), [...old.keys()].some((k) => /^jar\.[0-9]$/.test(k))], ["new", false], "the next write replaces it, old parts and all");
 
 done("session cookie");

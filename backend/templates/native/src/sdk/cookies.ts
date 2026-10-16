@@ -182,38 +182,50 @@ export interface ChunkedStore {
   remove(): Promise<void>;
 }
 
+/**
+ * THE PARTS OF A WRITE ARE NEVER THE PARTS OF THE LAST ONE. A write used the same keys as the one before it, so a
+ * crash half way left the old count over a mixture of new and old parts, which read back as garbage and signed the
+ * person out. Each write puts its parts under a fresh generation (`<name>.<gen>.<i>`) and then switches to them with ONE
+ * write, the pointer (`<name>.n` = `<gen>:<count>`): a crash before that leaves the previous generation whole.
+ * A jar saved the old way (`<name>.n` = a bare count, parts `<name>.<i>`) still reads, and is replaced by the next write.
+ */
 export function chunkedStore(kv: KeyValue, name: string, size = 1800): ChunkedStore {
-  const countKey = `${name}.n`;
-  const partKey = (i: number) => `${name}.${i}`;
-  const count = async (): Promise<number> => {
-    const n = Number(await kv.get(countKey));
-    return Number.isInteger(n) && n > 0 ? n : 0;
+  const pointerKey = `${name}.n`;
+  const partKey = (gen: string, i: number) => (gen ? `${name}.${gen}.${i}` : `${name}.${i}`);
+  const pointer = async (): Promise<{ gen: string; n: number } | null> => {
+    const raw = await kv.get(pointerKey);
+    const m = raw === null ? null : /^(?:([a-z0-9]+):)?(\d+)$/.exec(raw.trim());
+    const n = m ? Number(m[2]) : 0;
+    return m && Number.isInteger(n) && n > 0 ? { gen: m[1] ?? "", n } : null;
+  };
+  const dropParts = async (p: { gen: string; n: number } | null) => {
+    if (p) for (let i = 0; i < p.n; i++) await kv.remove(partKey(p.gen, i));
   };
   return {
     async read() {
-      const n = await count();
-      if (!n) return null;
+      const p = await pointer();
+      if (!p) return null;
       let out = "";
-      for (let i = 0; i < n; i++) {
-        const part = await kv.get(partKey(i));
+      for (let i = 0; i < p.n; i++) {
+        const part = await kv.get(partKey(p.gen, i));
         if (part === null) return null; // a torn write reads as nothing, not as half a jar
         out += part;
       }
       return out;
     },
     async write(text) {
-      const before = await count();
+      const before = await pointer();
       const parts: string[] = [];
       for (let i = 0; i < text.length; i += size) parts.push(text.slice(i, i + size));
-      // Parts first, the count last: a write that dies half way keeps the old count.
-      for (let i = 0; i < parts.length; i++) await kv.set(partKey(i), parts[i]);
-      await kv.set(countKey, String(parts.length));
-      for (let i = parts.length; i < before; i++) await kv.remove(partKey(i));
+      const gen = Date.now().toString(36) + Math.floor(Math.random() * 1296).toString(36);
+      for (let i = 0; i < parts.length; i++) await kv.set(partKey(gen, i), parts[i]);
+      await kv.set(pointerKey, `${gen}:${parts.length}`); // the switch: one write
+      await dropParts(before);
     },
     async remove() {
-      const n = await count();
-      await kv.remove(countKey);
-      for (let i = 0; i < n; i++) await kv.remove(partKey(i));
+      const p = await pointer();
+      await kv.remove(pointerKey);
+      await dropParts(p);
     },
   };
 }

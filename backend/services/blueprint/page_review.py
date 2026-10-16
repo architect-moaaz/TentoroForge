@@ -317,7 +317,10 @@ class RunningApp:
             dev_servers.forget(self.proc.pid)
             if os.name == "nt":
                 subprocess.run(["taskkill", "/PID", str(self.proc.pid), "/T", "/F"], capture_output=True)
-                self.proc.wait(timeout=10)
+                try:
+                    self.proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:      # still going after a forced kill: stop the rest of the clean-up anyway
+                    pass
             for sig in (() if os.name == "nt" else (signal.SIGTERM, signal.SIGKILL)):
                 try:
                     os.killpg(os.getpgid(self.proc.pid), sig)

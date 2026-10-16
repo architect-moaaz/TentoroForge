@@ -75,7 +75,13 @@ def _hold_watch(path: Path | None = None):
         except ImportError:
             # WINDOWS HAS NO fcntl, and importing it at the top of this module stopped the backend from starting
             # there at all. Lock the file's first byte instead: the same one-holder rule, released the same way.
-            import msvcrt
+            try:
+                import msvcrt
+            except ImportError:
+                # Neither lock exists on this platform: every worker sweeps. An address checked twice is a repeated
+                # line in chat, not a fault, and the watch must not be the reason the backend cannot start.
+                logger.warning("[domain-watch] no file lock here: every worker runs the watch")
+                return fh
             fh.seek(0)
             msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
     except OSError:

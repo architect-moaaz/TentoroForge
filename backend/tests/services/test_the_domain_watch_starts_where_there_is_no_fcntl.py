@@ -7,6 +7,8 @@ from __future__ import annotations
 import importlib
 import sys
 
+import pytest
+
 
 def test_the_module_imports_where_fcntl_does_not_exist(monkeypatch):
     monkeypatch.setitem(sys.modules, "fcntl", None)            # `import fcntl` now raises ImportError
@@ -15,6 +17,18 @@ def test_the_module_imports_where_fcntl_does_not_exist(monkeypatch):
     assert watch.INTERVAL_S == 60
 
 
+def test_a_platform_with_neither_lock_still_starts_the_watch(tmp_path, monkeypatch):
+    """No fcntl and no msvcrt: the fallback is no lock, not an error that stops the backend."""
+    monkeypatch.setitem(sys.modules, "fcntl", None)
+    monkeypatch.setitem(sys.modules, "msvcrt", None)
+    import services.deploy.domain_watch as watch
+    importlib.reload(watch)
+    held = watch._hold_watch(tmp_path / "none.lock")
+    assert held is not None
+    held.close()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="the byte lock is msvcrt's: Windows only")
 def test_one_watch_per_host_without_fcntl(tmp_path, monkeypatch):
     monkeypatch.setitem(sys.modules, "fcntl", None)
     import services.deploy.domain_watch as watch

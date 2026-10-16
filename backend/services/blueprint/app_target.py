@@ -47,8 +47,8 @@ def bundle_for(name: str) -> str:
 
 
 def apply(doc: dict, target: str | None) -> dict:
-    """Set `mobile.native.enabled` from the choice. An explicit False for `responsive`, so the server's own default
-    (`FORGE_NATIVE_APP`) cannot start the native agent for an app whose owner asked for a website.
+    """Set `mobile.native.enabled` from the choice. An explicit False for `responsive`, so the choice is written down
+    and a later reader (or Smith) sees that the owner asked for a website.
 
     A NATIVE APP NAMES ITS BUNDLE ID: the Blueprint's contract refuses `mobile.native` without `mobile.store.bundleId`
     (the first real build failed its requirements step on exactly this), so a native choice carries one made from

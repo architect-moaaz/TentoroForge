@@ -125,3 +125,25 @@ def test_the_person_is_told_what_happened_to_the_phone(monkeypatch):
     part = said({"/a": "updated", "/b": "the phone screen of /b did not compile, so it was left as it was"})
     assert "phone screens of `/a`" in part["said"] and "phone screens left as they were" in part["finding"] and "/b:" in part["finding"]
     assert "phone" not in said({})["said"].lower()
+
+
+def test_the_phone_is_written_from_the_new_web_page_not_the_old(world):
+    """The phone's writer is shown the web page "as it is written now": that is the NEW code, not the version before."""
+    svc, calls, mp = world
+    seen = {}
+
+    def follow(svc_, doc, page, **k):
+        seen[page["id"]] = compose.code_row(doc, page["id"])
+        return {"page": page["id"], "screen": "s"}, ""
+
+    mp.setattr(compose, "native_follow", follow)
+    compose.relayout_pages(svc, ["/plants", "/add-plant"], app_root="/tmp/nowhere/app", request="redo")
+    assert seen["PAGE-001"]["view"] == "new" and seen["PAGE-002"]["view"] == "new"
+
+
+def test_the_document_given_to_the_phone_is_a_copy():
+    doc = {"pageCode": [{"page": "P1", "view": "old", "load": "old"}, {"page": "P2", "view": "keep"}]}
+    out = compose.with_new_web_page(doc, {"id": "P1"}, {"view": "new"})
+    assert compose.code_row(out, "P1")["view"] == "new" and compose.code_row(out, "P1")["load"] == "old"
+    assert compose.code_row(out, "P2")["view"] == "keep"
+    assert doc["pageCode"][0]["view"] == "old", "the original is untouched"

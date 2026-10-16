@@ -72,4 +72,18 @@ console.log("a whole form");
   ok(form.isFixed({ value: undefined }) && !form.isFixed({ label: "x" }), "a spec with `value` is fixed, even if the value is undefined");
 }
 
+{
+  // NumberField reports NaN for text that is not a number and `undefined` for an empty box. It used to report
+  // `undefined` for both, so an OPTIONAL number the person had typed "abc" into was left out of the input in silence.
+  const specs = { weight: { kind: "number", label: "Weight" }, notes: { kind: "text", label: "Notes" } };
+  const typedJunk = form.collectInput(specs as any, { weight: Number.NaN, notes: "x" }, []);
+  eqJson(typedJunk.errors.weight, "Weight must be a number.", "an optional number the person typed text into is refused, not dropped");
+  const emptied = form.collectInput(specs as any, { weight: undefined, notes: "x" }, []);
+  eqJson([emptied.errors.weight, "weight" in emptied.input], [undefined, false], "an optional number left empty is simply left out");
+  eqJson(form.collectInput(specs as any, { weight: 80 }, []).errors.weight, undefined, "a real number is fine");
+  eqJson(form.collectInput(specs as any, { weight: Number.NaN }, ["weight"]).errors.weight, "Weight must be a number.", "and a required one says so too");
+  eqJson([form.numberFromText("abc"), form.numberFromText(""), form.numberFromText("1,5")], [null, undefined, 1.5],
+    "the text-to-number step still tells empty (undefined) from not-a-number (null)");
+}
+
 done("form");

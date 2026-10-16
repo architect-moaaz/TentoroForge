@@ -397,6 +397,18 @@ def _page_findings(doc: dict, page: dict, screen: str) -> list[str]:
 #: The packages the template's `package.json` names, installed once and shared.
 _TOOLCHAIN_LOCK = threading.Lock()
 
+#: A FAILED INSTALL IS REMEMBERED FOR THE LIFE OF THE PROCESS. On a host with no network (or a bad registry) every
+#: screen's compile asked for the toolchain again: pages x rounds x Smith turns of `npm install`, each up to 25 minutes,
+#: one after another behind the lock. Keyed by the folder and the template's dependencies, so a changed template (or
+#: `forget_toolchain_failures()`) tries again.
+_INSTALL_FAILED: dict[str, str] = {}
+
+
+def forget_toolchain_failures() -> None:
+    """Try the install again on the next compile (a network that came back, a test)."""
+    with _TOOLCHAIN_LOCK:
+        _INSTALL_FAILED.clear()
+
 
 def toolchain_dir() -> Path:
     """Where the compiler and the packages the screens type-check against live:
@@ -428,6 +440,9 @@ def ensure_toolchain(run: Any = None, timeout: float = 1500.0) -> Path | None:
     with _TOOLCHAIN_LOCK:
         if tsc.is_file() and (explicit or (stamp.is_file() and stamp.read_text().strip() == _fingerprint())):
             return root
+        failed_key = f"{root}|{_fingerprint()}"
+        if failed_key in _INSTALL_FAILED:
+            return None                      # it did not install earlier in this process: not again, for every screen
         npm = shutil.which("npm")
         if not npm:
             logger.warning("[native_engineer] no npm: screens are not compiled")
@@ -439,11 +454,13 @@ def ensure_toolchain(run: Any = None, timeout: float = 1500.0) -> Path | None:
             proc = run([npm, "install", "--no-audit", "--no-fund", "--loglevel", "error"], cwd=str(root),
                        capture_output=True, text=True, encoding="utf-8", timeout=timeout)
         except (OSError, subprocess.SubprocessError) as exc:
-            logger.warning("[native_engineer] the toolchain did not install: %s", exc)
+            logger.warning("[native_engineer] the toolchain did not install (not tried again in this process): %s", exc)
+            _INSTALL_FAILED[failed_key] = str(exc)[:400]
             return None
         if getattr(proc, "returncode", 1) != 0 or not tsc.is_file():
-            logger.warning("[native_engineer] the toolchain did not install: %s",
-                           (getattr(proc, "stderr", "") or "")[-400:])
+            why = (getattr(proc, "stderr", "") or "")[-400:]
+            logger.warning("[native_engineer] the toolchain did not install (not tried again in this process): %s", why)
+            _INSTALL_FAILED[failed_key] = why or "npm install failed"
             return None
         stamp.write_text(_fingerprint(), encoding="utf-8")
         return root

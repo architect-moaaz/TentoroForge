@@ -4326,6 +4326,15 @@ def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
 
     # A public page is only public if what it fetches is reachable too.
     apis = public_apis(doc)
+    # A PUBLIC SCREEN ON THE PHONE READS OVER /api/read. The gate answered every call without a token with a 401 before
+    # the route ran, so a public screen of a gated app read nothing and the 401 sent the person to sign in. The read
+    # route decides for itself (`READ_ACCESS`: an anonymous caller gets only what a public page reads), so for a native
+    # app that has a public page of its own (not the sign-in pages) it is left to answer.
+    from services.blueprint.native_projection import enabled as _native_enabled
+    if _native_enabled(doc) and any(
+            str(p.get("access") or "") == "public" and str(p.get("pattern") or "") != "auth"
+            for p in _live(doc.get("pages"))):
+        apis = [*apis, "api/read"]
     excluded = list(_ALWAYS_OPEN) + open_routes + apis
     pattern = "|".join(excluded)
     # A negative lookahead cannot exclude the empty path, so `/` is matched by

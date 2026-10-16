@@ -188,7 +188,9 @@ export interface NumberFieldProps extends Common {
 }
 
 /** The text a person is typing is kept as text ("1." and "-" are on the way to
- *  numbers); what the form receives is the number, or undefined while it is not one. */
+ *  numbers); what the form receives is the number, `undefined` while the box is EMPTY, and NaN while what is in it is
+ *  not a number ("abc"): `undefined` for both dropped an optional field the person had typed into without a word, and
+ *  NaN is refused by the form's own check ("must be a number"). */
 export function NumberField({ label, required, help, error, disabled, value, onChange, min, max, placeholder, prefix }: NumberFieldProps) {
   const theme = useTheme();
   const [focused, setFocused] = React.useState(false);
@@ -197,7 +199,8 @@ export function NumberField({ label, required, help, error, disabled, value, onC
   // The form changed the value from outside (a reset after saving): follow it.
   React.useEffect(() => {
     const typed = numberFromText(text);
-    if ((typed ?? undefined) !== value) setText(value === undefined ? "" : String(value));
+    const inStep = typed === null ? typeof value === "number" && Number.isNaN(value) : typed === value;
+    if (!inStep) setText(value === undefined || Number.isNaN(value) ? "" : String(value));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
   const box = useBox(error ?? local, focused, disabled);
@@ -215,7 +218,7 @@ export function NumberField({ label, required, help, error, disabled, value, onC
           placeholder={placeholder}
           placeholderTextColor={theme.colors.mutedForeground}
           accessibilityLabel={label}
-          onChangeText={(t) => { setText(t); const n = numberFromText(t); onChange(n === null ? undefined : n); if (local) check(n); }}
+          onChangeText={(t) => { setText(t); const n = numberFromText(t); onChange(n === null ? Number.NaN : n); if (local) check(n); }}
           onFocus={() => setFocused(true)}
           onBlur={() => { setFocused(false); check(numberFromText(text)); }}
           style={{ flex: 1, minHeight: theme.touch, color: theme.colors.foreground, fontSize: 16, fontVariant: ["tabular-nums"] }}

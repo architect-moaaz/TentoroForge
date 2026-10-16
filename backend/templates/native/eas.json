@@ -5,7 +5,6 @@
   },
   "build": {
     "development": {
-      "developmentClient": true,
       "distribution": "internal",
       "channel": "development",
       "env": {
@@ -42,9 +41,7 @@
         "track": "internal",
         "releaseStatus": "draft"
       },
-      "ios": {
-        "ascApiKeyPath": "./secrets/ascApiKey.p8"
-      }
+      "ios": {}
     }
   }
 }

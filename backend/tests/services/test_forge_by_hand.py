@@ -13,6 +13,14 @@ import pytest
 
 from scripts import forge_by_hand as fbh
 
+import os as _os
+import subprocess as _subprocess
+import sys as _sys
+
+#: The process as this file found it: the last test checks nothing in here changed it for the tests after.
+_BEFORE = {"cwd": _os.getcwd(), "path": list(_sys.path), "popen": _subprocess.Popen.__init__,
+           "env": {k: v for k, v in _os.environ.items() if k != "PYTEST_CURRENT_TEST"}}
+
 
 def test_only_the_requests_worth_an_answer_wait():
     assert fbh.kind_of(fbh._COVERAGE_OPENING + " covers what", "Requirements: ...") == "coverage"
@@ -114,14 +122,33 @@ def test_installing_blanks_every_model_key_and_swaps_the_router(tmp_path, monkey
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-real")
     monkeypatch.setenv("KIMI_API_KEY", "kimi-real")
     monkeypatch.setenv("FORGE_UI_DESIGNER", "uxpilot")
+    import os
+    import subprocess
+    import sys
+
     from services.blueprint import executors, observer
 
+    # `install` changes the process: it moves into backend/, puts it on sys.path, loads backend/.env into the
+    # environment and (on Windows) patches subprocess.Popen. None of that may outlast this test.
+    monkeypatch.chdir(os.getcwd())                                       # restored when the test ends
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    monkeypatch.setattr(subprocess.Popen, "__init__", subprocess.Popen.__init__)
+    saved_env = dict(os.environ)
     real_router, real_observer = executors.tiered_router, observer.anthropic_observer
     try:
         model = fbh.install(tmp_path)
-        import os
         assert os.environ["ANTHROPIC_API_KEY"] == "" and os.environ["KIMI_API_KEY"] == ""
         assert os.environ["FORGE_UI_DESIGNER"] == "", "nobody has decided for the platform"
         assert executors.tiered_router() is model and observer.anthropic_observer() is None
     finally:
         executors.tiered_router, observer.anthropic_observer = real_router, real_observer
+        os.environ.clear()
+        os.environ.update(saved_env)
+
+
+def test_zz_installing_left_the_process_as_it_was():
+    """`install` moves the process into backend/, edits sys.path, loads backend/.env and patches Popen: undone."""
+    assert _os.getcwd() == _BEFORE["cwd"]
+    assert _sys.path == _BEFORE["path"]
+    assert _subprocess.Popen.__init__ is _BEFORE["popen"]
+    assert {k: v for k, v in _os.environ.items() if k != "PYTEST_CURRENT_TEST"} == _BEFORE["env"]

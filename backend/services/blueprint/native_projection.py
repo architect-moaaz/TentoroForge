@@ -19,11 +19,14 @@ thing in a different folder and is not touched.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
 import re
 import shutil
+import tempfile
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -142,19 +145,13 @@ _HEADER = ("// Generated from the Living Blueprint — the native app's own half
            "// Blueprint, not this file.\n")
 
 
-#: Turns the native app on for every application that does not say otherwise:
-#: `FORGE_NATIVE_APP=1`. The Blueprint's own `mobile.native.enabled` — set by the
-#: owner, or by Smith — wins over it either way, so one application can opt out
-#: of a platform that defaults to native, or in on one that does not.
-NATIVE_ENV = "FORGE_NATIVE_APP"
-
-
 def enabled(doc: dict) -> bool:
+    """A native app is OPT-IN, and only the application's own Blueprint opts in: `mobile.native.enabled` is true, set
+    by the owner at creation or by Smith. There is no environment switch: one that defaulted every application to
+    native gave every app built before this existed a second page writer and an Expo project on its next build."""
     mobile = doc.get("mobile") if isinstance(doc.get("mobile"), dict) else {}
     native = mobile.get("native") if isinstance(mobile.get("native"), dict) else {}
-    if isinstance(native.get("enabled"), bool):
-        return native["enabled"]
-    return os.environ.get(NATIVE_ENV, "").strip().lower() in ("1", "true", "yes", "on")
+    return native.get("enabled") is True
 
 
 def native_root(output_dir: str | Path) -> Path:
@@ -187,6 +184,28 @@ def brand_hex(doc: dict) -> str:
 # Writing, only when it changed
 # ---------------------------------------------------------------------------
 
+def _put(path: Path, data: bytes) -> None:
+    """Write a file so that nobody reading it ever sees half of it: the new content goes to a sibling file and replaces
+    the old in one step. Several screens are compiled at once against this project, each by a tsc that reads these files."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+        for attempt in range(5):
+            try:
+                os.replace(tmp, path)
+                return
+            except PermissionError:                  # Windows: a reader has the old file open for a moment
+                if attempt == 4:                     # still held: write in place rather than fail the build
+                    path.write_bytes(data)
+                    return
+                threading.Event().wait(0.05 * (attempt + 1))
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
 def _write(path: Path, text: str) -> bool:
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -194,7 +213,7 @@ def _write(path: Path, text: str) -> bool:
             return False
     except (OSError, UnicodeDecodeError):
         pass
-    path.write_text(text, encoding="utf-8", newline="\n")
+    _put(path, text.replace("\r\n", "\n").encode("utf-8"))
     return True
 
 
@@ -205,7 +224,7 @@ def _copy(src: Path, dst: Path) -> bool:
             return False
     except OSError:
         pass
-    shutil.copyfile(src, dst)
+    _put(dst, src.read_bytes())
     return True
 
 
@@ -722,10 +741,31 @@ def project_native(doc: dict, output_dir: str | Path) -> dict[str, Any]:
     return {"files": files, "enabled": True, "dir": NATIVE_DIR}
 
 
+#: ONE PROJECTION AT A TIME, AND ONCE. Every page of a build is written and compiled on its own thread, each round of
+#: each page asking for this project: ~100 fixed files and the generated modules were rewritten by every thread while the
+#: others' tsc read them (a torn `schema.ts` was a spurious compile error sent back to the model). The first caller
+#: projects; the rest wait, then find it done for that output folder and that document.
+_PROJECT_LOCK = threading.RLock()
+_PROJECTED: dict[str, str] = {}
+
+
+def _doc_fingerprint(doc: dict) -> str:
+    return hashlib.sha256(json.dumps(doc, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+
+
 def ensure_native_project(doc: dict, output_dir: str | Path) -> Path:
     """What the native engineer compiles a screen against: the fixed half and
     the modules generated from `doc`, written if they are not there (screens
-    are its to write). Returns the project's folder."""
-    project_fixed_half(doc, output_dir)
-    project_generated_modules(doc, output_dir)
-    return native_root(output_dir)
+    are its to write). Returns the project's folder.
+
+    Projected once per output folder and document, under a lock: a later call for the same document only reads. A
+    changed document (Smith's edit) projects again."""
+    root = native_root(output_dir)
+    key, fingerprint = str(Path(output_dir).resolve()), _doc_fingerprint(doc)
+    with _PROJECT_LOCK:
+        if _PROJECTED.get(key) == fingerprint and root.is_dir():
+            return root
+        project_fixed_half(doc, output_dir)
+        project_generated_modules(doc, output_dir)
+        _PROJECTED[key] = fingerprint
+    return root
