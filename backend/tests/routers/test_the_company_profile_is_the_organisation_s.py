@@ -168,3 +168,23 @@ async def test_the_document_can_be_read_as_a_document(
     assert resp.status_code == 200
     assert resp.text.startswith("# Northwind")
     assert resp.headers["content-type"].startswith("text/markdown")
+
+
+@pytest.mark.asyncio
+async def test_guidelines_written_by_hand_stay_written_until_handed_back(auth_client: AsyncClient, org_id: str):
+    """The start flow lets the person edit the guidelines in place. Their text
+    must not be overwritten by the renderer on the next correction, and
+    clearing it must bring the rendered document back."""
+    with patch("routers.brand_discovery.discover", return_value=READ, create=True), \
+         patch("services.brand_discovery.discover", return_value=READ):
+        await auth_client.post(f"/api/orgs/{org_id}/brand/discover", json={"url": "northwind.test"})
+    mine = "# Northwind\n\nWarm, never cute. Brown bread photography only."
+    r = await auth_client.put(f"/api/orgs/{org_id}/brand", json={"design_md": mine})
+    assert r.status_code == 200 and r.json()["design_md"].startswith("# Northwind\n\nWarm, never cute.")
+    # A later correction to a colour keeps the hand-written document.
+    r = await auth_client.put(f"/api/orgs/{org_id}/brand", json={"design": {"colors": {"primary": "#222222"}}})
+    assert r.json()["design_md"].startswith("# Northwind\n\nWarm, never cute.")
+    assert r.json()["design"]["colors"]["primary"] == "#222222"
+    # Handing it back: an empty document means "render it for me again".
+    r = await auth_client.put(f"/api/orgs/{org_id}/brand", json={"design_md": ""})
+    assert "design language" in r.json()["design_md"] and "#222222" in r.json()["design_md"]

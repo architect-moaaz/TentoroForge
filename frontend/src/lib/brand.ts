@@ -104,6 +104,8 @@ export const brand = {
       company_name?: string;
       identity?: BrandIdentity;
       design?: BrandDesign;
+      /** The guidelines in the person's own words; "" hands them back to the renderer. */
+      design_md?: string;
     },
   ) => api.put<BrandProfile>(`/api/orgs/${orgId}/brand`, body),
   skip: (orgId: string) => api.post<BrandProfile>(`/api/orgs/${orgId}/brand/skip`),
