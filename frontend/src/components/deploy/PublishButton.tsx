@@ -8,6 +8,7 @@ import { api } from "@/lib/api";
 import { PublishDialog } from "./PublishDialog";
 import { lockedNote } from "@/lib/features";
 import { explainLock } from "@/components/features/Locked";
+import { usePublishStatus } from "./PublishSides";
 
 interface LatestDeployment {
   id: string;
@@ -80,7 +81,12 @@ export function PublishButton({ projectId, orgId, size = "sm", lockedWeb = false
     },
   });
 
-  const liveUrl = data?.status === "succeeded" ? data.url : null;
+  // WHERE PUBLISH GOES, and which address is shown: the test version's
+  // while the switch is on Test, the live app's otherwise.
+  const { data: sides } = usePublishStatus(projectId, isReady && !lockedWeb);
+  const onTest = sides?.target === "test";
+  const productionUrl = sides ? sides.production?.url ?? null : data?.status === "succeeded" ? data.url : null;
+  const liveUrl = onTest ? sides?.test?.url ?? null : productionUrl;
 
   return (
     <div className="flex items-center gap-1.5">
@@ -90,9 +96,10 @@ export function PublishButton({ projectId, orgId, size = "sm", lockedWeb = false
           target="_blank"
           rel="noreferrer"
           className="flex items-center gap-1 text-[11px] font-mono text-muted-foreground hover:text-foreground max-w-[240px] truncate"
-          title={`Live at ${liveUrl}`}
+          title={onTest ? `Test version at ${liveUrl}` : `Live at ${liveUrl}`}
         >
           <ExternalLink className="h-3 w-3 shrink-0" />
+          {onTest && <span className="rounded bg-amber-100 px-1 text-[10px] font-semibold text-amber-800 dark:bg-amber-900/50 dark:text-amber-200">Test</span>}
           <span className="truncate">{liveUrl.replace(/^https?:\/\//, "")}</span>
         </a>
       )}
@@ -122,7 +129,7 @@ export function PublishButton({ projectId, orgId, size = "sm", lockedWeb = false
         }
       >
         {lockedWeb ? <Lock className="mr-1.5 h-3.5 w-3.5" /> : <Upload className="mr-1.5 h-3.5 w-3.5" />}
-        {liveUrl ? "Republish" : "Publish"}
+        {onTest ? "Publish to Test" : liveUrl ? "Republish" : "Publish"}
       </Button>
       <Button
         variant="outline"

@@ -2053,6 +2053,20 @@ export function registerDefaultActions(): void {
         }
       }
     }
+    // THE TEST VERSION EMAILS ONLY THE ORGANISATION'S OWN PEOPLE. Published
+    // to Test, the app carries FORGE_ENVIRONMENT=test and the members'
+    // addresses; a message to anybody else is held back and saved as a
+    // notification, so a tester never emails a real customer.
+    let heldForTest = "";
+    if (to && process.env.FORGE_ENVIRONMENT === "test") {
+      const allowed = String(process.env.FORGE_TEST_RECIPIENTS ?? "").toLowerCase().split(",")
+        .map((s) => s.trim()).filter(Boolean);
+      const recipients = to.toLowerCase().split(",").map((s) => s.trim()).filter(Boolean);
+      if (!recipients.every((r) => allowed.includes(r))) {
+        heldForTest = `This is the test version, which emails only your organisation's members — the message to ${to} was not sent, and was saved as a notification instead.`;
+      }
+    }
+    const sendTo = heldForTest ? "" : to;
     const { getSecret } = await import("@/lib/integrations/resolver");
     const { connectedService } = await import("@/lib/integrations/connected");
     const service = connectedService("send_email");
@@ -2074,7 +2088,7 @@ export function registerDefaultActions(): void {
     // configured, and the notice must not say it was: an owner who has set
     // the credential would go looking for a setting that is already there.
     let refused = "";
-    if (smtpHost && to) {
+    if (smtpHost && sendTo) {
       const port = Number((await getSecret("smtp", "SMTP_PORT")) || "587");
       const user = await getSecret("smtp", "SMTP_USER");
       const pass = await getSecret("smtp", "SMTP_PASSWORD");
@@ -2088,7 +2102,7 @@ export function registerDefaultActions(): void {
           secure: port === 465, // 465 = SSL, 587/25 = STARTTLS (nodemailer negotiates)
           auth: user && pass ? { user, pass } : undefined,
         });
-        const info: any = await transporter.sendMail({ from, to, subject, html: `<p>${body}</p>` });
+        const info: any = await transporter.sendMail({ from, to: sendTo, subject, html: `<p>${body}</p>` });
         // Contract-declared `messageId`. nodemailer surfaces it as info.messageId.
         return { sent: true, channel: "smtp", messageId: info?.messageId ?? null, notice: fromNotice };
       } catch (e) {
@@ -2103,12 +2117,12 @@ export function registerDefaultActions(): void {
       const key = (!service || service.provider === "resend")
         ? await getSecret("resend", "RESEND_API_KEY")
         : undefined;
-      if (key && to) {
+      if (key && sendTo) {
         try {
           const res = await fetch("https://api.resend.com/emails", {
             method: "POST",
             headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-            body: JSON.stringify({ from, to, subject, html: `<p>${body}</p>` }),
+            body: JSON.stringify({ from, to: sendTo, subject, html: `<p>${body}</p>` }),
           });
           if (res.ok) {
             const j: any = await res.json().catch(() => null);
@@ -2139,7 +2153,9 @@ export function registerDefaultActions(): void {
     // notice onto the run, the dispatch shows them on the toast the person
     // who pressed the button is already looking at, and the wording says
     // what to do rather than naming an internal state.
-    const notice = refused
+    const notice = heldForTest
+      ? heldForTest
+      : refused
       ? `${refused} — nothing was sent, and the message was saved as a notification instead.`
       : !to
       ? "No email address could be worked out for this step, so nothing was sent — it was saved as a notification instead."

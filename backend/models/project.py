@@ -119,6 +119,11 @@ class Project(Base):
     # so subsequent pipeline runs + Smith turns see the same brief. Null
     # for legacy projects and while FORGE_BRIEF_AUTHOR is off.
     brief: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    #: Where Publish sends the app: "test" (its own address and data; the
+    #: live app untouched) or "production". New apps start on test; apps from
+    #: before the switch existed keep publishing to production.
+    publish_target: Mapped[str] = mapped_column(String(16), nullable=False, server_default="production",
+                                                default="test")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

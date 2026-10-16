@@ -67,6 +67,15 @@ class DeploySnapshot:
     integrations: dict[str, str] = field(default_factory=dict)
     existing_deployment_id: Optional[str] = None
     triggered_by: Optional[str] = None  # platform user id, for audit
+    #: Which side of the app this publish goes to: "production" (the live
+    #: app) or "test" (`services.deploy.environments`).
+    environment: str = "production"
+    #: Promote: the test deployment whose exact files go to production.
+    promote_from: Optional[str] = None
+    #: The test side's database is started again from demo data first.
+    reset_test_data: bool = False
+    #: Who the test side may email: the organisation's own members.
+    test_recipients: tuple[str, ...] = ()
 
 
 @runtime_checkable

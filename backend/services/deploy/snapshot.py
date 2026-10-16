@@ -155,3 +155,14 @@ def build_snapshot_upload(root: Path) -> list[dict[str, Any]]:
         sha = hashlib.sha1(raw).hexdigest()
         files.append({"file": rel, "sha": sha, "size": size, "raw": raw})
     return files
+
+
+def snapshot_digest(root: Path) -> str:
+    """The fingerprint a publish of `root` would record now
+    (`environments.source_digest` of its files), read one file at a time:
+    "has the app changed since it was tried on Test?"."""
+    from services.deploy.environments import source_digest
+    entries = []
+    for path in _iter_files(root):
+        entries.append({"file": path.relative_to(root).as_posix(), "sha": hashlib.sha1(path.read_bytes()).hexdigest()})
+    return source_digest(entries)

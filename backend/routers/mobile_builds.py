@@ -386,7 +386,10 @@ async def create_mobile_build(
     # back to the project's most recent successful deployment.
     deployed_url = (req.deployed_url or "").strip()
     if not deployed_url:
-        deployed_url = await _latest_deployed_url(project.id) or ""
+        # A store build runs against the live app; a preview build against the
+        # test version when there is one.
+        deployed_url = await _latest_deployed_url(
+            project.id, environment="production" if req.profile == "production" else None) or ""
     if not deployed_url:
         raise HTTPException(
             status_code=400,
@@ -580,9 +583,14 @@ async def get_mobile_build(
 # Latest deployed URL lookup                                                   #
 # --------------------------------------------------------------------------- #
 
-async def _latest_deployed_url(project_id: uuid.UUID) -> Optional[str]:
-    """Find the URL of the most recent succeeded deployment. Nullable —
-    a project without any deployment gets a 400 above."""
+async def _latest_deployed_url(project_id: uuid.UUID, environment: Optional[str] = None) -> Optional[str]:
+    """Find the URL of the most recent succeeded deployment — of that side
+    when `environment` is given; otherwise the test version when one is
+    live, else production. Nullable — a project without any deployment
+    gets a 400 above."""
+    if environment is None:
+        return (await _latest_deployed_url(project_id, "test")
+                or await _latest_deployed_url(project_id, "production"))
     try:
         from models.deployment import LIVE_STATUSES, Deployment
     except Exception:  # noqa: BLE001
@@ -592,6 +600,7 @@ async def _latest_deployed_url(project_id: uuid.UUID) -> Optional[str]:
             select(Deployment.url)
             .where(
                 Deployment.project_id == project_id,
+                Deployment.environment == environment,
                 Deployment.status.in_(LIVE_STATUSES),
                 Deployment.url.isnot(None),
             )

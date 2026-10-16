@@ -35,6 +35,7 @@ class ProjectResponse(BaseModel):
     status: str
     preview_port: int | None
     db_port: int | None
+    publish_target: str = "production"
     created_at: datetime
     updated_at: datetime
 

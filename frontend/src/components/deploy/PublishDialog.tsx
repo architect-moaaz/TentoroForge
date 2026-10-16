@@ -27,13 +27,6 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   Tabs,
   TabsContent,
   TabsList,
@@ -46,6 +39,7 @@ import { MobileBuildsPanel } from "./MobileBuildsPanel";
 import { LockedPanel } from "@/components/features/Locked";
 import { DomainsPanel } from "./DomainsPanel";
 import { useAppSettingsStore } from "@/stores/appSettings";
+import { PublishTargetSwitch, SidesSummary, usePublishStatus, type Side } from "./PublishSides";
 
 interface LatestDeployment {
   id: string;
@@ -104,7 +98,12 @@ export function PublishDialog({
   initialTab = "web",
   mobileLocked = false,
 }: Props) {
-  const [target, setTarget] = useState<"vercel" | "tentoro-cloud">("vercel");
+  // WHERE PUBLISH GOES: the app's Test | Production switch.
+  const { data: sides, refetch: refetchSides } = usePublishStatus(projectId, open);
+  const side: Side = sides?.target ?? "production";
+  const [confirmProduction, setConfirmProduction] = useState(false);
+  const [resetTestData, setResetTestData] = useState(false);
+  const [publishedSide, setPublishedSide] = useState<Side | null>(null);
   const [started, setStarted] = useState(false);
   const [reconciledUrl, setReconciledUrl] = useState<string | null>(null);
   const [reconciledError, setReconciledError] = useState<string | null>(null);
@@ -114,10 +113,22 @@ export function PublishDialog({
   const reconcilePoll = useRef<number | null>(null);
   const openSettings = useAppSettingsStore((s) => s.open);
 
-  const publish = () => {
+  const publish = (body?: { environment?: Side; promote?: boolean; reset_test_data?: boolean }) => {
     if (started) return;
     setStarted(true);
-    void start();
+    setConfirmProduction(false);
+    setPublishedSide(body?.promote ? "production" : body?.environment ?? side);
+    void start(body);
+  };
+
+  /** Publish pressed: to Test at once; to Production, once more when the
+   *  changes were not tried on Test first. */
+  const publishToSide = () => {
+    if (side === "production" && sides?.untested_changes && !confirmProduction) {
+      setConfirmProduction(true);
+      return;
+    }
+    publish(side === "test" ? { environment: "test", reset_test_data: resetTestData } : { environment: "production" });
   };
 
   // On open, reconcile against the DB. Do NOT auto-start a deploy —
@@ -141,8 +152,11 @@ export function PublishDialog({
     let cancelled = false;
     (async () => {
       try {
+        setReconciledUrl(null);
+        setReconciledError(null);
+        setPriorFinishedAt(null);
         const latest = await api.get<LatestDeployment | null>(
-          `/api/projects/${projectId}/deployments/latest`,
+          `/api/projects/${projectId}/deployments/latest?environment=${side}`,
         );
         if (cancelled || !latest) return;
         // In-flight deploys started elsewhere → attach the stream so
@@ -177,7 +191,7 @@ export function PublishDialog({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, projectId]);
+  }, [open, projectId, side]);
 
   // When SSE ends without a terminal frame, reconcile against /latest.
   // Poll every 3s until succeeded/failed or 10 min. Only runs after the
@@ -201,7 +215,7 @@ export function PublishDialog({
       if (!alive) return;
       try {
         const latest = await api.get<LatestDeployment | null>(
-          `/api/projects/${projectId}/deployments/latest`,
+          `/api/projects/${projectId}/deployments/latest${publishedSide ? `?environment=${publishedSide}` : ""}`,
         );
         if (!alive || !latest) return;
         if (
@@ -241,12 +255,20 @@ export function PublishDialog({
     setReconciledUrl(null);
     setReconciledError(null);
     setPriorFinishedAt(null);
+    setConfirmProduction(false);
+    setResetTestData(false);
+    setPublishedSide(null);
     reset();
     if (reconcilePoll.current) window.clearTimeout(reconcilePoll.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const doneEvent = events.find((e) => e.stage === "done");
+  // A finished publish changes what each side runs.
+  useEffect(() => {
+    if (doneEvent) void refetchSides();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [!!doneEvent]);
   const errorEvent = events.find((e) => e.stage === "error");
   const url =
     reconciledUrl ??
@@ -281,27 +303,17 @@ export function PublishDialog({
           </TabsList>
 
           <TabsContent value="web" className="mt-3 space-y-2">
-        {/* Target picker — Tentoro Cloud reserved for later. */}
-        <div className="space-y-1 py-1">
-          <label className="text-xs font-medium text-muted-foreground">
-            Deploy target
-          </label>
-          <Select
-            value={target}
-            onValueChange={(v) => setTarget(v as "vercel" | "tentoro-cloud")}
-            disabled={started}
-          >
-            <SelectTrigger className="h-8 text-sm">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="vercel">Vercel</SelectItem>
-              <SelectItem value="tentoro-cloud" disabled>
-                Tentoro Cloud (coming soon)
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+        {/* WHERE PUBLISH GOES: Test (its own address and demo data) or
+            Production (the live app). Promote sends what Test runs. */}
+        {sides && (
+          <div className="space-y-2 py-1">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-medium text-muted-foreground">Publish to</span>
+            </div>
+            <PublishTargetSwitch projectId={projectId} value={side} disabled={started} />
+            <SidesSummary status={sides} />
+          </div>
+        )}
 
         {/*
           Idle state — no deploy in flight this session. If there's a
@@ -341,18 +353,55 @@ export function PublishDialog({
           </p>
         )}
 
-        {!started && (
-          <div className="flex items-center justify-between rounded border bg-muted/30 px-3 py-2 text-xs">
-            <span className="text-muted-foreground">
-              {reconciledUrl
-                ? priorFinishedAt
-                  ? `Last published ${new Date(priorFinishedAt).toLocaleString()}`
-                  : "Previously published"
-                : "This project hasn't been published yet."}
-            </span>
-            <Button size="sm" onClick={publish}>
-              {reconciledUrl ? "Republish" : "Publish now"}
-            </Button>
+        {!started && confirmProduction && (
+          <div role="alert" className="space-y-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200">
+            <p className="font-medium">
+              {sides?.test ? "The app has changed since it was last tried on Test." : "This version has not been tried on Test."}
+            </p>
+            <p>Publishing now puts these changes on the live app straight away.</p>
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" variant="destructive" onClick={() => publish({ environment: "production" })}>
+                Publish to Production anyway
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => { setConfirmProduction(false); publish({ environment: "test" }); }}>
+                Publish to Test first
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {!started && !confirmProduction && (
+          <div className="space-y-2 rounded border bg-muted/30 px-3 py-2 text-xs">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-muted-foreground">
+                {side === "test"
+                  ? reconciledUrl
+                    ? `Test version last published ${priorFinishedAt ? new Date(priorFinishedAt).toLocaleString() : ""}`
+                    : "Not published to Test yet. The live app is not affected."
+                  : reconciledUrl
+                    ? priorFinishedAt
+                      ? `Live app last published ${new Date(priorFinishedAt).toLocaleString()}`
+                      : "Previously published"
+                    : "This project hasn't been published yet."}
+              </span>
+              <Button size="sm" onClick={publishToSide}>
+                {side === "test" ? "Publish to Test" : "Publish to Production"}
+              </Button>
+            </div>
+            {side === "test" && sides?.test && (
+              <label className="flex items-center gap-2 text-muted-foreground">
+                <input type="checkbox" checked={resetTestData} onChange={(e) => setResetTestData(e.target.checked)} />
+                Start the test data again from demo data
+              </label>
+            )}
+            {sides?.test && (sides.test_ahead || !sides.production) && (
+              <div className="flex items-center justify-between gap-2 border-t pt-2">
+                <span className="text-muted-foreground">Send exactly what Test runs to the live app.</span>
+                <Button size="sm" variant="outline" onClick={() => publish({ promote: true })}>
+                  Promote to Production
+                </Button>
+              </div>
+            )}
           </div>
         )}
 
@@ -394,7 +443,7 @@ export function PublishDialog({
         {started && isDone && url && (
           <div className="rounded border border-green-200 bg-green-50 p-3 space-y-2">
             <div className="text-sm font-medium text-green-900">
-              Live at
+              {publishedSide === "test" ? "Test version live at" : "Live at"}
             </div>
             <div className="flex items-center gap-1 text-xs font-mono">
               <span className="flex-1 truncate">{url}</span>

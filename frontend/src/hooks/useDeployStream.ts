@@ -32,7 +32,11 @@ export function useDeployStream(projectId: string | undefined) {
   const [status, setStatus] = useState<Status>("idle");
   const abortRef = useRef<AbortController | null>(null);
 
-  const start = useCallback(async () => {
+  /** `body` says where the publish goes: `{environment: "test" | "production"}`,
+   *  `{promote: true}` (exactly what Test runs, to production), or with
+   *  `reset_test_data` the test data started again. Without it the publish
+   *  goes to the side the app's switch is on. */
+  const start = useCallback(async (body?: Record<string, unknown>) => {
     if (!projectId) return;
     abortRef.current?.abort();
     const ac = new AbortController();
@@ -47,7 +51,11 @@ export function useDeployStream(projectId: string | undefined) {
       const res = await authFetch(`/api/projects/${projectId}/publish`, {
         method: "POST",
         credentials: "include",
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(body ? { "Content-Type": "application/json" } : {}),
+        },
+        ...(body ? { body: JSON.stringify(body) } : {}),
         signal: ac.signal,
       });
       if (!res.ok || !res.body) {
