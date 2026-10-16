@@ -8,8 +8,11 @@
  * on one form (name, the address shown as the name is typed, who to invite,
  * a mark), and a business then gives its website on the same kind of screen:
  * the site is read, the palette and type come back in one card, the page
- * wears the colour, and one press saves it — the full interview stays in
- * Settings → Brand for whoever wants it. Somebody joining a team is shown the teams that invited
+ * wears the colour, and the three things the read said about the company —
+ * who you are, what you do, how you do it — are shown once as editable
+ * drafts on a single screen, because confirming is not composing. One press
+ * saves it all; the same fields stay in Settings → Brand.
+ * Somebody joining a team is shown the teams that invited
  * them — an invitation is taken up the moment they sign in with the invited
  * address — and, when nobody has yet, told so plainly instead of shown an
  * empty page.
@@ -24,9 +27,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api, ApiError } from "@/lib/api";
 import { useAuthStore } from "@/stores/auth";
-import { type BrandProfile, brand, describeDesign } from "@/lib/brand";
+import { type BrandIdentity, type BrandProfile, brand, describeDesign } from "@/lib/brand";
 import { cleanedForSave } from "@/components/brand/BrandProfileEditor";
-import { useBrandLogo } from "@/components/brand/fields";
+import { DiscoveryQuestionField, useBrandLogo } from "@/components/brand/fields";
 import { PaletteStrip, ReadingSequence, TypeSpecimen } from "@/app/onboarding/moments";
 import { ACCOUNT_TYPES, ROLES, type AccountType, type MemberRole, badEmails, parseEmails, slugPreview, slugProblem } from "./lib";
 
@@ -38,12 +41,12 @@ interface Waiting {
 }
 interface InviteOutcome { invite_email: string | null; joined: boolean; emailed: boolean; invite_url: string }
 
-type Step = "type" | "create" | "join" | "brand";
+type Step = "type" | "create" | "join" | "brand" | "about";
 
-function Progress({ at }: { at: number }) {
+function Progress({ at, total }: { at: number; total: number }) {
   return (
     <div className="mx-auto mb-10 flex w-24 gap-1" aria-hidden="true">
-      {[0, 1, 2].map((i) => (
+      {Array.from({ length: total }, (_, i) => i).map((i) => (
         <div key={i} className={`h-1 flex-1 rounded-full ${i <= at ? "bg-slate-900 dark:bg-white" : "bg-slate-200 dark:bg-slate-700"}`} />
       ))}
     </div>
@@ -88,6 +91,8 @@ function StartInner() {
   const [site, setSite] = useState("");
   const [reading, setReading] = useState(false);
   const [profile, setProfile] = useState<BrandProfile | null>(null);
+  // What the read said about the company, as the person edits it.
+  const [identity, setIdentity] = useState<BrandIdentity>({});
   const logoSrc = useBrandLogo(made?.id ?? "", Boolean(profile?.has_logo));
   // The screen wears the company's colour the moment there is one.
   const accent = profile?.design?.colors?.primary || "";
@@ -168,6 +173,7 @@ function StartInner() {
     try {
       const read = await brand.discover(made.id, site.trim());
       setProfile(read);
+      setIdentity(read.identity ?? {});
       if (read.company_name && read.company_name !== made.name) {
         try { setMade(await api.put<Org>(`/api/orgs/${made.id}`, { name: read.company_name })); } catch { /* cosmetic */ }
       }
@@ -182,7 +188,7 @@ function StartInner() {
     if (!made) return;
     setBusy(true);
     try {
-      if (profile) await brand.update(made.id, cleanedForSave(profile.company_name ?? made.name, profile.identity ?? {}, profile.design ?? {}));
+      if (profile) await brand.update(made.id, cleanedForSave(profile.company_name ?? made.name, identity, profile.design ?? {}));
       else await brand.skip(made.id);
     } catch { /* the profile is stored server-side by the read either way */ }
     router.replace(`/org/${made.id}`);
@@ -199,13 +205,14 @@ function StartInner() {
     }
   }
 
-  const stepIndex = step === "type" ? 0 : step === "brand" ? 2 : 1;
+  const stepIndex = step === "type" ? 0 : step === "brand" ? 2 : step === "about" ? 3 : 1;
+  const segments = type === "business" ? 4 : 3;
 
   return (
     <div className="min-h-screen bg-slate-50 px-4 py-16 dark:bg-slate-950">
       <div className="mx-auto w-full max-w-xl">
         <Mark />
-        <Progress at={stepIndex} />
+        <Progress at={stepIndex} total={segments} />
 
         {step === "type" && (
           <section data-step="type">
@@ -337,14 +344,40 @@ function StartInner() {
                 {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
                 <div className="flex items-center gap-2">
                   <Button type="button" variant="ghost" className="h-12 rounded-full px-5" onClick={() => { setProfile(null); setSite(""); }} disabled={busy}>Try another site</Button>
-                  <Button type="button" onClick={saveBrand} disabled={busy}
+                  <Button type="button" onClick={() => setStep("about")} disabled={busy}
                           className={`h-12 flex-1 rounded-full text-base ${accent ? "bg-[var(--ob-accent)] text-[var(--ob-on-accent)] hover:bg-[var(--ob-accent)] hover:brightness-110" : ""}`}>
-                    {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}Save and start building
+                    Continue
                   </Button>
                 </div>
-                <p className="text-center text-xs text-slate-400">Fine-tune the colours, type and your company's story any time in Settings → Brand.</p>
+                <p className="text-center text-xs text-slate-400">Fine-tune the colours and type any time in Settings → Brand.</p>
               </div>
             )}
+          </section>
+        )}
+
+        {step === "about" && made && (
+          <section data-step="about" style={accent ? ({ ["--ob-accent" as string]: accent, ["--ob-on-accent" as string]: onAccent } as React.CSSProperties) : undefined} className="space-y-7">
+            <div className="text-center">
+              <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-white">About {profile?.company_name || made.name}</h1>
+              <p className="mx-auto mt-3 max-w-md text-[15px] text-slate-500 dark:text-slate-400">
+                We drafted these from your site. Fix anything that is wrong — the apps you build will speak in these words.
+              </p>
+            </div>
+            <div className="space-y-5 rounded-2xl border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900">
+              {(["who_you_are", "what_you_do", "how_you_do_it"] as const).map((key) => (
+                <DiscoveryQuestionField key={key} which={key} rows={3} value={(identity[key] as string) ?? ""}
+                                        onChange={(v) => setIdentity((i) => ({ ...i, [key]: v }))} />
+              ))}
+            </div>
+            {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+            <div className="flex items-center gap-2">
+              <Button type="button" variant="ghost" className="h-12 rounded-full px-5" onClick={() => setStep("brand")} disabled={busy}>Back</Button>
+              <Button type="button" onClick={saveBrand} disabled={busy}
+                      className={`h-12 flex-1 rounded-full text-base ${accent ? "bg-[var(--ob-accent)] text-[var(--ob-on-accent)] hover:bg-[var(--ob-accent)] hover:brightness-110" : ""}`}>
+                {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}Save and start building
+              </Button>
+            </div>
+            <p className="text-center text-xs text-slate-400">Every one of these can be changed later in Settings → Brand.</p>
           </section>
         )}
 
