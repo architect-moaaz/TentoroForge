@@ -6,8 +6,10 @@
  * "What kind of account?" — personal, business, or joining a team — and the
  * answer decides the next screen. Personal and business make the organisation
  * on one form (name, the address shown as the name is typed, who to invite,
- * a mark), and a business is then offered the brand interview rather than
- * walked through it. Somebody joining a team is shown the teams that invited
+ * a mark), and a business then gives its website on the same kind of screen:
+ * the site is read, the palette and type come back in one card, the page
+ * wears the colour, and one press saves it — the full interview stays in
+ * Settings → Brand for whoever wants it. Somebody joining a team is shown the teams that invited
  * them — an invitation is taken up the moment they sign in with the invited
  * address — and, when nobody has yet, told so plainly instead of shown an
  * empty page.
@@ -15,13 +17,17 @@
 
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowRight, Building2, Check, Loader2, RefreshCw, Upload, Users } from "lucide-react";
+import { Building2, Check, Loader2, RefreshCw, Upload, Users } from "lucide-react";
 import { AuthGuard } from "@/components/auth-guard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api, ApiError } from "@/lib/api";
 import { useAuthStore } from "@/stores/auth";
+import { type BrandProfile, brand, describeDesign } from "@/lib/brand";
+import { cleanedForSave } from "@/components/brand/BrandProfileEditor";
+import { useBrandLogo } from "@/components/brand/fields";
+import { PaletteStrip, ReadingSequence, TypeSpecimen } from "@/app/onboarding/moments";
 import { ACCOUNT_TYPES, ROLES, type AccountType, type MemberRole, badEmails, parseEmails, slugPreview, slugProblem } from "./lib";
 
 interface Org { id: string; name: string; slug: string }
@@ -78,6 +84,15 @@ function StartInner() {
   const [waiting, setWaiting] = useState<Waiting | null>(null);
   const [checking, setChecking] = useState(false);
 
+  // The brand, for a business: the site, the read, what came back.
+  const [site, setSite] = useState("");
+  const [reading, setReading] = useState(false);
+  const [profile, setProfile] = useState<BrandProfile | null>(null);
+  const logoSrc = useBrandLogo(made?.id ?? "", Boolean(profile?.has_logo));
+  // The screen wears the company's colour the moment there is one.
+  const accent = profile?.design?.colors?.primary || "";
+  const onAccent = profile?.design?.colors?.primaryForeground || "#FFFFFF";
+
   // The address follows the name until the person edits it by hand.
   useEffect(() => { if (!slugTouched) setSlug(slugPreview(name)); }, [name, slugTouched]);
   const slugWarning = useMemo(() => (slug || name ? slugProblem(slug) : ""), [slug, name]);
@@ -87,8 +102,12 @@ function StartInner() {
     return bad.length ? `Not an email address: ${bad.join(", ")}` : "";
   }, [emailList]);
 
-  // A link straight to one path (`?type=joining`) skips the question.
+  // A link straight to one path (`?type=joining`) skips the question — read
+  // once, at arrival: a later re-render must not drag the person back to it.
+  const arrived = useRef(false);
   useEffect(() => {
+    if (arrived.current) return;
+    arrived.current = true;
     const t = params.get("type");
     if (t === "joining") { setType("joining"); setStep("join"); }
     else if (t === "business" || t === "personal") { setType(t); setStep("create"); }
@@ -140,6 +159,33 @@ function StartInner() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function readSite(e: React.FormEvent) {
+    e.preventDefault();
+    if (!made || !site.trim()) return;
+    setBusy(true); setReading(true); setError("");
+    try {
+      const read = await brand.discover(made.id, site.trim());
+      setProfile(read);
+      if (read.company_name && read.company_name !== made.name) {
+        try { setMade(await api.put<Org>(`/api/orgs/${made.id}`, { name: read.company_name })); } catch { /* cosmetic */ }
+      }
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not read that site. You can skip this and add it later from Settings → Brand.");
+    } finally {
+      setBusy(false); setReading(false);
+    }
+  }
+
+  async function saveBrand() {
+    if (!made) return;
+    setBusy(true);
+    try {
+      if (profile) await brand.update(made.id, cleanedForSave(profile.company_name ?? made.name, profile.identity ?? {}, profile.design ?? {}));
+      else await brand.skip(made.id);
+    } catch { /* the profile is stored server-side by the read either way */ }
+    router.replace(`/org/${made.id}`);
   }
 
   async function accept(orgId: string, inviteId: string) {
@@ -233,27 +279,72 @@ function StartInner() {
         )}
 
         {step === "brand" && made && (
-          <section data-step="brand" className="text-center">
-            <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-white">{made.name} is ready</h1>
-            <p className="mx-auto mt-3 max-w-md text-[15px] text-slate-500 dark:text-slate-400">
-              Every app you build here can wear your company's brand. Give us your website and we will read its colours, type and voice — it takes about a minute.
-            </p>
-            {sent.length > 0 && (
-              <ul className="mx-auto mt-6 max-w-md space-y-1 text-left text-sm text-slate-600 dark:text-slate-300">
-                {sent.map((o) => (
-                  <li key={o.invite_email ?? ""} className="flex items-start gap-2">
-                    <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
-                    <span>{o.invite_email}: {o.joined ? "already had an account and is in." : o.emailed ? "invited by email." : o.invite_url ? <>invited — pass them <code className="break-all text-xs">{o.invite_url}</code></> : "invited."}</span>
-                  </li>
-                ))}
-              </ul>
+          <section data-step="brand" style={accent ? ({ ["--ob-accent" as string]: accent, ["--ob-on-accent" as string]: onAccent } as React.CSSProperties) : undefined}>
+            {!profile && !reading && (
+              <form onSubmit={readSite} className="space-y-7">
+                <div className="text-center">
+                  <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-white">Where can we find {made.name}?</h1>
+                  <p className="mx-auto mt-3 max-w-md text-[15px] text-slate-500 dark:text-slate-400">
+                    Give us your web address and we read what your company does and what it looks like — your colours, type and mark. Every app you build here can then wear them.
+                  </p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="org-site" className="text-[15px] font-medium">Company website</Label>
+                  <Input id="org-site" value={site} onChange={(e) => { setSite(e.target.value); setError(""); }} placeholder="acme.com" autoFocus autoCapitalize="off" autoCorrect="off" spellCheck={false} className="h-12 rounded-full px-4" />
+                </div>
+                {sent.length > 0 && (
+                  <ul className="space-y-1 text-sm text-slate-500 dark:text-slate-400">
+                    {sent.map((o) => (
+                      <li key={o.invite_email ?? ""} className="flex items-start gap-2">
+                        <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                        <span>{o.invite_email}: {o.joined ? "already had an account and is in." : o.emailed ? "invited by email." : o.invite_url ? <>invited — pass them <code className="break-all text-xs">{o.invite_url}</code></> : "invited."}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+                <div className="flex items-center gap-2">
+                  <Button type="button" variant="ghost" className="h-12 rounded-full px-5" onClick={saveBrand} disabled={busy}>Skip for now</Button>
+                  <Button type="submit" className="h-12 flex-1 rounded-full text-base" disabled={busy || !site.trim()}>Read my site</Button>
+                </div>
+                <p className="text-center text-xs text-slate-400">You can finish this any time from Settings → Brand.</p>
+              </form>
             )}
-            <div className="mt-8 flex flex-col gap-2">
-              <Button type="button" className="h-12 rounded-full text-base" onClick={() => router.replace(`/onboarding?org=${made.id}`)}>
-                Set up our brand <ArrowRight className="ml-2 h-4 w-4" />
-              </Button>
-              <Button type="button" variant="ghost" className="h-12 rounded-full" onClick={() => router.replace(`/org/${made.id}`)}>Later, from Settings → Brand</Button>
-            </div>
+            {reading && (
+              <div className="text-center">
+                <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-white">Reading {site.trim().replace(/^https?:\/\//i, "").replace(/\/.*$/, "")}</h1>
+                <div className="mx-auto mt-6 max-w-md text-left"><ReadingSequence host={site.trim().replace(/^https?:\/\//i, "").replace(/\/.*$/, "") || "your site"} /></div>
+              </div>
+            )}
+            {profile && !reading && (
+              <div className="space-y-7">
+                <div className="text-center">
+                  <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-white">This is how {profile.company_name || made.name} looks</h1>
+                  <p className="mx-auto mt-3 max-w-md text-[15px] text-slate-500 dark:text-slate-400">{describeDesign(profile.design ?? {}) || "Read from your site. Every app you build here can be built in this language."}</p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900">
+                  <div className="flex items-start gap-5">
+                    {logoSrc && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={logoSrc} alt={`${profile.company_name || made.name} logo`} className="h-14 w-14 shrink-0 rounded-xl object-contain" />
+                    )}
+                    <div className="min-w-0 flex-1 space-y-3">
+                      <TypeSpecimen name={profile.company_name || made.name} family={profile.design?.typography?.fontFamilyHeading || profile.design?.typography?.fontFamilyBase} />
+                      <PaletteStrip design={profile.design ?? {}} animate />
+                    </div>
+                  </div>
+                </div>
+                {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+                <div className="flex items-center gap-2">
+                  <Button type="button" variant="ghost" className="h-12 rounded-full px-5" onClick={() => { setProfile(null); setSite(""); }} disabled={busy}>Try another site</Button>
+                  <Button type="button" onClick={saveBrand} disabled={busy}
+                          className={`h-12 flex-1 rounded-full text-base ${accent ? "bg-[var(--ob-accent)] text-[var(--ob-on-accent)] hover:bg-[var(--ob-accent)] hover:brightness-110" : ""}`}>
+                    {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}Save and start building
+                  </Button>
+                </div>
+                <p className="text-center text-xs text-slate-400">Fine-tune the colours, type and your company's story any time in Settings → Brand.</p>
+              </div>
+            )}
           </section>
         )}
 
