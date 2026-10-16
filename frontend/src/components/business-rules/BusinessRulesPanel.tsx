@@ -88,6 +88,20 @@ export function BusinessRulesPanel(props: BusinessRulesPanelProps) {
   if (query.data?.mode === "blueprint") {
     return <BlueprintRulesPanel projectId={props.projectId} initial={query.data} />;
   }
+  // A FAILED READ IS NOT AN EMPTY LIST. With Forge's API down the tab fell
+  // through to the old table-backed editor and said "No business rules yet"
+  // over an app with eight (2026-10-16). Only a project the API says is of
+  // the older pipeline gets that editor.
+  if (query.isError || !query.data) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
+        <span>The rules could not be loaded — Forge may be restarting.</span>
+        <Button size="sm" variant="outline" onClick={() => query.refetch()} disabled={query.isFetching}>
+          {query.isFetching ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null} Try again
+        </Button>
+      </div>
+    );
+  }
   return <LegacyBusinessRulesPanel {...props} />;
 }
 
