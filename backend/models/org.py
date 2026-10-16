@@ -38,6 +38,17 @@ class InviteStatus(str, PyEnum):
     expired = "expired"
 
 
+class OrgStatus(str, PyEnum):
+    """Where an organisation stands with the platform. A plain string in the
+    table (no Postgres enum), so a later value needs no ALTER TYPE."""
+    active = "active"
+    #: Its members may not use it: every organisation and app route refuses,
+    #: no build or turn starts. Sign-in to the platform itself still works.
+    blocked = "blocked"
+    #: Blocked and hidden everywhere; its data kept; reinstatable.
+    removed = "removed"
+
+
 # ---------------------------------------------------------------------------
 # Organization
 # ---------------------------------------------------------------------------
@@ -52,12 +63,29 @@ class Organization(Base):
     slug: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     logo_url: Mapped[str | None] = mapped_column(String(500))
     settings: Mapped[dict | None] = mapped_column(JSONB, default=dict)
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default=OrgStatus.active.value,
+        server_default=OrgStatus.active.value, index=True,
+    )
+    status_reason: Mapped[str | None] = mapped_column(Text)
+    status_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status_changed_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("platform_users.id", ondelete="SET NULL")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+    @property
+    def is_removed(self) -> bool:
+        return self.status == OrgStatus.removed.value
+
+    @property
+    def is_blocked(self) -> bool:
+        return self.status == OrgStatus.blocked.value
 
     # Relationships
     members: Mapped[list["OrgMember"]] = relationship(
@@ -96,9 +124,12 @@ class OrgMember(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
-    user_id: Mapped[uuid.UUID] = mapped_column(
+    # NULL WHILE THE INVITE IS PENDING FOR SOMEONE WITH NO ACCOUNT YET. The
+    # inviter's own id used to stand in, and a second invite from the same
+    # person tripped `uq_org_member`.
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("platform_users.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
     )
     org_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"),
@@ -119,7 +150,7 @@ class OrgMember(Base):
     )
 
     # Relationships
-    user: Mapped["PlatformUser"] = relationship("PlatformUser", back_populates="org_memberships")
+    user: Mapped["PlatformUser | None"] = relationship("PlatformUser", back_populates="org_memberships")
     organization: Mapped["Organization"] = relationship(back_populates="members")
 
 
@@ -200,6 +231,39 @@ class Team(Base):
     people: Mapped[list["OrgPerson"]] = relationship(
         back_populates="team", foreign_keys="OrgPerson.team_id"
     )
+    memberships: Mapped[list["TeamMember"]] = relationship(
+        back_populates="team", cascade="all, delete-orphan"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Team ↔ Person membership: A PERSON MAY BE IN MORE THAN ONE TEAM. `team_id`
+# on the person is their home team (kept for every older reader); the rows
+# here are every team they belong to, home team included once it is set.
+# ---------------------------------------------------------------------------
+
+class TeamMember(Base):
+    __tablename__ = "team_members"
+    __table_args__ = (
+        UniqueConstraint("team_id", "person_id", name="uq_team_member"),
+        Index("ix_team_member_person", "person_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    team_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False
+    )
+    person_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("org_people.id", ondelete="CASCADE"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    team: Mapped["Team"] = relationship(back_populates="memberships")
+    person: Mapped["OrgPerson"] = relationship(back_populates="team_memberships")
 
 
 # ---------------------------------------------------------------------------
@@ -260,6 +324,9 @@ class OrgPerson(Base):
         back_populates="person", cascade="all, delete-orphan"
     )
     group_memberships: Mapped[list["OrgGroupMember"]] = relationship(
+        back_populates="person", cascade="all, delete-orphan"
+    )
+    team_memberships: Mapped[list["TeamMember"]] = relationship(
         back_populates="person", cascade="all, delete-orphan"
     )
 

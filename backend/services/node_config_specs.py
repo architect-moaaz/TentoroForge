@@ -556,6 +556,58 @@ NODE_CONFIG_SPECS: dict[str, list[ConfigKey]] = {
         ),
     ],
 
+    # --- DNS providers (an app's own address) -------------------------- #
+    # Forge writes the DNS records an app's own domain needs at the owner's
+    # DNS provider ("Add the records for me" in App settings → Domains, or
+    # asking Smith). Read by the platform only (services/deploy/dns_accounts);
+    # never copied into an app. Names are distinct from the S3 keys on
+    # purpose: platform_only is matched on the key name alone.
+    "__dns__": [
+        ConfigKey(
+            key="CLOUDFLARE_API_TOKEN",
+            provider="cloudflare",
+            label="Cloudflare API token (Zone · DNS · Edit)",
+            kind="password",
+            required=True,
+            help_url="https://developers.cloudflare.com/fundamentals/api/get-started/create-token/",
+            platform_only=True,
+        ),
+        ConfigKey(
+            key="ROUTE53_ACCESS_KEY_ID",
+            provider="route53",
+            label="AWS access key id (Route 53 changes only)",
+            kind="text",
+            required=True,
+            help_url="https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/access-control-managing-permissions.html",
+            platform_only=True,
+        ),
+        ConfigKey(
+            key="ROUTE53_SECRET_ACCESS_KEY",
+            provider="route53",
+            label="AWS secret access key",
+            kind="password",
+            required=True,
+            platform_only=True,
+        ),
+        ConfigKey(
+            key="GODADDY_API_KEY",
+            provider="godaddy",
+            label="GoDaddy API key (production)",
+            kind="text",
+            required=True,
+            help_url="https://developer.godaddy.com/keys",
+            platform_only=True,
+        ),
+        ConfigKey(
+            key="GODADDY_API_SECRET",
+            provider="godaddy",
+            label="GoDaddy API secret",
+            kind="password",
+            required=True,
+            platform_only=True,
+        ),
+    ],
+
     # --- Mobile builds (MOBILE-B) ------------------------------------ #
     # Synthetic "action type": no workflow ever calls "mobile_build", but
     # the credentials it needs share the registry shape so they surface

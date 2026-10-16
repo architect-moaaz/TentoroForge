@@ -19,8 +19,9 @@ from services.export_service import (
     push_to_git,
     write_production_bundle,
 )
+from services.features import feature_gate
 
-router = APIRouter(tags=["export"])
+router = APIRouter(tags=["export"], dependencies=[Depends(feature_gate("code_export"))])
 
 
 # ---------------------------------------------------------------------------

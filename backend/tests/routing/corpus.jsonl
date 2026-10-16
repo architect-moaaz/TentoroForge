@@ -80,6 +80,13 @@
 {"say": "fire the payment reminder", "verb": "run_now"}
 {"say": "let Shopify tell the app when an order is paid", "verb": "add_webhook"}
 {"say": "accept payment.succeeded from Stripe", "verb": "add_webhook"}
+{"say": "put it on app.acme.com", "verb": "connect_domain"}
+{"say": "is my domain working?", "verb": "domain_status"}
+{"say": "where do I point my DNS?", "verb": "domain_status"}
+{"say": "remove app.acme.com", "verb": "remove_domain"}
+{"say": "call our address aqua", "verb": "rename_app_address"}
+{"say": "add the DNS records for me", "verb": "add_dns_records"}
+{"say": "give each organisation its own address under clinicapp.com", "verb": "give_organisations_addresses"}
 {"say": "who changed the invoices yesterday", "verb": "show_audit"}
 {"say": "show me the deletions", "verb": "show_audit"}
 {"say": "export the audit trail", "verb": "export_audit"}

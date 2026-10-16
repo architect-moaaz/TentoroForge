@@ -483,8 +483,11 @@ WRITES = WRITES + (
      "(`workflows.FLOW-001`, `pages.PAGE-004`, `data.entities.ENTITY-002`, `navigation`, `security`) — "
      "`find` copied exactly from read_section's text, `replace`, `why`. The result is checked as the build "
      "checks it, recorded, and the app is written out again from it. For a precise fix to a workflow's "
-     "steps, a page's access, a field, a landing page, a rule; the verbs remain for larger changes.",
-     {"section": "string", "find": "string", "replace": "string", "why": "string"}),
+     "steps, a page's access, a field, a landing page, a rule, a widget's query; the verbs remain for larger "
+     "changes. When one fix is the same change in several places (every widget that needs its period, every "
+     "workflow that needs the same step), give them all at once in `edits`, a list of `{section, find, "
+     "replace}`: they land together or not at all, in one step.",
+     {"section": "string", "find": "string", "replace": "string", "edits": "array", "why": "string"}),
 )
 #: `requested`, on every write that changes code or the definition: true only
 #: when the person asked for this change itself. Until a try has run in the
@@ -606,7 +609,8 @@ def run(name: str, args: dict, *, output_dir: str, reasoning: Any = None) -> dic
         from services.smith.file_edit import edit_definition
         return edit_definition(output_dir, str(args.get("section") or ""), str(args.get("find") or ""),
                                str(args.get("replace") if args.get("replace") is not None else ""),
-                               str(args.get("why") or ""))
+                               str(args.get("why") or ""),
+                               edits=args.get("edits") if isinstance(args.get("edits"), list) else None)
     if name == "write_section":
         return write_section(output_dir, str(args.get("section") or ""), str(args.get("brief") or ""),
                              subject=str(args.get("subject") or ""), reasoning=reasoning)

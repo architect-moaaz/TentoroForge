@@ -132,6 +132,12 @@ async def sso_callback(
     await db.commit()
     await db.refresh(user)
 
+    if user.disabled_at is not None:
+        from auth import DISABLED_MESSAGE
+        raise HTTPException(status_code=401, detail=DISABLED_MESSAGE)
+    from platform_admin import record_sign_in
+    await record_sign_in(user, db)
+
     jwt_access = create_access_token(user.id)
     jwt_refresh = create_refresh_token(user.id)
     return TokenResponse(access_token=jwt_access, refresh_token=jwt_refresh)

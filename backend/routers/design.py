@@ -10,8 +10,13 @@ import uuid as uuid_mod
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from auth import get_current_user
+from database import get_db
+from models.auth import PlatformUser
 
 from services.ahtml_storage import (
     load_all_pages,
@@ -34,28 +39,14 @@ router = APIRouter(prefix="/api/projects/{project_id}/design", tags=["design"])
 OUTPUT_BASE = Path(__file__).resolve().parent.parent.parent / "output"
 
 
-async def _output_dir(project_id: str) -> str:
-    """Resolve project output directory — DB lookup for UUIDs, fallback to direct path."""
-    try:
-        from database import get_db
-        from models.project import Project
-        from sqlalchemy import select
+async def _output_dir(project_id: str, user: PlatformUser, db: AsyncSession) -> str:
+    """The project's output directory, for a member of its organisation
+    (`project_for`: by id or short id, membership checked, a blocked or
+    removed organisation refused)."""
+    from services.project_service import project_for
 
-        async for db in get_db():
-            try:
-                pid = uuid_mod.UUID(project_id)
-            except ValueError:
-                break
-            stmt = select(Project).where(Project.id == pid)
-            result = await db.execute(stmt)
-            project = result.scalar_one_or_none()
-            if project and project.output_dir:
-                return project.output_dir
-            break
-    except Exception:
-        pass
-
-    return str(OUTPUT_BASE / project_id)
+    project = await project_for(project_id, user, db)
+    return project.output_dir or str(OUTPUT_BASE / project.short_id)
 
 
 # ---------------------------------------------------------------------------
@@ -85,13 +76,13 @@ class ValidateResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 @router.get("")
-async def get_design(project_id: str) -> dict[str, Any]:
+async def get_design(project_id: str, user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     """Load all annotated HTML pages for a project.
 
     Returns:
         { pages: [...], hasDesign: bool, themeCSS: str }
     """
-    output_dir = await _output_dir(project_id)
+    output_dir = await _output_dir(project_id, user, db)
     pages = load_all_pages(output_dir)
 
     # Load project's globals.css for canvas theme injection
@@ -115,20 +106,20 @@ async def get_design(project_id: str) -> dict[str, Any]:
 
 
 @router.put("")
-async def save_design(project_id: str, body: SaveDesignRequest) -> dict[str, Any]:
+async def save_design(project_id: str, body: SaveDesignRequest, user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     """Save annotated HTML pages from the GrapeJS editor.
 
     Returns:
         { saved: [...file_paths] }
     """
-    output_dir = await _output_dir(project_id)
+    output_dir = await _output_dir(project_id, user, db)
     saved = save_pages(output_dir, body.pages)
 
     return {"saved": saved}
 
 
 @router.post("/compile")
-async def compile_design(project_id: str) -> CompileResponse:
+async def compile_design(project_id: str, user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> CompileResponse:
     """Compile design pages to TSX.
 
     Fast path: If MCP code exists in .design/mcp-code/, wraps it as Next.js pages directly.
@@ -137,7 +128,7 @@ async def compile_design(project_id: str) -> CompileResponse:
     Returns:
         CompileResponse with pages, files, errors, warnings.
     """
-    output_dir = await _output_dir(project_id)
+    output_dir = await _output_dir(project_id, user, db)
 
     all_results: list[dict[str, str]] = []
     all_files: list[str] = []
@@ -222,13 +213,13 @@ async def compile_design(project_id: str) -> CompileResponse:
 
 
 @router.post("/validate")
-async def validate_design(project_id: str) -> ValidateResponse:
+async def validate_design(project_id: str, user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> ValidateResponse:
     """Validate annotated HTML pages against the schema.
 
     Returns:
         Validation result with errors, warnings, and stats.
     """
-    output_dir = await _output_dir(project_id)
+    output_dir = await _output_dir(project_id, user, db)
     pages = load_all_pages(output_dir)
 
     if not pages:
@@ -282,7 +273,7 @@ async def validate_design(project_id: str) -> ValidateResponse:
 
 
 @router.post("/fix-images")
-async def fix_images_endpoint(project_id: str) -> dict[str, Any]:
+async def fix_images_endpoint(project_id: str, user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     """Inject local images into existing AHTML pages.
 
     Replaces gray placeholder divs with <img> tags pointing to
@@ -291,7 +282,7 @@ async def fix_images_endpoint(project_id: str) -> dict[str, Any]:
     Returns:
         { fixed: int, pages: { page_id: count } }
     """
-    output_dir = await _output_dir(project_id)
+    output_dir = await _output_dir(project_id, user, db)
 
     from services.ahtml_image_fixer import fix_ahtml_images
 
@@ -301,7 +292,7 @@ async def fix_images_endpoint(project_id: str) -> dict[str, Any]:
 
 
 @router.post("/regenerate-from-figma")
-async def regenerate_from_figma(project_id: str) -> dict[str, Any]:
+async def regenerate_from_figma(project_id: str, user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     """Regenerate AHTML pages from styles.json (Figma source).
 
     Re-runs the LLM-based conversion with the latest prompt rules
@@ -310,7 +301,7 @@ async def regenerate_from_figma(project_id: str) -> dict[str, Any]:
     Returns:
         { pages: int, files: [...] }
     """
-    output_dir = await _output_dir(project_id)
+    output_dir = await _output_dir(project_id, user, db)
     styles_path = Path(output_dir) / "styles.json"
 
     if not styles_path.exists():
@@ -368,7 +359,7 @@ async def regenerate_from_figma(project_id: str) -> dict[str, Any]:
 
 
 @router.post("/from-ir")
-async def design_from_ir(project_id: str) -> dict[str, Any]:
+async def design_from_ir(project_id: str, user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     """Generate annotated HTML for the design editor.
 
     Routing logic:
@@ -379,7 +370,7 @@ async def design_from_ir(project_id: str) -> dict[str, Any]:
     Returns:
         { pages: int, files: [...], source: "figma" | "ir" }
     """
-    output_dir = await _output_dir(project_id)
+    output_dir = await _output_dir(project_id, user, db)
     import json
 
     # --- Figma path (preferred for Figma projects) ---
@@ -473,7 +464,7 @@ async def design_from_ir(project_id: str) -> dict[str, Any]:
 
 
 @router.post("/from-code")
-async def design_from_code(project_id: str) -> dict[str, Any]:
+async def design_from_code(project_id: str, user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     """Reverse-compile generated TSX pages into annotated HTML.
 
     Reads all ``src/app/**/page.tsx`` files, converts JSX → HTML,
@@ -483,7 +474,7 @@ async def design_from_code(project_id: str) -> dict[str, Any]:
     This enables Build & Design to reflect the current state of the
     code, including any changes made in Live Edit.
     """
-    output_dir = await _output_dir(project_id)
+    output_dir = await _output_dir(project_id, user, db)
     root = Path(output_dir)
 
     app_dir = root / "src" / "app"
@@ -539,8 +530,7 @@ class FigmaMCPBatchRequest(BaseModel):
 @router.post("/figma-mcp-code")
 async def save_figma_mcp_code_endpoint(
     project_id: str,
-    body: FigmaMCPBatchRequest,
-) -> dict[str, Any]:
+    body: FigmaMCPBatchRequest, user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     """Save Figma MCP get_design_context output for later use by the pipeline.
 
     The Figma MCP is only accessible from the Claude Code session.
@@ -550,7 +540,7 @@ async def save_figma_mcp_code_endpoint(
     Returns:
         { saved: int, files: [...] }
     """
-    output_dir = await _output_dir(project_id)
+    output_dir = await _output_dir(project_id, user, db)
 
     from services.figma_to_ir import save_figma_mcp_code
 
@@ -564,8 +554,7 @@ async def save_figma_mcp_code_endpoint(
 
 @router.post("/figma-to-ahtml")
 async def convert_figma_mcp_to_ahtml(
-    project_id: str,
-) -> dict[str, Any]:
+    project_id: str, user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     """Convert pre-saved Figma MCP code to annotated HTML.
 
     Reads .design/mcp-code/*.tsx files, converts each to AHTML,
@@ -574,7 +563,7 @@ async def convert_figma_mcp_to_ahtml(
     Returns:
         { pages: int, files: [...] }
     """
-    output_dir = await _output_dir(project_id)
+    output_dir = await _output_dir(project_id, user, db)
 
     mcp_dir = Path(output_dir) / ".design" / "mcp-code"
     if not mcp_dir.exists():

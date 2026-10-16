@@ -53,6 +53,7 @@ from routers.platform_integrations import router as platform_integrations_router
 from routers.platform_mcp_servers import router as platform_mcp_servers_router
 from routers.preview_proxy import router as preview_proxy_router
 from routers.deployments import router as deployments_router
+from routers.domains import router as domains_router
 from routers.verify import router as verify_router
 from routers.generate import router as generate_router
 from routers.blueprint_generate import router as blueprint_generate_router
@@ -92,10 +93,17 @@ from routers.design import router as design_router
 from routers.brand import router as brand_router
 from routers.brand_discovery import router as brand_discovery_router
 from routers.usage import router as usage_router
+from routers.drafts_room import router as drafts_room_router
+from routers.admin import router as admin_router
+from routers.admin_credits import router as admin_credits_router
+from routers.admin_live import router as admin_live_router
+from routers.features import router as features_router, admin_router as admin_features_router
 
 # Middleware
 from middleware.rate_limit import RateLimitMiddleware
 from middleware.security_headers import SecurityHeadersMiddleware
+from middleware.impersonation_audit import ImpersonationAuditMiddleware
+from middleware.live_activity import LiveActivityMiddleware
 from middleware.logging import StructuredLoggingMiddleware, setup_structured_logging
 from middleware.error_handler import ErrorHandlerMiddleware
 from middleware.metrics import MetricsMiddleware, metrics_endpoint
@@ -145,6 +153,9 @@ app.add_middleware(ErrorHandlerMiddleware)
 app.add_middleware(MetricsMiddleware)
 app.add_middleware(StructuredLoggingMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
+# Inside the security headers, so the request id it sets is on the record.
+app.add_middleware(ImpersonationAuditMiddleware)
+app.add_middleware(LiveActivityMiddleware)
 app.add_middleware(
     RateLimitMiddleware,
     requests_per_minute=RATE_LIMIT_REQUESTS_PER_MINUTE,
@@ -180,6 +191,7 @@ app.include_router(platform_integrations_router)
 app.include_router(platform_mcp_servers_router)
 app.include_router(preview_proxy_router)
 app.include_router(deployments_router)
+app.include_router(domains_router)
 app.include_router(verify_router)
 app.include_router(generate_router)
 # §115 — generation through the Living Blueprint, registered beside the legacy
@@ -228,6 +240,14 @@ app.include_router(ir_router)
 app.include_router(design_router)
 app.include_router(brand_router)
 app.include_router(usage_router)
+# The Drafts Room: Smith and a person work an idea out, study references and
+# agree a draft before any app exists; agreeing creates and builds the app.
+app.include_router(drafts_room_router)
+app.include_router(admin_router)
+app.include_router(admin_credits_router)
+app.include_router(admin_live_router)
+app.include_router(features_router)
+app.include_router(admin_features_router)
 
 # Metrics endpoint (Prometheus format)
 app.add_api_route("/metrics", metrics_endpoint, methods=["GET"], tags=["monitoring"])
@@ -338,6 +358,23 @@ async def _close_orphaned_ledgers():
     if closed:
         logging.getLogger("forge.startup").info("[ledgers] closed %d left open by the last process: %s",
                                                 len(closed), ", ".join(closed[:6]))
+        await _tell_whose_turn_was_lost(list(run_registry.CLOSED_PATHS))
+        run_registry.CLOSED_PATHS.clear()
+
+
+async def _tell_whose_turn_was_lost(paths: list[str]) -> None:
+    """THE PERSON IS TOLD (`services.lost_runs`). A turn the restart killed used
+    to leave the chat on "Still working on it" for good (pcn4owv7, 2026-10-15)."""
+    from services import lost_runs
+    await lost_runs.tell(paths, "restarted")
+
+
+@app.on_event("startup")
+async def _start_lost_run_watch():
+    """A ledger that stops pulsing while the platform is up — a worker died,
+    not the container — is closed and its person told; see `services.lost_runs`."""
+    from services import lost_runs
+    app.state.lost_run_watch = asyncio.create_task(lost_runs.watch_forever())
 
 
 @app.on_event("startup")
@@ -347,11 +384,20 @@ async def _start_dev_server_reaper():
     app.state.dev_server_reaper = asyncio.create_task(dev_servers.reaper())
 
 
+@app.on_event("startup")
+async def _start_domain_watch():
+    """Checks the apps' addresses until they answer — see `services.deploy.domain_watch`."""
+    from services.deploy import domain_watch
+    app.state.domain_watch = asyncio.create_task(domain_watch.watch_forever())
+
+
 @app.on_event("shutdown")
 async def _shutdown():
     stop_all_previews()
     if hasattr(app.state, "dev_server_reaper"):
         app.state.dev_server_reaper.cancel()
+    if hasattr(app.state, "domain_watch"):
+        app.state.domain_watch.cancel()
     if hasattr(app.state, "timer_scheduler"):
         await app.state.timer_scheduler.stop()
 

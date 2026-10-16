@@ -1,6 +1,22 @@
+import { hasCockpitReturn, restoreCockpitReturn } from "@/lib/auth-storage";
+
 // `??` not `||` — `""` means "same-origin, let nginx route /api" and
 // must NOT trigger the localhost dev fallback. Only undefined does.
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
+
+/**
+ * `fetch` as the signed-in person. The editor, the IR and design panels and
+ * the Smith panel built their own requests without the bearer, and the
+ * routes they call answered anyone who knew a project's folder; those routes
+ * want a member now, so every request carries the token the person has
+ * (a header the caller already set is kept).
+ */
+export function authFetch(input: string, init: RequestInit = {}): Promise<Response> {
+  const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+  const headers = new Headers(init.headers || {});
+  if (token && !headers.has("Authorization")) headers.set("Authorization", `Bearer ${token}`);
+  return fetch(input, { ...init, headers });
+}
 
 class ApiError extends Error {
   constructor(
@@ -39,6 +55,14 @@ async function request<T>(
 
   // Handle 401 — attempt token refresh
   if (res.status === 401 && token) {
+    // AN IMPERSONATION THAT RAN OUT IS NOT A SIGN-OUT. The super admin's own
+    // tokens were kept for the way back; they come back and the cockpit
+    // opens, instead of a refresh that cannot happen and a login page.
+    if (typeof window !== "undefined" && hasCockpitReturn()) {
+      restoreCockpitReturn();
+      window.location.href = "/admin/people?expired=1";
+      throw new ApiError(401, "Impersonation ended");
+    }
     // A request that was already in flight when someone else refreshed comes
     // back 401 holding a token that is simply out of date. Refreshing again
     // would present the rotated token and fail, logging the user out for a

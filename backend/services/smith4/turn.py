@@ -472,6 +472,12 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
                     sum(len(o.said or "") for o in observations), t2 - turn_started)
         args = chosen.get("args") if isinstance(chosen.get("args"), dict) else {}
         args = {k: v for k, v in args.items() if v not in (None, "")}
+        # SAID TO THE LEDGER, so a long turn can be reported on while it runs.
+        try:
+            from services import run_registry as _rr
+            _rr.turn_step(ctx.out, step_line(_step, tool, args))
+        except Exception:  # noqa: BLE001 — a note, never the turn
+            pass
 
         if ctx.unattended and tool in ("ask_user", "propose_plan"):
             observations.append(Observation(tool=tool, args=args, status="error", said=NOBODY_TO_ASK))
@@ -522,7 +528,7 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
                 observations.append(Observation(tool=tool, args=args, status="error", said=first))
                 continue
         if tool in tools.TERMINAL_NAMES or not tool:
-            ended = _ended(tool, args, landed, touched, last)
+            ended = _ended(tool, args, landed, touched, last, observations)
             if tool != "answer" and ended.status not in ("asked",):
                 ended.said += _failing_note(observations)
             return ended
@@ -778,8 +784,18 @@ def _plan(ctx: Ctx, args: dict, landed: list[str], touched: list[str]) -> Outcom
                    touched=list(touched))
 
 
+#: Said with what a no-change turn tried: where the person is matters.
+#: "During signup it says Display Name is required" was answered "Nothing
+#: needed doing" after a signup that worked on the preview — the tester was
+#: on the address of an earlier publish, which keeps the earlier build
+#: (pcn4owv7, 2026-10-15 11:40).
+STILL_FAILS_FOR_YOU = ("If it still fails for you, tell me the address you are on and what the page says "
+                       "— an address from an earlier publish keeps the earlier build; the preview and the "
+                       "latest publish have the current one.")
+
+
 def _ended(tool: str, args: dict, landed: list[str], touched: list[str],
-           last: Outcome | None) -> Outcome:
+           last: Outcome | None, observations: list[Observation] | None = None) -> Outcome:
     if tool == "ask_user":
         question = str(args.get("question") or "").strip()
         options = [str(o).strip() for o in (args.get("options") or []) if str(o).strip()]
@@ -789,7 +805,27 @@ def _ended(tool: str, args: dict, landed: list[str], touched: list[str],
         said = str(args.get("text") or "").strip()
         if said:
             return _finished([said], touched, Outcome(status="no_op", said=said))
+    if tool == "done" and not landed and not (last and last.said):
+        # NOT "NOTHING NEEDED DOING" AFTER A TRY. What was tried and what it
+        # showed is the answer; the default is a shrug.
+        tried = [o.said.split("\n", 1)[0][:200] for o in (observations or [])
+                 if tools.is_trial(o.tool) and o.status == "read" and o.said]
+        if tried:
+            said = ("I changed nothing this turn. What I tried, and what it showed:\n"
+                    + "\n".join(f"- {t}" for t in tried[-6:]) + "\n\n" + STILL_FAILS_FOR_YOU)
+            return _finished([said], touched, Outcome(status="no_op", said=said))
     return _finished(landed, touched, last)
+
+
+def step_line(n: int, tool: str, args: dict) -> str:
+    """One short line for a step: the tool and what it is about."""
+    about = ""
+    for key in ("route", "path", "name", "workflow", "entity", "page"):
+        if args.get(key):
+            about = str(args[key])[:60]
+            break
+    who = f" as {args['as']}" if args.get("as") else ""
+    return f"step {n}: {tool or '-'}" + (f" {about}" if about else "") + who
 
 
 def _finished(landed: list[str], touched: list[str], last: Outcome | None, *,

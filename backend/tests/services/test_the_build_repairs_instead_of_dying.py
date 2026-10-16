@@ -101,7 +101,9 @@ def test_the_data_model_is_proved_in_a_database_when_it_is_judged():
 
     from services.blueprint import orchestrator
     assert "entity_fields" in orchestrator.DATABASE_CHECKED_NODES
-    assert "_observe_with_database, observer_agent, key, app_root" in inspect.getsource(orchestrator)
+    # The check is submitted to the pool with the app root — wrapped in
+    # `carrying(...)` so the actor stamped on the usage rows crosses the thread.
+    assert "_observe_with_database), observer_agent, key, app_root" in inspect.getsource(orchestrator)
 
 
 def test_the_assemble_step_repairs_rather_than_raising_on_a_proof():

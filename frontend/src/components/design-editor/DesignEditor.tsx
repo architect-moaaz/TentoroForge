@@ -36,6 +36,7 @@ import {
   ChevronDown, Layers, PaintBucket, Code2, PanelLeftClose, PanelRightClose,
   Database, Workflow, GitBranch, Eye, TreePine,
 } from "lucide-react";
+import { authFetch } from "@/lib/api";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
 
@@ -56,7 +57,7 @@ export function DesignEditor({ projectId, onCompiled }: DesignEditorProps) {
   // Load IR into store so ComponentTree / ComponentPalette work
   const loadIR = useIREditorStore((s) => s.loadIR);
   useEffect(() => {
-    fetch(`${API_BASE_URL}/api/projects/${projectId}/ir`)
+    authFetch(`${API_BASE_URL}/api/projects/${projectId}/ir`)
       .then((r) => r.ok ? r.json() : null)
       .then((data) => { if (data) loadIR(data, projectId); })
       .catch(() => {});

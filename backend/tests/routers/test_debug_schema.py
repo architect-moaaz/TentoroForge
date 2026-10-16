@@ -23,7 +23,7 @@ from fastapi.testclient import TestClient
 # ---------------------------------------------------------------------------
 
 @pytest.fixture()
-def client(tmp_path, monkeypatch):
+def client(tmp_path, monkeypatch, as_member):
     """TestClient with _resolve_output_dir redirected to a per-test temp dir.
 
     The monkeypatch replaces the helper in the router module so every call

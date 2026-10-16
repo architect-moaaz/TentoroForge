@@ -78,6 +78,13 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     # An outside system that calls the application: which one, and what it
     # tells the app (its events, in the user's words).
     "add_webhook": {"integration", "change"},
+    # The app's own addresses: which one, and (for status) optionally which.
+    "connect_domain": {"domain"},
+    "remove_domain": {"domain"},
+    "domain_status": set(),
+    "rename_app_address": {"domain"},
+    "add_dns_records": set(),
+    "give_organisations_addresses": set(),
     # The audit trail: read it, export it, verify its chain, change the policy.
     # Organisations: a new one, and which one a login belongs to.
     "add_organisation": {"change"},
@@ -336,6 +343,41 @@ VERB_HELP: dict[str, str] = {
         "when an order is paid\", \"accept payment.succeeded from Stripe\". Gives the "
         "address to call, the header it signs with and the NAME of the secret to set. "
         "Needs which system and what it tells the app."
+    ),
+    "connect_domain": (
+        "Put the published app on the owner's own domain or subdomain: \"put it on "
+        "app.acme.com\", \"use our domain acme.com\", \"make portal.acme.com the main "
+        "address\". Says the DNS records to add and watches until it is live; never "
+        "asks for a key. Needs the address."
+    ),
+    "remove_domain": (
+        "Stop the app answering at one of its own addresses: \"remove app.acme.com\", "
+        "\"drop the old domain\". Needs the address."
+    ),
+    "domain_status": (
+        "Where the app's own addresses stand, checked now: \"is my domain working?\", "
+        "\"where do I point my DNS?\", \"is app.acme.com live yet?\". The address is "
+        "optional; without one, every address the app has."
+    ),
+    "add_dns_records": (
+        "Write an own address's DNS records at the DNS account the organisation "
+        "connected (Cloudflare, Route 53, GoDaddy): \"add the DNS records for me\", "
+        "\"set up the DNS for app.acme.com\", \"yes, replace the old record\". With no account "
+        "connected, answers with a one-click approval link at the provider where it offers one. Never "
+        "replaces mail records; asks before replacing anything else. The address is "
+        "optional; without one, every own address still waiting."
+    ),
+    "give_organisations_addresses": (
+        "Give each organisation of an app of several organisations its own address "
+        "under a domain the owner holds: \"give each organisation its own address under "
+        "clinicapp.com\", \"each clinic gets its own subdomain\", \"keep sign-in separate per "
+        "organisation\". `domain` is the domain; sign-in is shared across the addresses "
+        "unless asked otherwise."
+    ),
+    "rename_app_address": (
+        "Rename the free address the platform gives the app (<name>.apps.tentoro.ai): "
+        "\"call our address aqua\", \"rename our tentoro address to clinic-hub\". "
+        "`domain` is the new name before the dot. Not for the owner's own domain."
     ),
     "add_organisation": (
         "Add an organisation to an application that serves several: \"add an "
@@ -736,6 +778,26 @@ VERB_EXAMPLES: dict[str, tuple[str, ...]] = {
     'add_webhook': (
         'let Shopify tell the app when an order is paid',
         'accept payment.succeeded from Stripe',
+    ),
+    'connect_domain': (
+        'put it on app.acme.com',
+        'make portal.acme.com the main address',
+    ),
+    'remove_domain': (
+        'remove app.acme.com',
+    ),
+    'domain_status': (
+        'is my domain working?',
+        'where do I point my DNS?',
+    ),
+    'rename_app_address': (
+        'call our address aqua',
+    ),
+    'add_dns_records': (
+        'add the DNS records for me',
+    ),
+    'give_organisations_addresses': (
+        'give each organisation its own address under clinicapp.com',
     ),
     'add_organisation': (
         'add an organisation called Northside Clinic',

@@ -234,7 +234,7 @@ describe("route-based schema-file fallback (DEFECT-RENAME-NOOP editor half)", ()
           root: { id: "n1", type: "Stack", children: [] },
         },
       },
-      navFlow: { version: "1.0" as const, initialPage: "home", pages: [], transitions: [], guards: {} },
+      navFlow: { version: "1.0" as const, initialPage: "home", pages: [], transitions: [], guards: {}, auth_routes: [] },
       tokens: { color: {}, typography: {}, spacing: {}, radius: {}, shadow: {}, motion: {}, breakpoints: {} },
     };
     const p = buildPersister("proj1", 10);

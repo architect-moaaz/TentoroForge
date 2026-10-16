@@ -1528,6 +1528,17 @@
                   "timeField": {
                     "type": "string"
                   },
+                  "window": {
+                    "type": "string",
+                    "enum": [
+                      "today",
+                      "week",
+                      "month",
+                      "last_7_days",
+                      "last_30_days",
+                      "year"
+                    ]
+                  },
                   "sort": {
                     "type": "object",
                     "properties": {
@@ -2486,7 +2497,8 @@
             "type": "object",
             "properties": {
               "entity": {
-                "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
+                "$ref": "#/properties/pages/items/properties/sections/items/properties/entity",
+                "description": "Stable ENTITY identifier (§12)"
               },
               "account": {
                 "type": "string"
@@ -2501,12 +2513,14 @@
                   ]
                 },
                 "default": {}
+              },
+              "roles": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/properties/roles/items/properties/id"
+                }
               }
             },
-            "required": [
-              "entity",
-              "account"
-            ],
             "additionalProperties": false
           },
           "message": {
@@ -3047,6 +3061,14 @@
             },
             "nameField": {
               "type": "string"
+            },
+            "addressSignIn": {
+              "type": "string",
+              "enum": [
+                "shared",
+                "per_organisation"
+              ],
+              "default": "shared"
             }
           },
           "additionalProperties": false,
@@ -4755,6 +4777,66 @@
             "vercel"
           ],
           "default": "vercel"
+        },
+        "domains": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 3
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "subdomain",
+                  "apex",
+                  "tentoro",
+                  "organisations"
+                ],
+                "default": "subdomain"
+              },
+              "main": {
+                "type": "boolean",
+                "default": false
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "waiting",
+                  "live",
+                  "failed"
+                ],
+                "default": "waiting"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "redirectTo": {
+                "type": "string"
+              },
+              "addedAt": {
+                "type": "string"
+              },
+              "liveAt": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        },
+        "oldAddress": {
+          "type": "string",
+          "enum": [
+            "redirect",
+            "keep"
+          ],
+          "default": "redirect"
         },
         "preview": {
           "type": "object",

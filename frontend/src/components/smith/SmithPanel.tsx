@@ -78,6 +78,7 @@ import {
   type RunThought,
   type BlueprintRun,
 } from "@/hooks/useBlueprintRun";
+import { authFetch } from "@/lib/api";
 
 /** §107 step 1 — what Smith says before the user says anything. */
 type Greeting = {
@@ -369,7 +370,7 @@ export function SmithPanel({
     const headers: Record<string, string> = token
       ? { Authorization: `Bearer ${token}` }
       : {};
-    fetch(`${API_BASE}/api/projects/${projectId}/smith/greeting`, {
+    authFetch(`${API_BASE}/api/projects/${projectId}/smith/greeting`, {
       credentials: "include",
       headers,
     })
@@ -478,7 +479,7 @@ export function SmithPanel({
     const headers: Record<string, string> = token
       ? { Authorization: `Bearer ${token}` }
       : {};
-    fetch(`${API_BASE}/api/projects/${projectId}/conversations`, {
+    authFetch(`${API_BASE}/api/projects/${projectId}/conversations`, {
       credentials: "include",
       headers,
     })
@@ -561,7 +562,7 @@ export function SmithPanel({
     // designation is how someone says this one is direction, and it is what
     // the generation reads.
     try {
-      await fetch(`${API_BASE}/api/projects/${projectId}/design-references`, {
+      await authFetch(`${API_BASE}/api/projects/${projectId}/design-references`, {
         method: "PUT",
         headers: { ...headers, "Content-Type": "application/json" },
         credentials: "include",

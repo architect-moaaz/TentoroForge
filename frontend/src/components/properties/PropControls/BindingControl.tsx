@@ -2,6 +2,7 @@
 import * as React from "react";
 import { useParams } from "next/navigation";
 import { useEditorStore } from "@/lib/editor-store";
+import { authFetch } from "@/lib/api";
 
 /**
  * Data-aware binding editor. A grouped dropdown is the primary UX: it offers the
@@ -85,7 +86,7 @@ export function BindingControl({ label, value, onChange, placeholder, pageId: pa
     if (!projectId || typeof window === "undefined") return;
     setEntityLoad("loading");
     const token = window.localStorage?.getItem("token");
-    fetch(`${API_BASE}/api/projects/${projectId}/registry/entities`, {
+    authFetch(`${API_BASE}/api/projects/${projectId}/registry/entities`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))

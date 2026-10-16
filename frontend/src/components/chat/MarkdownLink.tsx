@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { authFetch } from "@/lib/api";
 
 /**
  * A link inside an answer — and, for an export, the download itself.
@@ -46,7 +47,7 @@ export function MarkdownLink({
     try {
       const token =
         typeof window !== "undefined" ? localStorage.getItem("token") : null;
-      const resp = await fetch(`${API}${href}`, {
+      const resp = await authFetch(`${API}${href}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
       if (!resp.ok) throw new Error(String(resp.status));

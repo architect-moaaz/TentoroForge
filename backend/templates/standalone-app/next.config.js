@@ -47,6 +47,12 @@ module.exports = {
   // app_emitter's inline write of next.config.js.
   typescript: { ignoreBuildErrors: true },
   eslint: { ignoreDuringBuilds: true },
+  // `next dev` keeps every page it compiled; a generated app's page pulls
+  // ~6,500 modules, and the dev server's heap grew past its cap while the
+  // platform tried the app page by page (it restarts itself near the limit,
+  // dropping the request in flight). This trades some compile speed for a
+  // smaller webpack memory footprint.
+  experimental: { webpackMemoryOptimizations: true },
   images: {
     // Photographs come from Unsplash (see the Blueprint's designSystem.imagery).
     remotePatterns: [

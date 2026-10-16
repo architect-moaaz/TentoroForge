@@ -74,5 +74,6 @@ def test_an_apps_api_requests_go_under_the_preview_base_path(tmp_path):
 
 def test_a_widget_range_on_a_date_column_is_passed_as_text():
     engine = (ri._TEMPLATE_DIR / "data-engine.ts").read_text()
-    assert "gte(cols[timeField], asBound(cols[timeField], from))" in engine
-    assert "lt(cols[timeField], asBound(cols[timeField], to))" in engine
+    # smithv5's `dateBound` answers it: a date column's bound is passed as text.
+    assert "gte(cols[timeField], dateBound(cols[timeField], from)" in engine
+    assert "lt(cols[timeField], dateBound(cols[timeField], to)" in engine

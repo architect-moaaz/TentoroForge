@@ -90,6 +90,40 @@ def _accounts(doc: dict[str, Any], role_names: dict[str, str]) -> dict[str, Any]
     }
 
 
+def _checked_first(doc: dict, w: dict) -> list[str]:
+    """Each check a rule writes in front of `w`'s steps, said with its rule.
+
+    A prerequisite rule is put between the trigger and the first step every
+    time the process is written out. Smith saw only the steps, so asked why
+    Data Collector 4's staff were all refused, it removed the check from four
+    processes' steps twice; the rule wrote it back each time, and every staff
+    process still refused everyone (60v142ju, 2026-10-12)."""
+    try:
+        from services.blueprint.account_model import guard_nodes, guard_roles
+    except Exception:  # noqa: BLE001 — an older tree without the account model
+        return []
+    ents = {str(e.get("table")): e for e in _live((doc.get("data") or {}).get("entities"))}
+    out: list[str] = []
+    for query, rule in guard_nodes(doc, w):
+        req = rule.get("requires") or {}
+        parts = []
+        roles = guard_roles(doc, rule)
+        if roles:
+            parts.append(f"the signed-in person must hold one of the roles {', '.join(roles)}")
+        if query is not None:
+            ent = ents.get(str(query.get("table"))) or {}
+            extra = {k: v for k, v in (req.get("where") or {}).items()}
+            parts.append(f"the signed-in person must have a record in {ent.get('name') or query.get('table')} whose "
+                         f"`{req.get('account')}` is their own account id" + (f" and {extra}" if extra else ""))
+        cond = " and ".join(parts)
+        said = str(rule.get("message") or "").strip()
+        out.append(f"{cond}, else it refuses" + (f" with \"{said}\"" if said else "")
+                   + f". Written in by the rule **{rule.get('name') or rule.get('id')}** every time the "
+                   "process is written: to change or drop it, change that rule (or the record it names), "
+                   "never the steps")
+    return out
+
+
 def _step_lines(w: dict[str, Any], role_names: dict[str, str]) -> list[str]:
     """A workflow's steps as one short line each — what it changes, who it
     tells, who it asks, when it refuses. The engine's own step graph is the
@@ -215,6 +249,7 @@ def to_smith_fields(doc: dict[str, Any]) -> dict[str, Any]:
                                   for x in w.get("launchedFrom") or []
                                   for u in (pages_by_id.get(str(x)) or {}).get("users") or []}),
                 "steps": _step_lines(w, role_names),
+                "checked_first": _checked_first(doc, w),
             }
             for w in _live(doc.get("workflows"))
         ],

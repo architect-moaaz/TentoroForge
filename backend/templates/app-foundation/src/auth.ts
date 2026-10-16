@@ -218,6 +218,18 @@ export const authOptions: NextAuthOptions = {
   session: { strategy: "jwt" },
   pages: { signIn: "/login", error: "/login" },
   callbacks: {
+    // AN ORGANISATION'S OWN ADDRESS IS THIS APP TOO: after signing in at
+    // acme.clinicapp.com the person stays there, not on the main address.
+    async redirect({ url, baseUrl }) {
+      if (url.startsWith("/")) return `${baseUrl}${url}`;
+      try {
+        const u = new URL(url);
+        if (u.origin === baseUrl) return url;
+        const base = String(process.env.FORGE_ORG_DOMAIN || "").toLowerCase().replace(/^\*\./, "");
+        if (base && u.protocol === "https:" && (u.hostname === base || u.hostname.endsWith(`.${base}`))) return url;
+      } catch { /* not a URL: home */ }
+      return baseUrl;
+    },
     async signIn({ user, account, profile }) {
       const e = account ? ssoEntries().find((x) => x.id === account.provider) : null;
       if (!e) return true;
@@ -295,14 +307,26 @@ export const authOptions: NextAuthOptions = {
 };
 
 /** The signed-in person, on the server. Every page and route reads through
- *  this — `getServerSession` with this app's own options. */
+ *  this — `getServerSession` with this app's own options. AT AN
+ *  ORGANISATION'S OWN ADDRESS (`<slug>.<FORGE_ORG_DOMAIN>`) the address
+ *  decides the organisation the request acts in (`tenancy.atAddress`). */
 export async function auth() {
-  return getServerSession(authOptions);
+  const session = await getServerSession(authOptions);
+  const user = session?.user as Record<string, any> | undefined;
+  if (!user?.id || !process.env.FORGE_ORG_DOMAIN) return session;
+  try {
+    const tenancy = await import("@/lib/tenancy");
+    const { headers } = await import("next/headers");
+    const h = await headers();
+    const at = await tenancy.atAddress(user as any, h.get("x-forwarded-host") || h.get("host"));
+    if (at) Object.assign(user, at);
+  } catch { /* no request (a job), or no address table yet: the stored organisation */ }
+  return session;
 }
 
 declare module "next-auth" {
   interface User { id: string; role?: string; accountType?: string | null; activeOrgId?: string | null; orgRole?: string | null; }
-  interface Session { user: { id: string; role?: string; accountType?: string | null; activeOrgId?: string | null; orgRole?: string | null; name?: string | null; email?: string | null; image?: string | null; }; }
+  interface Session { user: { id: string; role?: string; accountType?: string | null; activeOrgId?: string | null; orgRole?: string | null; outsideOrg?: string; name?: string | null; email?: string | null; image?: string | null; }; }
 }
 declare module "next-auth/jwt" {
   interface JWT { id: string; role?: string; accountType?: string | null; activeOrgId?: string | null; orgRole?: string | null; }

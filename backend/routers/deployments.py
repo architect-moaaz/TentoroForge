@@ -33,6 +33,7 @@ from services.deploy.provider import DeploySnapshot
 from services.deploy.vercel_client import VercelClient
 from services.deploy.vercel_provider import VercelDeployProvider
 from services.platform_integrations_crypto import CryptoError, decrypt
+from services.features import feature_gate
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -62,12 +63,11 @@ def _deploy_app_dir(output_dir: str) -> str:
 async def _require_project(
     project_id: uuid.UUID, user: PlatformUser, db: AsyncSession
 ) -> Project:
-    project = await db.get(Project, project_id)
-    if project is None:
-        raise HTTPException(404, "project not found")
-    # Owner or org-member check would go here; for MVP any authenticated
-    # user with the project id can publish. Tightening left as a follow-up.
-    return project
+    # A PUBLISH IS THE ORGANISATION'S. Any signed-in person who knew a
+    # project's id could publish it; now only a member of its organisation
+    # can, and not while the organisation is blocked.
+    from services.project_service import get_project_with_auth
+    return await get_project_with_auth(project_id, user, db)
 
 
 async def _collect_integrations(
@@ -121,7 +121,7 @@ async def _collect_integrations(
 # --------------------------------------------------------------------------- #
 
 
-@router.post("/api/projects/{project_id}/publish")
+@router.post("/api/projects/{project_id}/publish", dependencies=[Depends(feature_gate("publish"))])
 async def publish(
     project_id: uuid.UUID,
     user: PlatformUser = Depends(get_current_user),
@@ -220,6 +220,7 @@ async def latest_deployment(
         "target": r.target,
         "status": r.status,
         "url": r.url,
+        "deployment_url": r.deployment_url,
         "error": r.error,
         "created_at": r.created_at.isoformat() if r.created_at else None,
         "finished_at": r.finished_at.isoformat() if r.finished_at else None,
@@ -279,6 +280,7 @@ async def list_deployments(
             "target": r.target,
             "status": r.status,
             "url": r.url,
+            "deployment_url": r.deployment_url,
             "error": r.error,
             "created_at": r.created_at.isoformat() if r.created_at else None,
             "started_at": r.started_at.isoformat() if r.started_at else None,
@@ -300,7 +302,7 @@ async def list_deployments(
 # --------------------------------------------------------------------------- #
 
 
-@router.post("/api/deployments/{deployment_id}/rollback")
+@router.post("/api/deployments/{deployment_id}/rollback", dependencies=[Depends(feature_gate("publish"))])
 async def rollback(
     deployment_id: uuid.UUID,
     user: PlatformUser = Depends(get_current_user),
@@ -330,7 +332,9 @@ async def rollback(
         project_id=d.project_id,
         target="vercel",
         status="succeeded",
+        # The app's address serves this build again; the build's own address is its own.
         url=d.url,
+        deployment_url=d.deployment_url or d.url,
         vercel_project_id=d.vercel_project_id,
         vercel_deployment_id=d.vercel_deployment_id,
         neon_project_id=d.neon_project_id,
@@ -341,4 +345,4 @@ async def rollback(
     db.add(row)
     await db.commit()
 
-    return {"url": d.url, "rollback_id": str(row.id)}
+    return {"url": d.url, "deployment_url": d.deployment_url or d.url, "rollback_id": str(row.id)}

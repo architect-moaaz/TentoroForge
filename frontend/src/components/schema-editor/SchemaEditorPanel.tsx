@@ -10,6 +10,7 @@ import { PreviewTab } from "./PreviewTab";
 import { CritiquePanel } from "./CritiquePanel";
 import { PageScoreBadge } from "./PageScoreBadge";
 import type { Project } from "@/types/project";
+import { authFetch } from "@/lib/api";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
 
@@ -51,7 +52,7 @@ export function SchemaEditorPanel({ projectId }: SchemaEditorPanelProps) {
       return;
     }
     try {
-      const r = await fetch(`${API_BASE}/api/_debug/project-register/${project.short_id}`, {
+      const r = await authFetch(`${API_BASE}/api/_debug/project-register/${project.short_id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ register: newRegister }),

@@ -33,7 +33,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -102,6 +104,17 @@ _SECRET_COLUMN = re.compile(r"pass|hash|secret|token|salt|otp|api_?key|private",
 #: Lines of server output worth showing: errors and stack heads.
 _SERVER_ERROR = re.compile(r"⨯|error|Error|ERR_|Unhandled|failed|Failed|exception|Exception")
 BODY_SHOWN = 3000
+#: What a browser reports when the app's server is not there to answer:
+#: `next dev` restarting itself near its heap limit, or gone. None of these
+#: says anything about the page that was being opened.
+_SERVER_GONE = re.compile(r"ERR_EMPTY_RESPONSE|ERR_INCOMPLETE_CHUNKED_ENCODING|ERR_CONNECTION_REFUSED"
+                          r"|ERR_CONNECTION_RESET|ERR_CONNECTION_CLOSED|ERR_CONNECTION_ABORTED")
+#: The line Next's dev server prints before it restarts itself.
+_RESTARTING = "approaching the used memory threshold"
+#: How long a try waits for the app's server to answer again after it restarted.
+RESTART_WAIT_S = float(os.environ.get("FORGE_TRIAL_RESTART_WAIT_S") or 120)
+SERVER_RESTARTED = ("the app's server restarted while this page was being opened — it was near its "
+                    "memory limit and started again; that says nothing about the page")
 
 
 class TrialUnavailable(RuntimeError):
@@ -119,6 +132,9 @@ class Bench:
         self._app: Any = None
         self._log_at = 0
         self.log = Path(output_dir) / ".forge" / "trials" / "server.log"
+        #: How many times the server restarted itself (Next's memory watchdog),
+        #: counted as the log is read.
+        self.restarts = 0
         #: Names and values the copy's environment gets beyond the platform's
         #: (a check's own signing secrets). Set before the first `app()`.
         self.extra_env: dict[str, str] = {}
@@ -156,7 +172,9 @@ class Bench:
         except OSError:
             return []
         fresh, self._log_at = data[self._log_at:], len(data)
-        lines = [l.strip() for l in fresh.decode("utf-8", "replace").splitlines()]
+        text = fresh.decode("utf-8", "replace")
+        self.restarts += text.count(_RESTARTING)
+        lines = [l.strip() for l in text.splitlines()]
         return [l[:300] for l in lines if l and _SERVER_ERROR.search(l)][:15]
 
     def reset(self) -> None:
@@ -573,6 +591,27 @@ def try_request(bench: Bench, doc: dict, method: str, path: str, body: Any, as_:
     return scrub("\n".join(out))
 
 
+def _server_gone(shot: dict, restarted: bool) -> bool:
+    """The open hit no server: no status and only connection errors, or the
+    server said it was restarting while the page was opened."""
+    if restarted:
+        return True
+    errs = [str(e) for e in shot.get("errors") or []]
+    return shot.get("status") is None and bool(errs) and all(_SERVER_GONE.search(e) for e in errs)
+
+
+def _server_back(app: Any, timeout: float | None = None) -> bool:
+    """Wait for the app's server to answer again; False when it does not."""
+    deadline = time.monotonic() + (RESTART_WAIT_S if timeout is None else timeout)
+    while time.monotonic() < deadline:
+        try:
+            urllib.request.urlopen(f"{app.base}/api/auth/csrf", timeout=10)
+            return True
+        except Exception:  # noqa: BLE001 — not back yet
+            time.sleep(2)
+    return False
+
+
 def open_page(bench: Bench, doc: dict, route: str, as_: str, sign_in: bool = False) -> str:
     from services.blueprint.page_review import BROKEN_OUTCOMES, ReviewUnavailable, run_shots
 
@@ -600,15 +639,36 @@ def open_page(bench: Bench, doc: dict, route: str, as_: str, sign_in: bool = Fal
     elif not is_admin:
         entry["cookies"] = jar
     bench.server_said()
+    shots_dir = Path(bench.output_dir) / ".forge" / "trials" / "shots"
+    printed: list[str] = []
+    notes: list[str] = []
     try:
-        shot = run_shots(app, [entry], Path(bench.output_dir) / ".forge" / "trials" / "shots",
-                         states=False)[0]
+        shot = run_shots(app, [entry], shots_dir, states=False)[0]
+        # A RESTARTING SERVER IS NOT A BROKEN PAGE. `next dev` restarts itself
+        # near its heap limit; the request in flight dies with a connection
+        # error and the page "says it is loading". Three pages were rewritten
+        # for that on 2026-10-15 (Personal Finance) and none of them was at
+        # fault. Wait for the server, open the page once more, and say so.
+        before = bench.restarts
+        printed += bench.server_said()
+        if _server_gone(shot, bench.restarts > before):
+            if not _server_back(app):
+                return scrub(f"{route} as {who}: {SERVER_RESTARTED}; it had not answered again after "
+                             f"{int(RESTART_WAIT_S)}s. Try it again in a moment — do not change the page for this.")
+            notes.append(SERVER_RESTARTED + "; opened again once it was back")
+            shot = run_shots(app, [entry], shots_dir, states=False)[0]
+            before = bench.restarts
+            printed += bench.server_said()
+            if _server_gone(shot, bench.restarts > before):
+                return scrub(f"{route} as {who}: {SERVER_RESTARTED}, twice in a row. Try it again in a "
+                             f"moment — do not change the page for this.")
     except ReviewUnavailable as exc:
         return f"The page could not be opened in a browser: {exc}"
     if shot.get("skipped"):
         return f"{route} as {who}: not opened — {shot['skipped']}."
     out = [f"{shot.get('url') or route} as {who}: HTTP {shot.get('status')}"
            + (f", ended up at {shot['landed']}" if shot.get("landed") and shot["landed"] != shot.get("url") else "")]
+    out += [f"note: {n}" for n in notes]
     if shot.get("state"):
         out.append(f"the page says it is: {shot['state']}")
     out += [f"browser error: {e}" for e in shot.get("errors") or []]
@@ -616,12 +676,18 @@ def open_page(bench: Bench, doc: dict, route: str, as_: str, sign_in: bool = Fal
     if controls:
         out.append("controls, each pressed from a fresh load:")
         for c in controls:
+            detail = str(c.get("detail") or "")
+            if _SERVER_GONE.search(detail):
+                # The press landed while the server was restarting: not pressed, not broken.
+                out.append(f"  {c.get('kind')} \"{c.get('label')}\": could not be pressed — the app's server "
+                           "was restarting (not the control's fault); press it again later")
+                continue
             verdict = BROKEN_OUTCOMES.get(str(c.get("outcome")), str(c.get("outcome")))
             out.append(f"  {c.get('kind')} \"{c.get('label')}\": {verdict}"
-                       + (f" ({c.get('detail')})" if c.get("detail") else ""))
+                       + (f" ({detail})" if detail else ""))
     text = " ".join(str(shot.get("text") or "").split())
     out.append(f"text on the page: {text[:BODY_SHOWN]}" if text else "the page shows no text")
-    said = bench.server_said()
+    said = printed + bench.server_said()
     if said:
         out.append("the server printed:")
         out += [f"  {l}" for l in said]

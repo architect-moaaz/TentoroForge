@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { Plus } from "lucide-react";
+import { Plus, ShieldCheck } from "lucide-react";
 import { AuthGuard } from "@/components/auth-guard";
 import { useAuthStore } from "@/stores/auth";
 import { api, ApiError } from "@/lib/api";
@@ -89,6 +90,13 @@ function OrgSelector() {
           </div>
         </div>
         <div className="flex items-center gap-3">
+          {user?.platform_role === "super_admin" && (
+            <Link href="/admin">
+              <Button variant="ghost" size="sm" className="text-xs">
+                <ShieldCheck className="mr-1 h-3.5 w-3.5" /> Cockpit
+              </Button>
+            </Link>
+          )}
           <div className="flex items-center gap-2 rounded-full bg-muted/50 px-3 py-1.5">
             <div className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-[10px] font-semibold text-primary">
               {user?.email?.[0]?.toUpperCase() || "U"}

@@ -19,6 +19,13 @@ Endpoints used:
   POST   /v13/deployments                        create_deployment
   GET    /v13/deployments/{id}                   get_deployment
   PATCH  /v13/deployments/{id}/promote           promote_deployment
+  POST   /v13/deployments  (deploymentId)        redeploy     (same files, new env)
+  POST   /v10/projects/{id}/domains              add_project_domain
+  GET    /v9/projects/{id}/domains[/{name}]      list_project_domains / get_project_domain
+  POST   /v9/projects/{id}/domains/{name}/verify verify_project_domain
+  PATCH  /v9/projects/{id}/domains/{name}        redirect_project_domain
+  DELETE /v9/projects/{id}/domains/{name}        remove_project_domain
+  GET    /v6/domains/{name}/config               get_domain_config
 """
 from __future__ import annotations
 
@@ -310,6 +317,105 @@ class VercelClient:
             params=self._params(),
         )
         _raise_with_body(r, f"promote_deployment id={deployment_id!r}")
+        return r.json()
+
+    async def redeploy(self, project_name: str, deployment_id: str) -> dict[str, Any]:
+        """A new production deployment of an earlier one's files, built with
+        the project's environment as it is now. A changed setting (the address
+        sign-in uses) takes effect only in a deployment built after it."""
+        r = await self._client.post(
+            f"{BASE}/v13/deployments",
+            params={**self._params(), "forceNew": "1"},
+            json={"name": project_name, "deploymentId": deployment_id, "target": "production"},
+        )
+        _raise_with_body(r, f"redeploy project={project_name!r} from={deployment_id!r}")
+        return r.json()
+
+    async def latest_production_deployment(self, project_id: str) -> dict[str, Any] | None:
+        """The project's newest production deployment, or None before the first."""
+        r = await self._client.get(
+            f"{BASE}/v6/deployments",
+            params={**self._params(), "projectId": project_id, "target": "production", "limit": "1"},
+        )
+        _raise_with_body(r, "latest_production_deployment")
+        found = list(r.json().get("deployments") or [])
+        return found[0] if found else None
+
+    # ── Domains ─────────────────────────────────────────────────────
+    #
+    # An address the app answers at besides `<project>.vercel.app`. Vercel
+    # issues its certificate once the domain's DNS points at Vercel, and asks
+    # for a TXT record first when the domain is claimed by another account.
+    # `services.deploy.domains` owns what is said and when; these are the calls.
+
+    async def add_project_domain(self, project_id: str, name: str) -> dict[str, Any]:
+        r = await self._client.post(
+            f"{BASE}/v10/projects/{project_id}/domains",
+            params=self._params(),
+            json={"name": name},
+        )
+        _raise_with_body(r, f"add_project_domain {name!r}")
+        return r.json()
+
+    async def get_project_domain(self, project_id: str, name: str) -> dict[str, Any] | None:
+        r = await self._client.get(
+            f"{BASE}/v9/projects/{project_id}/domains/{name}",
+            params=self._params(),
+        )
+        if r.status_code == 404:
+            return None
+        _raise_with_body(r, f"get_project_domain {name!r}")
+        return r.json()
+
+    async def list_project_domains(self, project_id: str) -> list[dict[str, Any]]:
+        r = await self._client.get(
+            f"{BASE}/v9/projects/{project_id}/domains",
+            params=self._params(),
+        )
+        _raise_with_body(r, "list_project_domains")
+        return list(r.json().get("domains") or [])
+
+    async def verify_project_domain(self, project_id: str, name: str) -> dict[str, Any] | None:
+        """Ask Vercel to check the TXT proof again. None when it is still
+        not there (Vercel answers 400 for an unverified domain)."""
+        r = await self._client.post(
+            f"{BASE}/v9/projects/{project_id}/domains/{name}/verify",
+            params=self._params(),
+        )
+        if r.status_code in (400, 409):
+            return None
+        _raise_with_body(r, f"verify_project_domain {name!r}")
+        return r.json()
+
+    async def redirect_project_domain(self, project_id: str, name: str, to: str | None) -> dict[str, Any]:
+        """Send requests for `name` to `to` (a permanent redirect), or stop
+        redirecting when `to` is None."""
+        body: dict[str, Any] = {"redirect": to, "redirectStatusCode": 308 if to else None}
+        r = await self._client.patch(
+            f"{BASE}/v9/projects/{project_id}/domains/{name}",
+            params=self._params(),
+            json=body,
+        )
+        _raise_with_body(r, f"redirect_project_domain {name!r} -> {to!r}")
+        return r.json()
+
+    async def remove_project_domain(self, project_id: str, name: str) -> None:
+        r = await self._client.delete(
+            f"{BASE}/v9/projects/{project_id}/domains/{name}",
+            params=self._params(),
+        )
+        if r.status_code == 404:
+            return
+        _raise_with_body(r, f"remove_project_domain {name!r}")
+
+    async def get_domain_config(self, name: str) -> dict[str, Any]:
+        """How the domain's DNS points: `misconfigured` false once it reaches
+        Vercel, with the records Vercel recommends."""
+        r = await self._client.get(
+            f"{BASE}/v6/domains/{name}/config",
+            params=self._params(),
+        )
+        _raise_with_body(r, f"get_domain_config {name!r}")
         return r.json()
 
     # ── House-keeping ───────────────────────────────────────────────

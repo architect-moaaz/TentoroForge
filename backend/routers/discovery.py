@@ -24,8 +24,9 @@ from schemas.discovery import (
 from schemas.project import ProjectResponse
 from services.project_service import create_project
 from sse_helpers import sse_event, stream_agent_messages
+from services.features import feature_gate
 
-router = APIRouter(tags=["discovery"])
+router = APIRouter(tags=["discovery"], dependencies=[Depends(feature_gate("discover"))])
 
 
 # ---------------------------------------------------------------------------
@@ -35,15 +36,9 @@ router = APIRouter(tags=["discovery"])
 async def _require_org_member_simple(
     org_id: uuid.UUID, user: PlatformUser, db: AsyncSession
 ) -> None:
-    result = await db.execute(
-        select(OrgMember).where(
-            OrgMember.org_id == org_id,
-            OrgMember.user_id == user.id,
-            OrgMember.invite_status == InviteStatus.accepted,
-        )
-    )
-    if not result.scalar_one_or_none():
-        raise HTTPException(status_code=403, detail="Not a member of this organization")
+    """The one membership check (`services.org_access`)."""
+    from services.org_access import require_org_member
+    await require_org_member(org_id, user, db)
 
 
 async def _get_org_context(org_id: uuid.UUID, db: AsyncSession) -> str:

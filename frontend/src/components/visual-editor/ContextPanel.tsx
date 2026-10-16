@@ -29,6 +29,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { useVisualEditorStore } from "@/stores/visual-editor";
 import { api } from "@/lib/api";
+import { authFetch } from "@/lib/api";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
 
@@ -45,7 +46,7 @@ function useRegistryEntities(projectId: string) {
   const [loading, setLoading] = useState(false);
   useEffect(() => {
     setLoading(true);
-    fetch(`${API_BASE}/api/projects/${projectId}/registry/entities`)
+    authFetch(`${API_BASE}/api/projects/${projectId}/registry/entities`)
       .then((r) => r.ok ? r.json() : [])
       .then((d) => setEntities(Array.isArray(d) ? d : []))
       .catch(() => setEntities([]))
@@ -57,7 +58,7 @@ function useRegistryEntities(projectId: string) {
 function useRegistryWorkflows(projectId: string) {
   const [workflows, setWorkflows] = useState<WorkflowSchema[]>([]);
   useEffect(() => {
-    fetch(`${API_BASE}/api/projects/${projectId}/registry/workflows`)
+    authFetch(`${API_BASE}/api/projects/${projectId}/registry/workflows`)
       .then((r) => r.ok ? r.json() : [])
       .then((d) => setWorkflows(Array.isArray(d) ? d : []))
       .catch(() => setWorkflows([]));

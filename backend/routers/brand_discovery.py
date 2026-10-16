@@ -41,10 +41,11 @@ from models.auth import PlatformUser
 from models.brand_profile import BrandDiscoveryStatus, OrgBrandProfile
 from models.org import OrgMemberRole
 from routers.orgs import _require_org_member
+from services.features import feature_gate
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(tags=["brand"])
+router = APIRouter(tags=["brand"], dependencies=[Depends(feature_gate("brand"))])
 
 
 # --------------------------------------------------------------------------- #

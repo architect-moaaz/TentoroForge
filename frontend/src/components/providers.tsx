@@ -27,6 +27,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { useAuthStore } from "@/stores/auth";
 import { Toaster } from "@/components/ui/sonner";
+import { ImpersonationBanner } from "@/components/admin/ImpersonationBanner";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -54,7 +55,10 @@ function AuthHydrator({ children }: { children: React.ReactNode }) {
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
-      <AuthHydrator>{children}</AuthHydrator>
+      <AuthHydrator>
+        <ImpersonationBanner />
+        {children}
+      </AuthHydrator>
       <Toaster />
     </QueryClientProvider>
   );

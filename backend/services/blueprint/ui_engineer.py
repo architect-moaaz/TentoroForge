@@ -39,6 +39,7 @@ from typing import Any, Iterable, Sequence
 from services.blueprint.app_sdk import (
     code_page_files, project_app_sdk, sdk_reference,
 )
+from services.build_usage import carrying
 
 logger = logging.getLogger(__name__)
 
@@ -354,7 +355,8 @@ series(entity, { groupBy: field; bucket?: "day" | "week" | "month"; fn?: "count"
 query(entity, { measures: { [key]: { fn: "count" } | { fn: "count_distinct" | "min" | "max", field } | { fn: "sum" | "avg", field: numericField } };
                 dimensions?: [field | { field, bucket?: "day" | "week" | "month" | "quarter" | "year" }
                               | { field: numericField, ranges: { label?, from?, to? }[] }, …at most 2];
-                where?; range?: { from?: iso; to?: iso }; timeField?; sort?: { by, order? }; limit? }): Promise<QueryRow[]>
+                where?; range?: { from?: iso; to?: iso }; timeField?; window?: "today" | "week" | "month" | "last_7_days" | "last_30_days" | "year";
+                sort?: { by, order? }; limit? }): Promise<QueryRow[]>   // `window` keeps the rows to that period on timeField
    Measures by dimensions, one GROUP BY: query("Order", { measures: { revenue: { fn: "sum", field: "total" } },
    dimensions: [{ field: "placedAt", bucket: "month" }, "region"] }) → [{ placedAt: "2026-01", region: "EU", revenue: 1840 }, …].
    A bucketed date reads "2026-03-02" / "2026-03" / "2026-Q1" / "2026"; a foreign-key dimension also carries `<field>Label`.
@@ -1891,8 +1893,8 @@ def reshape_screen(doc: dict, page: dict, app_root: Path, client: Any, current: 
     siblings = {**kept, **stubs}
     if new:
         with cf.ThreadPoolExecutor(min(4, len(new))) as pool:
-            results = list(pool.map(lambda p: _write_part(doc, page, p, app_root, call, client, load=load,
-                                                          view=view, siblings=siblings, brief=brief), new))
+            results = list(pool.map(carrying(lambda p: _write_part(doc, page, p, app_root, call, client, load=load,
+                                                          view=view, siblings=siblings, brief=brief)), new))
         for key, code, errors in results:
             if errors:
                 raise CompileError(f"{pid}: parts/{key}.tsx still does not compile after "
@@ -2008,7 +2010,7 @@ def compose_screen(doc: dict, page: dict, app_root: Path, client: Any, parts: li
 
     written: dict[str, str] = {}
     with cf.ThreadPoolExecutor(min(4, len(parts))) as pool:
-        for key, code, errors in pool.map(lambda p: write_part(p, feedback), parts):
+        for key, code, errors in pool.map(carrying(lambda p: write_part(p, feedback)), parts):
             if errors:
                 raise CompileError(f"{pid}: parts/{key}.tsx still does not compile after "
                                    f"{COMPILE_ROUNDS} rounds — " + "; ".join(errors[:8]))
@@ -2176,7 +2178,7 @@ def settle_code_pages(svc: Any, app_root: str | Path, client: Any = None,
         return row, typecheck(doc, root, str(row["page"]), str(row["load"]), str(row["view"]))
 
     with cf.ThreadPoolExecutor(6) as pool:
-        failing = [(r, e) for r, e in pool.map(check, rows) if e]
+        failing = [(r, e) for r, e in pool.map(carrying(check), rows) if e]
     outcome: dict[str, str] = {}
     if not failing:
         return outcome
@@ -2199,7 +2201,7 @@ def settle_code_pages(svc: Any, app_root: str | Path, client: Any = None,
         return pid, body, []
 
     with cf.ThreadPoolExecutor(6) as pool:
-        fixed = list(pool.map(fix, failing))
+        fixed = list(pool.map(carrying(fix), failing))
     with svc.lock:
         for pid, body, errors in fixed:
             if body is not None:

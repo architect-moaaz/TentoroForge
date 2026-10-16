@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useChatStore } from "@/stores/chat";
+import { authFetch } from "@/lib/api";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
 const MAX_RECONNECT_ATTEMPTS = 3;
@@ -181,7 +182,7 @@ export function useSSE() {
             ? localStorage.getItem("token")
             : null;
 
-        const response = await fetch(`${API_BASE}${url}`, {
+        const response = await authFetch(`${API_BASE}${url}`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",

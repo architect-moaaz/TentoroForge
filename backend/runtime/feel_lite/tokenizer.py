@@ -237,8 +237,10 @@ def tokenize(input_str: str) -> List[Token]:
             continue
 
         # Identifiers and keywords
-        if ch.isalpha() or ch == "_":
+        if ch.isalpha() or ch == "_" or (ch == "$" and pos + 1 < length and input_str[pos + 1].isalpha()):
             start = pos
+            if ch == "$":
+                pos += 1  # `$today`, `$now`: the clock, by the names steps use
             while pos < length and (input_str[pos].isalnum() or input_str[pos] in ("_", ".")):
                 # Allow dots in identifiers for nested access like "person.age"
                 # But stop if it's a ".." range operator
@@ -252,6 +254,15 @@ def tokenize(input_str: str) -> List[Token]:
 
             word = input_str[start:pos]
             lower = word.lower()
+
+            # `date and time(…)` is ONE function name, FEEL's own spelling — not
+            # `date` AND `time(…)` (m1dck85j, 2026-10-12).
+            if word == "date":
+                rest = re.match(r"\s+and\s+time(?=\s*\()", input_str[pos:])
+                if rest:
+                    pos += rest.end()
+                    tokens.append(Token(TokenType.Identifier, "date and time", start))
+                    continue
 
             if lower in KEYWORDS:
                 tt = KEYWORDS[lower]

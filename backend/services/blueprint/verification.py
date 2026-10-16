@@ -1026,6 +1026,10 @@ def _query_findings(widget: dict, src: dict, entity: dict) -> list[str]:
         col = src.get(key)
         if col and fields and col not in fields:
             out.append(f"{key} {col!r} is not a column on {name}")
+    # A PERIOD NEEDS A DATE TO COUNT BACK ON: `window` with no `timeField` and
+    # no bucketed date would silently read every record.
+    if src.get("window") and not src.get("timeField") and not any(d.get("bucket") for d in dims):
+        out.append(f"window {src['window']!r} needs a timeField, the date it counts back on")
     sort_by = (src.get("sort") or {}).get("by")
     if sort_by and sort_by not in keys and sort_by not in [d.get("field") for d in dims]:
         out.append(f"sorts by {sort_by!r}, which is neither a measure nor a dimension")

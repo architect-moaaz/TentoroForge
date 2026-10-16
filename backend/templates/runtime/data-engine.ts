@@ -124,11 +124,10 @@ export interface DataEngineContext {
    *  rule; a session that does not carry one cannot reach workspace-scoped
    *  rows, which is the safe direction to fail. */
   user?: { id: string; role?: string; email?: string; workspaceId?: string; [column: string]: unknown };
-  /** Slice-4: original (plaintext) column names the CALLER is explicitly
-   *  asking to see unmasked. The route parses `?unmask=col1&unmask=col2`
-   *  and passes them here. The read path only honours the request when
-   *  the caller's role is in the column's `readers` list — otherwise the
-   *  request is silently ignored (mask stays), never a 403. */
+  /** Slice-4: column names the request named in `?unmask=`. No longer needed
+   *  to see a value: a role in the column's `readers` reads it unmasked, and
+   *  every other role reads the mask, whatever the request asks. Kept so the
+   *  route's parsing stays harmless. */
   unmaskColumns?: string[];
   /** A signed-out visitor's guest token (the `forge-guest` cookie): the rows
    *  a rule's `guestColumn` marks as theirs are reachable with it. */
@@ -190,9 +189,69 @@ function _auditUnmask(entity: string, column: string, ctx: DataEngineContext): v
   console.info("[sensitive-unmask]", JSON.stringify(payload));
 }
 
+// ─── Totals over sealed values ───────────────────────────────────────────
+//
+// A SEALED NUMBER IS TOTALLED HERE, NOT IN THE DATABASE. A sealed field's
+// value lives only in `<field>_encrypted`; its plain column is empty. Every
+// SUM(amount) a chart or a tile asked Postgres for came back NULL, and
+// Personal Finance's twenty widgets over transaction amounts read 0 or NaN
+// (pcn4owv7, 2026-10-14). The database cannot add ciphertexts, so a measure
+// over a sealed field reads the rows it would have grouped — under the same
+// access, filters and period — and the engine opens and folds them.
+
+/** The column a sealed field's value is kept in, or null for a field the
+ *  table keeps in the clear (or does not seal at all). */
+function _sealedColumn(entityName: string, cols: any, field: string | undefined): any | null {
+  if (!field || !sensitiveColumnsFor(entityName)[field]) return null;
+  return cols?.[`${field}_encrypted`] ?? null;
+}
+
+/** The most rows one total over sealed values reads. */
+const _SEALED_SCAN_ROWS = 50_000;
+
+/** Sealed values opened as numbers for this reader: a role outside the
+ *  field's `readers` gets nothing to total — as the empty plain column always
+ *  gave it — and a value that is not a number counts as absent. */
+async function _openSealedNumbers(
+  entityName: string, field: string, blobs: unknown[], ctx: DataEngineContext,
+): Promise<Array<number | null>> {
+  const spec = sensitiveColumnsFor(entityName)[field];
+  if (!spec || !_canReaderUnmask(spec, ctx.user?.role)) return blobs.map(() => null);
+  if (blobs.length) {
+    _auditUnmask(entityName, field, ctx);
+    if (regulated()) {
+      await recordAudit(db, { action: "read_sensitive", entity: entityName, entityId: null, changed: [field],
+        actor: actorOf(ctx.user, ctx.guest), via: ctx.via ?? "api" }).catch((e: unknown) =>
+          console.warn("[audit] a sensitive total could not be recorded:", e));
+    }
+  }
+  return Promise.all(blobs.map(async (b) => {
+    if (b === null || b === undefined || b === "") return null;
+    try {
+      const n = Number(await decryptSensitive(String(b)));
+      return Number.isFinite(n) ? n : null;
+    } catch {
+      return null;
+    }
+  }));
+}
+
+/** An aggregate over values, as SQL computes it: absent values ignored, a
+ *  sum of nothing 0, any other fold of nothing null. */
+function _fold(fn: string, values: unknown[]): number | null {
+  const present = values.filter((v) => v !== null && v !== undefined);
+  if (fn === "count") return present.length;
+  if (fn === "count_distinct" || fn === "countDistinct") return new Set(present.map(String)).size;
+  const nums = present.map(Number).filter(Number.isFinite);
+  if (fn === "sum") return nums.reduce((a, b) => a + b, 0);
+  if (!nums.length) return null;
+  if (fn === "avg") return nums.reduce((a, b) => a + b, 0) / nums.length;
+  return fn === "min" ? Math.min(...nums) : Math.max(...nums);
+}
+
 /** A row as the trail keeps it: every sensitive value as its mask, never
  *  the plaintext or the ciphertext. */
-function _snapshotForAudit(entityName: string, row: Record<string, any> | null | undefined): Record<string, any> | null {
+export function _snapshotForAudit(entityName: string, row: Record<string, any> | null | undefined): Record<string, any> | null {
   if (!row || typeof row !== "object") return null;
   const specs = sensitiveColumnsFor(entityName);
   const out: Record<string, any> = { ...row };
@@ -272,11 +331,18 @@ export async function sealSensitive(entityName: string, data: Record<string, any
 }
 
 /** Read path: for every sensitive column on this entity, replace the
- *  `_encrypted` blob with EITHER the pre-computed `_mask` value (default)
- *  OR the decrypted plaintext (when the caller asked to unmask that column
- *  and their role allows it). The `_encrypted` blob itself is ALWAYS
- *  stripped from the response — nothing gains from exposing a ciphertext
- *  the client can't do anything with.
+ *  `_encrypted` blob with EITHER the decrypted plaintext (when the reader's
+ *  role is one of the column's `readers`) OR the pre-computed `_mask` value
+ *  (everyone else). The `_encrypted` blob itself is ALWAYS stripped from the
+ *  response — nothing gains from exposing a ciphertext the client can't do
+ *  anything with.
+ *
+ *  A READER SEES WHAT THEY MAY READ, WITHOUT ASKING. The value used to be
+ *  decrypted only when the request also named the column in `?unmask=`, and
+ *  no page the build writes ever asks: Personal Finance's Consumer — the one
+ *  role allowed to read a transaction's amount — got "••••••••" for every
+ *  amount, and every page that showed one printed ₹NaN (pcn4owv7, 2026-10-14).
+ *  `readers` is the decision; the mask is for the roles it leaves out.
  */
 async function _maskOrUnmaskOnRead<T extends Record<string, any>>(
   entityName: string,
@@ -292,13 +358,11 @@ async function _maskOrUnmaskOnRead<T extends Record<string, any>>(
   const specs = sensitiveColumnsFor(entityName);
   const keys = Object.keys(specs);
   if (keys.length === 0 || record == null) return record;
-  const wants = new Set(ctx.unmaskColumns ?? []);
   for (const col of keys) {
     const spec = specs[col];
     const encKey = `${col}_encrypted`;
     const maskKey = `${col}_mask`;
-    const asked = wants.has(col);
-    const allowed = asked && _canReaderUnmask(spec, ctx.user?.role);
+    const allowed = _canReaderUnmask(spec, ctx.user?.role);
     if (!(encKey in record) && !(maskKey in record)) {
       // STORED IN THE CLEAR, STILL SENSITIVE. A column the manifest names
       // but that was written without the encrypt-at-rest siblings — the
@@ -1479,8 +1543,8 @@ async function computeSimple(
   const conds: SQL[] = await accessConditions(entityName, entity, ctx, "read");
   const dateCol = cols[m.dateField || "createdAt"];
   const start = range ? range.start : windowStart(m.window);
-  if (start && dateCol) conds.push(gte(dateCol, start));
-  if (range?.end && dateCol) conds.push(lt(dateCol, range.end));
+  if (start && dateCol) conds.push(gte(dateCol, dateBound(dateCol, start) as any));
+  if (range?.end && dateCol) conds.push(lt(dateCol, dateBound(dateCol, range.end) as any));
   for (const [k, v] of Object.entries(withReader(m.filter, ctx, cols))) {
     if (cols[k] !== undefined && (v === null || typeof v !== "object")) { conds.push(eq(cols[k], v as any)); continue; }
     const joined = cols[k] !== undefined ? await joinedCondition(cols[k], v, ctx) : null;
@@ -1492,8 +1556,17 @@ async function computeSimple(
   }
 
   const _db = _testDb ?? db;
+  const where = conds.length ? (conds.length === 1 ? conds[0] : and(...conds)) : undefined;
+  const sealed = m.fn !== "count" ? _sealedColumn(entityName, cols, m.field) : null;
+  if (sealed) {
+    let rq = (_db as any).select({ sealed, ...(cols.id ? { __id: cols.id } : {}) }).from(entity.table);
+    if (where) rq = rq.where(where);
+    const rows: any[] = await rq.limit(_SEALED_SCAN_ROWS);
+    const values = await _openSealedNumbers(entityName, m.field!, rows.map((r) => r.sealed), ctx);
+    return Number(_fold(m.fn, values) ?? 0);
+  }
   let q = (_db as any).select({ value: agg }).from(entity.table);
-  if (conds.length) q = q.where(conds.length === 1 ? conds[0] : and(...conds));
+  if (where) q = q.where(where);
   const [row] = await q;
   // sum/avg return string | null from Drizzle; Number() normalises all variants.
   return Number(row?.value ?? 0);
@@ -1648,6 +1721,20 @@ export async function resolveSeries(
     }
     try {
       const _db = _testDb ?? db;
+      const sealedRun = _sealedColumn(source.entity, cols, fld);
+      if (sealedRun) {
+        // The running total of a sealed value, kept here (see _openSealedNumbers).
+        let rq = (_db as any).select({ label: orderCol, sealed: sealedRun }).from(entity.table);
+        if (conds.length) rq = rq.where(conds.length === 1 ? conds[0] : and(...conds));
+        const rows: Array<{ label: unknown; sealed: unknown }> = await rq.orderBy(orderCol).limit(_SEALED_SCAN_ROWS);
+        const values = await _openSealedNumbers(source.entity, fld, rows.map((r) => r.sealed), ctx);
+        let total = 0;
+        const out = rows.map((r, i) => {
+          total += values[i] ?? 0;
+          return { label: formatSeriesLabel(r.label, undefined), value: total };
+        });
+        return source.limit && source.limit > 0 ? out.slice(0, source.limit) : out;
+      }
       // SUM(field) OVER (ORDER BY orderCol) — one running total per row.
       // Kept as `sql` fragment because drizzle doesn't model window fns yet.
       const running = sql<number>`SUM(${cols[fld]}) OVER (ORDER BY ${orderCol})`;
@@ -1692,10 +1779,28 @@ export async function resolveSeries(
 
   try {
     const _db = _testDb ?? db;
-    let q = (_db as any).select({ label: labelExpr, value: aggExpr }).from(entity.table);
-    if (conds.length) q = q.where(conds.length === 1 ? conds[0] : and(...conds));
-    q = q.groupBy(labelExpr);
-    const rows: Array<{ label: unknown; value: unknown }> = await q;
+    let rows: Array<{ label: unknown; value: unknown }>;
+    const sealedAgg = fn !== "count" ? _sealedColumn(source.entity, cols, source.agg?.field) : null;
+    if (sealedAgg) {
+      // Grouped here, by the same label expression (see _openSealedNumbers).
+      let rq = (_db as any).select({ label: labelExpr, sealed: sealedAgg, ...(cols.id ? { __id: cols.id } : {}) })
+        .from(entity.table);
+      if (conds.length) rq = rq.where(conds.length === 1 ? conds[0] : and(...conds));
+      const each: Array<{ label: unknown; sealed: unknown }> = await rq.limit(_SEALED_SCAN_ROWS);
+      const values = await _openSealedNumbers(source.entity, source.agg!.field!, each.map((r) => r.sealed), ctx);
+      const groups = new Map<string, { label: unknown; values: Array<number | null> }>();
+      each.forEach((r, i) => {
+        const id = r.label instanceof Date ? r.label.toISOString() : JSON.stringify(r.label ?? null);
+        const g = groups.get(id) ?? groups.set(id, { label: r.label, values: [] }).get(id)!;
+        g.values.push(values[i]);
+      });
+      rows = [...groups.values()].map((g) => ({ label: g.label, value: _fold(fn, g.values) }));
+    } else {
+      let q = (_db as any).select({ label: labelExpr, value: aggExpr }).from(entity.table);
+      if (conds.length) q = q.where(conds.length === 1 ? conds[0] : and(...conds));
+      q = q.groupBy(labelExpr);
+      rows = await q;
+    }
 
     let out = rows.map((r) => ({
       label: formatSeriesLabel(r.label, bucket),
@@ -1774,6 +1879,9 @@ export type QuerySource = {
   dimensions?: QueryDimension[];
   filter?: Record<string, unknown>;
   timeField?: string;
+  /** The period the widget always reads on `timeField` — "today", "week",
+   *  "month", "last_7_days", "last_30_days", "year". Applied with `range`. */
+  window?: string;
   range?: { from?: string | Date | null; to?: string | Date | null };
   sort?: { by: string; order?: "asc" | "desc" };
   limit?: number;
@@ -1796,22 +1904,29 @@ function bucketLabel(v: unknown, bucket: string): string | null {
   return iso.slice(0, 10);
 }
 
+/** A date bound in the form its column keeps: a calendar date for a date
+ *  column, the moment's text for a timestamp kept as text, the moment itself
+ *  otherwise. A Date handed to a date column is refused by the driver ("The
+ *  string argument must be of type string… Received an instance of Date"):
+ *  AquaTrack's "today" tiles over DailySummary.date failed that way the
+ *  moment they were given a period, and Home stopped opening (m1dck85j,
+ *  2026-10-14). */
+export function dateBound(col: unknown, d: Date): Date | string {
+  const c = (col ?? {}) as { dataType?: unknown; columnType?: unknown };
+  if (c.dataType === "string" && typeof c.columnType === "string") {
+    if (/^PgDateString$/i.test(c.columnType)) {
+      const p = (n: number) => String(n).padStart(2, "0");
+      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+    }
+    if (/^PgTimestamp/i.test(c.columnType)) return d.toISOString();
+  }
+  return d;
+}
+
 function asDate(v: string | Date | null | undefined): Date | null {
   if (v === null || v === undefined || v === "") return null;
   const d = v instanceof Date ? v : new Date(v);
   return isNaN(d.getTime()) ? null : d;
-}
-
-/** A range bound as the column takes it. A `date` or string-mode timestamp
- *  column is written as text, and handed a Date the driver threw ("The
- *  'string' argument must be of type string … Received an instance of Date")
- *  — every widget on a page with a range read 0 (live, 2026-10-09). */
-function asBound(col: unknown, d: Date): Date | string {
-  const c = col as { dataType?: string; columnType?: string } | undefined;
-  if (c?.dataType !== "string") return d;
-  return /Date(String)?$/.test(String(c.columnType ?? "")) && !/Timestamp/.test(String(c.columnType ?? ""))
-    ? d.toISOString().slice(0, 10)
-    : d.toISOString();
 }
 
 /**
@@ -1896,9 +2011,13 @@ export async function resolveQuery(
   if (timeField && source.range) {
     const from = asDate(source.range.from);
     const to = asDate(source.range.to);
-    if (from) conds.push(gte(cols[timeField], asBound(cols[timeField], from)));
-    if (to) conds.push(lt(cols[timeField], asBound(cols[timeField], to)));
+    if (from) conds.push(gte(cols[timeField], dateBound(cols[timeField], from) as any));
+    if (to) conds.push(lt(cols[timeField], dateBound(cols[timeField], to) as any));
   }
+  // THE WIDGET'S OWN PERIOD, whatever range the page has: "Entries Logged
+  // Today" counted every drink ever logged without it (m1dck85j).
+  const windowFrom = timeField ? windowStart(source.window) : null;
+  if (windowFrom) conds.push(gte(cols[timeField!], dateBound(cols[timeField!], windowFrom) as any));
 
   // Sort: an explicit measure key or dimension field; else chronological on a
   // bucketed axis; else the first measure, largest first (a ranking).
@@ -1917,14 +2036,53 @@ export async function resolveQuery(
   const limit = Math.min(Math.max(source.limit ?? _QUERY_MAX_ROWS, 1), _QUERY_MAX_ROWS);
 
   let raw: any[];
+  const sealedOf = measures.map((m) => _sealedColumn(source.entity, cols, m.field));
   try {
     const _db = _testDb ?? db;
-    let q = (_db as any).select(shape).from(entity.table);
-    if (conds.length) q = q.where(conds.length === 1 ? conds[0] : and(...conds));
-    if (groupExprs.length) q = q.groupBy(...groupExprs);
-    if (sortExpr) q = q.orderBy(order === "asc" ? asc(sortExpr) : desc(sortExpr));
-    q = q.limit(limit);
-    raw = await q;
+    if (sealedOf.some(Boolean)) {
+      // A measure over a sealed field: the rows, grouped by the same
+      // expressions and folded here (see _openSealedNumbers). The order and
+      // the limit are applied below, as for any query.
+      const rowShape: Record<string, any> = cols.id ? { __id: cols.id } : {};
+      dims.forEach((_, i) => { rowShape[`d${i}`] = shape[`d${i}`]; });
+      measures.forEach((m, i) => {
+        if (sealedOf[i]) rowShape[`s${i}`] = sealedOf[i];
+        else if (m.field) rowShape[`v${i}`] = cols[m.field];
+      });
+      let rq = (_db as any).select(rowShape).from(entity.table);
+      if (conds.length) rq = rq.where(conds.length === 1 ? conds[0] : and(...conds));
+      const each: any[] = await rq.limit(_SEALED_SCAN_ROWS);
+      // A count of sealed values needs none opened: it counts the seals.
+      const opened = new Map<string, Promise<Array<number | null>>>();
+      const series = await Promise.all(measures.map((m, i) => {
+        if (!sealedOf[i]) return Promise.resolve(each.map((r) => (m.field ? r[`v${i}`] : 1)));
+        if (m.aggregation === "count") return Promise.resolve(each.map((r) => r[`s${i}`]));
+        if (!opened.has(m.field!)) {
+          opened.set(m.field!, _openSealedNumbers(source.entity, m.field!, each.map((r) => r[`s${i}`]), ctx));
+        }
+        return opened.get(m.field!)!;
+      }));
+      const groups = new Map<string, { key: unknown[]; rows: number[] }>();
+      each.forEach((r, j) => {
+        const key = dims.map((_, i) => r[`d${i}`]);
+        const id = JSON.stringify(key.map((v) => (v instanceof Date ? v.toISOString() : v ?? null)));
+        (groups.get(id) ?? groups.set(id, { key, rows: [] }).get(id)!).rows.push(j);
+      });
+      if (!dims.length && !groups.size) groups.set("[]", { key: [], rows: [] });
+      raw = [...groups.values()].map((g) => {
+        const o: Record<string, unknown> = {};
+        g.key.forEach((v, i) => { o[`d${i}`] = v; });
+        measures.forEach((m, i) => { o[`m${i}`] = _fold(m.aggregation, g.rows.map((j) => series[i][j])); });
+        return o;
+      });
+    } else {
+      let q = (_db as any).select(shape).from(entity.table);
+      if (conds.length) q = q.where(conds.length === 1 ? conds[0] : and(...conds));
+      if (groupExprs.length) q = q.groupBy(...groupExprs);
+      if (sortExpr) q = q.orderBy(order === "asc" ? asc(sortExpr) : desc(sortExpr));
+      q = q.limit(limit);
+      raw = await q;
+    }
   } catch (err) {
     console.warn(`[data-engine] query ${source.entity} failed:`, err);
     return [];

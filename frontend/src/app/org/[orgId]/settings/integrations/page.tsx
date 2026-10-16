@@ -74,10 +74,19 @@ const PROVIDER_LABELS: Record<string, string> = {
   unsplash: "Photos (Unsplash)",
   figma: "Design (Figma)",
   uxpilot: "Design (UX Pilot)",
+  cloudflare: "DNS (Cloudflare)",
+  route53: "DNS (Amazon Route 53)",
+  godaddy: "DNS (GoDaddy)",
 };
 
 /** What a card says about a provider, when the field labels alone don't. */
 const PROVIDER_NOTES: Record<string, string> = {
+  cloudflare:
+    "Lets Forge add the DNS records an app's own domain needs (App settings → Domains → Add the records for me). Forge never replaces mail records, and asks before changing anything already there.",
+  route53:
+    "Lets Forge add the DNS records an app's own domain needs in your hosted zones. Forge never replaces mail records, and asks before changing anything already there.",
+  godaddy:
+    "Lets Forge add the DNS records an app's own domain needs at GoDaddy. Forge never replaces mail records, and asks before changing anything already there.",
   unsplash:
     "Finds the photographs for sign-in panels, hero bands and empty states while an app is built, credited to their photographers. Without a key, pages use the brand gradient.",
 };

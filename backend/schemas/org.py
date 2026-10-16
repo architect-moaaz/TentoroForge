@@ -29,6 +29,7 @@ class OrgResponse(BaseModel):
     slug: str
     logo_url: str | None
     settings: dict | None
+    status: str = "active"
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -48,8 +49,25 @@ class InviteResponse(BaseModel):
     invite_email: str | None
     role: str
     invite_status: str
+    #: True when the person already had an account and is a member now.
+    joined: bool = False
+    #: True when the platform's mail service took the invitation.
+    emailed: bool = False
+    #: Where the invitee signs up; "" when the platform address is unknown.
+    invite_url: str = ""
 
     model_config = {"from_attributes": True}
+
+
+class MemberRow(BaseModel):
+    id: uuid.UUID
+    user_id: uuid.UUID | None
+    email: str | None
+    name: str | None
+    role: str
+    invite_status: str
+    joined_at: datetime | None
+    created_at: datetime | None
 
 
 # ---------------------------------------------------------------------------
@@ -120,7 +138,10 @@ class PersonCreate(BaseModel):
     last_name: str
     title: str | None = None
     department_id: uuid.UUID | None = None
+    #: The home team; also the first of `team_ids` when only those are given.
     team_id: uuid.UUID | None = None
+    #: Every team the person is in (a person may be in more than one).
+    team_ids: list[uuid.UUID] | None = None
     manager_id: uuid.UUID | None = None
 
 
@@ -131,6 +152,7 @@ class PersonUpdate(BaseModel):
     title: str | None = None
     department_id: uuid.UUID | None = None
     team_id: uuid.UUID | None = None
+    team_ids: list[uuid.UUID] | None = None
     manager_id: uuid.UUID | None = None
     is_active: bool | None = None
 
@@ -143,11 +165,16 @@ class PersonResponse(BaseModel):
     title: str | None
     department_id: uuid.UUID | None
     team_id: uuid.UUID | None
+    team_ids: list[uuid.UUID] = []
     manager_id: uuid.UUID | None
     is_active: bool
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class TeamMemberAdd(BaseModel):
+    person_id: uuid.UUID
 
 
 # ---------------------------------------------------------------------------

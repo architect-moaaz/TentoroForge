@@ -49,6 +49,17 @@ def opening(project_id: str, output_dir: str, ask: str, *, brief: str = "") -> s
                 "Do not ask what the brief already answers.")
     bp = Blueprint.load(project_id=project_id, output_dir=output_dir)
     page = blueprint_to_context(pick_relevant_slice(bp, ask=ask))
+    # WHAT IS RUNNING, FROM THE LEDGER, NOT FROM MEMORY. A status answer
+    # built from the last check claimed fixes "in progress" while nothing
+    # ran (pcn4owv7, 2026-10-15). This turn is itself the thing running, so
+    # the line is about anything else: a build, a check, a turn that was lost.
+    try:
+        from services.run_registry import live_state
+        page = ("LIVE STATE (answer any question about progress, status or time from this line, never "
+                "from the last check; when nothing is running, say so): " + live_state(output_dir)
+                + "\n\n" + page)
+    except Exception:  # noqa: BLE001 — the page stands without the line
+        pass
     waiting = plan_mod.peek(output_dir) if plan_mod.is_agreed(output_dir) else []
     if waiting:
         page = ("STEPS OF AN AGREED PLAN STILL WAITING (each is a later turn, done when they say "

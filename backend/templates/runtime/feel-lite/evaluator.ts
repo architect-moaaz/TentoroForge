@@ -58,10 +58,15 @@ const BUILT_IN_FUNCTIONS: Record<string, (...args: unknown[]) => unknown> = {
     return isNaN(n) ? null : n;
   },
   date: (x: unknown) => {
-    const d = new Date(String(x));
+    const d = x instanceof Date ? x : new Date(String(x));
     return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
   },
+  "date and time": (x: unknown) => {
+    const d = x instanceof Date ? x : new Date(String(x));
+    return isNaN(d.getTime()) ? null : d.toISOString();
+  },
   now: () => new Date().toISOString(),
+  today: () => calendarToday(),
   duration: (x: unknown) => {
     // Parse ISO 8601 duration string to seconds
     const str = String(x);
@@ -113,16 +118,91 @@ function flattenNumbers(args: unknown[]): number[] {
   return result;
 }
 
+// DATES AND MOMENTS ARE TEXT HERE (`date()` gives "2026-10-12", `now()` an ISO
+// moment) and a duration is milliseconds, so `+` saw text and a number and
+// joined them: date("2026-10-12") + duration("P1D") was "2026-10-1286400000".
+// AquaTrack's Edit Log Entry could not find the end of a day in four tries
+// (m1dck85j, 2026-10-12). A date or moment and a number of milliseconds now
+// add and subtract as time; two of them subtract to the milliseconds between.
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+const ISO_MOMENT = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/;
+
+/** A calendar date or a moment as milliseconds, and whether it was a date. */
+function asMoment(v: unknown): { ms: number; day: boolean } | null {
+  if (v instanceof Date) return isNaN(v.getTime()) ? null : { ms: v.getTime(), day: false };
+  if (typeof v !== "string") return null;
+  const s = v.trim();
+  if (ISO_DAY.test(s)) {
+    const ms = Date.parse(s + "T00:00:00Z");
+    return isNaN(ms) ? null : { ms, day: true };
+  }
+  if (ISO_MOMENT.test(s)) {
+    const ms = Date.parse(s);
+    return isNaN(ms) ? null : { ms, day: false };
+  }
+  return null;
+}
+
+/** Back to the form it came in: a date stays a date, a moment a moment. */
+function fromMoment(ms: number, day: boolean): string {
+  const iso = new Date(ms).toISOString();
+  return day ? iso.slice(0, 10) : iso;
+}
+
+const isDuration = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+
+// A DATE'S PARTS, AS FEEL NAMES THEM. Data Collector 4 built its reference
+// numbers from date($today).year, .month and .day; each read as nothing and
+// every new reference came out "REF--0002" (60v142ju, 2026-10-12). In UTC,
+// like every moment here; weekday is 1 (Monday) to 7 (Sunday).
+const DATE_PARTS = new Set(["year", "month", "day", "weekday", "hour", "minute", "second"]);
+
+/** The part of a date or moment, or undefined when `v` is not one or `part`
+ *  is not a date part (the caller then reads it as an ordinary field). */
+function datePart(v: unknown, part: string): number | undefined {
+  if (!DATE_PARTS.has(part)) return undefined;
+  const m = asMoment(v);
+  if (!m) return undefined;
+  const d = new Date(m.ms);
+  switch (part) {
+    case "year": return d.getUTCFullYear();
+    case "month": return d.getUTCMonth() + 1;
+    case "day": return d.getUTCDate();
+    case "weekday": return ((d.getUTCDay() + 6) % 7) + 1;
+    case "hour": return d.getUTCHours();
+    case "minute": return d.getUTCMinutes();
+    default: return d.getUTCSeconds();
+  }
+}
+
 function toNumber(x: unknown): number {
   const n = Number(x);
   return isNaN(n) ? 0 : n;
 }
 
+/** Today as the calendar shows it where the app runs — "2026-10-12" — the
+ *  same date a step's `$today` writes. */
+function calendarToday(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
 function resolveIdentifier(name: string, ctx: Context): unknown {
+  // THE CLOCK, BY THE NAMES STEPS USE. An expression read `$today` as an
+  // unknown variable — nothing — though every step template resolved it, so
+  // Data Collector 4's date(\$today).year was empty (60v142ju, 2026-10-12).
+  // A variable of that name, if a process has one, still wins.
+  if ((name === "$today" || name === "$now") && !(name in ctx)) {
+    return name === "$today" ? calendarToday() : new Date().toISOString();
+  }
   // Handle dotted names: "customer.age"
   const parts = name.split(".");
   let current: unknown = ctx;
   for (const part of parts) {
+    // A DATE'S OWN PARTS: `logged.year`, `d.month` (FEEL's date properties).
+    const dp = datePart(current, part);
+    if (dp !== undefined) { current = dp; continue; }
     // An ABSENT field is null, not undefined — matching the Python engine so a
     // condition evaluates identically in the editor playground and here in the
     // shipped app. Pinned by the FEEL cross-engine conformance suite.
@@ -170,6 +250,8 @@ export function evaluate(node: ASTNode, ctx: Context): unknown {
 
     case "MemberExpression": {
       const obj = evaluate(node.object, ctx);
+      const dp = datePart(obj, node.property);
+      if (dp !== undefined) return dp;
       if (obj == null || typeof obj !== "object") return undefined;
       // A PATH ON A LIST IS THE LIST OF EACH ITEM'S VALUE (FEEL's own rule).
       // `sum(items.subtotal)` read `subtotal` off the array, got nothing, and
@@ -191,6 +273,17 @@ export function evaluate(node: ASTNode, ctx: Context): unknown {
       const right = evaluate(node.right, ctx);
       const l = toNumber(left);
       const r = toNumber(right);
+
+      const lm = asMoment(left);
+      const rm = asMoment(right);
+      if (node.operator === "+") {
+        if (lm && isDuration(right)) return fromMoment(lm.ms + right, lm.day);
+        if (rm && isDuration(left)) return fromMoment(rm.ms + left, rm.day);
+      }
+      if (node.operator === "-") {
+        if (lm && rm) return lm.ms - rm.ms;
+        if (lm && isDuration(right)) return fromMoment(lm.ms - right, lm.day);
+      }
 
       switch (node.operator) {
         case "+":

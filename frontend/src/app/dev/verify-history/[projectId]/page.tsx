@@ -14,6 +14,7 @@
  */
 import { useEffect, useState } from "react";
 import { use } from "react";
+import { authFetch } from "@/lib/api";
 
 interface VerifyRunRow {
   id: string;
@@ -43,7 +44,7 @@ export default function VerifyHistoryPage({
   useEffect(() => {
     let alive = true;
     setLoading(true);
-    fetch(`/api/projects/${projectId}/verify`, {
+    authFetch(`/api/projects/${projectId}/verify`, {
       credentials: "include",
     })
       .then(async (r) => {

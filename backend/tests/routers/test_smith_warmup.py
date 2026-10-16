@@ -14,7 +14,7 @@ _FIXTURE = Path("/Users/m/Work/code/poc/design2ui-forge-v3/output/bpxr6hsv")
 
 
 @pytest.fixture()
-def client(tmp_path):
+def client(tmp_path, as_member):
     """TestClient over an isolated OUTPUT_ROOT with the bpxr6hsv contracts
     copied into a project named ``bpxr6hsv``."""
     # `_FIXTURE` EXISTS AND IS EMPTY on a machine whose copy of the

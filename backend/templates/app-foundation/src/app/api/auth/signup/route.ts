@@ -38,7 +38,9 @@ const signupSchema = z.object({
  * `$user.id` IS the person's row everywhere. Only the fields the entity
  * declares are written; a required one left out is refused in words.
  */
-function accountValues(input: Record<string, unknown>, email: string): { values?: Record<string, unknown>; error?: string } {
+const NAME_LIKE = /^(display_?name|name|full_?name|user_?name|nick_?name)$/i;
+
+function accountValues(input: Record<string, unknown>, email: string, name = ""): { values?: Record<string, unknown>; error?: string } {
   if (!ACCOUNT) return {};
   // WHERE A NEW ACCOUNT STARTS. The form asks only what a person types, so
   // the state a process owns — a verification that has not happened yet — is
@@ -47,6 +49,13 @@ function accountValues(input: Record<string, unknown>, email: string): { values?
   for (const f of ACCOUNT.fields) {
     let v = input[f.name];
     if ((v === undefined || v === "") && f.kind === "email") v = email;
+    // THE NAME TYPED AT SIGNUP IS THE PERSON'S NAME ON THEIR RECORD. A
+    // display-name field the form never sent as `account.displayName` was
+    // refused as missing while the Name box held it (pcn4owv7, 2026-10-15).
+    if ((v === undefined || v === "") && name && (ACCOUNT.labelField === f.name || NAME_LIKE.test(f.name))) v = name;
+    // A VALUE THE APPLICATION STARTS WITH COUNTS AS SUPPLIED: it was decided
+    // for the fields nobody is asked about, and "" is a decision too.
+    if ((v === undefined || v === "" || v === null) && Object.prototype.hasOwnProperty.call(ACCOUNT_INITIAL, f.name)) continue;
     if (v === undefined || v === "" || v === null) {
       if (f.required) return { error: `${f.label} is required` };
       continue;
@@ -75,7 +84,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const account = accountValues(data.account ?? {}, data.email);
+    const account = accountValues(data.account ?? {}, data.email, data.name);
     if (account.error) {
       return NextResponse.json(
         { error: { code: "VALIDATION_ERROR", message: account.error } },

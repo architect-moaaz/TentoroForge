@@ -21,6 +21,7 @@ installHarness({
       };`,
     "@/lib/data-engine-bridge": "export const actorCtx = (u) => u ?? {}; export const resolveAggregate = async () => 0; export const resolveQuery = async () => ({}); export const resolveSeries = async () => []; export const resolveSimilar = async () => [];",
     "@/lib/data-init": "export const ensureDataEngineInitialized = async () => {};",
+    "@/lib/data-engine/aggregate-window": "export const priorWindow = () => null;",
     "./schema": "export const NUMERIC_FIELDS = {}; export const READABLE_FIELDS = {};",
     "@/lib/account": "export const ACCOUNT = null;",
     "./geo": "export const distanceKm = () => 0; export const formatDistance = () => ''; export const parseNear = () => null; export const isPoint = () => false;",

@@ -8,6 +8,7 @@
 import { useEffect, useState, useCallback } from "react";
 import type { Editor, Component as GjsComponent } from "grapesjs";
 import { Workflow, Play, Link2, Zap } from "lucide-react";
+import { authFetch } from "@/lib/api";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
 
@@ -46,7 +47,7 @@ export function WorkflowBindingPanel({ editor, projectId }: WorkflowBindingPanel
     async function load() {
       setLoading(true);
       try {
-        const res = await fetch(`${API_BASE}/api/projects/${projectId}/workflows`);
+        const res = await authFetch(`${API_BASE}/api/projects/${projectId}/workflows`);
         if (res.ok) {
           const data = await res.json();
           const list = (data.workflows || data || []).map((w: any) => ({

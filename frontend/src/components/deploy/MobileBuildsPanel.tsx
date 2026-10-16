@@ -36,6 +36,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { useAuthStore } from "@/stores/auth";
 import { toast } from "sonner";
+import { authFetch } from "@/lib/api";
 
 interface MobileBuild {
   id: string;
@@ -99,7 +100,7 @@ export function MobileBuildsPanel({ projectId, orgId }: Props) {
 
   const fetchList = useCallback(async () => {
     try {
-      const res = await fetch(`/api/projects/${projectId}/mobile-builds`, {
+      const res = await authFetch(`/api/projects/${projectId}/mobile-builds`, {
         headers: authHeaders,
       });
       if (!res.ok) return;
@@ -127,7 +128,7 @@ export function MobileBuildsPanel({ projectId, orgId }: Props) {
       setLoading({ profile, platform });
       setError(null);
       try {
-        const res = await fetch(`/api/projects/${projectId}/mobile-builds`, {
+        const res = await authFetch(`/api/projects/${projectId}/mobile-builds`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",

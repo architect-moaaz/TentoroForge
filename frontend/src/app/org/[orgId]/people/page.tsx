@@ -39,6 +39,10 @@ interface Person {
   title: string | null;
   department_id: string | null;
   team_id: string | null;
+  /** Every team the person is in; a person may be in more than one. */
+  team_ids?: string[];
+  /** Who they report to: another person of the organisation. */
+  manager_id: string | null;
   is_active: boolean;
   created_at: string;
 }
@@ -59,12 +63,14 @@ function PersonForm({
   person,
   departments,
   teams,
+  people,
   onClose,
 }: {
   orgId: string;
   person?: Person;
   departments: Department[];
   teams: Team[];
+  people: Person[];
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
@@ -74,8 +80,16 @@ function PersonForm({
     last_name: person?.last_name || "",
     title: person?.title || "",
     department_id: person?.department_id || "",
-    team_id: person?.team_id || "",
+    team_ids: person?.team_ids ?? (person?.team_id ? [person.team_id] : []),
+    manager_id: person?.manager_id || "",
   });
+  const toggleTeam = (id: string) =>
+    setForm((f) => ({
+      ...f,
+      team_ids: f.team_ids.includes(id) ? f.team_ids.filter((t) => t !== id) : [...f.team_ids, id],
+    }));
+  // Anyone but the person themself can be the one they report to.
+  const managers = people.filter((p) => p.id !== person?.id && p.is_active);
 
   const mutation = useMutation({
     mutationFn: (data: Record<string, unknown>) =>
@@ -105,7 +119,8 @@ function PersonForm({
           last_name: form.last_name,
           title: form.title || null,
           department_id: form.department_id || null,
-          team_id: form.team_id || null,
+          team_ids: form.team_ids,
+          manager_id: form.manager_id || null,
         });
       }}
     >
@@ -158,16 +173,14 @@ function PersonForm({
                 setForm({
                   ...form,
                   department_id: v === "none" ? "" : v,
-                  // Reset team if department changes and team doesn't belong
-                  team_id:
+                  // Teams of another department drop off when the department changes.
+                  team_ids:
                     v === "none"
-                      ? form.team_id
-                      : teams.find((t) => t.id === form.team_id)
-                            ?.department_id === v ||
-                          !teams.find((t) => t.id === form.team_id)
-                            ?.department_id
-                        ? form.team_id
-                        : "",
+                      ? form.team_ids
+                      : form.team_ids.filter((id) => {
+                          const dept = teams.find((t) => t.id === id)?.department_id;
+                          return !dept || dept === v;
+                        }),
                 })
               }
             >
@@ -185,26 +198,42 @@ function PersonForm({
             </Select>
           </div>
           <div className="space-y-2">
-            <Label>Team</Label>
+            <Label>Reports to</Label>
             <Select
-              value={form.team_id}
-              onValueChange={(v) =>
-                setForm({ ...form, team_id: v === "none" ? "" : v })
-              }
+              value={form.manager_id || "none"}
+              onValueChange={(v) => setForm({ ...form, manager_id: v === "none" ? "" : v })}
             >
               <SelectTrigger>
-                <SelectValue placeholder="Select team" />
+                <SelectValue placeholder="Nobody" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="none">No team</SelectItem>
-                {filteredTeams.map((t) => (
-                  <SelectItem key={t.id} value={t.id}>
-                    {t.name}
+                <SelectItem value="none">Nobody</SelectItem>
+                {managers.map((m) => (
+                  <SelectItem key={m.id} value={m.id}>
+                    {m.first_name} {m.last_name}{m.title ? ` · ${m.title}` : ""}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
+        </div>
+        <div className="space-y-2">
+          <Label>Teams</Label>
+          <p className="text-xs text-muted-foreground">A person may be in more than one team; the first one picked is their home team.</p>
+          {filteredTeams.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No teams yet.</p>
+          ) : (
+            <div data-team-picker="" className="grid grid-cols-2 gap-x-4 gap-y-1 rounded-md border p-3">
+              {filteredTeams.map((t) => (
+                <label key={t.id} className="flex cursor-pointer items-center gap-2 text-sm">
+                  <input type="checkbox" className="h-4 w-4 accent-primary"
+                         checked={form.team_ids.includes(t.id)} onChange={() => toggleTeam(t.id)} />
+                  <span>{t.name}</span>
+                  {form.team_ids[0] === t.id && <Badge variant="secondary" className="ml-auto text-[10px]">home</Badge>}
+                </label>
+              ))}
+            </div>
+          )}
         </div>
       </div>
       <DialogFooter>
@@ -252,6 +281,12 @@ function PeopleDirectory({ orgId }: { orgId: string }) {
 
   const deptMap = Object.fromEntries(departments.map((d) => [d.id, d.name]));
   const teamMap = Object.fromEntries(teams.map((t) => [t.id, t.name]));
+  // Managers may be outside the current search: the whole directory names them.
+  const { data: everyone = [] } = useQuery({
+    queryKey: ["org", orgId, "people", "", "all"],
+    queryFn: () => api.get<Person[]>(`/api/orgs/${orgId}/people?limit=200`),
+  });
+  const personMap = Object.fromEntries(everyone.map((p) => [p.id, `${p.first_name} ${p.last_name}`]));
 
   const deleteMutation = useMutation({
     mutationFn: (personId: string) =>
@@ -296,7 +331,8 @@ function PeopleDirectory({ orgId }: { orgId: string }) {
               <TableHead>Email</TableHead>
               <TableHead>Title</TableHead>
               <TableHead>Department</TableHead>
-              <TableHead>Team</TableHead>
+              <TableHead>Teams</TableHead>
+              <TableHead>Reports to</TableHead>
               <TableHead>Status</TableHead>
               <TableHead className="w-[100px]">Actions</TableHead>
             </TableRow>
@@ -305,7 +341,7 @@ function PeopleDirectory({ orgId }: { orgId: string }) {
             {people.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={7}
+                  colSpan={8}
                   className="py-8 text-center text-muted-foreground"
                 >
                   No people found
@@ -325,7 +361,10 @@ function PeopleDirectory({ orgId }: { orgId: string }) {
                       : "\u2014"}
                   </TableCell>
                   <TableCell>
-                    {person.team_id ? teamMap[person.team_id] || "\u2014" : "\u2014"}
+                    {(person.team_ids ?? (person.team_id ? [person.team_id] : [])).map((id) => teamMap[id]).filter(Boolean).join(", ") || "\u2014"}
+                  </TableCell>
+                  <TableCell>
+                    {person.manager_id ? personMap[person.manager_id] || "\u2014" : "\u2014"}
                   </TableCell>
                   <TableCell>
                     <Badge variant={person.is_active ? "default" : "secondary"}>
@@ -383,6 +422,7 @@ function PeopleDirectory({ orgId }: { orgId: string }) {
             person={editPerson}
             departments={departments}
             teams={teams}
+            people={everyone}
             onClose={() => setShowForm(false)}
           />
         </DialogContent>

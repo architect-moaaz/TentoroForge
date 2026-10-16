@@ -11,7 +11,12 @@ def test_lifecycle_verb_only_matches_a_bare_command():
     assert _lifecycle_verb("  STATUS. ") == "status"
     assert _lifecycle_verb("define") == "define"
     assert _lifecycle_verb("define the roles for me") is None  # a sentence, not the verb
-    assert _lifecycle_verb("what is the status of my app") is None
+    # A STATUS QUESTION IN A SENTENCE IS THE STATUS VERB. It used to go to the
+    # model, which answered "fixes in progress, 65–70%" from the last check
+    # while nothing ran (pcn4owv7, 2026-10-15); the answer is read off the
+    # live run now. A change that mentions status is still a change.
+    assert _lifecycle_verb("what is the status of my app") == "status"
+    assert _lifecycle_verb("fix the status filter on the orders page") is None
     assert _lifecycle_verb("") is None
 
 

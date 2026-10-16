@@ -43,12 +43,17 @@ import { useDeployStream, DeployEvent } from "@/hooks/useDeployStream";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { MobileBuildsPanel } from "./MobileBuildsPanel";
+import { LockedPanel } from "@/components/features/Locked";
+import { DomainsPanel } from "./DomainsPanel";
+import { useAppSettingsStore } from "@/stores/appSettings";
 
 interface LatestDeployment {
   id: string;
   target: string;
   status: string;
+  /** The app's own address: its main domain, else the production alias — the same after every publish. */
   url: string | null;
+  deployment_url?: string | null;
   error: string | null;
   created_at: string | null;
   finished_at: string | null;
@@ -65,6 +70,8 @@ interface Props {
    *  separately (a distinct toolbar entry) pass "mobile"; the default
    *  "web" preserves the existing Publish button behavior. */
   initialTab?: "web" | "mobile";
+  /** The organisation lacks "Mobile builds": the tab shows the lock, not the panel. */
+  mobileLocked?: boolean;
 }
 
 /** What the build found when it used the app (GET /api/projects/{id}/check). */
@@ -74,7 +81,7 @@ interface CheckNote {
   stale?: boolean;
   pages: number;
   working: number;
-  failing: Array<{ route: string; detail: string }>;
+  failing: Array<{ route: string; detail: string; stale?: boolean }>;
   processes: string[];
 }
 
@@ -95,6 +102,7 @@ export function PublishDialog({
   open,
   onOpenChange,
   initialTab = "web",
+  mobileLocked = false,
 }: Props) {
   const [target, setTarget] = useState<"vercel" | "tentoro-cloud">("vercel");
   const [started, setStarted] = useState(false);
@@ -104,6 +112,7 @@ export function PublishDialog({
   const { events, status, start, reset } = useDeployStream(projectId);
   const [check, setCheck] = useState<CheckNote | null>(null);
   const reconcilePoll = useRef<number | null>(null);
+  const openSettings = useAppSettingsStore((s) => s.open);
 
   const publish = () => {
     if (started) return;
@@ -314,13 +323,14 @@ export function PublishDialog({
               {check.failing.slice(0, 5).map((f) => (
                 <li key={f.route}>
                   <code>{f.route}</code> — {f.detail}
+                  {f.stale && <span className="text-amber-700/80 dark:text-amber-300/80"> (found before the page was last changed)</span>}
                 </li>
               ))}
               {check.processes.slice(0, 5).map((name) => (
                 <li key={name}>{name} does not run through</li>
               ))}
             </ul>
-            <p className="mt-1">Publishing puts them live as they are. Ask Smith to carry on to fix them first.</p>
+            <p className="mt-1">Publishing puts them live as they are. Tell Smith &ldquo;check the app again and fix everything that still fails&rdquo; first.</p>
           </div>
         )}
 
@@ -418,10 +428,33 @@ export function PublishDialog({
             {errorMessage}
           </div>
         )}
+
+        {/* The app's own address — the same panel as App settings → Domains. */}
+        {projectId && (
+          <div className="space-y-2 border-t pt-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-sm font-medium">Custom domain</div>
+              <Button
+                variant="link"
+                size="sm"
+                className="h-auto p-0 text-xs"
+                onClick={() => {
+                  openSettings("domains");
+                  onOpenChange(false);
+                }}
+              >
+                Manage in App settings
+              </Button>
+            </div>
+            <DomainsPanel projectId={projectId} compact />
+          </div>
+        )}
           </TabsContent>
 
           <TabsContent value="mobile" className="mt-3">
-            {projectId && orgId ? (
+            {mobileLocked ? (
+              <LockedPanel name="Mobile builds" />
+            ) : projectId && orgId ? (
               <MobileBuildsPanel projectId={projectId} orgId={orgId} />
             ) : (
               <div className="rounded border bg-muted/40 px-3 py-4 text-xs text-muted-foreground text-center">

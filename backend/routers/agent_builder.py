@@ -22,8 +22,9 @@ from schemas.agent_builder import AgentDefinitionSave, AgentListItem, AgentTestR
 from services.project_service import get_project_with_auth
 from services.git_service import git_commit
 from sse_helpers import sse_event, stream_agent_messages
+from services.features import feature_gate
 
-router = APIRouter(tags=["agent-builder"])
+router = APIRouter(tags=["agent-builder"], dependencies=[Depends(feature_gate("agents"))])
 
 AGENT_DEFS_DIR = "agent-definitions"  # relative to project output_dir
 

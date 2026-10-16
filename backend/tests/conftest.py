@@ -255,3 +255,63 @@ async def org_id(auth_client: AsyncClient) -> str:
     })
     assert resp.status_code in (200, 201), f"Org creation failed: {resp.text}"
     return resp.json()["id"]
+
+
+@pytest.fixture
+def as_member(monkeypatch):
+    """The editor and debug routes serve a signed-in MEMBER of the project's
+    organisation now (`services.project_service.project_for`). A router test
+    that works on a folder under a temporary output root has no rows to be a
+    member of: this stands a person in and answers `project_for` with a
+    project whose short id is the one the route named."""
+    import uuid as _uuid
+    from types import SimpleNamespace
+
+    from auth import get_current_user
+    from main import app
+
+    person = SimpleNamespace(id=_uuid.uuid4(), email="member@example.com", name="Member",
+                             platform_role=None, disabled_at=None)
+
+    async def _project_for(project_ref, user, db):
+        return SimpleNamespace(id=_uuid.uuid4(), short_id=str(project_ref), output_dir=None,
+                               org_id=_uuid.uuid4(), owner_id=person.id)
+
+    async def _user():
+        return person
+
+    from platform_admin import require_super_admin
+
+    monkeypatch.setattr("services.project_service.project_for", _project_for)
+    app.dependency_overrides[get_current_user] = _user
+    # The folder listing under output/ is the super admin's; the stand-in is
+    # one for the tests that list it.
+    app.dependency_overrides[require_super_admin] = _user
+    try:
+        yield person
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        app.dependency_overrides.pop(require_super_admin, None)
+
+
+@pytest_asyncio.fixture
+async def super_admin_client(client: AsyncClient, monkeypatch):
+    """A client signed in as the platform's super admin: the email the
+    platform's configuration names takes the role at sign-up
+    (`platform_admin.record_sign_in`). Separate from `auth_client`, so a test
+    can hold both a person and the admin."""
+    monkeypatch.setenv("FORGE_SUPER_ADMIN_EMAILS", "admin@tentoro.ai")
+    resp = await client.post("/api/auth/signup", json={
+        "email": "admin@tentoro.ai",
+        "name": "Platform Admin",
+        "password": "Adminpass123",
+    })
+    assert resp.status_code == 201, f"Signup failed: {resp.text}"
+    token = resp.json()["access_token"]
+    from main import app
+    admin = AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+    admin.headers["Authorization"] = f"Bearer {token}"
+    try:
+        yield admin
+    finally:
+        await admin.aclose()

@@ -1,5 +1,6 @@
 "use client";
 import { useQuery } from "@tanstack/react-query";
+import { authFetch } from "@/lib/api";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
 
@@ -11,7 +12,7 @@ const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
  */
 async function fetchProjectFile<T>(projectId: string, filePath: string): Promise<T | null> {
   try {
-    const r = await fetch(`${API}/api/_debug/project-file/${projectId}/${filePath}`);
+    const r = await authFetch(`${API}/api/_debug/project-file/${projectId}/${filePath}`);
     if (!r.ok) return null;
     return r.json() as Promise<T>;
   } catch {

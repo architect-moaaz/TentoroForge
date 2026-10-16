@@ -505,9 +505,30 @@ class VercelDeployProvider:
                 info = await self.vercel.get_deployment(deployment_id)
                 state = info.get("readyState") or info.get("state") or ""
                 if state in ("READY", "READY_STATE_READY"):
-                    url = f"https://{info.get('url', vercel_url)}"
-                    row.url = url
+                    # THIS BUILD'S ADDRESS, and THE APP'S. Vercel mints one
+                    # per deployment, frozen at that build; the app's own is
+                    # its main domain or the production alias, which moves to
+                    # the newest publish. People are given the app's.
+                    deployment_url = f"https://{info.get('url', vercel_url)}"
+                    from services.deploy.sign_in_address import stable_address
+                    aliases = [a for a in (info.get("alias") or []) if isinstance(a, str)]
+                    row.deployment_url = deployment_url
+                    row.url = stable_address(snapshot.output_dir, _slugify(snapshot.project_slug),
+                                             next((a for a in aliases if a.endswith(".vercel.app")), ""))
+                    url = row.url
                     row.finished_at = datetime.now(timezone.utc)
+
+                    # THE APP'S OTHER ADDRESSES: its Tentoro address, and any
+                    # the owner added before this first publish, are attached
+                    # now; the domain watch carries on from here.
+                    domains: list[dict] = []
+                    try:
+                        from services.deploy.domains import attach_after_publish
+                        domains = await attach_after_publish(snapshot.output_dir, self.vercel,
+                                                             _slugify(snapshot.project_slug))
+                    except Exception:  # noqa: BLE001 — the app is live; an address is retried by the watch
+                        import logging as _logging
+                        _logging.getLogger(__name__).warning("attaching the app's addresses after publish failed", exc_info=True)
 
                     # Post-READY smoke: green Vercel builds can still ship an
                     # empty database (drizzle-kit push exiting silently on the
@@ -535,7 +556,7 @@ class VercelDeployProvider:
                         yield DeployEvent(
                             "done",
                             f"Live at {url}",
-                            data={"url": url, "deployment_id": str(row.id)},
+                            data={"url": url, "deployment_id": str(row.id), "domains": domains},
                         )
                     else:
                         row.status = "succeeded_with_warnings"

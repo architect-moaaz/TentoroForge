@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useIREditorStore, type AppIR } from "@/stores/ir-editor";
+import { authFetch } from "@/lib/api";
 import { ComponentTree } from "./ComponentTree";
 import { ComponentPalette } from "./ComponentPalette";
 import { PropertiesPanel } from "./PropertiesPanel";
@@ -28,7 +29,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
 
 async function fetchIR(projectId: string): Promise<AppIR | null> {
   try {
-    const res = await fetch(`${API_BASE}/api/projects/${projectId}/ir`);
+    const res = await authFetch(`${API_BASE}/api/projects/${projectId}/ir`);
     if (!res.ok) return null;
     return res.json();
   } catch {
@@ -38,7 +39,7 @@ async function fetchIR(projectId: string): Promise<AppIR | null> {
 
 async function saveIRToBackend(projectId: string, ir: AppIR): Promise<boolean> {
   try {
-    const res = await fetch(`${API_BASE}/api/projects/${projectId}/ir`, {
+    const res = await authFetch(`${API_BASE}/api/projects/${projectId}/ir`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(ir),

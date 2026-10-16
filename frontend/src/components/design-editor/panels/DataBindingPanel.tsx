@@ -8,6 +8,7 @@
 import { useEffect, useState, useCallback } from "react";
 import type { Editor, Component as GjsComponent } from "grapesjs";
 import { Database, Table2, Plus, Link2 } from "lucide-react";
+import { authFetch } from "@/lib/api";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
 
@@ -54,7 +55,7 @@ export function DataBindingPanel({ editor, projectId }: DataBindingPanelProps) {
       setLoading(true);
       try {
         // Try app-model first
-        const res = await fetch(`${API_BASE}/api/projects/${projectId}/app-model`);
+        const res = await authFetch(`${API_BASE}/api/projects/${projectId}/app-model`);
         if (res.ok) {
           const data = await res.json();
           const entityMap = data.entities || {};
@@ -65,7 +66,7 @@ export function DataBindingPanel({ editor, projectId }: DataBindingPanelProps) {
           }));
 
           // Also try to load DB tables for field info
-          const tablesRes = await fetch(`${API_BASE}/api/projects/${projectId}/db/tables`);
+          const tablesRes = await authFetch(`${API_BASE}/api/projects/${projectId}/db/tables`);
           if (tablesRes.ok) {
             const tables = await tablesRes.json();
             const withFields = parsed.map((e) => {
@@ -88,7 +89,7 @@ export function DataBindingPanel({ editor, projectId }: DataBindingPanelProps) {
           }
         } else {
           // Fallback: try IR manifest for entity data
-          const irRes = await fetch(`${API_BASE}/api/projects/${projectId}/ir`);
+          const irRes = await authFetch(`${API_BASE}/api/projects/${projectId}/ir`);
           if (irRes.ok) {
             const ir = await irRes.json();
             const sources = ir.dataSources || {};
@@ -111,7 +112,7 @@ export function DataBindingPanel({ editor, projectId }: DataBindingPanelProps) {
 
           // Last fallback: extract from design HTML annotations
           if (entities.length === 0) {
-            const designRes = await fetch(`${API_BASE}/api/projects/${projectId}/design`);
+            const designRes = await authFetch(`${API_BASE}/api/projects/${projectId}/design`);
             if (designRes.ok) {
               const design = await designRes.json();
               const entityNames = new Set<string>();

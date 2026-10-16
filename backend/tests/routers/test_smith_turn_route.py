@@ -69,7 +69,7 @@ class FakeModel:
 
 
 @pytest.fixture()
-def project(tmp_path, monkeypatch):
+def project(tmp_path, monkeypatch, as_member):
     """A project on disk, at ``OUTPUT_ROOT/officeapp``, with a real Blueprint."""
     import services.project_paths as pp
     from services.blueprint.service import BlueprintService
@@ -99,7 +99,7 @@ def uuid_addressed(project, monkeypatch):
     """Let the UUID resolve to the same directory, without a database."""
     import routers.output_projects as mod
 
-    async def resolve(project_id: str):
+    async def resolve(project_id: str, *_args):
         return project
 
     monkeypatch.setattr(mod, "_resolve_root", resolve)
@@ -133,7 +133,7 @@ async def _drain(queue: asyncio.Queue, *, timeout: float = 0.5) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_a_project_without_a_blueprint_is_refused_not_crashed(tmp_path, monkeypatch):
+async def test_a_project_without_a_blueprint_is_refused_not_crashed(tmp_path, monkeypatch, as_member):
     import services.project_paths as pp
     monkeypatch.setattr(pp, "OUTPUT_ROOT", tmp_path)
     (tmp_path / PROJECT).mkdir()
@@ -176,7 +176,7 @@ async def test_warmup_reports_whether_the_project_has_a_blueprint(project):
 
 
 @pytest.mark.asyncio
-async def test_warmup_says_no_blueprint_for_a_project_that_has_none(tmp_path, monkeypatch):
+async def test_warmup_says_no_blueprint_for_a_project_that_has_none(tmp_path, monkeypatch, as_member):
     """A project still waiting to be built keeps the streaming front door."""
     import services.project_paths as pp
     monkeypatch.setattr(pp, "OUTPUT_ROOT", tmp_path)

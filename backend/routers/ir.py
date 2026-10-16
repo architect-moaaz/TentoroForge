@@ -18,6 +18,10 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from auth import get_current_user
+from database import get_db
+from models.auth import PlatformUser
+
 from services.ir_compiler import (
     compile_ir,
     write_compiled_files,
@@ -32,34 +36,15 @@ router = APIRouter(prefix="/api/projects", tags=["ir"])
 OUTPUT_BASE = Path(__file__).resolve().parent.parent.parent / "output"
 
 
-async def _resolve_output_dir(project_id: str) -> str:
-    """Resolve the output directory for a project.
+async def _resolve_output_dir(project_id: str, user: PlatformUser, db: AsyncSession) -> str:
+    """The output directory of a project, for a member of its organisation.
+    The row is found by id or short id and the membership checked first
+    (`project_for`): a folder nobody owns is not served, and a blocked or
+    removed organisation refuses here too."""
+    from services.project_service import project_for
 
-    Tries the database first (project.output_dir), falls back to
-    OUTPUT_BASE / project_id for direct filesystem access.
-    """
-    # Try DB lookup
-    try:
-        from database import get_db
-        from models.project import Project
-        from sqlalchemy import select
-
-        async for db in get_db():
-            try:
-                pid = uuid.UUID(project_id)
-            except ValueError:
-                break
-            stmt = select(Project).where(Project.id == pid)
-            result = await db.execute(stmt)
-            project = result.scalar_one_or_none()
-            if project and project.output_dir:
-                return project.output_dir
-            break
-    except Exception:
-        pass
-
-    # Fallback: direct path
-    return str(OUTPUT_BASE / project_id)
+    project = await project_for(project_id, user, db)
+    return project.output_dir or str(OUTPUT_BASE / project.short_id)
 
 
 # ---------------------------------------------------------------------------
@@ -82,12 +67,12 @@ class CompileResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 @router.get("/{project_id}/ir")
-async def get_ir(project_id: str) -> dict[str, Any]:
+async def get_ir(project_id: str, user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     """Load the IR manifest for a project.
 
     If no IR exists but a registry does, auto-migrates the project.
     """
-    output = await _resolve_output_dir(project_id)
+    output = await _resolve_output_dir(project_id, user, db)
     ir = load_ir(output)
 
     if ir is None:
@@ -106,9 +91,9 @@ async def get_ir(project_id: str) -> dict[str, Any]:
 
 
 @router.put("/{project_id}/ir")
-async def update_ir(project_id: str, body: dict[str, Any]) -> dict[str, str]:
+async def update_ir(project_id: str, body: dict[str, Any], user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict[str, str]:
     """Save a full IR document (from the visual editor)."""
-    output = await _resolve_output_dir(project_id)
+    output = await _resolve_output_dir(project_id, user, db)
 
     # Validate basic structure
     if "$schema" not in body or "pages" not in body:
@@ -119,12 +104,12 @@ async def update_ir(project_id: str, body: dict[str, Any]) -> dict[str, str]:
 
 
 @router.post("/{project_id}/ir/compile")
-async def compile_project_ir(project_id: str) -> CompileResponse:
+async def compile_project_ir(project_id: str, user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> CompileResponse:
     """Recompile the project's IR to code files.
 
     Reads the stored IR, compiles it, and writes files to the output dir.
     """
-    output = await _resolve_output_dir(project_id)
+    output = await _resolve_output_dir(project_id, user, db)
     ir = load_ir(output)
     if ir is None:
         raise HTTPException(status_code=404, detail="No IR found for this project")
@@ -160,13 +145,13 @@ class IREditResponse(BaseModel):
     message: str = ""
 
 @router.post("/{project_id}/ir/edit")
-async def ir_edit(project_id: str, body: IREditRequest) -> IREditResponse:
+async def ir_edit(project_id: str, body: IREditRequest, user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> IREditResponse:
     """Apply an AI-powered IR edit from a natural language instruction.
 
     The IR edit agent analyzes the instruction and current IR,
     then produces structured operations instead of rewriting code.
     """
-    output = await _resolve_output_dir(project_id)
+    output = await _resolve_output_dir(project_id, user, db)
     ir = load_ir(output)
     if ir is None:
         raise HTTPException(status_code=404, detail="No IR found for this project")
@@ -210,24 +195,24 @@ class ThemeListItem(BaseModel):
 
 
 @router.post("/{project_id}/ir/eject")
-async def eject_ir(project_id: str) -> EjectResponse:
+async def eject_ir(project_id: str, user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> EjectResponse:
     """Eject from IR — strips boundary comments, deletes .ir/ directory.
 
     One-way operation. The project becomes fully code-owned.
     """
     from services.ir_export import eject_from_ir
 
-    output = await _resolve_output_dir(project_id)
+    output = await _resolve_output_dir(project_id, user, db)
     result = await eject_from_ir(output)
     return EjectResponse(**result)
 
 
 @router.get("/{project_id}/ir/export")
-async def export_ir_endpoint(project_id: str) -> dict[str, Any]:
+async def export_ir_endpoint(project_id: str, user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     """Export the IR JSON for backup."""
     from services.ir_export import export_ir
 
-    output = await _resolve_output_dir(project_id)
+    output = await _resolve_output_dir(project_id, user, db)
     ir = export_ir(output)
     if ir is None:
         raise HTTPException(status_code=404, detail="No IR found")
@@ -235,17 +220,17 @@ async def export_ir_endpoint(project_id: str) -> dict[str, Any]:
 
 
 @router.post("/{project_id}/ir/migrate")
-async def migrate_to_ir(project_id: str) -> MigrateResponse:
+async def migrate_to_ir(project_id: str, user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> MigrateResponse:
     """Migrate an existing code-first project to IR (non-destructive)."""
     from services.ir_migrate import migrate_to_ir
 
-    output = await _resolve_output_dir(project_id)
+    output = await _resolve_output_dir(project_id, user, db)
     result = await migrate_to_ir(output)
     return MigrateResponse(**result)
 
 
 @router.get("/themes")
-async def list_themes() -> list[ThemeListItem]:
+async def list_themes(user: PlatformUser = Depends(get_current_user)) -> list[ThemeListItem]:
     """List available IR themes."""
     # Import from the Node.js package isn't practical here,
     # so we maintain a simple Python-side list
@@ -266,9 +251,9 @@ class IRQAResponse(BaseModel):
     fixes_applied: list[str] = []
 
 @router.post("/{project_id}/ir/qa")
-async def ir_qa(project_id: str) -> IRQAResponse:
+async def ir_qa(project_id: str, user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> IRQAResponse:
     """Run IR-aware QA: validate, auto-fix, and recompile."""
-    output = await _resolve_output_dir(project_id)
+    output = await _resolve_output_dir(project_id, user, db)
     ir = load_ir(output)
     if ir is None:
         raise HTTPException(status_code=404, detail="No IR found for this project")
@@ -311,13 +296,13 @@ class WorkflowSchema(BaseModel):
 
 
 @router.get("/{project_id}/registry/entities")
-async def get_registry_entities(project_id: str) -> list[EntitySchema]:
+async def get_registry_entities(project_id: str, user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> list[EntitySchema]:
     """Return all entities from the project's registry.json.
 
     Used by the Data Binding panel in the IR editor to populate
     entity / field dropdowns.
     """
-    output = await _resolve_output_dir(project_id)
+    output = await _resolve_output_dir(project_id, user, db)
     try:
         from services.registry import load_registry
         registry = load_registry(output)
@@ -350,7 +335,7 @@ async def get_registry_entities(project_id: str) -> list[EntitySchema]:
 
 
 @router.get("/{project_id}/registry/workflows")
-async def get_registry_workflows(project_id: str) -> list[WorkflowSchema]:
+async def get_registry_workflows(project_id: str, user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> list[WorkflowSchema]:
     """Return all workflow definitions for a project — for the editor's
     ActionPicker / Workflow Binding panel.
 
@@ -364,7 +349,7 @@ async def get_registry_workflows(project_id: str) -> list[WorkflowSchema]:
     import json as _json
     from pathlib import Path as _Path
 
-    output = await _resolve_output_dir(project_id)
+    output = await _resolve_output_dir(project_id, user, db)
     result: list[WorkflowSchema] = []
     seen: set[str] = set()
 

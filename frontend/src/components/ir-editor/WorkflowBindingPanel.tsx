@@ -20,6 +20,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Loader2, Workflow, Link2Off, ArrowRight } from "lucide-react";
 import { useIREditorStore, type IRNode, type NodePath } from "@/stores/ir-editor";
+import { authFetch } from "@/lib/api";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
 
@@ -38,7 +39,7 @@ function useRegistryWorkflows(projectId: string | null) {
   useEffect(() => {
     if (!projectId) return;
     setLoading(true);
-    fetch(`${API_BASE}/api/projects/${projectId}/registry/workflows`)
+    authFetch(`${API_BASE}/api/projects/${projectId}/registry/workflows`)
       .then((r) => (r.ok ? r.json() : []))
       .then((data) => setWorkflows(Array.isArray(data) ? data : []))
       .catch(() => setWorkflows([]))
