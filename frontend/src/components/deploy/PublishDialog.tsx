@@ -270,10 +270,13 @@ export function PublishDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [!!doneEvent]);
   const errorEvent = events.find((e) => e.stage === "error");
-  const url =
+  const builtUrl =
     reconciledUrl ??
     (doneEvent?.data as { url?: string } | undefined)?.url ??
     "";
+  // The live app is shown at its main address (own domain, else
+  // apps.tentoro.ai) once that answers, not at the Vercel one it was built at.
+  const url = builtUrl && publishedSide !== "test" && sides?.production_address ? sides.production_address : builtUrl;
   const errorMessage = reconciledError ?? errorEvent?.message ?? null;
 
   const isDone = !!url;

@@ -32,6 +32,9 @@ export interface PublishStatus {
   test: SideState | null;
   production: SideState | null;
   test_address: string;
+  /** Where people open the live app: its main address (own domain, else
+   *  `<app>.apps.tentoro.ai`) once that answers, else its Vercel address. */
+  production_address?: string | null;
   /** The app has changed since it was last tried on Test. */
   untested_changes: boolean;
   /** Test runs a newer version than production. */
@@ -105,15 +108,18 @@ export function PublishTargetSwitch({
   );
 }
 
-function SideLine({ label, state, fallback }: { label: string; state: SideState | null; fallback: string }) {
+function SideLine({ label, state, address, fallback }: {
+  label: string; state: SideState | null; address?: string | null; fallback: string;
+}) {
+  const url = state ? address || state.url : null;
   return (
     <div className="flex min-w-0 items-center gap-2 text-xs">
       <span className="w-20 shrink-0 font-medium">{label}</span>
-      {state?.url ? (
-        <a href={state.url} target="_blank" rel="noreferrer"
+      {url ? (
+        <a href={url} target="_blank" rel="noreferrer"
            className="flex min-w-0 items-center gap-1 font-mono text-muted-foreground hover:text-foreground">
           <ExternalLink className="h-3 w-3 shrink-0" />
-          <span className="truncate">{state.url.replace(/^https?:\/\//, "")}</span>
+          <span className="truncate">{url.replace(/^https?:\/\//, "")}</span>
         </a>
       ) : (
         <span className="text-muted-foreground">{fallback}</span>
@@ -125,12 +131,34 @@ function SideLine({ label, state, fallback }: { label: string; state: SideState 
   );
 }
 
+/** One side's address as a small link with its tag, for the toolbar. */
+export function SideLink({ side, url }: { side: Side; url: string }) {
+  const test = side === "test";
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noreferrer"
+      className="flex min-w-0 max-w-[280px] items-center gap-1 text-[11px] font-mono text-muted-foreground hover:text-foreground"
+      title={test ? `Test version at ${url}` : `Live app at ${url}`}
+    >
+      <ExternalLink className="h-3 w-3 shrink-0" />
+      <span className={`rounded px-1 font-sans text-[10px] font-semibold ${
+        test
+          ? "bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200"
+          : "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-200"
+      }`}>{test ? "Test" : "Live"}</span>
+      <span className="truncate">{url.replace(/^https?:\/\//, "")}</span>
+    </a>
+  );
+}
+
 /** What each side runs now, and what that means for the next publish. */
 export function SidesSummary({ status }: { status: PublishStatus }) {
   return (
     <div className="space-y-1.5 rounded border bg-muted/20 px-3 py-2">
       <SideLine label="Test" state={status.test} fallback={`Not published yet — it will be at ${status.test_address.replace(/^https?:\/\//, "")}`} />
-      <SideLine label="Production" state={status.production} fallback="Not live yet" />
+      <SideLine label="Production" state={status.production} address={status.production_address} fallback="Not live yet" />
       {status.test_ahead && (
         <p className="text-xs text-muted-foreground">The test version is newer than the live app.</p>
       )}

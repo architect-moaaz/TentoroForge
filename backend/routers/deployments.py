@@ -396,10 +396,15 @@ async def publish_status(
     untested = bool(current and (test is None or test.source_digest != current))
     test_ahead = bool(test and (prod is None or (test.source_digest and test.source_digest != prod.source_digest
                                                  and test.created_at > prod.created_at)))
+    from services.deploy.domains import live_address
     from services.deploy.vercel_provider import _slugify
+    # THE LIVE APP'S ADDRESS is its main one (own domain, else apps.tentoro.ai)
+    # once that answers; until then the Vercel address it was published at.
+    production_address = (live_address(project.output_dir, project.short_id) or prod.url) if prod else None
     return {"target": project.publish_target or envs.PRODUCTION,
             "test": _side_view(test), "production": _side_view(prod),
             "test_address": f"https://{envs.test_alias(_slugify(project.short_id))}",
+            "production_address": production_address,
             "untested_changes": untested, "test_ahead": test_ahead}
 
 

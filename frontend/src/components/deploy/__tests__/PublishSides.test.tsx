@@ -33,6 +33,7 @@ vi.mock("@/lib/api", () => ({
     get: async (u: string) => {
       if (u.endsWith("/publish-status")) return status;
       if (u.endsWith("/check")) return { checked: false, pages: 0, working: 0, failing: [], processes: [] };
+      if (u.endsWith("/api/projects/p1")) return { status: "ready" };
       return null;
     },
     put: async (u: string, b: unknown) => { puts.push([u, b]); return { target: (b as any).target }; },
@@ -51,6 +52,7 @@ vi.mock("next/navigation", () => ({ useParams: () => ({}), useSearchParams: () =
   useRouter: () => ({ replace() {} }), usePathname: () => "/" }));
 
 import { PublishDialog } from "../PublishDialog";
+import { PublishButton } from "../PublishButton";
 
 const side = (url: string, at = "2026-10-16T10:00:00Z") =>
   ({ id: url, status: "succeeded", url, deployment_url: url, app_version: null, promoted_from: null, finished_at: at });
@@ -58,14 +60,10 @@ const side = (url: string, at = "2026-10-16T10:00:00Z") =>
 let root: Root;
 let host: HTMLDivElement;
 
-async function render() {
+async function render(el: React.ReactNode = <PublishDialog projectId="p1" open onOpenChange={() => {}} />) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   await act(async () => {
-    root.render(
-      <QueryClientProvider client={qc}>
-        <PublishDialog projectId="p1" open onOpenChange={() => {}} />
-      </QueryClientProvider>,
-    );
+    root.render(<QueryClientProvider client={qc}>{el}</QueryClientProvider>);
   });
   for (let i = 0; i < 4; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 }
@@ -133,5 +131,34 @@ describe("Publish, Test and Production", () => {
     await act(async () => { box.click(); });
     await act(async () => { button("Publish to Test")!.click(); });
     expect(started).toEqual([{ environment: "test", reset_test_data: true }]);
+  });
+
+  it("shows both addresses in the toolbar, the live app at its Tentoro address, whichever way the switch is set", async () => {
+    status = { target: "test", test: side("https://acme-test.vercel.app"), production: side("https://acme.vercel.app"),
+               test_address: "https://acme-test.vercel.app", production_address: "https://acme.apps.tentoro.ai",
+               untested_changes: false, test_ahead: false };
+    await render(<PublishButton projectId="p1" />);
+    const links = [...host.querySelectorAll("a")].map((a) => [a.textContent?.trim(), a.getAttribute("href")]);
+    expect(links).toEqual([
+      ["Liveacme.apps.tentoro.ai", "https://acme.apps.tentoro.ai"],
+      ["Testacme-test.vercel.app", "https://acme-test.vercel.app"],
+    ]);
+    expect(host.textContent).not.toContain("acme.vercel.app");
+  });
+
+  it("shows the live app at its Vercel address while it has no other", async () => {
+    status = { target: "production", test: null, production: side("https://acme.vercel.app"),
+               test_address: "https://acme-test.vercel.app", production_address: "https://acme.vercel.app",
+               untested_changes: true, test_ahead: false };
+    await render(<PublishButton projectId="p1" />);
+    expect([...host.querySelectorAll("a")].map((a) => a.getAttribute("href"))).toEqual(["https://acme.vercel.app"]);
+  });
+
+  it("the dialog's summary names the live app's main address", async () => {
+    status = { target: "production", test: null, production: side("https://acme.vercel.app"),
+               test_address: "https://acme-test.vercel.app", production_address: "https://acme.apps.tentoro.ai",
+               untested_changes: true, test_ahead: false };
+    await render();
+    expect(document.body.textContent).toContain("acme.apps.tentoro.ai");
   });
 });

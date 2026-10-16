@@ -296,3 +296,25 @@ def test_a_domain_change_never_touches_the_test_versions_settings(tmp_path):
     asyncio.run(svc.connect("app.acme.com"))
     assert fake.env["NEXTAUTH_URL"]["value"] == "https://app.acme.com"
     assert "env_test_url" not in fake.env, "the test version's row was never updated"
+
+
+def test_the_live_app_is_shown_at_its_main_address_once_it_answers(tmp_path):
+    """While the Tentoro address is still waiting, the live app is shown at its
+    Vercel address (""); once it answers, at `<app>.apps.tentoro.ai`; once the
+    owner's own main domain answers, at that."""
+    from services.blueprint.service import BlueprintService
+    from services.deploy.domains import live_address
+    svc = BlueprintService.create(output_dir=tmp_path, app_id="aqua", name="AquaTrack", domain="health")
+    svc.doc["deployment"] = {"domains": [{"name": "aqua.apps.tentoro.ai", "kind": "tentoro", "main": True,
+                                          "status": "waiting"}]}
+    svc.save()
+    assert live_address(tmp_path, "aqua") == ""
+    svc.doc["deployment"]["domains"][0]["status"] = "live"
+    svc.save()
+    assert live_address(tmp_path, "aqua") == "https://aqua.apps.tentoro.ai"
+    svc.doc["deployment"]["domains"][0]["main"] = False
+    svc.doc["deployment"]["domains"].append({"name": "app.acme.com", "kind": "subdomain", "main": True,
+                                             "status": "live"})
+    svc.save()
+    assert live_address(tmp_path, "aqua") == "https://app.acme.com"
+    assert live_address(None, "aqua") == ""

@@ -1030,6 +1030,20 @@ def project_root(path: str | Path) -> Path:
     return p.parent
 
 
+def live_address(output_dir: str | Path | None, short_id: str) -> str:
+    """The address people should open the live app at: its main address once
+    live (the owner's own, else its Tentoro address), or "" while only
+    `<project>.vercel.app` answers."""
+    if not output_dir:
+        return ""
+    try:
+        return DomainService(output_dir=str(project_root(output_dir)), client=None,
+                             project_name=vercel_project_name(short_id)).main_address()
+    except Exception:  # noqa: BLE001 — what is shown falls back to the Vercel address
+        logger.warning("[domains] could not read the main address of %s", short_id, exc_info=True)
+        return ""
+
+
 async def attach_after_publish(path: str | Path, client: Any, project_name: str,
                                say: Callable[[str], None] | None = None) -> list[dict]:
     """After a publish: give the app its Tentoro address (when the platform
