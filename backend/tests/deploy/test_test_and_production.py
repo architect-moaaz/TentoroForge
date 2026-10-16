@@ -275,3 +275,24 @@ def test_the_test_version_emails_only_the_organisation_and_says_so():
     assert 'process.env.FORGE_ENVIRONMENT !== "test"' in ribbon and "noindex" in ribbon
     layout = (Path(__file__).resolve().parents[2] / "templates/app-foundation/src/app/layout.tsx").read_text()
     assert "<TestRibbon />" in layout
+
+
+def test_a_domain_change_never_touches_the_test_versions_settings(tmp_path):
+    """The main domain going live re-points the live app's sign-in address;
+    the test version's own NEXTAUTH_URL row is left as it is."""
+    import asyncio
+    from tests.services.test_an_app_answers_at_its_own_address import FakeVercel, _project, _service
+    root = _project(tmp_path)
+    fake = FakeVercel()
+    fake.configured.add("app.acme.com")
+    test_rows = [{"id": "env_test_url", "key": "NEXTAUTH_URL", "value": "https://aqua-test.vercel.app",
+                  "target": ["preview"]}]
+    original = fake.list_env
+
+    async def list_env(pid):
+        return [*test_rows, *(await original(pid))]
+    fake.list_env = list_env
+    svc = _service(root, fake)
+    asyncio.run(svc.connect("app.acme.com"))
+    assert fake.env["NEXTAUTH_URL"]["value"] == "https://app.acme.com"
+    assert "env_test_url" not in fake.env, "the test version's row was never updated"

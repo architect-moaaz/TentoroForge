@@ -23,6 +23,11 @@ def test_the_runtime_registry_and_the_platform_keys_agree():
     index = (ROOT / "templates/runtime/payments/index.ts").read_text()
     assert "ADAPTERS: Record<string, PaymentAdapter> = { stripe: stripeAdapter, stand_in: standInAdapter }" in index
     from services.node_config_specs import keys_for_provider, providers_for_action
-    assert [k.key for k in keys_for_provider("stripe")] == ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PUBLISHABLE_KEY"]
+    # The live keys, then their test-mode twins, which only a published app's
+    # test version receives (in place of the live ones; services/deploy/environments).
+    from services.deploy.environments import TEST_TWINS
+    assert [k.key for k in keys_for_provider("stripe")] == [
+        "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PUBLISHABLE_KEY",
+        TEST_TWINS["STRIPE_SECRET_KEY"], TEST_TWINS["STRIPE_WEBHOOK_SECRET"], TEST_TWINS["STRIPE_PUBLISHABLE_KEY"]]
     for action in ("take_payment", "refund_payment", "payment_status", "connect_account"):
         assert "stripe" in providers_for_action(action)

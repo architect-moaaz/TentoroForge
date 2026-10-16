@@ -931,7 +931,10 @@ class DomainService:
         main = self.main_address()
         wanted = main or (production_alias(self.project_name) if sso_declared(self.output_dir) else "")
         org_base = self.organisations_domain()
-        env = {e.get("key"): e for e in await self.client.list_env(pid)}
+        # THE LIVE APP'S SETTINGS ONLY: the test version has its own rows of the
+        # same names (its own NEXTAUTH_URL), which a domain change never touches.
+        env = {e.get("key"): e for e in await self.client.list_env(pid)
+               if "production" in (e.get("target") or ["production"])}
         changed = False
         for key, value in (("NEXTAUTH_URL", wanted), ("FORGE_ORG_DOMAIN", org_base),
                            ("FORGE_ORG_SIGN_IN_MODE", (self.tenancy().get("addressSignIn") or "shared") if org_base else "")):
