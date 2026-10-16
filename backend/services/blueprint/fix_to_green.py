@@ -341,18 +341,32 @@ def _write_logic(svc: Any, processes: dict, rules: dict | None) -> None:
     green = len(processes.get("passed") or []) + len(processes.get("fixed") or [])
     red = [sc.item(t["workflow"], t["name"], t["reason"], t["workflow"]) for t in processes.get("left") or []]
     untried = [sc.item(t["workflow"], t["name"], t["reason"], t["workflow"]) for t in processes.get("untried") or []]
+    skipped: list[dict] = []
     if rules:
         green += len(rules.get("green") or [])
         red += list(rules.get("red") or [])
         untried += list(rules.get("untried") or [])
-    sc.write(svc, "logic", green=green, red=red, untried=untried)
+        skipped += list(rules.get("skipped") or [])
+    sc.write(svc, "logic", green=green, red=red, untried=untried, skipped=skipped)
 
 
 def _logic_line(svc: Any) -> str:
+    """What the checks could judge, said as such; what nothing here can judge
+    said apart, so "0 of 7 hold, 7 I couldn't try" never stands for seven
+    rules no process carries (Mark 8, 2026-10-16)."""
     v = (sc.read(svc.doc) or {}).get("criteria", {}).get("logic") or {}
-    return (f"Ran the processes and tried the rules: {v.get('green', 0)} of {v.get('total', 0)} hold"
-            + (f", {len(v.get('red') or [])} don't" if v.get("red") else "")
-            + (f", {len(v.get('untried') or [])} I couldn't try" if v.get("untried") else "") + ".")
+    skipped = len(v.get("skipped") or [])
+    total = int(v.get("total") or 0)
+    if not total and not v.get("untried"):
+        head = "No process or rule a trial could run here"
+    else:
+        head = (f"Ran the processes and tried the rules: {v.get('green', 0)} of {total} hold"
+                + (f", {len(v.get('red') or [])} don't" if v.get("red") else "")
+                + (f", {len(v.get('untried') or [])} I couldn't try" if v.get("untried") else ""))
+    if skipped:
+        head += (f"; {skipped} rule{'s' if skipped != 1 else ''} gate{'s' if skipped == 1 else ''} no process, "
+                 f"so there is nothing to try {'them' if skipped != 1 else 'it'} in")
+    return head + "."
 
 
 def _write_smith(svc: Any, turns: int, yields: list[int], *, before_total: int) -> None:
@@ -534,8 +548,10 @@ def _check_again(svc: Any, output_dir: str, app_root: str, report: Any, batch: l
             out = results["rules"]
             red = [r for r in prior["red"] if str(r.get("cause")) not in rules] + list(out["red"])
             untried = [u for u in prior["untried"] if str(u.get("cause")) not in rules] + list(out["untried"])
+            skipped = [u for u in prior.get("skipped") or [] if str(u.get("cause")) not in rules] + list(out.get("skipped") or [])
             total = int(prior["total"])
-            sc.write(svc, "logic", green=max(total - len(red) - len(untried), 0), red=red, untried=untried, total=total)
+            sc.write(svc, "logic", green=max(total - len(red) - len(untried), 0), red=red, untried=untried, total=total,
+                     skipped=skipped)
 
 
 def _wait_for_the_person(output_dir: str, cancelled: Callable[[], bool]) -> None:

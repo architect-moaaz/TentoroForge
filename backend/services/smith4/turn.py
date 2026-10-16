@@ -111,8 +111,20 @@ FAULT_NOT_SEEN = (
     "This turn was started by a check that saw a fault, and no try in it has shown that fault yet. Use "
     "what the check reported, as the person it names; if the try works, the fault is not there — end "
     "with `done` and say what the try showed. Change nothing for a fault you have not seen.")
+#: The writes that redo a page's code as a whole. The first of them in a turn
+#: that gives no `because` is asked to size the change first: "change the
+#: background to white" went to `write_page_code` — a full rewrite, seventeen
+#: minutes — when one class in the file was the change (Mark 8, cxz95dd1,
+#: 2026-10-16). The reason it gives is what the person is told.
+SIZED = frozenset({"write_page_code", "rewrite_pages"})
+SIZE_FIRST = (
+    "Size the change before rewriting a page. From what you read of its code: a value, a class or a "
+    "line changes — `edit_file` with `find` and `replace`; a section's content or one record's "
+    "fields — the section verbs or `edit_definition`; the layout, a component that is replaced, or "
+    "more than a few lines that move — call this again with `because`: one sentence saying which "
+    "of those it is, in the person's terms. It is said to them as the reason.")
 #: A step these answered never ran: asking for it again is not a repeat.
-_NOT_RUN = frozenset({REPRODUCE_FIRST, PATCH_NEEDS_PROOF, NOT_ASKED_FOR, FAULT_NOT_SEEN})
+_NOT_RUN = frozenset({REPRODUCE_FIRST, PATCH_NEEDS_PROOF, NOT_ASKED_FOR, FAULT_NOT_SEEN, SIZE_FIRST})
 
 
 def _change_said(tool: str, args: dict) -> str:
@@ -619,6 +631,13 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
                         tools.is_trial(o.tool) and trials.failed(o.said or "") for o in observations):
                     observations.append(Observation(tool=tool, args=args, status="error", said=PATCH_NEEDS_PROOF))
                     continue
+            # SEEN FIRST, SIZED SECOND. Once the fault has been seen (or the change
+            # is the one they asked for), a whole-page rewrite still says why an
+            # edit will not do — once a turn — before it runs.
+            held = size_first(tool, args, observations)
+            if held is not None:
+                observations.append(held)
+                continue
         if tools.is_write(tool):
             out = writes.run(tool, args, output_dir=ctx.out, reasoning=ctx.reasoning)
             step = Outcome(status="resolved" if out.get("applied") and not out.get("finding") else "needs_user",
@@ -817,15 +836,33 @@ def _ended(tool: str, args: dict, landed: list[str], touched: list[str],
     return _finished(landed, touched, last)
 
 
+def size_first(tool: str, args: dict, observations: list) -> Observation | None:
+    """The observation a whole-page rewrite without a `because` gets, once a
+    turn; None when the call may run. A reason given, or the rule already
+    heard this turn, lets it through — the rule is a question asked once,
+    not a gate."""
+    if tool not in SIZED or str(args.get("because") or "").strip():
+        return None
+    if any(o.said == SIZE_FIRST for o in observations):
+        return None
+    return Observation(tool=tool, args=args, status="error", said=SIZE_FIRST)
+
+
 def step_line(n: int, tool: str, args: dict) -> str:
-    """One short line for a step: the tool and what it is about."""
+    """One short line for a step: the tool, what it is about, and — for a
+    change — why that change: the `because` of a rewrite, the `why` of an
+    edit. "step 6: write_page_code /" told the person nothing they could
+    object to; the reason is what lets them say "no, just the background"
+    at minute one rather than minute seventeen (Mark 8, 2026-10-16)."""
     about = ""
     for key in ("route", "path", "name", "workflow", "entity", "page"):
         if args.get(key):
             about = str(args[key])[:60]
             break
     who = f" as {args['as']}" if args.get("as") else ""
-    return f"step {n}: {tool or '-'}" + (f" {about}" if about else "") + who
+    reason = str(args.get("because") or (args.get("why") if tool in ("edit_file", "edit_definition") else "") or "").strip()
+    reason = " ".join(reason.split())[:140]
+    return f"step {n}: {tool or '-'}" + (f" {about}" if about else "") + who + (f" — {reason}" if reason else "")
 
 
 def _finished(landed: list[str], touched: list[str], last: Outcome | None, *,
@@ -847,4 +884,4 @@ def _finished(landed: list[str], touched: list[str], last: Outcome | None, *,
                    diff_summary=last.diff_summary, touched=list(touched), finding=last.finding)
 
 
-__all__ = ["turn", "Choose", "LOOK_FIRST", "NOTHING_TRIED", "UNPROVEN", "STILL_FAILING"]
+__all__ = ["turn", "Choose", "LOOK_FIRST", "NOTHING_TRIED", "UNPROVEN", "STILL_FAILING", "SIZE_FIRST", "SIZED"]

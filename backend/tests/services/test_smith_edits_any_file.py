@@ -244,7 +244,10 @@ def test_a_page_rewrite_in_a_turn_that_tried_nothing_is_asked_to_reproduce_too(t
                         {"applied": True, "said": "Rewrote /cart.", "touched": ["app/src/app/cart/view.tsx"]})
     _repo(tmp_path)
     rewrite = {"tool": "write_page_code", "args": {"route": "/cart", "brief": "show the items"}}
-    chooser = _Chooser(rewrite, _TRY, dict(rewrite), _TRY, {"tool": "done", "args": {}})
+    # After the try, the rewrite says why an edit will not do (`because`), or
+    # it is asked to size the change first — see test_a_change_is_sized_before_a_page_is_rewritten.
+    sized = {"tool": "write_page_code", "args": {**rewrite["args"], "because": "the cart's list is replaced by a table"}}
+    chooser = _Chooser(rewrite, _TRY, sized, _TRY, {"tool": "done", "args": {}})
     _turn(tmp_path, chooser, "the bag is empty after adding")
     assert chooser.seen[1][-1].said == REPRODUCE_FIRST
     assert calls == ["write_page_code"]

@@ -38,7 +38,9 @@ def _try(workflow="FLOW-001"):
 
 
 def _write(path="src/app/admin/categories/view.tsx"):
-    return {"tool": "write_page_code", "args": {"route": "/admin/categories", "brief": "fix"}}
+    # `because`: a whole-page rewrite says why an edit will not do, or it is asked to size the change first.
+    return {"tool": "write_page_code", "args": {"route": "/admin/categories", "brief": "fix",
+                                               "because": "the category form is replaced by a wizard"}}
 
 
 @pytest.fixture

@@ -122,11 +122,16 @@ def refuse_rules(doc: dict, bench: Any, client: Any, *, only: set[str] | None = 
     pairs = [(r, f) for r, f in gated(doc) if only is None or str(r.get("id")) in only]
     green: list[dict] = []
     red: list[dict] = []
-    untried: list[dict] = [item(str(r["id"]), str(r.get("name") or r["id"]),
+    untried: list[dict] = []
+    # A RULE NO PROCESS CARRIES IS NOTHING A TRIAL CAN JUDGE. It used to be
+    # counted as "untried", so a calculator with seven rules and no process
+    # read "0 of 7 hold, 7 I couldn't try — my own check failed" (Mark 8,
+    # 2026-10-16). It is skipped, with the reason, outside the total.
+    skipped: list[dict] = [item(str(r["id"]), str(r.get("name") or r["id"]),
                                 "gates no process a trial can run", str(r["id"]))
                            for r in ungated(doc) if only is None or str(r.get("id")) in only]
     if not pairs:
-        return {"total": len(untried), "green": green, "red": red, "untried": untried}
+        return {"total": 0, "green": green, "red": red, "untried": untried, "skipped": skipped}
     try:
         app = bench.app()
         if records is None:
@@ -134,7 +139,7 @@ def refuse_rules(doc: dict, bench: Any, client: Any, *, only: set[str] | None = 
     except trials.TrialUnavailable as exc:
         untried += [item(str(r["id"]), str(r.get("name") or r["id"]),
                          f"the app could not be started to try it: {exc}", str(r["id"])) for r, _f in pairs]
-        return {"total": len(untried), "green": green, "red": red, "untried": untried}
+        return {"total": len(untried), "green": green, "red": red, "untried": untried, "skipped": skipped}
     plans = compose_breaking_inputs(doc, pairs, records, client)
     for rule, flow in pairs:
         rid, label = str(rule["id"]), str(rule.get("name") or rule["id"])
@@ -156,7 +161,7 @@ def refuse_rules(doc: dict, bench: Any, client: Any, *, only: set[str] | None = 
         else:
             red.append(it(f"{flow.get('name')} accepts what the rule says to refuse "
                           f"({json.dumps(plan.get('input') or {}, default=str)[:160]})"))
-    return {"total": len(pairs) + len(untried), "green": green, "red": red, "untried": untried}
+    return {"total": len(pairs), "green": green, "red": red, "untried": untried, "skipped": skipped}
 
 
 __all__ = ["RULE_INPUTS_SCHEMA", "RULE_INPUTS_SYSTEM", "compose_breaking_inputs", "gated", "refuse_rules", "ungated"]

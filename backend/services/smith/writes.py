@@ -548,6 +548,16 @@ _REQUESTED = {"edit_file", "edit_definition", "write_page_code", "rewrite_pages"
 WRITES = tuple((n, d + " `requested: true` only when they asked for this change itself — never when "
                 "they reported something not working.", {**a, "requested": "boolean"})
                if n in _REQUESTED else (n, d, a) for n, d, a in WRITES)
+#: `because`, on the writes that redo a page's code as a whole: one sentence
+#: on why an edit will not do. The loop sends a rewrite without it back to
+#: size the change (`smith4.turn.SIZE_FIRST`), and the sentence is what the
+#: person reads while it runs.
+_SIZED = {"write_page_code", "rewrite_pages"}
+WRITES = tuple((n, d + " `because`: one sentence on why an edit (`edit_file`, `edit_definition`) will not "
+                "do — the layout changes, a component is replaced, more than a few lines move — in the "
+                "person's terms; it is said to them as the reason. A rewrite without it is sent back to "
+                "size the change.", {**a, "because": "string"})
+               if n in _SIZED else (n, d, a) for n, d, a in WRITES)
 WRITE_NAMES = frozenset(name for name, _d, _a in WRITES)
 
 

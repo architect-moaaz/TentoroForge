@@ -167,6 +167,27 @@ def summary(doc: dict) -> dict:
             "declined": declined}
 
 
+#: Why an item offered at the product model and built past is declined.
+UNASKED_REASON = ("offered at the product model as something such products have, and the app was "
+                  "built without asking for it — the model's decision stands; ask for it to add it")
+
+
+def decline_unasked(svc: Any, *, by: str = "build") -> list[dict]:
+    """At the build, every reference item still open — offered at the product
+    model's review ("N things such products have are not in the model yet —
+    ask for them, or tell me to leave them out") and then built past without
+    a word — is declined with that reason. The modeller's decision to leave it
+    out and the person's to build anyway are one decision, remembered; the
+    domain score after hand-over used to re-litigate it and the fix loop then
+    spent its minutes adding processes to a calculator (Mark 8, 2026-10-16).
+    Returns what was declined; saves when anything was."""
+    left_out = [{"kind": it.kind, "name": it.name, "reason": UNASKED_REASON} for it in coverage(svc.doc) if it.open]
+    added = record_declines(svc, left_out, by=by)
+    if added:
+        svc.save()
+    return added
+
+
 def record_declines(svc: Any, declines: list[dict], *, by: str) -> list[dict]:
     """Merge well-formed declines into `domainReference.declined`, by name
     and kind, keeping the first reason. Returns what was added."""

@@ -2630,6 +2630,21 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
                         _approval.record(svc, _g)
                     except Exception:  # noqa: BLE001 — a gate that cannot be written must not stop the build
                         logger.exception("could not record the %s approval for %s", _g, output_dir)
+            # WHAT WAS OFFERED AND BUILT PAST IS LEFT OUT ON PURPOSE. The reference
+            # items the product model's review said were "not in the model yet"
+            # are declined here, with the reason, so the checks after hand-over
+            # hold the app to the model that was approved and not to a list the
+            # person chose to build without (Mark 8, 2026-10-16).
+            try:
+                from services.blueprint.reference_coverage import decline_unasked
+                _left_out = decline_unasked(svc, by="build")
+                if _left_out:
+                    emit("thought", {"text": "Left out, as built: " + ", ".join(d["name"] for d in _left_out[:8])
+                                     + (" and more" if len(_left_out) > 8 else "")
+                                     + " — such products have them; this one was built without. Ask for any of them to add it.",
+                                     "kind": "step", "node": "domain_reference"})
+            except Exception:  # noqa: BLE001 — a note on the record, never the build
+                logger.exception("could not record what the build left out for %s", output_dir)
         if description:
             # AN ANSWER ADDS TO THE BRIEF, IT DOES NOT REPLACE IT. This
             # assigned, so a clarifying exchange destroyed the request that
