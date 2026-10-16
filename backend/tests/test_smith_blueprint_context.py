@@ -199,10 +199,41 @@ def test_the_rules_in_force_are_shown(tmp_path):
          "when": "experienceYears > 60"}])
     ctx = blueprint_to_context(bp)
     assert "## Rules (1)" in ctx
-    assert "**Experience Cap**: Experience cannot exceed 60." in ctx
+    assert "**Experience Cap** — Experience cannot exceed 60." in ctx
     assert "when `experienceYears > 60`" in ctx
+    # What the person sees of it in the Business Rules tab, Smith sees too.
+    tab = blueprint_to_context(Blueprint(project_id="p1", domain={"name": "clinic"}, business_rules=[
+        {"id": "RULE-007", "name": "Note over 5000", "statement": "Big expenses need a note.",
+         "entity_name": "Expense", "when": "amount > 5000", "effects": ["require managerNote"],
+         "runs": "everywhere", "enabled": True, "origin": "editor"},
+        {"id": "RULE-008", "name": "Weekend", "statement": "No weekend claims.", "runs": "nowhere",
+         "enabled": True, "origin": "brief"},
+        {"id": "RULE-009", "name": "Old cap", "statement": "Cap at 100.", "runs": "nowhere",
+         "enabled": False, "origin": "smith"}]))
+    assert ("- RULE-007 **Note over 5000** on Expense — Big expenses need a note. "
+            "[ENFORCED on every save + live on the form; made by the person in the Business Rules tab]"
+            " · when `amount > 5000` → require managerNote") in tab
+    assert "RULE-008 **Weekend** — No weekend claims. [WRITTEN DOWN ONLY — nothing enforces it; from the person's request]" in tab
+    assert "[SWITCHED OFF in the Business Rules tab; added in chat]" in tab
     assert "## Rules\n(none yet.)" in blueprint_to_context(
         Blueprint(project_id="p1", domain={"name": "c"}))
+
+
+def test_every_rule_stays_named_when_the_page_is_short(tmp_path):
+    """A big app's rules were cut off the end of the page: Smith answered "is
+    there a rule for that?" from half the list."""
+    rules = [{"id": f"RULE-{i:03d}", "name": f"Rule number {i}", "statement": "x " * 120,
+              "entity_name": "Expense", "when": f"amount > {i}", "effects": ["refuse “too much”"],
+              "runs": "everywhere", "enabled": i != 7, "origin": "editor"} for i in range(1, 121)]
+    bp = Blueprint(project_id="p1", domain={"name": "clinic"}, business_rules=rules)
+    ctx = blueprint_to_context(bp, budget=ContextBudget(max_chars=12_000))
+    assert "## Rules (120)" in ctx and "`read_section` \"rules\" shows each in full" in ctx
+    for i in range(1, 121):
+        assert f"- RULE-{i:03d} Rule number {i} on Expense [" in ctx, i
+    assert "- RULE-007 Rule number 7 on Expense [switched off; editor]" in ctx
+    # Room enough: the full form, unchanged.
+    roomy = blueprint_to_context(bp, budget=ContextBudget(max_chars=400_000))
+    assert "shortened to fit" not in roomy and "**Rule number 120**" in roomy
 
 
 def test_the_engine_document_is_what_smith_reads(tmp_path):

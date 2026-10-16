@@ -916,6 +916,17 @@ async function fireRuleEffects(
   record: any,
   ctx: DataEngineContext,
 ): Promise<void> {
+  // The rule's workflow starts and its notification is stored — the events
+  // below are kept for anything that listens, but they were all that
+  // happened, and nothing listened.
+  try {
+    const wf = await import("@/lib/workflows");
+    if (typeof (wf as any).runRuleEffects === "function") {
+      await (wf as any).runRuleEffects(effects, record, ctx.user);
+    }
+  } catch (e) {
+    console.error("[DataEngine] rule side effects could not run:", e);
+  }
   for (const eff of effects ?? []) {
     try {
       if (eff.type === "trigger_workflow" && eff.workflow) {
@@ -1219,7 +1230,7 @@ export async function update(
     if (!result.valid) {
       throw new ValidationError(result.errors);
     }
-    const rs = await evaluateRuleSet(entityName, "update", merged, ctx.user);
+    const rs = await evaluateRuleSet(entityName, "update", merged, ctx.user, existing as Record<string, unknown>);
     if (rs.errors.length) {
       throw new ValidationError(rs.errors);
     }

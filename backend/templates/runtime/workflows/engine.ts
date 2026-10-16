@@ -258,6 +258,7 @@ export async function executeWorkflow(
       startedAt,
       completedAt: new Date().toISOString(),
       status: "failed",
+      ...((err as { refused?: unknown })?.refused === true ? { refused: true } : {}),
       log: ctx.log,
       output: ctx.variables,
       notices: noticesOf(ctx.log),
@@ -652,6 +653,12 @@ async function executeNode(
           actionOutput && typeof actionOutput === "object" &&
           (actionOutput as { error?: unknown }).error
         ) {
+          // A BUSINESS RULE SAYING NO is a refusal, not a crash: its message
+          // is the person's sentence ("A task in progress needs a due date."),
+          // said as it is, and the run is `refused` like a refused end.
+          if ((actionOutput as { refusedByRule?: unknown }).refusedByRule === true) {
+            throw Object.assign(new Error(String((actionOutput as { error?: unknown }).error)), { refused: true });
+          }
           throw new Error(
             `${node.data.label || node.type}: ${(actionOutput as { error?: unknown }).error}`,
           );

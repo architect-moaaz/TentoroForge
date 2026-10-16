@@ -61,6 +61,7 @@ from routers.templates import router as templates_router
 from routers.discovery import router as discovery_router
 from routers.data_model import router as data_model_router
 from routers.rules import router as rules_router
+from routers.business_rules import router as business_rules_router
 from routers.workflows import router as workflows_router
 from routers.decisions import router as decisions_router
 from routers.open_decisions import router as open_decisions_router
@@ -200,6 +201,7 @@ app.include_router(templates_router)
 app.include_router(discovery_router)
 app.include_router(data_model_router)
 app.include_router(rules_router)
+app.include_router(business_rules_router)
 from routers.app_actions import router as app_actions_router
 app.include_router(app_actions_router)
 

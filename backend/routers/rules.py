@@ -75,46 +75,18 @@ async def list_rules(
     user: PlatformUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Every rule for a project — the Blueprint's, then any authored by hand.
+    """Every rule a person authored in the Rules tab (validation, access, …).
 
-    THE BLUEPRINT IS THE LIVING DOCUMENT. `project_rules` is a table the
-    Blueprint engine has never written, so a generated application answered
-    `200 []` here while its Blueprint held thirteen business rules. The panel
-    rendered an empty state, which is what an application with no rules also
-    looks like, so nothing anywhere reported a problem.
-
-    Read rather than synced. Copying the Blueprint into this table would give
-    rules two homes and let them drift apart the moment either changed, which
-    is the divergence §76 forbids — and `_sync_pages_from_app_model` next door
-    is what that costs: a legacy bridge reachable from one router, leaving rows
-    that are correct only until the Blueprint moves.
-
-    Rows still answer for anything a person authored through POST. They come
-    second so a hand-written rule can never be hidden by a generated one.
+    A Blueprint app's business rules are not listed here: they have one home,
+    the Business Rules tab (see the comment below and routers/business_rules).
     """
     project = await get_project_with_auth(project_id, user, db)
 
-    blueprint_rules: list[dict] = []
-    if project.output_dir:
-        try:
-            from services.blueprint.service import BlueprintService
-            from services.blueprint_to_editor import rules_from_blueprint
-            svc = BlueprintService.load(output_dir=str(project.output_dir))
-            blueprint_rules = rules_from_blueprint(
-                svc.doc, project_id, project.output_dir)
-        except FileNotFoundError:
-            # No Blueprint — a legacy project, and the rows below are all it
-            # ever had.
-            pass
-        # Filters apply to both sources or they mean different things
-        # depending on where a rule came from.
-        if rule_type:
-            blueprint_rules = [r for r in blueprint_rules
-                               if r["rule_type"] == rule_type]
-        if model_name:
-            blueprint_rules = [r for r in blueprint_rules
-                               if r["model_name"] == model_name]
-
+    # BUSINESS RULES HAVE ONE TAB. A Blueprint app's business rules are read,
+    # edited, switched and removed in the Business Rules tab
+    # (/api/projects/{id}/business-rules), from the same record the build and
+    # Smith write. Listed here too they were a second, stripped copy — read-only,
+    # without their logic, and still "Active" after Smith retired them.
     stmt = select(ProjectRule).where(ProjectRule.project_id == project_id)
     if rule_type:
         stmt = stmt.where(ProjectRule.rule_type == rule_type)
@@ -123,9 +95,7 @@ async def list_rules(
     stmt = stmt.order_by(ProjectRule.created_at.desc())
 
     result = await db.execute(stmt)
-    return blueprint_rules + [
-        RuleResponse.model_validate(r) for r in result.scalars().all()
-    ]
+    return [RuleResponse.model_validate(r) for r in result.scalars().all()]
 
 
 @router.post("/api/projects/{project_id}/rules", response_model=RuleResponse, status_code=201)

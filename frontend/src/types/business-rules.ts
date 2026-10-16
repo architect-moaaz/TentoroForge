@@ -22,6 +22,7 @@ export type RuleActionType =
   | "set_visibility"
   | "set_required"
   | "set_readonly"
+  | "set_options"
   | "recommendation"
   | "trigger_workflow"
   | "send_notification";
@@ -45,8 +46,10 @@ export interface RuleAction {
   required?: boolean;
   /** set_readonly (lock/unlock) */
   readonly?: boolean;
-  /** trigger_workflow */
+  /** trigger_workflow — the workflow's id (FLOW-…) on a Blueprint app. */
   workflow?: string;
+  /** set_options — the options the field offers while the rule holds. */
+  options?: { value: string; label: string }[];
 }
 
 export type RuleScope = "entity" | "form" | "server";
@@ -146,8 +149,8 @@ export const ACTION_META: Record<
   },
   set_required: {
     label: "Set required",
-    description: "Make a field business-required or optional.",
-    formOnly: true,
+    description: "Require a field: the form marks it, and a save without it is refused.",
+    formOnly: false,
     needsField: true,
     needsValue: false,
     needsMessage: false,
@@ -155,6 +158,14 @@ export const ACTION_META: Record<
   set_readonly: {
     label: "Lock / unlock field",
     description: "Make a field read-only or editable.",
+    formOnly: true,
+    needsField: true,
+    needsValue: false,
+    needsMessage: false,
+  },
+  set_options: {
+    label: "Limit options",
+    description: "Offer only these choices for a field while the rule holds.",
     formOnly: true,
     needsField: true,
     needsValue: false,
@@ -170,7 +181,7 @@ export const ACTION_META: Record<
   },
   trigger_workflow: {
     label: "Trigger workflow",
-    description: "Fire a workflow by name.",
+    description: "Start one of the app's workflows with this record.",
     formOnly: false,
     needsField: false,
     needsValue: false,
@@ -194,6 +205,7 @@ export const ACTION_TYPES: RuleActionType[] = [
   "set_visibility",
   "set_required",
   "set_readonly",
+  "set_options",
   "recommendation",
   "trigger_workflow",
   "send_notification",

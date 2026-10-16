@@ -209,6 +209,19 @@ def _remove_except(target: Path, root: Path, preserve: tuple[str, ...]) -> None:
             child.rmdir()
 
 
+#: The policies an app with no tenancy / no audit trail declared runs on —
+#: what the projections write when the Blueprint says "none".
+TENANCY_POLICY_NONE = (
+    "// Written by the Blueprint projection (project_tenancy). None: this\n"
+    "// application serves one organisation.\n"
+    "export const TENANCY = { kind: \"none\", entity: null, table: null, nameColumn: null, memberRoles: [], "
+    "platformRoles: [], adminRole: null, signup: \"both\", columns: {} } as const;\n")
+AUDIT_POLICY_NONE = (
+    "// Written by the Blueprint projection (project_audit). None: this\n"
+    "// application declares no audit trail, so nothing is recorded.\n"
+    "export const AUDIT = { level: \"none\", reviewers: [], retentionDays: null, reasonRequired: [] } as const;\n")
+
+
 def inject_runtime(output_dir: str, app_name: str | None = None, domain: str | None = None, project_id: str | None = None, preserve: tuple[str, ...] = ()) -> dict[str, Any]:
     """Copy runtime files into a generated app's src/lib/ directory.
 
@@ -304,20 +317,11 @@ def inject_runtime(output_dir: str, app_name: str | None = None, domain: str | N
             errors.append(f"Failed to copy tenancy: {e}")
     tpolicy = src_lib / "tenancy-policy.ts"
     if not tpolicy.exists():
-        tpolicy.write_text(
-            "// Written by the Blueprint projection (project_tenancy). None: this\n"
-            "// application serves one organisation.\n"
-            "export const TENANCY = { kind: \"none\", entity: null, table: null, nameColumn: null, memberRoles: [], "
-            "platformRoles: [], adminRole: null, signup: \"both\", columns: {} } as const;\n",
-            encoding="utf-8")
+        tpolicy.write_text(TENANCY_POLICY_NONE, encoding="utf-8")
         copied.append("src/lib/tenancy-policy.ts")
     policy = src_lib / "audit-policy.ts"
     if not policy.exists():
-        policy.write_text(
-            "// Written by the Blueprint projection (project_audit). None: this\n"
-            "// application declares no audit trail, so nothing is recorded.\n"
-            "export const AUDIT = { level: \"none\", reviewers: [], retentionDays: null, reasonRequired: [] } as const;\n",
-            encoding="utf-8")
+        policy.write_text(AUDIT_POLICY_NONE, encoding="utf-8")
         copied.append("src/lib/audit-policy.ts")
 
     # Slice-4 sensitive-column encrypt-at-rest helper. Copied into every

@@ -23,6 +23,8 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -127,10 +129,12 @@ ENGINE_FOUNDATION_FILES: tuple[str, ...] = (
     # lands: platform files every app carries, never an agent's.
     "src/lib/api-path.ts", "src/lib/landing.ts", "src/lib/LiveRefresh.tsx",
     "src/sdk/client.tsx", "src/hooks/useEntityList.ts", "src/hooks/useEntityDetail.ts",
+    # The form asks it which rules hold while the person types.
+    "src/app/api/form-rules/route.ts",
 )
 
 
-def refresh_engine(app_root: str | Path, doc: dict | None = None) -> list[str]:
+def refresh_engine(app_root: str | Path, doc: dict | None = None, *, complete: bool = True) -> list[str]:
     """The app's copy of the platform's engine brought up to the platform's.
 
     An app carries the workflow engine, the formula engine and the SDK as
@@ -247,6 +251,8 @@ def refresh_engine(app_root: str | Path, doc: dict | None = None) -> list[str]:
         ensure_sdk(doc, root)
         after = _fingerprint(root)
         changed += sorted(k for k in after if k.startswith("src/sdk/") and before.get(k) != after[k])
+    if complete:
+        changed += complete_imports(root)
     if changed:
         logger.info("[engine] %s: %d engine file(s) brought up to the platform's: %s",
                     root, len(changed), ", ".join(changed[:8]))
@@ -300,7 +306,7 @@ def owned_frame(doc: dict) -> dict[str, str]:
             if isinstance(r, dict) and r.get("file") and r.get("code")}
 
 
-def refresh_frame(app_root: str | Path, doc: dict) -> list[str]:
+def refresh_frame(app_root: str | Path, doc: dict, *, complete: bool = True) -> list[str]:
     """The app's frame written out: each file the application owns from its
     `frameCode` row, every other one as the platform's current version, filled
     as a build fills it (`__APP_NAME__`). Written only where the file differs,
@@ -321,7 +327,108 @@ def refresh_frame(app_root: str | Path, doc: dict) -> list[str]:
         dst.parent.mkdir(parents=True, exist_ok=True)
         dst.write_text(text, "utf-8")
         changed.append(rel)
-    return changed
+    return changed + (complete_imports(root) if complete else [])
+
+
+#: Platform modules an app keeps somewhere other than where
+#: `templates/app-foundation/src` has them: `@/<module>` -> its template under
+#: `templates/runtime` (`runtime_injector` copies the same ones on a build).
+def _runtime_modules() -> dict[str, str]:
+    mods = {"lib/push": "push.ts",
+            "db/schema/_forge_push_subscriptions": "db/forge-push-subscriptions.schema.ts"}
+    for tmpl, dst in RUNTIME_FILES:
+        mods.setdefault(dst.removeprefix("src/").rsplit(".", 1)[0], tmpl)
+    return mods
+
+
+_IMPORT = re.compile(r"""(?:\bfrom\s*|\bimport\s*\(\s*)["'](@/|\.\.?/)([^"'\s]*)["']""")
+#: A template still holding a build's placeholders is filled by the build, not here.
+_UNFILLED = re.compile(r"__[A-Z][A-Z_]+__")
+_EXTS = ("", ".ts", ".tsx", "/index.ts", "/index.tsx", ".json")
+
+
+def _resolves(src: Path, mod: str) -> bool:
+    return any(Path(f"{src / mod}{ext}").is_file() for ext in _EXTS)
+
+
+def _platform_source(mod: str) -> tuple[str, str] | None:
+    """`(content, path under src/)` for a platform module, or None."""
+    from services.runtime_injector import _TEMPLATE_DIR, AUDIT_POLICY_NONE, TENANCY_POLICY_NONE
+
+    # A policy the projection writes from the Blueprint: "none" until it does.
+    stubs = {"lib/audit-policy": AUDIT_POLICY_NONE, "lib/tenancy-policy": TENANCY_POLICY_NONE}
+    if mod in stubs:
+        return stubs[mod], f"{mod}.ts"
+    foundation = Path(__file__).resolve().parents[2] / "templates" / "app-foundation" / "src"
+    for ext in _EXTS:
+        cand = Path(f"{foundation / mod}{ext}")
+        if cand.is_file():
+            return cand.read_text("utf-8", errors="replace"), cand.relative_to(foundation).as_posix()
+    tmpl = _runtime_modules().get(mod)
+    if tmpl and (_TEMPLATE_DIR / tmpl).is_file():
+        return (_TEMPLATE_DIR / tmpl).read_text("utf-8", errors="replace"), f"{mod}{Path(tmpl).suffix}"
+    # `src/lib/<x>` is where an app keeps the runtime's `<x>` (`inject_runtime`).
+    if mod.startswith("lib/"):
+        for ext in (".ts", ".tsx"):
+            cand = _TEMPLATE_DIR / f"{mod[4:]}{ext}"
+            if cand.is_file():
+                return cand.read_text("utf-8", errors="replace"), f"{mod}{ext}"
+    return None
+
+
+def complete_imports(app_root: str | Path) -> list[str]:
+    """Every platform module the app imports and does not have, written from
+    the platform's template. Returns the paths it wrote.
+
+    A refresh brings a platform file current, and the current file can import
+    one the app was built before: Task Board's refreshed `NotificationBell`
+    imported `@/lib/api-path`, its workflow engine `@/lib/push`, and neither
+    had ever been written into it — the dev server answered every page and
+    every API call with "Module not found" (2026-10-14). The files the
+    refresh carries are copied only where the app has them; what they need
+    has to come with them. Only a MISSING file is written (nothing the app
+    has is replaced), only from the platform's own templates, and what it
+    imports in turn is completed too. An import of something the platform
+    does not ship is left alone — that is the app's own code to answer for."""
+    root = Path(app_root)
+    src = root / "src"
+    if not src.is_dir():
+        return []
+    written: list[str] = []
+    looked: set[str] = set()
+    queue = [f for f in src.rglob("*") if f.suffix in (".ts", ".tsx") and f.is_file()
+             and not any(part in _SKIP for part in f.parts)]
+    while queue:
+        f = queue.pop()
+        try:
+            text = f.read_text("utf-8", errors="replace")
+        except OSError:
+            continue
+        for lead, spec in _IMPORT.findall(text):
+            if lead == "@/":
+                mod = spec
+            else:                     # beside the importing file: the frame's own parts
+                mod = os.path.normpath(os.path.join(f.parent.relative_to(src).as_posix(), lead + spec))
+                if mod.startswith(".."):
+                    continue
+            if mod in looked:
+                continue
+            looked.add(mod)
+            if _resolves(src, mod):
+                continue
+            found = _platform_source(mod)
+            if found is None or _UNFILLED.search(found[0]):
+                continue
+            text_of, rel = found
+            dst = src / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            dst.write_text(text_of, "utf-8")
+            written.append(f"src/{rel}")
+            queue.append(dst)
+    if written:
+        logger.info("[engine] %s: %d platform file(s) the app imported and lacked: %s",
+                    root, len(written), ", ".join(written))
+    return written
 
 
 #: What an app is written out by: the projections and the files they copy.
@@ -394,8 +501,11 @@ def sync(svc: Any, app_root: str) -> dict:
 
     root = Path(app_root)
     before = _fingerprint(root)
-    refresh_engine(root, svc.doc)
-    refresh_frame(root, svc.doc)
+    # The import completion walks the whole source tree; run it once here, not
+    # once inside each of the two refreshes, which doubled the walk every sync.
+    refresh_engine(root, svc.doc, complete=False)
+    refresh_frame(root, svc.doc, complete=False)
+    complete_imports(root)
     everything(svc, app_root)
     after = _fingerprint(root)
     changed = sorted(k for k in after if k in before and before[k] != after[k])
@@ -452,4 +562,4 @@ def run(output_dir: str, *, reasoning: Any = None) -> dict:
     return {"applied": True, "edited_paths": moved, "diff_summary": summary_of(out), **out}
 
 
-__all__ = ["ENGINE_DIRS", "FRAME_FILES", "catch_up", "frame_template", "owned_frame", "refresh_frame", "platform_stamp", "refresh_engine", "run", "summary_of", "sync"]
+__all__ = ["ENGINE_DIRS", "FRAME_FILES", "catch_up", "complete_imports", "frame_template", "owned_frame", "refresh_frame", "platform_stamp", "refresh_engine", "run", "summary_of", "sync"]
