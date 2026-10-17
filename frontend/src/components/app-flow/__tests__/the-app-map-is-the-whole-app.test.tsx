@@ -60,7 +60,11 @@ describe("the App Map", () => {
     expect(text).toContain("on no path");
     expect(text).toContain("after sign-up");
     expect(text).toContain("1 screen people may not find");
-    expect(text).toContain("Tax (/tax) — no path anyone takes passes through it");
+    // The list is folded at first; opening it names each screen.
+    expect(text).not.toContain("Tax (/tax) — no path anyone takes passes through it");
+    const strip = [...document.body.querySelectorAll("[data-map-gaps] button")][0] as HTMLButtonElement;
+    await act(async () => { strip.click(); });
+    expect(document.body.textContent).toContain("Tax (/tax) — no path anyone takes passes through it");
   });
 
   it("draws the screens even before any path is written", async () => {
