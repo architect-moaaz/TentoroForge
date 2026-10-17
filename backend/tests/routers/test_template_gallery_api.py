@@ -426,3 +426,51 @@ def test_a_small_file_that_unpacks_to_a_vast_picture_is_refused(tmp_path, monkey
     assert len(data) < templates.SCREENSHOT_BYTES_MAX
     with pytest.raises(templates.TemplateError, match="too large"):
         templates._decoded_size(data)
+
+
+@pytest.mark.asyncio
+async def test_a_gallery_of_pictures_does_not_spend_the_rate_limit():
+    """Every card draws its cover with one request; a page of them used up the
+    per-IP burst and the rest of the page answered 429."""
+    from starlette.applications import Starlette
+    from starlette.responses import PlainTextResponse
+    from starlette.routing import Route
+
+    from middleware.rate_limit import RateLimitMiddleware
+
+    async def ok(_request):
+        return PlainTextResponse("ok")
+    inner = Starlette(routes=[Route("/{path:path}", ok, methods=["GET", "POST"])])
+    inner.add_middleware(RateLimitMiddleware, requests_per_minute=1, burst=1)
+    async with AsyncClient(transport=ASGITransport(app=inner), base_url="http://t") as c:
+        shot = f"/api/project-templates/{'a' * 32}/screenshots/{'b' * 32}"
+        assert all([(await c.get(shot)).status_code == 200 for _ in range(30)])
+        # Everything else still counts — including writes to the same address.
+        assert (await c.get("/api/template-gallery")).status_code == 200
+        assert (await c.get("/api/template-gallery")).status_code == 429
+        assert (await c.post(shot)).status_code == 429
+
+
+@pytest.mark.asyncio
+async def test_a_deleted_versions_number_is_never_given_again(auth_client, org_id):
+    src = await _defined_project(auth_client, org_id, "Numbers")
+    v1 = (await auth_client.post(f"/api/projects/{src['id']}/templates", json={})).json()
+    v2 = (await auth_client.post(f"/api/projects/{src['id']}/templates", json={})).json()
+    assert (v1["version"], v2["version"]) == (1, 2)
+    assert (await auth_client.delete(f"/api/project-templates/{v2['id']}")).status_code == 204
+    v3 = (await auth_client.post(f"/api/projects/{src['id']}/templates", json={})).json()
+    assert v3["version"] == 3
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_domain_is_not_a_category(auth_client, org_id):
+    def unknown(doc):
+        doc["application"]["domain"] = "unknown"
+    src = await _defined_project(auth_client, org_id, "NoDomain", mutate=unknown)
+    tpl = (await auth_client.post(f"/api/projects/{src['id']}/templates", json={})).json()
+    assert tpl["category"] == ""
+    # One saved before this rule is shown without it too.
+    meta = templates.get(tpl["id"])
+    meta["category"] = "unknown"
+    (templates.templates_root() / tpl["id"] / "meta.json").write_text(json.dumps(meta))
+    assert (await auth_client.get(f"/api/project-templates/{tpl['id']}")).json()["category"] == ""

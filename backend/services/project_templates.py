@@ -117,6 +117,16 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+#: What a Blueprint says when it does not know an app's domain — never a
+#: category a person would pick or filter by.
+_NO_DOMAIN = {"unknown", "other", "general", "none", "n/a"}
+
+
+def clean_category(value: Any) -> str:
+    text = str(value or "").strip()[:60]
+    return "" if text.lower() in _NO_DOMAIN else text
+
+
 def lineage_key(org_id: str, source_project_id: str, template_id: str) -> str:
     """What every version of one app's template shares: the organisation and
     the app it was taken from (a template with no source app is its own)."""
@@ -156,6 +166,26 @@ def _file_lock(path: Path):
 
 _THREAD_LOCKS: dict[str, threading.Lock] = {}
 _THREAD_LOCKS_GUARD = threading.Lock()
+
+
+def _versions_file(lineage: str) -> Path:
+    import hashlib
+    return templates_root() / ".versions" / hashlib.sha1(lineage.encode()).hexdigest()
+
+
+def _last_version(lineage: str) -> int:
+    """The highest version this app's template has had — remembered past a
+    deleted one, so a number shown once is never given to another."""
+    try:
+        return int(_versions_file(lineage).read_text().strip() or 0)
+    except (OSError, ValueError):
+        return 0
+
+
+def _record_version(lineage: str, version: int) -> None:
+    path = _versions_file(lineage)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(str(version))
 
 
 def _root_lock():
@@ -288,8 +318,10 @@ def save(*, output_dir: str | Path, org_id: str, created_by: str = "",
         # The next version of this app's template is counted and written under
         # one lock, so two saves of the same app at once are v2 and v3, not two v2s.
         with _root_lock():
-            version = 1 + max((int(m.get("version") or 1) for m in list_for_org(str(org_id))
-                               if lineage_of(m) == lineage), default=0)
+            version = 1 + max([_last_version(lineage)] +
+                              [int(m.get("version") or 1) for m in list_for_org(str(org_id))
+                               if lineage_of(m) == lineage])
+            _record_version(lineage, version)
             _write_json(root / "blueprint.json", snapshot(doc))
             ids = output_dir / ".forge" / "ids.json"
             if ids.is_file():
@@ -305,7 +337,7 @@ def save(*, output_dir: str | Path, org_id: str, created_by: str = "",
                 "org_id": str(org_id),
                 "name": name,
                 "description": (str(description or "").strip() or facts["description"])[:DESCRIPTION_MAX],
-                "category": str(category or facts["domain"] or "").strip()[:60],
+                "category": clean_category(category or facts["domain"]),
                 "created_by": str(created_by or ""),
                 "created_by_name": str(created_by_name or "")[:120],
                 "source_project_id": str(source_project_id or ""),
@@ -373,7 +405,7 @@ def update(template_id: str, *, name: str | None = None, description: str | None
         if description is not None:
             meta["description"] = str(description).strip()[:DESCRIPTION_MAX]
         if category is not None:
-            meta["category"] = str(category).strip()[:60]
+            meta["category"] = clean_category(category)
         meta["updated_at"] = _now()
         _write_json(_dir(template_id) / "meta.json", meta)
     return meta

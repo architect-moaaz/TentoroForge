@@ -140,7 +140,8 @@ async def _cards(db: AsyncSession, pairs: list[tuple[dict, TemplateListing | Non
         out.append({
             "id": meta["id"], "org_id": meta.get("org_id"), "org_name": orgs.get(str(meta.get("org_id")), ""),
             "name": meta.get("name"), "description": meta.get("description") or "",
-            "category": meta.get("category") or "", "version": int(meta.get("version") or 1),
+            "category": templates.clean_category(meta.get("category")),
+            "version": int(meta.get("version") or 1),
             "status": status, "creator": creator, "created_by": meta.get("created_by"),
             "created_by_name": (creator or {}).get("name") or meta.get("created_by_name") or "",
             "source_project_id": meta.get("source_project_id") if manage or who.is_admin else None,

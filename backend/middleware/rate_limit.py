@@ -1,5 +1,6 @@
 """Rate limiting middleware — in-memory token bucket with per-IP tracking."""
 
+import re
 import time
 import logging
 from collections import defaultdict
@@ -9,6 +10,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+
+_TEMPLATE_SHOT = re.compile(r"^/api/project-templates/[0-9a-f]{32}/screenshots/[0-9a-f]{32}$")
 logger = logging.getLogger(__name__)
 
 
@@ -63,6 +66,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # UI when the user only pinged the tab a few times. Skip.
         p = request.url.path
         if p.endswith("/events") or p.endswith("/verify/events") or p.endswith("/stream"):
+            return await call_next(request)
+        # A template's screenshots: one per card on the Templates page, so a
+        # Gallery of twenty templates spent the whole burst on its pictures
+        # and the rest drew as broken images (2026-10-17). Each is a signed-in,
+        # visibility-checked read of one small file the browser then caches.
+        if request.method == "GET" and _TEMPLATE_SHOT.match(p):
             return await call_next(request)
 
         client_ip = self._get_client_ip(request)
