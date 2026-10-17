@@ -2012,8 +2012,12 @@ async def smith_chat(
             if svc is not None and defined and not _answers_smith \
                     and (_is_build_consent(req.message) or _is_forced_rebuild(req.message)):
                 from services.blueprint import approval as _approval
+                # A BUILD THAT STOPPED SHORT IS NOT "ALREADY BUILT". "approve and
+                # build" after one got "already built, nothing has changed since"
+                # with no hand-over on record (baicuft0, 2026-10-09).
                 if not _is_forced_rebuild(req.message) and _is_built(output_dir) \
-                        and _approval.state_of(svc.doc, "plan") == "approved":
+                        and _approval.state_of(svc.doc, "plan") == "approved" \
+                        and run_registry.dead_build(output_dir) is None:
                     # Already built, and nothing has changed since it was
                     # approved: rebuilding costs minutes and money for the
                     # same application, so it is asked rather than assumed.
