@@ -38,8 +38,12 @@ async function request<T>(
   const token =
     typeof window !== "undefined" ? localStorage.getItem("token") : null;
 
+  // A FILE IS NOT JSON. Every request was labelled application/json, the
+  // uploads too, so a multipart body went out without its boundary and the
+  // server could not read the file. The browser labels FormData itself.
+  const isForm = typeof FormData !== "undefined" && options.body instanceof FormData;
   const headers: Record<string, string> = {
-    "Content-Type": "application/json",
+    ...(isForm ? {} : { "Content-Type": "application/json" }),
     ...((options.headers as Record<string, string>) || {}),
   };
 

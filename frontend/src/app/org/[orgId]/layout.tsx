@@ -22,6 +22,7 @@ import {
   PencilRuler,
   ShieldCheck,
 } from "lucide-react";
+import { NotificationBell } from "@/components/NotificationBell";
 import { AuthGuard } from "@/components/auth-guard";
 import { useAuthStore } from "@/stores/auth";
 import { api } from "@/lib/api";
@@ -205,6 +206,7 @@ function OrgLayout({
                 {user?.email}
               </p>
             </div>
+            <NotificationBell />
             {user?.platform_role === "super_admin" && !user.impersonated_by && (
               <Link
                 href="/admin"

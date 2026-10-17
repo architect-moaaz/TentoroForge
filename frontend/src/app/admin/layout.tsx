@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  Activity, AppWindow, BarChart3, Building2, ChevronLeft, Coins, LayoutDashboard, LogOut, ShieldCheck, Users, ToggleLeft, Radio } from "lucide-react";
+  Activity, AppWindow, BarChart3, Building2, ChevronLeft, Coins, LayoutDashboard, LayoutTemplate, LogOut, ShieldCheck, Users, ToggleLeft, Radio } from "lucide-react";
+import { NotificationBell } from "@/components/NotificationBell";
 import { AuthGuard } from "@/components/auth-guard";
 import { SuperAdminGate } from "@/components/admin/SuperAdminGate";
 import { Badge } from "@/components/ui/badge";
@@ -24,6 +25,7 @@ const NAV: { label?: string; items: NavItem[] }[] = [
       { href: "/admin/people", label: "People", icon: Users },
       { href: "/admin/live", label: "Live", icon: Radio },
       { href: "/admin/apps", label: "Apps", icon: AppWindow },
+      { href: "/admin/templates", label: "Templates", icon: LayoutTemplate },
       { href: "/admin/credits", label: "Credits", icon: Coins },
       { href: "/admin/features", label: "Features", icon: ToggleLeft },
       { href: "/admin/activity", label: "Activity", icon: Activity },
@@ -82,6 +84,7 @@ function CockpitShell({ children }: { children: React.ReactNode }) {
               <p className="truncate text-xs font-medium text-slate-700 dark:text-slate-300">{user?.email}</p>
               <Badge variant="outline" className="mt-0.5 text-[10px]">Super admin</Badge>
             </div>
+            <NotificationBell />
             <button onClick={logout} className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800" title="Sign out">
               <LogOut className="h-3.5 w-3.5" />
             </button>
