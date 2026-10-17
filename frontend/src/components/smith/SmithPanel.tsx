@@ -1165,12 +1165,12 @@ export function SmithPanel({
             ))}
           </div>
         )}
-        <div className="flex items-end gap-2">
+        <div className="flex items-center gap-2">
           <label
             className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-xl border text-muted-foreground hover:bg-muted"
             title="Attach a screenshot, a design, or a spreadsheet to load in"
           >
-            <Paperclip className="h-4 w-4" />
+            <Paperclip className="h-[18px] w-[18px]" />
             {/* A SPREADSHEET IS THE POINT OF THE PAPERCLIP for an owner who
                 already has a business: they attach customers.xlsx and say
                 "load it in" (services/smith/data_import.py). Leaving the sheet
@@ -1196,13 +1196,13 @@ export function SmithPanel({
               aria-label="Dictate"
               title="Speak instead of typing"
               className={cn(
-                "rounded-md border p-2 hover:bg-muted",
+                "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border hover:bg-muted",
                 listening
                   ? "animate-pulse border-primary text-primary"
                   : "text-muted-foreground",
               )}
             >
-              <Mic className="h-4 w-4" />
+              <Mic className="h-[18px] w-[18px]" />
             </button>
           )}
           <textarea
@@ -1220,7 +1220,7 @@ export function SmithPanel({
             placeholder={
               busy ? "Building…" : "Describe the application, or a change to it…"
             }
-            className="min-h-11 flex-1 resize-none rounded-xl border bg-background px-4 py-3 text-sm outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
+            className="min-h-11 flex-1 resize-none rounded-xl border bg-background px-4 py-[11px] text-sm leading-5 outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
           />
           <button
             onClick={() => void send()}
@@ -1228,7 +1228,7 @@ export function SmithPanel({
             className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm hover:bg-blue-700 disabled:opacity-40"
             aria-label="Send"
           >
-            <Send className="h-4 w-4" />
+            <Send className="h-[18px] w-[18px]" />
           </button>
         </div>
       </div>
