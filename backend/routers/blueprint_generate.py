@@ -2184,6 +2184,7 @@ async def smith_chat(
                 history=[(t.role, t.text) for t in req.history if t.text][-10:],
                 reasoning_fn=lambda text, kind="reasoning", node="": emit(
                     "thought", {"text": text, "kind": kind, "node": node}),
+                defer_check=True,
             ))
             # A TURN ALWAYS ANSWERS. An empty answer posted an empty bubble —
             # or, read back from the transcript, no reply at all.
@@ -2197,6 +2198,19 @@ async def smith_chat(
                 "status": turn_result.status,
                 "intent": turn_result.intent,
             })
+            # THE CHECK, AFTER THE ANSWER. The pages the change reaches are
+            # opened as the people they are for and what this change broke is
+            # repaired once; what was already not working is said as known.
+            if turn_result.status in ("resolved", "needs_user") and turn_result.touched_paths:
+                try:
+                    run_registry.turn_step(output_dir, "checking the pages the change reaches")
+                    from services.blueprint.app_check import check_change as _check_change
+                    _checked = _check_change(str(output_dir), list(turn_result.touched_paths),
+                                             asked=req.message, emit=emit)
+                    if _checked and _checked.get("said"):
+                        emit("message", {"text": _checked["said"], "status": "resolved"})
+                except Exception:  # noqa: BLE001 — the change landed; its check is a bonus
+                    logger.exception("[smith4] checking the pages a change reaches failed")
 
             # `asked` and `needs_user` are the conversation doing its job —
             # §16 holds rather than guessing. `resolved` already changed the

@@ -22,9 +22,15 @@ def handle(**kwargs: Any) -> Outcome:
     """One Smith turn, its model calls written to the usage ledger, and the
     pages its change reaches used again before it answers."""
     from services.build_usage import usage_scope
+    # THE ANSWER FIRST, THE CHECK AFTER. A caller that can post two messages
+    # (`check_after=False`) tells the person the change landed, then runs the
+    # check and posts what it found; a two-minute colour change was held
+    # twelve minutes behind the check of the page it reached (cxz95dd1,
+    # 2026-10-17).
+    check_after = bool(kwargs.pop("check_after", True))
     with usage_scope(agent="smith", output_dir=str(kwargs.get("output_dir") or ""), kind="smith"):
         out = _handle(**kwargs)
-    if not kwargs.get("unattended"):
+    if check_after and not kwargs.get("unattended"):
         out = _checked(str(kwargs.get("output_dir") or ""), out, asked=str(kwargs.get("message") or ""))
     return out
 

@@ -178,3 +178,59 @@ def test_the_version_a_check_reflects_is_in_the_contract():
     import jsonschema
     contract = json.loads((Path(__file__).resolve().parents[2] / "contracts/blueprint.schema.json").read_text())
     jsonschema.validate({"check": {"pages": 1, "working": 1, "version": 3}}, contract["properties"]["runtime"])
+
+
+def test_a_fault_on_record_before_the_change_is_said_as_known_not_repaired(monkeypatch, tmp_path):
+    """A gradient on the calculator met its old "Clear does nothing" and the
+    person waited ten minutes on a repair of a view the change never touched
+    (cxz95dd1, 2026-10-17)."""
+    monkeypatch.setattr("services.blueprint.account_model.admin_role", lambda doc: "Admin")
+    doc = json.loads(json.dumps(DOC))
+    doc["runtime"] = {"check": {"pages": 4, "working": 3, "fixed": [], "failing": ["/children"], "version": 6},
+                      "issues": [{"kind": "page_check", "page": "PAGE-005", "route": "/children", "name": "My Children",
+                                  "detail": 'as Parent: button "Clear" does nothing when pressed'}]}
+    svc = _Svc(doc)
+    monkeypatch.setattr("services.blueprint.service.BlueprintService.load",
+                        classmethod(lambda cls, output_dir: svc))
+    monkeypatch.setattr(ac, "check_pages", _pages_saying([{"/children": 'button "Clear" does nothing when pressed'}]))
+    turns = []
+    posted = []
+    out = ac.check_change(str(tmp_path), ["app/src/app/(dashboard)/children/view.tsx"], app_factory=_App,
+                          run_turn=lambda pid, od, ask, **k: turns.append(ask) or {"edited_paths": ["x"]},
+                          emit=lambda e, d: posted.append(d.get("text", "")))
+    assert turns == []                                   # nothing repaired: it was like that before
+    assert out["left"] == [] and [k["route"] for k in out["known"]] == ["/children"]
+    assert "nothing this change touched is worse" in out["said"]
+    assert "Not working, as before this change (not caused by it, left as it was): /children" in out["said"]
+    assert not any("Fixing it" in p for p in posted)
+    # the fault stays on the record
+    assert any(i.get("page") == "PAGE-005" for i in svc.doc["runtime"]["issues"])
+
+
+def test_a_new_fault_after_the_change_is_repaired_and_posted(monkeypatch, tmp_path):
+    monkeypatch.setattr("services.blueprint.account_model.admin_role", lambda doc: "Admin")
+    doc = json.loads(json.dumps(DOC))
+    doc["runtime"] = {"issues": [{"kind": "page_check", "page": "PAGE-005", "route": "/children", "name": "My Children",
+                                  "detail": "as Parent: the list is empty"}]}
+    svc = _Svc(doc)
+    monkeypatch.setattr("services.blueprint.service.BlueprintService.load",
+                        classmethod(lambda cls, output_dir: svc))
+    monkeypatch.setattr(ac, "check_pages", _pages_saying([{"/children": "it answers HTTP 500"}, {}]))
+    turns, posted = [], []
+    out = ac.check_change(str(tmp_path), ["app/src/app/(dashboard)/children/view.tsx"], app_factory=_App,
+                          run_turn=lambda pid, od, ask, **k: turns.append(k) or {"edited_paths": ["x"]},
+                          asked="make the list blue", emit=lambda e, d: posted.append(d.get("text", "")))
+    assert len(turns) == 1 and turns[0].get("asked_from") == "make the list blue"
+    assert any("does not work yet" in p and "Fixing it" in p for p in posted)
+    assert out["fixed"] == ["/children"]
+
+
+def test_the_caller_may_post_the_answer_first_and_check_after(monkeypatch, tmp_path):
+    handle_mod = importlib.import_module("services.smith4.handle")
+    from services.smith4.outcome import Outcome
+    monkeypatch.setattr(handle_mod, "_handle", lambda **k: Outcome(status="resolved", said="Done.",
+                                                                  touched=["app/src/app/x/view.tsx"]))
+    monkeypatch.setattr("services.blueprint.app_check.check_change",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("the check ran inside the turn")))
+    out = handle_mod.handle(project_id="p1", output_dir=str(tmp_path), message="x", check_after=False)
+    assert out.said == "Done."

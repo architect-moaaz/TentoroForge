@@ -62,6 +62,9 @@ class ChatV2Request:
     evidence: list[str] = field(default_factory=list)
     #: What the project is called, for a Blueprint created on this turn.
     app_name: str = ""
+    #: True when the caller posts the answer itself and runs the after-change
+    #: check afterwards (`app_check.check_change`) as a second message.
+    defer_check: bool = False
 
 
 @dataclass
@@ -115,6 +118,7 @@ def handle_chat_v2(req: ChatV2Request) -> ChatV2Response:
         reasoning=req.reasoning_fn,
         evidence=list(req.evidence or []),
         app_name=req.app_name,
+        check_after=not req.defer_check,
     )
     return ChatV2Response(status=out.status, answer=out.said, options=list(out.options),
                           diff_summary=out.diff_summary, touched_paths=list(out.touched),
