@@ -165,6 +165,17 @@ TRY_AFTER = (
 #: The start of the message when a trial that failed has not been tried
 #: again since the change meant to fix it.
 UNPROVEN = "Not shown to work yet:"
+#: What `done` hears, once, while the try after the change still fails.
+FINISH_FIRST = ("Not done: the try after your change still fails — "
+                "{what}. A change is done when the try that failed passes. Fix what the try "
+                "points at and try it again; if it cannot be fixed this turn, say why with `answer`.")
+#: Steps a turn is granted past its budget to make a failing try pass, once,
+#: and the age of a turn past which it is not.
+FINISH_STEPS = 8
+FINISH_TIME_S = float(20 * 60)
+FINISH_EXTENSION = ("Your steps were up, but the try after your change still fails. You have "
+                    "{n} more steps to make it pass — fix what it points at and try it again; "
+                    "do not spend them reading.")
 #: What the loop is told when its reply could not be read: once, then the
 #: turn ends on what it has rather than on a question that throws it away.
 UNREADABLE_RETRY = ("Your last reply could not be read as a step. Reply with the JSON object only — "
@@ -207,9 +218,7 @@ def turn(ctx: Ctx, *, choose: Choose, history: list | None = None,
     bench = trials.Bench(ctx.out)
     # THE PERSON'S WORDS GO WITH EVERY BRIEF THIS TURN HANDS ON (`asked`).
     from services.smith.asked import ASKED
-    asked = ctx.ask or ctx.message or ""
-    if ctx.asked_from and ctx.asked_from not in asked:
-        asked = f"{ctx.asked_from}\n(This turn does one part of it: {asked})"
+    asked = asked_text(ctx)
     token = ASKED.set(asked)
     from services.smith import file_edit
     started = {p.get("id") for p in file_edit.load_patches(ctx.out)}
@@ -434,6 +443,14 @@ def _before_done(observations: list[Observation], landed: list[str]) -> str:
     if landed and changes and (not tries or tries[-1] < changes[-1]) \
             and TRY_AFTER.split(",", 1)[0] not in said:
         return TRY_AFTER
+    # NOT DONE WHILE THE TRY STILL FAILS. "Say carry on and I will keep at it"
+    # ended turns that had the fault in hand and steps left (97l5iqsp,
+    # cxz95dd1, 2026-10). Once: a turn that cannot fix it says why instead.
+    # (A try failing the way it did before the change is `_unproven`'s nudge
+    # above; this is the failure that is new after the change.)
+    failing = last_try_failed(observations)
+    if landed and failing and not _still_failing(observations) and FINISH_FIRST.split(":", 1)[0] not in said:
+        return FINISH_FIRST.format(what=failing)
     return ""
 
 
@@ -515,7 +532,17 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
     import time as _time
     turn_started = _time.monotonic()
     unreadable = 0
-    for _step in range(1, max_steps + 1):
+    budget, extended, _step = max_steps, False, 0
+    while True:
+        if _step >= budget:
+            more = finish_steps(observations, landed, extended=extended,
+                                elapsed_s=_time.monotonic() - turn_started)
+            if not more:
+                break
+            budget, extended = budget + more, True
+            observations.append(Observation(tool="done", status="error",
+                                            said=FINISH_EXTENSION.format(n=more)))
+        _step += 1
         from services.smith4.definition import brief_of
         if _step > 1:
             # WHAT THIS TURN KNOWS SO FAR, KEPT IN CASE IT IS LOST. A turn the
@@ -796,6 +823,48 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
     note = failing or loop_mod.remaining_note(observations, capped=True).replace(
         f"{loop_mod.MAX_STEPS} steps", f"{max_steps} steps")
     return _finished(landed, touched, last, note=note)
+
+
+def asked_text(ctx: Ctx) -> str:
+    """The person's words, as every brief this turn hands on gets them. A
+    plan step says which part it does; a repair the platform runs after a
+    change says what the person asked for and that this is the repair of
+    what doing it broke — so the repair stays inside their ask instead of
+    becoming a change nobody asked for (F2, qpqhdugb 2026-10-16)."""
+    asked = ctx.ask or ctx.message or ""
+    if ctx.asked_from and ctx.asked_from not in asked:
+        if ctx.unattended:
+            return (f"{ctx.asked_from}\n(The person asked for that. This turn repairs what making that "
+                    f"change broke, and nothing else: {asked})")
+        return f"{ctx.asked_from}\n(This turn does one part of it: {asked})"
+    return asked
+
+
+def last_try_failed(observations: list[Observation]) -> str:
+    """The first line of the last try after the last change when it failed
+    (a failure that ran — a try that could not run decides nothing); ""
+    otherwise."""
+    changes = [i for i, o in enumerate(observations) if _is_change(o)]
+    if not changes:
+        return ""
+    after = [o for o in observations[changes[-1] + 1:] if tools.is_trial(o.tool) and o.status == "read"]
+    if not after:
+        return ""
+    said = after[-1].said or ""
+    if inconclusive(said) or not trials.failed(said):
+        return ""
+    return " ".join(said.split("\n", 1)[0].split())[:200]
+
+
+def finish_steps(observations: list[Observation], landed: list[str], *, extended: bool,
+                 elapsed_s: float) -> int:
+    """How many steps a turn whose budget is up may still have: `FINISH_STEPS`
+    once, when it changed something and the try after it still fails and the
+    turn is not already old. Three turns ended "say carry on" with the fault
+    in hand and steps spent (97l5iqsp P3/P4, cxz95dd1 M2, 2026-10)."""
+    if extended or not landed or elapsed_s > FINISH_TIME_S:
+        return 0
+    return FINISH_STEPS if last_try_failed(observations) else 0
 
 
 def what_was_seen(observations: list[Observation]) -> str:

@@ -201,6 +201,10 @@ def _check_everything(svc: Any, output_dir: str, app_root: str, report: Any, *, 
     rules = _on_a_bench(svc, output_dir, bench_factory=bench_factory, client=client, cancelled=cancelled,
                         what=("routes", "access", "rules", "systems", "audit", "domain"))
     _write_logic(svc, processes, rules.get("rules"))
+    if rules.get("causes"):
+        # ONE CAUSE, SAID AS ONE, BEFORE THE ITEMS. The headline of "2 of 106
+        # served" was the sign-in nobody could do (fyuhs16i, 2026-10-06).
+        say(causes_line(rules["causes"]))
     say(_logic_line(svc))
 
 
@@ -248,6 +252,8 @@ def _on_a_bench(svc: Any, output_dir: str, *, bench_factory: Any, client: Any, c
                             out[k] = list(out[k]) + list(part[k])
                         out["total"] = int(out["total"]) + int(part["total"])
                 _merge(svc, "routes", out, only_pages)
+                if out.get("causes"):
+                    results["causes"] = [str(c) for c in out["causes"]]
             except Exception as exc:  # noqa: BLE001
                 logger.warning("[fix-to-green] the route check failed", exc_info=True)
                 sc.write(svc, "routes", green=0, red=[], untried=[sc.item("routes", sc.LABELS["routes"], f"the check failed: {exc}"[:200], "routes")])
@@ -348,6 +354,11 @@ def _write_logic(svc: Any, processes: dict, rules: dict | None) -> None:
         untried += list(rules.get("untried") or [])
         skipped += list(rules.get("skipped") or [])
     sc.write(svc, "logic", green=green, red=red, untried=untried, skipped=skipped)
+
+
+def causes_line(causes: list[str]) -> str:
+    return ("Behind the screens I could not try there is one cause each, not a fault per screen: "
+            + "; ".join(str(c) for c in causes[:4]) + ". That is what to fix first.")
 
 
 def _logic_line(svc: Any) -> str:

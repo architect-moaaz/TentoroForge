@@ -108,6 +108,10 @@ def _fill(route: str, entity_name: str, records: dict[str, list[dict]]) -> str |
     return re.sub(r"\[[^\]]+\]", str(rows[0].get("id")), route)
 
 
+#: Screens in a row the app did not answer before the sweep stops.
+UNANSWERED_STOP = 3
+
+
 def check_routes(app: Any, doc: dict, *, only: set[str] | None = None,
                  records: dict[str, list[dict]] | None = None,
                  cancelled: Callable[[], bool] = lambda: False) -> dict:
@@ -126,6 +130,8 @@ def check_routes(app: Any, doc: dict, *, only: set[str] | None = None,
             records = {}
     jars: dict[str, list[dict] | None] = {}
     no_session: dict[str, int] = {}
+    unanswered = 0
+    causes: list[str] = []
     green: list[dict] = []
     red: list[dict] = []
     untried: list[dict] = []
@@ -158,13 +164,28 @@ def check_routes(app: Any, doc: dict, *, only: set[str] | None = None,
         try:
             status, location, _body = _http(app, "GET", path, None, jar)
         except Exception as exc:  # noqa: BLE001 — the app did not answer: the check's shortfall
+            unanswered += 1
             untried.append(it(f"the app did not answer: {str(exc)[:160]}"))
+            if unanswered >= UNANSWERED_STOP:
+                # THE SWEEP STOPS AT A SHARED CAUSE. An app that stopped
+                # answering fails every screen after it the same way; 49
+                # minutes of statements all blocked on one cause (baicuft0,
+                # 2026-10-09). The rest is one line, not one item each.
+                rest = todo[todo.index(v) + 1:]
+                untried += [item(f"{w['page']}::{w['as']}", f"{w['name']} as {w['as']}",
+                                 "not tried: the app stopped answering — one cause, not this screen's",
+                                 w["page"]) for w in rest]
+                causes.append(f"the app stopped answering after {unanswered} screens in a row: "
+                              f"{len(rest)} screens not tried")
+                break
             continue
+        unanswered = 0
         found = outcome_findings(int(status), str(location or ""), v)
         (red if found else green).append(it(found[0] if found else f"answers as declared ({v['expect']})"))
     out = {"total": len(todo), "green": green, "red": red, "untried": untried}
-    if no_session:
-        out["causes"] = [f"could not sign in as {role}: {n} screens not tried" for role, n in no_session.items()]
+    causes = [f"could not sign in as {role}: {n} screens not tried" for role, n in no_session.items()] + causes
+    if causes:
+        out["causes"] = causes
     return out
 
 

@@ -25,11 +25,11 @@ def handle(**kwargs: Any) -> Outcome:
     with usage_scope(agent="smith", output_dir=str(kwargs.get("output_dir") or ""), kind="smith"):
         out = _handle(**kwargs)
     if not kwargs.get("unattended"):
-        out = _checked(str(kwargs.get("output_dir") or ""), out)
+        out = _checked(str(kwargs.get("output_dir") or ""), out, asked=str(kwargs.get("message") or ""))
     return out
 
 
-def _checked(output_dir: str, out: Outcome) -> Outcome:
+def _checked(output_dir: str, out: Outcome, *, asked: str = "") -> Outcome:
     """A CHANGE IS CHECKED WHERE IT REACHES. Smith tries what it changed; the
     pages it did not touch but did reach — a list of a record type whose
     fields moved, a page that starts a process that changed — are opened as
@@ -43,7 +43,11 @@ def _checked(output_dir: str, out: Outcome) -> Outcome:
         return out
     try:
         from services.blueprint.app_check import check_change
-        checked = check_change(output_dir, list(out.touched))
+        # THE REPAIR HEARS THE ASK. The turn the check starts used to know only
+        # the fault; it rewrote a page to take a parameter nobody asked for
+        # (qpqhdugb F2, 2026-10-16). It is told what the person asked for and
+        # that it repairs what doing that broke.
+        checked = check_change(output_dir, list(out.touched), asked=asked)
     except Exception:  # noqa: BLE001 — the change landed; its check is a bonus
         import logging
         logging.getLogger(__name__).exception("[smith4] checking the pages a change reaches failed")
@@ -65,7 +69,8 @@ def _handle(*, project_id: str, output_dir: str, message: str,
            attachments: list[dict] | None = None,
            evidence: list[str] | None = None,
            app_name: str = "",
-           unattended: bool = False) -> Outcome:
+           unattended: bool = False,
+           asked_from: str = "") -> Outcome:
     """One turn on a built application. `choose` decides each step; absent,
     `services.smith.loop.next_step` on the real model. `move` is the tree
     editor for layout pages; absent, `move_dispatcher`."""
@@ -84,7 +89,7 @@ def _handle(*, project_id: str, output_dir: str, message: str,
                    attachments=list(attachments or []), history=list(history or []),
                    evidence=[str(e) for e in (evidence or []) if str(e).strip()],
                    app_name=str(app_name or ""), engine_refreshed=_once(refreshed),
-                   unattended=unattended, asked_from=planned_from if step else "")
+                   unattended=unattended, asked_from=asked_from or (planned_from if step else ""))
 
     # A TURN THE PLATFORM STARTED is the fault and nothing else: the person's
     # waiting plan or held question is theirs, not something to clear or join.

@@ -437,7 +437,7 @@ def check_app(svc: Any, output_dir: str, *args: Any, **kwargs: Any) -> dict:
 
 
 def _check_app(svc: Any, output_dir: str, *, emit: Callable[[str, dict], None] | None = None,
-               run_turn: Callable[..., dict] | None = None,
+               run_turn: Callable[..., dict] | None = None, asked: str = "",
                app_factory: Callable[[Path], Any] | None = None,
                rounds: int = ROUNDS, record: bool = True, only: set[str] | None = None,
                cancelled: Callable[[], bool] = lambda: False) -> dict:
@@ -525,7 +525,8 @@ def _check_app(svc: Any, output_dir: str, *, emit: Callable[[str, dict], None] |
                 say("message", {"text": f"{item['name']} ({item['route']}) does not work yet — "
                                         f"{item['findings'][0][1][:160]}. Fixing it."})
                 try:
-                    done = run_turn("", output_dir, fault_ask(pid, item), max_steps=STEPS, unattended=True) or {}
+                    done = run_turn("", output_dir, fault_ask(pid, item), max_steps=STEPS, unattended=True,
+                                    **({"asked_from": asked} if asked else {})) or {}
                     touched += [t for t in done.get("edited_paths") or [] if t not in touched]
                 except Exception as exc:  # noqa: BLE001 — one repair never ends the build
                     logger.warning("[app-check] %s: %s", item["route"], exc)
@@ -651,7 +652,7 @@ def affected_pages(doc: dict, touched: list[str]) -> set[str]:
 
 
 def check_change(output_dir: str, touched: list[str], *, run_turn: Callable[..., dict] | None = None,
-                 app_factory: Callable[[Path], Any] | None = None) -> dict | None:
+                 app_factory: Callable[[Path], Any] | None = None, asked: str = "") -> dict | None:
     """After a change: check the pages it could have reached, as the people
     they are for; repair once what it broke. None when it reached no page.
     `said` is the sentence for the reply; `touched` what the repair changed."""
@@ -674,7 +675,7 @@ def check_change(output_dir: str, touched: list[str], *, run_turn: Callable[...,
             return None
         order = [v["page"] for v in visits(svc.doc) if v["page"] in reached]
         only = set(list(dict.fromkeys(order))[:MAX_CHANGE_PAGES])
-        out = _check_app(svc, output_dir, run_turn=run_turn, app_factory=app_factory, rounds=1,
+        out = _check_app(svc, output_dir, run_turn=run_turn, app_factory=app_factory, rounds=1, asked=asked,
                          record=False, only=only)
     routes = sorted({v["route"] for v in visits(svc.doc) if v["page"] in only})
     if out["left"]:

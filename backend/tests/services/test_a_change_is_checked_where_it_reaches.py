@@ -142,11 +142,12 @@ def test_a_smith_turn_that_changed_the_app_reports_its_check(monkeypatch, tmp_pa
                                                                   touched=["app/src/db/schema/child.ts"]))
     seen = []
     monkeypatch.setattr("services.blueprint.app_check.check_change",
-                        lambda output_dir, touched: seen.append(list(touched)) or {
+                        lambda output_dir, touched, asked="": seen.append([list(touched), asked]) or {
                             "said": "I then opened the 3 pages this change reaches … they work.",
                             "touched": ["app/src/fix.ts"], "left": [], "fixed": [], "checked": []})
     out = handle_mod.handle(project_id="p1", output_dir=str(tmp_path), message="add a phone to child")
-    assert seen == [["app/src/db/schema/child.ts"]]
+    # the check hands the person's ask to the repair it may start
+    assert seen == [[["app/src/db/schema/child.ts"], "add a phone to child"]]
     assert out.said == "Added a phone field.\n\nI then opened the 3 pages this change reaches … they work."
     assert out.touched == ["app/src/db/schema/child.ts", "app/src/fix.ts"]
 
