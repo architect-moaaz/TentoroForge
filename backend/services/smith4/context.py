@@ -49,6 +49,15 @@ def opening(project_id: str, output_dir: str, ask: str, *, brief: str = "") -> s
                 "Do not ask what the brief already answers.")
     bp = Blueprint.load(project_id=project_id, output_dir=output_dir)
     page = blueprint_to_context(pick_relevant_slice(bp, ask=ask))
+    # WHERE THINGS LIVE, UNDER THE SLICE. The slice says what a screen does;
+    # this says which file holds it, so the first read is the right one.
+    try:
+        from services.smith import places as where
+        lives = where.index(output_dir, ask=ask)
+        if lives:
+            page = page + "\n\n" + lives
+    except Exception:  # noqa: BLE001 — the page stands without it
+        pass
     # WHAT IS RUNNING, FROM THE LEDGER, NOT FROM MEMORY. A status answer
     # built from the last check claimed fixes "in progress" while nothing
     # ran (pcn4owv7, 2026-10-15). This turn is itself the thing running, so

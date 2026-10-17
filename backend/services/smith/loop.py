@@ -250,6 +250,12 @@ WHAT NON-TECHNICAL OWNERS ACTUALLY SAY, and how to read it:
   reach; the only reasons to end on a failing try are outside it — a key or
   a fact only the person has, a service that is down — and then `answer`
   says what you tried, what still fails and what you need.
+- THE FILE IS NAMED ON THE PAGE. "WHERE THINGS LIVE" maps every screen,
+  process and record type to its files; read the one named there. Never
+  `list_files` your way to a file the page already names. A browser error,
+  a server line or a database message is an address: `open_error` with its
+  text opens the code it points at. `read_file` with `paths` reads a
+  screen's view and load file in one step.
 - THE NOTEBOOK IS READ FIRST. The page opens with what earlier turns on this
   application read, tried, changed and left; a file named there was read
   then, a try named there was made then. Start from it, not from the slice.
@@ -398,10 +404,53 @@ def _shown(observations: list[Observation]) -> list[Observation]:
     return list(observations[start:])
 
 
+def _digest(older: list[Observation]) -> str:
+    """WHAT I KNOW SO FAR: the steps that fell out of the window, one line
+    each, so step thirty still knows what step six read. Reads collapse to
+    their names; tries, changes and findings keep their first line. Built
+    from the same prefix every time, so the cached page does not move."""
+    from services.smith import tools
+    reads: list[str] = []
+    rest: list[str] = []
+
+    def where(o: Observation) -> str:
+        a = o.args or {}
+        for k in ("path", "paths", "route", "workflow", "entity", "pattern", "name", "section", "page", "url"):
+            if a.get(k):
+                return str(a[k])[:80]
+        return ""
+
+    def head(o: Observation) -> str:
+        return " ".join((o.said or "").split("\n", 1)[0].split())[:160]
+    for o in older:
+        if o.status == "error":
+            continue
+        w = where(o)
+        if tools.is_trial(o.tool):
+            rest.append(f"- tried {o.tool} {w}: {head(o)}")
+        elif o.status == "read":
+            label = f"{o.tool} {w}".strip()
+            if label not in reads:
+                reads.append(label)
+        elif o.status == "finding":
+            rest.append(f"- not done ({o.tool} {w}): {head(o)}")
+        elif o.touched or o.status == "resolved":
+            rest.append(f"- changed ({o.tool} {w}): {head(o)}")
+    lines = ["WHAT I KNOW SO FAR (earlier steps, no longer shown in full — do not read or try them again "
+             "unless something changed since):"]
+    if reads:
+        lines.append("- read: " + "; ".join(reads[:30]) + (f"; and {len(reads) - 30} more" if len(reads) > 30 else ""))
+    lines += rest[-20:]
+    return "\n".join(lines)
+
+
 def _render(observations: list[Observation]) -> str:
     if not observations:
         return "(nothing yet — this is the first step)"
-    return "\n".join(o.line() for o in _shown(observations))
+    shown = _shown(observations)
+    older = observations[:len(observations) - len(shown)]
+    body = "\n".join(o.line() for o in shown)
+    return (_digest(older) + "\n\nTHE LAST STEPS:\n" + body) if older else body
 
 
 def next_step(ask: str, ctx: str, observations: list[Observation],

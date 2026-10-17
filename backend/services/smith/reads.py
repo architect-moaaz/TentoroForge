@@ -448,8 +448,18 @@ READS: tuple[tuple[str, str, dict[str, str]], ...] = (
     ("read_file",
      "A file of the application, numbered, from `start` (default 1), up to "
      f"{MAX_LINES} lines. Paths are relative to the project root — `app/src/...`. "
-     "Reads exactly the path given; a wrong path is reported, never corrected.",
-     {"path": "string", "start": "integer"}),
+     "Reads exactly the path given; a wrong path is reported, never corrected. "
+     "`paths` (up to 3) reads several files in one step — the screen's view and "
+     "its load file together, say — instead of one step each.",
+     {"path": "string", "paths": "array", "start": "integer"}),
+    ("open_error",
+     "Open the code an error points at. Give it the error text as a try or the "
+     "server reported it — a browser error, a stack trace, a database message — "
+     "and it finds the file and line named in it and shows the code there; when "
+     "the error names no file, it searches the code for the identifier the "
+     "error quotes. One step from the symptom to the code, instead of a grep "
+     "and a guess.",
+     {"error": "string"}),
     ("list_files",
      "What is in a directory of the application, one level. Empty `path` is "
      "the project root. Dependency and build directories are left out.",
@@ -486,14 +496,94 @@ READS: tuple[tuple[str, str, dict[str, str]], ...] = (
 READ_NAMES: frozenset[str] = frozenset(name for name, _d, _a in READS)
 
 
+#: What an error names: a source path, with a line and column when it has them.
+_ADDRESS = re.compile(r"((?:\./)?(?:[\w\-.]+/)*?(?:app/)?src/[\w\-./\[\]()@ ]+?\.(?:tsx?|jsx?|mjs|cjs|json|css))"
+                      r"(?::(\d+))?(?::(\d+))?")
+#: What an error quotes when it names no file: an identifier in quotes or backticks.
+_QUOTED = re.compile(r"[\"'`“]([A-Za-z_][\w.\-]{2,60})[\"'`”]")
+#: Database messages that name a table or a column.
+_RELATION = re.compile(r"(?:relation|table|column)\s+\"?([\w.]+)\"?\s+(?:does not exist|not found)", re.I)
+ERROR_CONTEXT_LINES = 25
+
+
+def _app_rel(output_dir: str, raw: str) -> str:
+    """A path the error named, as a project-root path that exists; "" when
+    nothing on disk matches."""
+    raw = raw.strip().lstrip("./")
+    root = Path(output_dir)
+    for cand in (raw, f"app/{raw}", raw.split("app/", 1)[-1] and f"app/{raw.split('app/', 1)[-1]}"):
+        if cand and (root / cand).is_file():
+            return cand
+    tail = raw.split("src/", 1)
+    if len(tail) == 2 and (root / "app" / "src" / tail[1]).is_file():
+        return f"app/src/{tail[1]}"
+    return ""
+
+
+def open_error(output_dir: str, doc: dict, error: str) -> str:
+    """The code an error names, opened at the line; else a search for what it quotes."""
+    text = str(error or "").strip()
+    if not text:
+        raise ReadRefused("`open_error` needs the error text — paste what the try or the server reported.")
+    seen: list[tuple[str, int]] = []
+    for m in _ADDRESS.finditer(text):
+        rel = _app_rel(output_dir, m.group(1))
+        if not rel:
+            continue
+        line = int(m.group(2) or 0)
+        if (rel, line) not in seen:
+            seen.append((rel, line))
+        if len(seen) >= 3:
+            break
+    parts: list[str] = []
+    if seen:
+        for rel, line in seen:
+            start = max(1, line - ERROR_CONTEXT_LINES) if line else 1
+            parts.append((f"The error names {rel}" + (f" at line {line}" if line else "") + ":\n")
+                         + read_file(output_dir, rel, start))
+    rel_m = _RELATION.search(text)
+    if rel_m:
+        name = rel_m.group(1)
+        from services.smith import places as where
+        schema = where.tables(output_dir)
+        hit = next((v for k, v in schema.items() if k == where._norm(name) or k == where._norm(where._singular(name))), "")
+        parts.append(f"The database says `{name}` does not exist. "
+                     + (f"Its schema file is {hit} — the table is defined but not in the database the app is "
+                        "running against: the migration or the sync did not land. `sync_app` brings the "
+                        "database in step with the definition." if hit else
+                        "No schema file defines it, so the code asks for a table the definition does not have."))
+    if not parts:
+        quoted = [q for q in _QUOTED.findall(text) if not q.isdigit()]
+        if quoted:
+            found = grep(output_dir, quoted[0], "app/src")
+            parts.append(f"The error names no file. Searching the code for `{quoted[0]}`:\n{found}")
+        else:
+            parts.append("The error names no file and quotes no identifier. Open the screen's view and load "
+                         "files named under WHERE THINGS LIVE, or `grep` a word from the error.")
+    return "\n\n".join(parts)
+
+
 def run(name: str, args: dict, *, output_dir: str, doc: dict) -> str:
     """Carry out one read. Returns the observation text; a refusal IS the
     observation, in the tool's own words."""
     args = {k: v for k, v in (args or {}).items() if v not in (None, "")}
     try:
         if name == "read_file":
+            paths = args.get("paths")
+            if isinstance(paths, list) and paths:
+                # SEVERAL FILES IN ONE STEP. Each step is a whole model call;
+                # the view and its load file are read together.
+                outs = []
+                for p in [str(x) for x in paths if str(x).strip()][:3]:
+                    try:
+                        outs.append(read_file(output_dir, p, 1))
+                    except ReadRefused as refused:
+                        outs.append(str(refused))
+                return "\n\n".join(outs)
             return read_file(output_dir, str(args.get("path") or ""),
                              int(args.get("start") or 1))
+        if name == "open_error":
+            return open_error(output_dir, doc, str(args.get("error") or ""))
         if name == "list_files":
             return list_files(output_dir, str(args.get("path") or ""))
         if name == "grep":
@@ -517,5 +607,5 @@ def run(name: str, args: dict, *, output_dir: str, doc: dict) -> str:
 
 
 __all__ = ["READS", "READ_NAMES", "ReadRefused", "run", "read_file", "read_rows", "list_files",
-           "grep", "read_section", "find", "read_page_code", "dependents",
+           "grep", "read_section", "find", "read_page_code", "dependents", "open_error",
            "MAX_LINES", "MAX_MATCHES", "SECRET_NAMES", "SKIP_DIRS"]

@@ -58,8 +58,13 @@ def starting(tool: str, args: dict | None) -> str:
                 "scope, every rule…" if what == "all" else f"Running the application's {what} checks…")
     if t == "try_upload":
         return f"Uploading a small {a.get('kind') or 'image'}{_who(a)} the way the form's picker does…"
+    if t == "read_file" and isinstance(a.get("paths"), list) and a.get("paths"):
+        names = [str(p).rsplit("/", 1)[-1] for p in a["paths"][:3]]
+        return f"Reading {', '.join(names)} together…"
     if t in ("read_file", "read_page_code"):
         return f"Reading {a.get('path') or a.get('route') or a.get('page') or 'the code'}…"
+    if t == "open_error":
+        return "Opening the code the error points at…"
     if t in ("grep", "find"):
         return f"Searching the code for “{a.get('pattern') or a.get('query') or a.get('text') or '…'}”…"
     if t == "list_files":
