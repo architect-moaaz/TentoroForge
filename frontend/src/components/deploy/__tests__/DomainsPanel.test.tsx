@@ -232,4 +232,25 @@ describe("DomainsPanel", () => {
     expect(host.textContent).toContain("How to add this at Cloudflare");
     expect(host.textContent).toContain("DNS only (grey cloud)");
   });
+
+  it("leads with the main address, and says what the first address does", async () => {
+    const intro = () => host.querySelector("p")?.textContent?.replace(/\s+/g, " ") ?? "";
+    await render();
+    expect(intro()).toContain("Your app is at shop.vercel.app.");
+    expect(intro()).not.toContain("first address");
+
+    act(() => root.unmount());
+    root = createRoot(host);
+    apiGet.mockImplementation(async () => ({ ...tentoro, mainAddress: "https://shop.apps.tentoro.ai" }));
+    await render();
+    expect(intro()).toContain("Your app is at shop.apps.tentoro.ai (its first address, shop.vercel.app, sends people there).");
+
+    act(() => root.unmount());
+    root = createRoot(host);
+    apiGet.mockImplementation(async () => ({ ...tentoro, mainAddress: "https://shop.apps.tentoro.ai", oldAddress: "keep" }));
+    await render();
+    expect(intro()).toContain("(its first address, shop.vercel.app, opens it too)");
+    apiGet.mockImplementation(async () => waiting);
+  });
 });
+
