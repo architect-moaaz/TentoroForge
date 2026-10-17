@@ -74,15 +74,58 @@ def record(output_dir: str | Path, ask: str, observations: list, out: Any) -> di
     try:
         row = entry_for(ask, observations, out)
         if not (row["reads"] or row["tries"] or row["changes"] or row["said"]):
+            _drop_partial(output_dir)
             return None
         path = _path(output_dir)
         path.parent.mkdir(parents=True, exist_ok=True)
         lines = path.read_text("utf-8").splitlines() if path.exists() else []
         lines.append(json.dumps(row, ensure_ascii=False))
         path.write_text("\n".join(lines[-KEEP:]) + "\n", "utf-8")
+        _drop_partial(output_dir)
         return row
     except Exception:  # noqa: BLE001
         logger.warning("[notebook] could not record the turn", exc_info=True)
+        return None
+
+
+PARTIAL = Path(".forge") / "smith" / "notebook.partial.json"
+
+
+def checkpoint(output_dir: str | Path, ask: str, observations: list) -> None:
+    """What the running turn has read and tried so far, written each step.
+
+    A turn the process loses — the host's out-of-memory killer, a restart
+    mid-turn (13 such ledgers on forge-v3 in the two weeks to 2026-10-17) —
+    never reaches `record`, and the next turn started from nothing again.
+    The checkpoint is replaced by the real line when the turn ends.
+    """
+    try:
+        row = entry_for(ask, observations, None)
+        if not (row["reads"] or row["tries"] or row["changes"]):
+            return
+        row["status"] = "lost"
+        path = Path(output_dir) / PARTIAL
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(row, ensure_ascii=False), "utf-8")
+    except Exception:  # noqa: BLE001
+        logger.debug("[notebook] checkpoint skipped", exc_info=True)
+
+
+def _drop_partial(output_dir: str | Path) -> None:
+    try:
+        (Path(output_dir) / PARTIAL).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _partial(output_dir: str | Path) -> dict | None:
+    path = Path(output_dir) / PARTIAL
+    if not path.is_file():
+        return None
+    try:
+        row = json.loads(path.read_text("utf-8"))
+        return row if isinstance(row, dict) else None
+    except (OSError, ValueError):
         return None
 
 
@@ -104,6 +147,9 @@ def entries(output_dir: str | Path) -> list[dict]:
 def recall(output_dir: str | Path, *, shown: int = SHOWN, max_chars: int = MAX_CHARS) -> str:
     """The block the next turn's page opens with, or "" when nothing is known."""
     rows = entries(output_dir)[-shown:]
+    lost = _partial(output_dir)
+    if lost is not None:
+        rows = (rows + [lost])[-shown:]
     if not rows:
         return ""
     lines = ["WHAT EARLIER TURNS ON THIS APPLICATION LEARNED (newest first; read before reading "
@@ -118,13 +164,21 @@ def recall(output_dir: str | Path, *, shown: int = SHOWN, max_chars: int = MAX_C
             bits.append("tried: " + "; ".join(row["tries"]))
         if row.get("reads"):
             bits.append("read: " + ", ".join(row["reads"]))
+        if row.get("status") == "lost":
+            bits.insert(1, "(this turn was lost before it ended — the process working on it went away; "
+                           "what it had read and tried is below, and nothing it meant to change landed)")
         if row.get("finding"):
             bits.append("left: " + row["finding"])
-        elif row.get("status") == "asked":
+        elif row.get("status") in ("asked", "needs_user"):
             bits.append("ended on a question: " + (row.get("said") or ""))
+        elif row.get("status") not in ("resolved", "lost", "") and row.get("said"):
+            # WHAT IT SAID IT WOULD DO NEXT IS ITS OWN NEXT STEP. TCommerce's
+            # turn named "read /cart's code" as what it had not got to, and the
+            # carry-on rewrote the product page instead (ihf6pjga, 2026-10-06).
+            bits.append("ended saying (do what this names first on a carry-on): " + row["said"])
         lines.append("  ".join(bits))
     text = "\n".join(lines)
     return text if len(text) <= max_chars else text[:max_chars - 1].rstrip() + "…"
 
 
-__all__ = ["record", "recall", "entries", "entry_for", "PATH"]
+__all__ = ["record", "recall", "checkpoint", "entries", "entry_for", "PATH", "PARTIAL"]

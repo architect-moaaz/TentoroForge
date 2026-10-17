@@ -273,6 +273,11 @@ def _looks_cut_off(raw: str) -> bool:
     return bool(text) and "{" in text and text.count("{") > text.count("}")
 
 
+#: How the question a reply nobody could read turns into begins; the turn
+#: recognises it and does not end on it while it has work to report.
+UNREADABLE_HEAD = "I could not turn that into a change I am sure of."
+
+
 def _did_not_follow(ask: str) -> str:
     """Ask again in the person's own words.
 
@@ -285,6 +290,6 @@ def _did_not_follow(ask: str) -> str:
     said = " ".join((ask or "").split())
     if len(said) > 120:
         said = said[:117].rstrip() + "\u2026"
-    return (f"I could not turn that into a change I am sure of. You said: "
+    return (f"{UNREADABLE_HEAD} You said: "
             f"\u201c{said}\u201d. Tell me the first thing to change and the "
             f"screen it is on, and I will do that one, then we take the next.")

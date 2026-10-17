@@ -142,3 +142,58 @@ def test_a_check_that_cannot_start_the_app_says_so(monkeypatch):
     monkeypatch.setattr(route_check, "check_routes", boom)
     said = trials.run("run_checks", {"what": "routes"}, bench=_Bench(), doc=DOC)
     assert "could not run — The app could not be started" in said and not trials.failed(said)
+
+
+def test_a_lost_turn_still_tells_the_next_one_what_it_read(tmp_path):
+    obs = [Observation(tool="read_file", args={"path": "a.ts"}, status="read", said="…"),
+           Observation(tool="open_page", args={"route": "/x"}, status="read", said="HTTP 500")]
+    notebook.checkpoint(tmp_path, "fix x", obs)
+    text = notebook.recall(tmp_path)
+    assert "asked: fix x" in text and "lost before it ended" in text and "open_page /x: HTTP 500" in text
+    # the real line replaces the checkpoint when a turn ends
+    notebook.record(tmp_path, "fix x", obs, _Out(said="fixed"))
+    assert not (tmp_path / notebook.PARTIAL).exists()
+    assert "lost before it ended" not in notebook.recall(tmp_path)
+
+
+# ── a turn ends on what it has, not on a question that throws it away ──────
+
+def test_an_unreadable_reply_is_asked_again_then_the_turn_says_what_it_saw(tmp_path, monkeypatch):
+    from services.smith.understand_ask import _did_not_follow
+    from services.smith4 import turn as turn_mod
+    (tmp_path / ".forge" / "blueprint").mkdir(parents=True)
+    doc = {"meta": {"name": "T"}, "roles": [{"id": "r1", "name": "Admin"}],
+           "pages": [{"id": "p_home", "name": "Home", "route": "/", "roles": ["r1"]}],
+           "requirements": [{"id": "q1", "text": "A home screen"}], "data": {"entities": []}}
+    (tmp_path / ".forge" / "blueprint" / "current.json").write_text(json.dumps(doc))
+    monkeypatch.setattr(turn_mod.trials, "run", lambda name, args, bench, doc: "HTTP 500 on /\nblank page")
+    picks = iter([
+        {"tool": "open_page", "args": {"route": "/", "as": "Admin"}},
+        {"tool": "ask_user", "args": {"question": _did_not_follow("fix the home page")}},
+        {"tool": "ask_user", "args": {"question": _did_not_follow("fix the home page")}},
+    ])
+    seen: list = []
+
+    def choose(ask, page, observations, history):
+        seen.append([o.said for o in observations])
+        return next(picks)
+    ctx = turn_mod.Ctx(project_id="p", output_dir=str(tmp_path), message="fix the home page",
+                       ask="fix the home page")
+    out = turn_mod.turn(ctx, choose=choose)
+    assert out.status == "no_op"
+    assert "HTTP 500 on /" in out.said and "my next step could not be worked out" in out.said
+    assert any(turn_mod.UNREADABLE_RETRY in s for s in seen[-1])
+
+
+def test_a_try_that_could_not_run_decides_nothing_about_a_patch():
+    from services.smith4 import turn as turn_mod
+    edit = Observation(tool="edit_file", args={"path": "app/src/lib/x.ts"}, status="resolved", said="edited",
+                       touched=["app/src/lib/x.ts"])
+    gone = Observation(tool="open_page", args={"route": "/"}, status="read",
+                       said=f"{trials.SERVER_RESTARTED}")
+    assert turn_mod.patch_verdict([edit, gone]) == "inconclusive"
+    ok = Observation(tool="open_page", args={"route": "/"}, status="read", said="landed on /\nfine")
+    assert turn_mod.patch_verdict([edit, ok]) == "proven"
+    bad = Observation(tool="open_page", args={"route": "/"}, status="read", said="HTTP 500 on /\nbrowser error: x")
+    assert turn_mod.patch_verdict([edit, bad]) == "failed"
+    assert turn_mod.patch_verdict([edit]) == "untried"
