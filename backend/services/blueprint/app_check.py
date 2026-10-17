@@ -353,7 +353,7 @@ def _entries(app: Any, doc: dict, batch: list[dict]) -> list[dict]:
 
 def check_pages(app: Any, doc: dict, todo: list[dict], out_dir: Path, *,
                 server_said: Callable[[], list[str]] = lambda: [],
-                cancelled: Callable[[], bool] = lambda: False) -> dict[str, dict]:
+                cancelled: Callable[[], bool] = lambda: False, probe: bool = True) -> dict[str, dict]:
     """Open `todo` (from `visits`) and read what happened: `{page: {name,
     route, findings: [(as, finding)]}}` for every page visited."""
     from services.blueprint.page_review import ReviewUnavailable, run_shots
@@ -370,7 +370,7 @@ def check_pages(app: Any, doc: dict, todo: list[dict], out_dir: Path, *,
             return role, [{"id": visit_id(v), "unavailable": "stopped by the person"} for v in batch]
         try:
             shots = run_shots(app, _entries(app, doc, batch), out_dir / safe,
-                              probe=role != "signed out", states=role != "signed out")
+                              probe=probe and role != "signed out", states=role != "signed out")
         except ReviewUnavailable as exc:
             shots = [{"id": visit_id(v), "unavailable": str(exc)} for v in batch]
         return role, shots
@@ -457,7 +457,8 @@ def _check_app(svc: Any, output_dir: str, *, emit: Callable[[str, dict], None] |
                run_turn: Callable[..., dict] | None = None, asked: str = "",
                app_factory: Callable[[Path], Any] | None = None,
                rounds: int = ROUNDS, record: bool = True, only: set[str] | None = None,
-               cancelled: Callable[[], bool] = lambda: False, known_ok: bool = False) -> dict:
+               cancelled: Callable[[], bool] = lambda: False, known_ok: bool = False,
+               probe: bool = True) -> dict:
     """Use every page as every role — or only the pages `only` names — repair
     what fails; returns the check's summary (also written to `runtime.check`,
     merged over the last one when only some pages were looked at). The summary
@@ -515,7 +516,7 @@ def _check_app(svc: Any, output_dir: str, *, emit: Callable[[str, dict], None] |
                     return [l.strip() for l in fresh.decode("utf-8", "replace").splitlines() if l.strip()]
 
                 report = check_pages(running, svc.doc, todo, Path(output_dir) / ".forge" / "check" / f"round-{round_}",
-                                     server_said=server_said, cancelled=cancelled)
+                                     server_said=server_said, cancelled=cancelled, probe=probe)
             except Exception as exc:  # noqa: BLE001 — a check that cannot run is said, not fatal
                 logger.warning("[app-check] the app could not be run: %s", exc)
                 report = {v["page"]: {"name": v["name"], "route": v["route"], "findings": [],
@@ -710,8 +711,13 @@ def check_change(output_dir: str, touched: list[str], *, run_turn: Callable[...,
             return None
         order = [v["page"] for v in visits(svc.doc) if v["page"] in reached]
         only = set(list(dict.fromkeys(order))[:MAX_CHANGE_PAGES])
+        # A STYLESHEET CANNOT CHANGE WHAT A CONTROL DOES. A change to .css alone
+        # has the pages opened as each person to see they still render, not
+        # every control pressed (four minutes a page for a background colour,
+        # cxz95dd1 2026-10-17).
+        style_only = bool(rel) and all(t.lower().endswith((".css", ".scss")) for t in rel)
         out = _check_app(svc, output_dir, run_turn=run_turn, app_factory=app_factory, rounds=1, asked=asked,
-                         record=False, only=only, emit=emit, known_ok=True)
+                         record=False, only=only, emit=emit, known_ok=True, probe=not style_only)
     routes = sorted({v["route"] for v in visits(svc.doc) if v["page"] in only})
     pages = f"the {len(routes)} page{'' if len(routes) == 1 else 's'} this change reaches"
     known = out.get("known") or []

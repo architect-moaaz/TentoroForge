@@ -1561,9 +1561,14 @@ export function ThinkingTrail({
   // describe the wrong half of the turn.
   const running = nodes.find((n) => n.state === "running");
   const stepNode = last?.kind === "step" ? last.node : undefined;
+  // A narrated step ("Opening /orders as Manager…", "Checking the pages this
+  // change reaches…") is already the action, in the present tense; the header
+  // says it rather than "Thinking" over it.
+  const stepText = last?.kind === "step" && !last.node ? last.text.replace(/[.…]+$/, "").trim() : "";
   const activity =
     (running && (STAGE_VERB[running.key] ?? labelFor(running.key))) ||
     (stepNode && (STAGE_VERB[stepNode] ?? labelFor(stepNode))) ||
+    stepText ||
     "Thinking";
 
   return (

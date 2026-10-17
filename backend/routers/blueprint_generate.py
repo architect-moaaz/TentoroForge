@@ -2204,6 +2204,10 @@ async def smith_chat(
             if turn_result.status in ("resolved", "needs_user") and turn_result.touched_paths:
                 try:
                     run_registry.turn_step(output_dir, "checking the pages the change reaches")
+                    # SAID IN THE TRAIL, so the panel reads "Checking…" and not
+                    # "Thinking" for the minutes this takes (cxz95dd1, 13:38 UTC).
+                    emit("thought", {"text": "Checking the pages this change reaches, as the people they are for…",
+                                     "kind": "step", "node": ""})
                     from services.blueprint.app_check import check_change as _check_change
                     _checked = _check_change(str(output_dir), list(turn_result.touched_paths),
                                              asked=req.message, emit=emit)

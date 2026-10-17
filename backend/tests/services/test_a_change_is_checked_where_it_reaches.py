@@ -234,3 +234,23 @@ def test_the_caller_may_post_the_answer_first_and_check_after(monkeypatch, tmp_p
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("the check ran inside the turn")))
     out = handle_mod.handle(project_id="p1", output_dir=str(tmp_path), message="x", check_after=False)
     assert out.said == "Done."
+
+
+def test_a_stylesheet_change_opens_the_pages_without_pressing_every_control(monkeypatch, tmp_path):
+    monkeypatch.setattr("services.blueprint.account_model.admin_role", lambda doc: "Admin")
+    svc = _Svc(json.loads(json.dumps(DOC)))
+    monkeypatch.setattr("services.blueprint.service.BlueprintService.load",
+                        classmethod(lambda cls, output_dir: svc))
+    seen = []
+    base = _pages_saying([{}])
+
+    def check_pages(app, doc, todo, out_dir, **kw):
+        seen.append(kw.get("probe"))
+        return base(app, doc, todo, out_dir, **{k: v for k, v in kw.items() if k != "probe"})
+    monkeypatch.setattr(ac, "check_pages", check_pages)
+    ac.check_change(str(tmp_path), ["app/src/app/globals.css"], app_factory=_App, run_turn=lambda *a, **k: {})
+    assert seen == [False]
+    seen.clear()
+    ac.check_change(str(tmp_path), ["app/src/app/(dashboard)/children/view.tsx"], app_factory=_App,
+                    run_turn=lambda *a, **k: {})
+    assert seen == [True]
