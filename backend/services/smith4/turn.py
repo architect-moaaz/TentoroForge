@@ -24,6 +24,7 @@ happen. `answer` may speak only in a turn that changed nothing.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from pathlib import Path
 from typing import Any, Callable
@@ -169,13 +170,20 @@ UNPROVEN = "Not shown to work yet:"
 FINISH_FIRST = ("Not done: the try after your change still fails — "
                 "{what}. A change is done when the try that failed passes. Fix what the try "
                 "points at and try it again; if it cannot be fixed this turn, say why with `answer`.")
-#: Steps a turn is granted past its budget to make a failing try pass, once,
-#: and the age of a turn past which it is not.
+#: KEEP AT IT. A turn's cap used to be its end: four of the six "say carry
+#: on" endings in two weeks of forge-v3 chats were budgets, not dead ends
+#: (2026-10-17). A turn whose steps are up is granted more, in slices, for
+#: as long as it is getting somewhere — a new read, a new try, a change
+#: since the last slice — up to a hard time and step limit. A turn going
+#: round in circles makes only refused steps, which is not progress, and
+#: ends. A turn the platform runs unattended keeps the budget it was given.
 FINISH_STEPS = 8
-FINISH_TIME_S = float(20 * 60)
-FINISH_EXTENSION = ("Your steps were up, but the try after your change still fails. You have "
-                    "{n} more steps to make it pass — fix what it points at and try it again; "
-                    "do not spend them reading.")
+KEEP_AT_IT_TIME_S = float(os.environ.get("FORGE_SMITH_KEEP_AT_IT_S") or 45 * 60)
+HARD_MAX_STEPS = int(os.environ.get("FORGE_SMITH_HARD_MAX_STEPS") or 120)
+KEEP_AT_IT = ("Your steps were up, but you are getting somewhere, so you have {n} more. Keep at it "
+              "until the try that failed passes. Do not end on a failing try unless something outside "
+              "this application stops you — then say with `answer` exactly what you tried, what still "
+              "fails, and what you need.")
 #: What the loop is told when its reply could not be read: once, then the
 #: turn ends on what it has rather than on a question that throws it away.
 UNREADABLE_RETRY = ("Your last reply could not be read as a step. Reply with the JSON object only — "
@@ -223,8 +231,10 @@ def turn(ctx: Ctx, *, choose: Choose, history: list | None = None,
     from services.smith import file_edit
     started = {p.get("id") for p in file_edit.load_patches(ctx.out)}
     try:
+        # A CALLER'S OWN BUDGET IS A BUDGET; the chat's default is a floor the
+        # turn keeps at it past while it is getting somewhere.
         out = _run(ctx, choose, list(history or []), observations,
-                   max_steps or loop_mod.MAX_STEPS, bench)
+                   max_steps or loop_mod.MAX_STEPS, bench, keep_at_it=max_steps is None)
     finally:
         ASKED.reset(token)
         bench.close()
@@ -454,17 +464,30 @@ def _before_done(observations: list[Observation], landed: list[str]) -> str:
     return ""
 
 
-def _failing_note(observations: list[Observation]) -> str:
+def kept_at_it(observations: list[Observation], elapsed_s: float | None = None) -> str:
+    """"I kept at this for 31 minutes (57 steps)" — what an ending on a
+    failing try owes the person: that the time was spent, not that it was
+    not. Empty when the turn was short."""
+    steps = len([o for o in observations if o.said not in _NOT_RUN and o.status != "error"])
+    minutes = int((elapsed_s or 0) // 60)
+    if minutes < 5 and steps < 20:
+        return ""
+    when = f"{minutes} minutes" if minutes >= 1 else "a while"
+    return f"I kept at this for {when} ({steps} steps). "
+
+
+def _failing_note(observations: list[Observation], elapsed_s: float | None = None) -> str:
     """Said after what landed when a turn ends with a try still failing: a
     change is reported, and so is that it did not fix what it was for."""
+    kept = kept_at_it(observations, elapsed_s)
     still = _still_failing(observations)
     if still:
-        return ("\n\nIt still does not work: I tried it again after the change and it failed "
-                "the same way. Say “carry on” and I will keep at it.")
+        return ("\n\n" + kept + "It still does not work: I tried it again after the change and it failed "
+                "the same way. Say “carry on” and I will continue from here.")
     fresh = _new_failures(observations)
     if fresh:
-        return ("\n\nAfter the change, this was tried and does not work: " + "; ".join(fresh[:4])
-                + ". Say “carry on” and I will look at it.")
+        return ("\n\n" + kept + "After the change, this was tried and does not work: " + "; ".join(fresh[:4])
+                + ". Say “carry on” and I will continue from here.")
     return ""
 
 
@@ -500,7 +523,7 @@ def standing_faults(doc: dict | None) -> list[str]:
 
 
 def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation],
-         max_steps: int, bench: "trials.Bench | None" = None) -> Outcome:
+         max_steps: int, bench: "trials.Bench | None" = None, *, keep_at_it: bool = False) -> Outcome:
     bench = bench or trials.Bench(ctx.out)
     if ctx.engine_refreshed and not observations:
         # SAID, SO A PASSING TRY IS BELIEVED. F&B's duplicate check passed on
@@ -532,16 +555,18 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
     import time as _time
     turn_started = _time.monotonic()
     unreadable = 0
-    budget, extended, _step = max_steps, False, 0
+    budget, since, _step = max_steps, 0, 0
     while True:
         if _step >= budget:
-            more = finish_steps(observations, landed, extended=extended,
-                                elapsed_s=_time.monotonic() - turn_started)
+            more = more_steps(observations, since=since, steps=_step,
+                              elapsed_s=_time.monotonic() - turn_started,
+                              unattended=ctx.unattended or not keep_at_it)
             if not more:
                 break
-            budget, extended = budget + more, True
-            observations.append(Observation(tool="done", status="error",
-                                            said=FINISH_EXTENSION.format(n=more)))
+            budget, since = budget + more, len(observations)
+            logger.info("[smith-step] keeping at it: %d more steps at step %d, %.0fs in",
+                        more, _step, _time.monotonic() - turn_started)
+            observations.append(Observation(tool="done", status="error", said=KEEP_AT_IT.format(n=more)))
         _step += 1
         from services.smith4.definition import brief_of
         if _step > 1:
@@ -641,7 +666,7 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
         if tool in tools.TERMINAL_NAMES or not tool:
             ended = _ended(tool, args, landed, touched, last, observations)
             if tool != "answer" and ended.status not in ("asked",):
-                ended.said += _failing_note(observations)
+                ended.said += _failing_note(observations, _time.monotonic() - turn_started)
             return ended
         if not tools.is_tool(tool):
             observations.append(Observation(tool=tool, args=args, status="error", said=tools.unknown(tool)))
@@ -810,18 +835,19 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
             logger.warning("smith4: the out-of-steps answer could not be had", exc_info=True)
         if not said:
             said = what_was_seen(observations)
-        tail = (f"\n\nThis turn ran out of steps ({max_steps}) before I changed anything. "
-                "Say “carry on” and I will pick up from there.")
+        spent = kept_at_it(observations, _time.monotonic() - turn_started) or f"This turn ran out of steps ({budget}). "
+        tail = (f"\n\n{spent}I changed nothing: I was still working out where the fault is. "
+                "Say “carry on” and I will continue from here — what I read and tried is kept.")
         return Outcome(status="no_op", touched=list(touched), said=(said + tail) if said else (
-            f"I have not changed anything yet — this turn ran out of steps ({max_steps}) "
-            "while I was still looking into it. Say “carry on” and I will pick up from there."))
-    failing = _failing_note(observations)
+            f"{spent}I have not changed anything yet — I was still looking into it. "
+            "Say “carry on” and I will continue from here; what I read and tried is kept."))
+    failing = _failing_note(observations, _time.monotonic() - turn_started)
     if not failing and _unproven(observations).startswith(UNPROVEN):
         # The change landed on the last step the cap allowed, untried.
         failing = ("\n\nI have not yet tried it again since the change, so I cannot say it works "
                    "yet — this turn ran out of steps. Say “carry on” and I will try it.")
     note = failing or loop_mod.remaining_note(observations, capped=True).replace(
-        f"{loop_mod.MAX_STEPS} steps", f"{max_steps} steps")
+        f"{loop_mod.MAX_STEPS} steps", f"{budget} steps")
     return _finished(landed, touched, last, note=note)
 
 
@@ -856,15 +882,28 @@ def last_try_failed(observations: list[Observation]) -> str:
     return " ".join(said.split("\n", 1)[0].split())[:200]
 
 
-def finish_steps(observations: list[Observation], landed: list[str], *, extended: bool,
-                 elapsed_s: float) -> int:
-    """How many steps a turn whose budget is up may still have: `FINISH_STEPS`
-    once, when it changed something and the try after it still fails and the
-    turn is not already old. Three turns ended "say carry on" with the fault
-    in hand and steps spent (97l5iqsp P3/P4, cxz95dd1 M2, 2026-10)."""
-    if extended or not landed or elapsed_s > FINISH_TIME_S:
+def progressed(observations: list[Observation], since: int) -> bool:
+    """Whether the steps since `since` got anywhere: a read or a try that ran
+    (status `read`), a change that landed (`resolved` with files) or a
+    finding — anything but refused steps and errors."""
+    for o in observations[since:]:
+        if o.status == "read" or o.status == "finding" or (o.status == "resolved" and _is_change(o)):
+            return True
+    return False
+
+
+def more_steps(observations: list[Observation], *, since: int, steps: int, elapsed_s: float,
+               unattended: bool = False) -> int:
+    """How many steps a turn whose budget is up may still have: a slice of
+    `FINISH_STEPS` while it is making progress and under the hard limits;
+    0 when it is going round in circles, too old, or run by the platform."""
+    if unattended:
         return 0
-    return FINISH_STEPS if last_try_failed(observations) else 0
+    if elapsed_s > KEEP_AT_IT_TIME_S or steps >= HARD_MAX_STEPS:
+        return 0
+    if not progressed(observations, since):
+        return 0
+    return min(FINISH_STEPS, HARD_MAX_STEPS - steps)
 
 
 def what_was_seen(observations: list[Observation]) -> str:

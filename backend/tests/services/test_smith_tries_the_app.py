@@ -132,7 +132,9 @@ def test_the_same_try_with_nothing_changed_between_is_refused(tmp_path, scripted
 
 def test_a_turn_that_runs_out_of_steps_having_changed_nothing_says_so(tmp_path, monkeypatch, scripted):
     import services.smith.loop as loop_mod
+    from services.smith4 import turn as turn_mod
     monkeypatch.setattr(loop_mod, "MAX_STEPS", 2)
+    monkeypatch.setattr(turn_mod, "HARD_MAX_STEPS", 2)   # the hard limit, not the floor, ends it here
     _repo(tmp_path)
     chooser = _Chooser({"tool": "grep", "args": {"pattern": "a"}}, {"tool": "grep", "args": {"pattern": "b"}})
     result = _turn(tmp_path, chooser)
@@ -144,15 +146,17 @@ def test_a_turn_out_of_steps_says_what_it_found(tmp_path, monkeypatch, scripted)
     """'I have not changed anything yet' threw away that the admin's landing
     now worked (F&B replay)."""
     import services.smith.loop as loop_mod
+    from services.smith4 import turn as turn_mod
     from services.smith4.turn import OUT_OF_STEPS
     monkeypatch.setattr(loop_mod, "MAX_STEPS", 2)
+    monkeypatch.setattr(turn_mod, "HARD_MAX_STEPS", 2)
     _repo(tmp_path)
     chooser = _Chooser(_try(), {"tool": "grep", "args": {"pattern": "b"}},
                        {"tool": "answer", "args": {"text": "Signing in now lands the admin on Categories."}})
     result = _turn(tmp_path, chooser)
     assert chooser.seen[2][-1].said == OUT_OF_STEPS
     assert result.said.startswith("Signing in now lands the admin on Categories.")
-    assert "ran out of steps (2) before I changed anything" in result.said
+    assert "ran out of steps (2)" in result.said and "I changed nothing" in result.said
 
 
 # --------------------------------------------------------------------------- #

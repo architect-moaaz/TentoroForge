@@ -36,42 +36,92 @@ def test_a_passing_try_or_one_that_could_not_run_does_not_hold_done():
     assert turn_mod.last_try_failed([_try("HTTP 500 on /x"), _change()]) == ""
 
 
-def test_steps_are_extended_once_to_make_a_failing_try_pass():
+def test_more_steps_come_while_the_turn_is_getting_somewhere():
     obs = [_change(), _try("HTTP 500 on /orders\nbrowser error: x")]
-    assert turn_mod.finish_steps(obs, ["edited"], extended=False, elapsed_s=60) == turn_mod.FINISH_STEPS
-    assert turn_mod.finish_steps(obs, ["edited"], extended=True, elapsed_s=60) == 0
-    assert turn_mod.finish_steps(obs, [], extended=False, elapsed_s=60) == 0
-    assert turn_mod.finish_steps(obs, ["edited"], extended=False, elapsed_s=turn_mod.FINISH_TIME_S + 1) == 0
-    assert turn_mod.finish_steps([_change(), _try("fine")], ["edited"], extended=False, elapsed_s=60) == 0
+    assert turn_mod.more_steps(obs, since=0, steps=40, elapsed_s=60) == turn_mod.FINISH_STEPS
+    # only refused steps since the last slice is going round in circles
+    circles = obs + [Observation(tool="grep", status="error", said="already taken")] * 3
+    assert turn_mod.more_steps(circles, since=2, steps=48, elapsed_s=60) == 0
+    # a new read since the slice is progress
+    assert turn_mod.more_steps(circles + [Observation(tool="read_file", args={"path": "a.ts"}, status="read",
+                                                      said="…")], since=2, steps=48, elapsed_s=60) == turn_mod.FINISH_STEPS
+    # the hard limits, and a turn the platform runs
+    assert turn_mod.more_steps(obs, since=0, steps=40, elapsed_s=turn_mod.KEEP_AT_IT_TIME_S + 1) == 0
+    assert turn_mod.more_steps(obs, since=0, steps=turn_mod.HARD_MAX_STEPS, elapsed_s=60) == 0
+    assert turn_mod.more_steps(obs, since=0, steps=turn_mod.HARD_MAX_STEPS - 3, elapsed_s=60) == 3
+    assert turn_mod.more_steps(obs, since=0, steps=40, elapsed_s=60, unattended=True) == 0
 
 
-def test_the_loop_grants_the_extension_and_then_ends(tmp_path, monkeypatch):
+def _app(tmp_path):
     import json
     (tmp_path / ".forge" / "blueprint").mkdir(parents=True)
     doc = {"meta": {"name": "T"}, "roles": [{"id": "r1", "name": "Admin"}],
            "pages": [{"id": "p_home", "name": "Home", "route": "/", "roles": ["r1"]}],
            "requirements": [{"id": "q1", "text": "A home screen"}], "data": {"entities": []}}
     (tmp_path / ".forge" / "blueprint" / "current.json").write_text(json.dumps(doc))
-    monkeypatch.setattr(turn_mod.trials, "run", lambda name, args, bench, doc: "HTTP 500 on /\nbrowser error: x")
-    seen: list = []
+
+
+def test_the_loop_keeps_at_it_past_the_cap_while_reads_are_new(tmp_path, monkeypatch):
+    _app(tmp_path)
+    monkeypatch.setattr(turn_mod, "HARD_MAX_STEPS", 9)
+    monkeypatch.setattr(turn_mod.loop_mod, "MAX_STEPS", 3)
+    monkeypatch.setattr(turn_mod.reads, "run", lambda *a, **k: "nothing here")
+    picks: list = []
 
     def choose(ask, page, observations, history):
-        seen.append(list(observations))
-        # the first pick tries, then every pick "reads" (grep), which spends steps
-        if len(observations) == 0:
-            return {"tool": "open_page", "args": {"route": "/", "as": "Admin"}}
-        return {"tool": "grep", "args": {"pattern": f"x{len(observations)}", "path": "app/src"}}
-    # a landed change is simulated by planting it after the first try
-    real_turn_run = turn_mod._run
-
-    def run(ctx, choose_, history, observations, max_steps, bench):
-        out = real_turn_run(ctx, choose_, history, observations, max_steps, bench)
-        return out
+        picks.append(len(observations))
+        return {"tool": "grep", "args": {"pattern": f"needle{len(picks)}", "path": "app/src"}}
     ctx = turn_mod.Ctx(output_dir=str(tmp_path), project_id="p", message="fix home", ask="fix home")
-    monkeypatch.setattr(turn_mod, "reads", type("R", (), {"run": staticmethod(lambda *a, **k: "nothing")})())
-    out = turn_mod.turn(ctx, choose=choose, max_steps=3)
-    # no change landed, so no extension: exactly three steps were chosen
-    assert len(seen) <= 5 and out.status in ("no_op", "asked", "resolved")
+    out = turn_mod.turn(ctx, choose=choose)
+    # three steps were the budget; new reads each time earned slices up to the hard limit
+    # (nine steps, then the two picks that ask for a closing answer)
+    assert len(picks) == 9 + 2
+    assert out.status == "no_op" and "what I read and tried is kept" in out.said
+
+
+def test_the_loop_stops_when_the_steps_go_round_in_circles(tmp_path, monkeypatch):
+    _app(tmp_path)
+    monkeypatch.setattr(turn_mod, "HARD_MAX_STEPS", 30)
+    monkeypatch.setattr(turn_mod.loop_mod, "MAX_STEPS", 3)
+    monkeypatch.setattr(turn_mod.reads, "run", lambda *a, **k: "nothing here")
+    picks: list = []
+
+    def choose(ask, page, observations, history):
+        picks.append(1)
+        return {"tool": "grep", "args": {"pattern": "same", "path": "app/src"}}   # the same step every time
+    ctx = turn_mod.Ctx(output_dir=str(tmp_path), project_id="p", message="fix home", ask="fix home")
+    out = turn_mod.turn(ctx, choose=choose)
+    # the first read is progress (one slice); the repeats are refused, so the next cap ends it
+    assert 3 + 2 < len(picks) <= 3 + turn_mod.FINISH_STEPS + 2
+    assert out.status == "no_op"
+
+
+def test_a_repair_the_platform_runs_keeps_its_budget(tmp_path, monkeypatch):
+    _app(tmp_path)
+    monkeypatch.setattr(turn_mod.loop_mod, "MAX_STEPS", 3)
+    monkeypatch.setattr(turn_mod.reads, "run", lambda *a, **k: "nothing here")
+    picks: list = []
+
+    def choose(ask, page, observations, history):
+        picks.append(1)
+        return {"tool": "grep", "args": {"pattern": f"n{len(picks)}", "path": "app/src"}}
+    ctx = turn_mod.Ctx(output_dir=str(tmp_path), project_id="p", message="", ask="Home as Admin: HTTP 500",
+                       unattended=True)
+    turn_mod.turn(ctx, choose=choose)
+    assert len(picks) <= 5   # the budget plus the out-of-steps answer asks
+    # and a caller's explicit budget is a budget, attended or not
+    picks.clear()
+    turn_mod.turn(turn_mod.Ctx(output_dir=str(tmp_path), project_id="p", message="fix", ask="fix"),
+                  choose=choose, max_steps=2)
+    assert len(picks) <= 4
+
+
+def test_an_ending_on_a_failing_try_says_how_long_it_kept_at_it():
+    obs = [_change(), _try("HTTP 500 on /orders\nbrowser error: x")] * 12
+    note = turn_mod._failing_note(obs, elapsed_s=31 * 60)
+    assert note.startswith("\n\nI kept at this for 31 minutes (24 steps).")
+    assert "continue from here" in note and "keep at it" not in note
+    assert turn_mod.kept_at_it(obs[:2], elapsed_s=30) == ""
 
 
 def test_the_ask_is_carried_into_an_unattended_repair():
