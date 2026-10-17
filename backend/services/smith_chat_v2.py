@@ -72,6 +72,7 @@ class ChatV2Response:
     diff_summary: str = ""
     touched_paths: list[str] = field(default_factory=list)
     intent: str | None = None  # what the router decided
+    follow_up: str = ""        # "run:<phase>" — the turn asks the router to run that phase again
 
 
 # --------------------------------------------------------------------------- #
@@ -117,7 +118,7 @@ def handle_chat_v2(req: ChatV2Request) -> ChatV2Response:
     )
     return ChatV2Response(status=out.status, answer=out.said, options=list(out.options),
                           diff_summary=out.diff_summary, touched_paths=list(out.touched),
-                          intent=intent.kind)
+                          intent=intent.kind, follow_up=str(getattr(out, "follow_up", "") or ""))
 
 
 # --------------------------------------------------------------------------- #

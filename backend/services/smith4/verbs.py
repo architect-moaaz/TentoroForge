@@ -764,7 +764,19 @@ def save_as_template(ctx: Ctx, u: dict) -> Outcome:
 
 
 def rebuild(ctx: Ctx, u: dict) -> Outcome:
-    """A chat turn cannot start a run, so it must not imply that it can."""
+    """A chat turn cannot start a run itself; a build that stopped short is
+    handed back to the router to start again (`follow_up`), with where it
+    stopped said first."""
+    try:
+        from services import run_registry
+        dead = run_registry.dead_build(ctx.out)
+    except Exception:  # noqa: BLE001 — the ledger is a help, not a gate
+        dead = None
+    if dead is not None:
+        phase = str(dead.get("phase") or "") or "build"
+        return Outcome(status="handoff", follow_up=f"run:{phase}", said=(
+            run_registry.stopped_line(dead) + " Starting it again from the definition now; what was "
+            "already built is kept."))
     stale = ""
     if (Path(ctx.out) / ".forge" / "blueprint" / "current.json").exists():
         try:

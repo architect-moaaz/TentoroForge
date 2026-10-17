@@ -27,6 +27,9 @@ class Outcome:
     #: The tools the turn called, in order — what a platform caller (self-heal,
     #: the verify pass) reports as the turn's trace.
     steps: list[str] = field(default_factory=list)
+    #: What the router does after the turn: "run:build" / "run:model" /
+    #: "run:define" starts that phase again (a build that stopped short).
+    follow_up: str = ""
 
     @property
     def done(self) -> bool:

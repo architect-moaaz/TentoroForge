@@ -125,6 +125,7 @@ def check_routes(app: Any, doc: dict, *, only: set[str] | None = None,
         except Exception:  # noqa: BLE001 — no records to fill with
             records = {}
     jars: dict[str, list[dict] | None] = {}
+    no_session: dict[str, int] = {}
     green: list[dict] = []
     red: list[dict] = []
     untried: list[dict] = []
@@ -146,7 +147,13 @@ def check_routes(app: Any, doc: dict, *, only: set[str] | None = None,
                 jars[v["as"]] = None
         jar = jars[v["as"]]
         if jar is None:
-            untried.append(it(f"could not sign in as {v['as']}"))
+            # ONE CAUSE, SAID ONCE. 106 screens each reported "could not sign in"
+            # (fyuhs16i, 2026-10-06); the fault is the sign-in, not the screens.
+            if v["as"] not in no_session:
+                no_session[v["as"]] = 0
+            no_session[v["as"]] += 1
+            untried.append(it(f"could not sign in as {v['as']} — one cause for every screen of that role, "
+                              "not a fault of this screen"))
             continue
         try:
             status, location, _body = _http(app, "GET", path, None, jar)
@@ -155,7 +162,10 @@ def check_routes(app: Any, doc: dict, *, only: set[str] | None = None,
             continue
         found = outcome_findings(int(status), str(location or ""), v)
         (red if found else green).append(it(found[0] if found else f"answers as declared ({v['expect']})"))
-    return {"total": len(todo), "green": green, "red": red, "untried": untried}
+    out = {"total": len(todo), "green": green, "red": red, "untried": untried}
+    if no_session:
+        out["causes"] = [f"could not sign in as {role}: {n} screens not tried" for role, n in no_session.items()]
+    return out
 
 
 __all__ = ["SIGNED_OUT", "check_routes", "expected_outcomes", "outcome_findings"]

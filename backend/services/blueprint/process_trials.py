@@ -29,6 +29,28 @@ from typing import Any, Callable
 logger = logging.getLogger(__name__)
 
 ROUNDS = 2
+#: Failing processes that share one failure text from here up are one fault.
+SHARED_CAUSE_AT = 3
+
+
+def sort_failures(failing: list, repeated: dict, changed: set) -> tuple[list, list, list]:
+    """What a repair round does with its failures: `still` (failing as before
+    a repair that changed nothing — not repaired again), `groups` (several
+    failing with the same words — one fault, one repair naming all of them),
+    `singles` (one repair each)."""
+    still, fresh = [], []
+    for flow, run, said in failing:
+        fid = str(flow.get("id"))
+        if fid in repeated and repeated[fid] == _why(said) and fid not in changed:
+            still.append((flow, run, said))
+        else:
+            fresh.append((flow, run, said))
+    by_cause: dict[str, list] = {}
+    for flow, run, said in fresh:
+        by_cause.setdefault(_why(said)[:160], []).append((flow, run, said))
+    groups = [items for items in by_cause.values() if len(items) >= SHARED_CAUSE_AT]
+    singles = [t for items in by_cause.values() if len(items) < SHARED_CAUSE_AT for t in items]
+    return still, groups, singles
 STEPS = 12
 
 INPUTS_SCHEMA: dict[str, Any] = {
@@ -385,6 +407,7 @@ def _prove_processes(svc: Any, output_dir: str, *,
     untried: list[dict] = []
     pending = [str(w["id"]) for w in flows]
     lessons: dict[str, str] = {}
+    repeated: dict[str, str] = {}
     proven: list[str] = []
     with _ledger(output_dir if record else None, len(pending), node="process_trials") as ledger:
         for round_ in range(1, rounds + 2):
@@ -492,10 +515,46 @@ def _prove_processes(svc: Any, output_dir: str, *,
             finally:
                 bench.close()
             if round_ > rounds or cancelled():
-                left = [{"workflow": str(f.get("id")), "name": str(f.get("name") or f.get("id")),
-                         "reason": said.split("\n", 1)[0][:200] + " — " + said[-400:]} for f, _r, said in failing]
+                left += [{"workflow": str(f.get("id")), "name": str(f.get("name") or f.get("id")),
+                          "reason": said.split("\n", 1)[0][:200] + " — " + said[-400:]} for f, _r, said in failing]
                 break
-            for flow, run, said in failing:
+            # THE SAME FAILURE TWICE IS NOT REPAIRED TWICE. 31 processes were
+            # posted "did not run through — fixing the cause" and, a round
+            # later, the same 31 lines again with nothing learned in between
+            # (fyuhs16i, 2026-10-06). A process whose failure reads as it did
+            # before a repair that changed nothing is left, with the reason.
+            still, groups, singles = sort_failures(failing, repeated, changed)
+            failing_now = [t for items in groups for t in items] + singles
+            if still:
+                names = ", ".join(str(f.get("name") or f.get("id")) for f, _r, _s in still[:6])
+                say("message", {"text": f"{names}: failing the same way after a repair that changed nothing; "
+                                        "I am not repeating that repair — the cause is recorded for the hand-over."})
+                left += [{"workflow": str(f.get("id")), "name": str(f.get("name") or f.get("id")),
+                          "reason": "the same failure after a repair that changed nothing — " + _why(said)[:300]}
+                         for f, _r, said in still]
+            # MANY FAILING WITH THE SAME WORDS IS ONE FAULT. "Could not sign
+            # in" on every process is one cause; it is given to one repair
+            # turn naming all of them, not one turn each.
+            for items in groups:
+                flow, run, said = items[0]
+                names = ", ".join(str(f.get("name") or f.get("id")) for f, _r, _s in items[:8])
+                say("message", {"text": f"{len(items)} processes fail with the same words ({_why(said)[:120]}) — "
+                                        f"one cause; fixing it once: {names}."})
+                for f, _r, _s in items:
+                    ledger.repair("process_trials", str(f.get("id")), round_, rounds, said[:600])
+                try:
+                    turn = run_turn("", output_dir, fault_ask(flow, run, said) + (
+                        f"\n\n{len(items)} processes fail with these same words: {names}. That is one fault, "
+                        "not one per process: find the cause they share, fix it once, and try one of them "
+                        "again."), max_steps=STEPS, unattended=True) or {}
+                    if turn.get("edited_paths"):
+                        changed.update(str(f.get("id")) for f, _r, _s in items)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("[process-trials] shared cause: %s", exc)
+                for f, r, sd in items:
+                    repeated[str(f.get("id"))] = _why(sd)
+                    lessons[str(f.get("id"))] = f"input {json.dumps(r.get('input') or {}, default=str)[:400]} -> {_why(sd)}"
+            for flow, run, said in singles:
                 ledger.repair("process_trials", str(flow.get("id")), round_, rounds, said[:600])
                 say("message", {"text": f"{flow.get('name')} did not run through — fixing the cause and running it again."})
                 found = ""
@@ -507,10 +566,12 @@ def _prove_processes(svc: Any, output_dir: str, *,
                         changed.add(str(flow.get("id")))
                 except Exception as exc:  # noqa: BLE001 — one repair never ends the build
                     logger.warning("[process-trials] %s: %s", flow.get("id"), exc)
+                repeated[str(flow.get("id"))] = _why(said)
                 lessons[str(flow.get("id"))] = (f"input {json.dumps(run.get('input') or {}, default=str)[:400]} -> "
                                                 f"{_why(said)}" + (f"; found: {found[:400]}" if found else ""))
+            if failing_now:
                 reload()
-            pending = [str(f.get("id")) for f, _r, _s in failing]
+            pending = [str(f.get("id")) for f, _r, _s in failing_now]
         for item in left:
             ledger.unrepaired("process_trials", item["workflow"], item["reason"])
 

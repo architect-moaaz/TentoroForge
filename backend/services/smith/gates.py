@@ -840,15 +840,32 @@ def say_requirements(doc: Mapping[str, Any]) -> str:
     return lead + "\n\n" + ask_line(REQUIREMENTS)
 
 
+def _short(text: Any, n: int = 70) -> str:
+    words = " ".join(str(text or "").split())
+    return words if len(words) <= n else words[:n - 1].rstrip() + "…"
+
+
 def say_requirements_change(change: Mapping[str, Any], version: int, *, declined: list[str] = (),
-                            reference: bool = False) -> str:
+                            reference: bool = False, names: Mapping[str, str] | None = None) -> str:
+    """"Done. v3 added 2." named nothing; the person opened the panel to see
+    what their sentence had become (wta55kt2, 2026-10-08). With `names`
+    (id → the requirement's words) each change says which ones."""
+    names = names or {}
+
+    def named(ids: list, kind: str) -> str:
+        shown = [_short(names.get(str(i if not isinstance(i, dict) else i.get("id")))
+                        or (i.get("description") if isinstance(i, dict) else "")) for i in ids]
+        shown = [x for x in shown if x][:4]
+        more = len(ids) - len(shown)
+        return (f"{kind} {len(ids)}" + (f" ({'; '.join(shown)}" + (f"; and {more} more" if more > 0 else "") + ")"
+                                       if shown else ""))
     bits = []
     if change.get("added"):
-        bits.append(f"added {len(change['added'])}")
+        bits.append(named(list(change["added"]), "added"))
     if change.get("removed"):
-        bits.append(f"removed {len(change['removed'])}")
+        bits.append(named(list(change["removed"]), "removed"))
     if change.get("changed"):
-        bits.append(f"changed {len(change['changed'])}")
+        bits.append(named(list(change["changed"]), "changed"))
     if declined:
         bits.append(f"left out of what such products have: {', '.join(declined)}")
     if reference:

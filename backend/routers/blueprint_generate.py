@@ -108,6 +108,19 @@ _STATUS_ASK = re.compile(
 _CHANGE_START = re.compile(r"^(please\s+|can you\s+|could you\s+)?(fix|change|add|remove|make|rename|build|create|delete|set|show|open|edit|update|rebuild)\b", re.I)
 
 
+#: A message that means "go on with what stopped": the whole message, in
+#: these words, nothing else asked in it.
+_CARRY_ON = re.compile(
+    r"^(please\s+)?(carry on|continue|resume|rerun|re-run|retry|try again|restart( and rebuild)?|rebuild"
+    r"|build( (the )?(app|application|it))?( again)?|run (it )?again|start again|go on|keep going|pick it up"
+    r"|finish (it|the build))$", re.I)
+
+
+def _asks_to_carry_on(message: str) -> bool:
+    word = " ".join((message or "").strip().lower().rstrip(".!?").split())
+    return bool(word) and bool(_CARRY_ON.match(word))
+
+
 def _lifecycle_verb(message: str) -> str | None:
     """The lifecycle verb a message IS, or None. Only an exact one-word command
     counts — 'define the roles for me' is a sentence, not the `define` verb —
@@ -1789,6 +1802,22 @@ async def smith_chat(
             # built… what would you like to do?" (pcn4owv7, 2026-10-15 05:36).
             if _yes_to_a_carry_on_offer(req.history, req.message):
                 req.message = "carry on"
+            # A BUILD THAT STOPPED SHORT IS PICKED UP, NOT POINTED AT. "continue",
+            # "resume", "rerun", "Build app" after a build whose process went
+            # away or whose step failed got the card to press, a canned "press
+            # Approve and build", a tool loop inventing a change, or nothing
+            # at all (fyuhs16i, qpqhdugb, 97l5iqsp, grpz7rl5, 23libgx8,
+            # fnocleub, 20nhpelj, 2026-10). The ledger says where it stopped;
+            # say that, then run the same phase again from the definition.
+            from services.smith import plan as _plan_mod
+            dead = run_registry.dead_build(output_dir) if _asks_to_carry_on(req.message) else None
+            if dead is not None and not _plan_mod.peek(output_dir) and not req.approved:
+                emit("message", {"text": run_registry.stopped_line(dead)
+                                 + " Starting it again from the definition now; what was already "
+                                   "built is kept.", "status": "reported"})
+                _phase = str(dead.get("phase") or "") or "build"
+                return _run_dag(str(output_dir), app_root, "", approved=_phase == "build", emit=emit,
+                                app_name=getattr(project, "name", "") or "", phase=_phase)
             verb = _lifecycle_verb(req.message)
             if verb == "status":
                 emit("message", {"text": _status_report(svc.doc if svc else {}, output_dir),
@@ -2161,6 +2190,11 @@ async def smith_chat(
             # `asked` and `needs_user` are the conversation doing its job —
             # §16 holds rather than guessing. `resolved` already changed the
             # Blueprint. Only a handoff needs the graph.
+            _follow = str(getattr(turn_result, "follow_up", "") or "")
+            if _follow.startswith("run:"):
+                _phase = _follow[4:] or "build"
+                return _run_dag(str(output_dir), app_root, "", approved=_phase == "build", emit=emit,
+                                app_name=getattr(project, "name", "") or "", phase=_phase)
             if turn_result.status in ("handoff", "not_enabled"):
                 return _run_dag(str(output_dir), app_root, req.message,
                                 approved=req.approved, emit=emit,
@@ -2925,9 +2959,11 @@ def _gate_turn(svc: Any, gate: str, output_dir: str, app_root: str, req: Any, *,
                                              request=req.message, reasoning=reasoning,
                                              parts=list(turn.get("parts") or []),
                                              decline=list(turn.get("decline") or []))
+            _names = {str(r.get("id")): str(r.get("description") or r.get("title") or "")
+                      for r in (svc.doc.get("requirements") or []) if isinstance(r, dict)}
             text = _gates.say_requirements_change(out["diff"], out["version"],
                                                   declined=list(out.get("declined") or []),
-                                                  reference=bool(out.get("reference")))
+                                                  reference=bool(out.get("reference")), names=_names)
         else:
             out = _gates.revise_model(svc, turn, request=req.message, reasoning=reasoning,
                                       detail=lambda s: _detail_new_records(s, reasoning))
