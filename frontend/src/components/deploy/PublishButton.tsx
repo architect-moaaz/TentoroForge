@@ -2,12 +2,13 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ExternalLink, Lock, Smartphone, Upload } from "lucide-react";
+import { Lock, Smartphone, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { PublishDialog } from "./PublishDialog";
 import { lockedNote } from "@/lib/features";
 import { explainLock } from "@/components/features/Locked";
+import { SideLink, usePublishStatus } from "./PublishSides";
 
 interface LatestDeployment {
   id: string;
@@ -80,21 +81,23 @@ export function PublishButton({ projectId, orgId, size = "sm", lockedWeb = false
     },
   });
 
-  const liveUrl = data?.status === "succeeded" ? data.url : null;
+  // WHERE PUBLISH GOES, and BOTH ADDRESSES: the live app's (its main
+  // address — own domain, else apps.tentoro.ai — once that answers) and the
+  // test version's, each one click away whichever way the switch is set.
+  const { data: sides } = usePublishStatus(projectId, isReady && !lockedWeb);
+  const onTest = sides?.target === "test";
+  const productionUrl = sides
+    ? sides.production ? sides.production_address || sides.production.url : null
+    : data?.status === "succeeded" ? data.url : null;
+  const testUrl = sides?.test?.url ?? null;
 
   return (
-    <div className="flex items-center gap-1.5">
-      {liveUrl && (
-        <a
-          href={liveUrl}
-          target="_blank"
-          rel="noreferrer"
-          className="flex items-center gap-1 text-[11px] font-mono text-muted-foreground hover:text-foreground max-w-[240px] truncate"
-          title={`Live at ${liveUrl}`}
-        >
-          <ExternalLink className="h-3 w-3 shrink-0" />
-          <span className="truncate">{liveUrl.replace(/^https?:\/\//, "")}</span>
-        </a>
+    <div className="flex min-w-0 items-center gap-1.5">
+      {(productionUrl || testUrl) && (
+        <div className="flex min-w-0 flex-col items-end gap-0.5 leading-tight">
+          {productionUrl && <SideLink side="production" url={productionUrl} />}
+          {testUrl && <SideLink side="test" url={testUrl} />}
+        </div>
       )}
       <Button
         variant="default"
@@ -105,6 +108,7 @@ export function PublishButton({ projectId, orgId, size = "sm", lockedWeb = false
           setOpen(true);
         }}
         disabled={!projectId || (!isReady && !lockedWeb)}
+        className="shrink-0"
         data-locked={lockedWeb ? "publish" : undefined}
         title={
           lockedWeb ? lockedNote("Publish to the web") :
@@ -122,7 +126,7 @@ export function PublishButton({ projectId, orgId, size = "sm", lockedWeb = false
         }
       >
         {lockedWeb ? <Lock className="mr-1.5 h-3.5 w-3.5" /> : <Upload className="mr-1.5 h-3.5 w-3.5" />}
-        {liveUrl ? "Republish" : "Publish"}
+        {onTest ? "Publish to Test" : productionUrl ? "Republish" : "Publish"}
       </Button>
       <Button
         variant="outline"
@@ -133,6 +137,7 @@ export function PublishButton({ projectId, orgId, size = "sm", lockedWeb = false
           setOpen(true);
         }}
         disabled={!projectId || (!isReady && !lockedMobile)}
+        className="shrink-0"
         data-locked={lockedMobile ? "mobile_builds" : undefined}
         title={lockedMobile ? lockedNote("Mobile builds") : "Build a mobile app (APK / IPA)"}
         aria-label="Build mobile app"

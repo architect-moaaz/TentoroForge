@@ -180,6 +180,17 @@ class VercelClient:
             )
         return r.json()
 
+    async def set_env_target(self, project_id: str, env_id: str, target: list[str]) -> dict[str, Any]:
+        """Change only which of Vercel's environments a setting applies to,
+        keeping its value (which listing does not return)."""
+        r = await self._client.patch(
+            f"{BASE}/v9/projects/{project_id}/env/{env_id}",
+            params=self._params(),
+            json={"target": target},
+        )
+        _raise_with_body(r, f"set_env_target project={project_id!r} env={env_id!r}")
+        return r.json()
+
     async def set_env(
         self,
         project_id: str,
@@ -275,8 +286,10 @@ class VercelClient:
         name: str,
         project_id: str,
         files: list[dict[str, Any]],
+        target: str | None = "production",
     ) -> dict[str, Any]:
-        """Create a deployment referencing `files`.
+        """Create a deployment referencing `files` — a production one, or with
+        `target=None` a preview (the app's test side).
 
         Two accepted shapes for each entry:
           - inline: `{file, data, encoding?}` — bytes go in the body
@@ -293,7 +306,7 @@ class VercelClient:
                 "name": name,
                 "project": project_id,
                 "files": files,
-                "target": "production",
+                **({"target": target} if target else {}),
                 "projectSettings": {"framework": "nextjs"},
             },
         )
@@ -319,16 +332,30 @@ class VercelClient:
         _raise_with_body(r, f"promote_deployment id={deployment_id!r}")
         return r.json()
 
-    async def redeploy(self, project_name: str, deployment_id: str) -> dict[str, Any]:
-        """A new production deployment of an earlier one's files, built with
-        the project's environment as it is now. A changed setting (the address
-        sign-in uses) takes effect only in a deployment built after it."""
+    async def redeploy(self, project_name: str, deployment_id: str, target: str | None = "production") -> dict[str, Any]:
+        """A new deployment of an earlier one's files, built with the project's
+        environment as it is now: production by default, or a preview. A
+        changed setting (the address sign-in uses) takes effect only in a
+        deployment built after it; a test deployment promoted to production is
+        this, with production's settings."""
         r = await self._client.post(
             f"{BASE}/v13/deployments",
             params={**self._params(), "forceNew": "1"},
-            json={"name": project_name, "deploymentId": deployment_id, "target": "production"},
+            json={"name": project_name, "deploymentId": deployment_id, **({"target": target} if target else {})},
         )
         _raise_with_body(r, f"redeploy project={project_name!r} from={deployment_id!r}")
+        return r.json()
+
+    async def alias_deployment(self, deployment_id: str, alias: str) -> dict[str, Any]:
+        """Point `alias` (a fixed address, e.g. the test side's) at this
+        deployment. A production publish never moves it: it is not one of the
+        project's production domains."""
+        r = await self._client.post(
+            f"{BASE}/v2/deployments/{deployment_id}/aliases",
+            params=self._params(),
+            json={"alias": alias},
+        )
+        _raise_with_body(r, f"alias_deployment {deployment_id!r} -> {alias!r}")
         return r.json()
 
     async def latest_production_deployment(self, project_id: str) -> dict[str, Any] | None:

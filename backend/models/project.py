@@ -2,7 +2,7 @@
 
 import uuid
 import string
-import random
+import secrets
 from datetime import datetime
 from enum import Enum as PyEnum
 
@@ -70,8 +70,14 @@ class AgentJobStatus(str, PyEnum):
 
 
 def _generate_short_id(length: int = 8) -> str:
+    # `secrets`, not `random`: a short id is a unique key (DB unique constraint,
+    # and the on-disk project directory `OUTPUT_BASE/<short_id>`), so it must
+    # not come from the global PRNG, which anything may seed. Under a fixed seed
+    # — pytest-randomly reseeds it before every test — `random` handed each test
+    # the same id, and projects collided on one directory in the shared test
+    # output, failing whichever test reused another's.
     chars = string.ascii_lowercase + string.digits
-    return "".join(random.choices(chars, k=length))
+    return "".join(secrets.choice(chars) for _ in range(length))
 
 
 # ---------------------------------------------------------------------------
@@ -113,6 +119,11 @@ class Project(Base):
     # so subsequent pipeline runs + Smith turns see the same brief. Null
     # for legacy projects and while FORGE_BRIEF_AUTHOR is off.
     brief: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    #: Where Publish sends the app: "test" (its own address and data; the
+    #: live app untouched) or "production". New apps start on test; apps from
+    #: before the switch existed keep publishing to production.
+    publish_target: Mapped[str] = mapped_column(String(16), nullable=False, server_default="production",
+                                                default="test")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

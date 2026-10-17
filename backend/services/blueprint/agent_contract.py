@@ -52,7 +52,7 @@ WRITABLE_SECTIONS: frozenset[str] = frozenset(
     | {"data.entities", "data.relationships", "data.constraints",
        "navigation", "designSystem", "security",
        "runtime", "database", "deployment", "product", "codeMap",
-       "pageLayouts", "pageCode", "composition", "completeness",
+       "pageLayouts", "pageCode", "nativeCode", "composition", "completeness",
        "domainReference", "mobile"}
 )
 
@@ -258,6 +258,15 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
     "ui_engineer": _cap(
         "ui_engineer",
         {"pageCode"},
+        tools={"blueprint:read", "page_contract:read", "design_system:read",
+               "sdk:read", "tsc:check"},
+    ),
+    # One native screen per page, written as React Native against the native SDK
+    # and kit, beside `ui_engineer`'s web page. It writes `nativeCode` and
+    # nothing else, and only for an application whose `mobile.native` is on.
+    "native_engineer": _cap(
+        "native_engineer",
+        {"nativeCode"},
         tools={"blueprint:read", "page_contract:read", "design_system:read",
                "sdk:read", "tsc:check"},
     ),
@@ -1147,6 +1156,14 @@ def check_page_access(result: "AgentResult", doc: dict | None) -> None:
             (k for k, v in merged.items() if v.get("route") == body.get("route")), str(body.get("route")))
         page = merged.get(key) or body
         if str(page.get("access") or "") == "role_restricted" and not page.get("users"):
+            # THE SECTIONS MAY ALREADY SAY WHO. A screen whose parts each name
+            # their roles is for the union of them; that is written onto the
+            # page rather than asked for a second time.
+            from_sections = sorted({str(r) for sec in (page.get("sections") or []) if isinstance(sec, dict)
+                                    for r in (sec.get("roles") or []) if r})
+            if from_sections:
+                body["users"] = from_sections
+                continue
             problems.append(f"{page.get('route') or page.get('name')}: `access: \"role_restricted\"` names no "
                             "role — put the roles that may open it in `users` (the people this screen is "
                             "for); a restricted page nobody is named for is the administrator's alone")
@@ -1184,11 +1201,26 @@ def check_role_doors(result: "AgentResult", doc: dict | None) -> None:
     after = {**(doc or {}), "pages": list(merged.values())}
     theirs = {str(n) for page in touched for n in restricted_roles(after, page)}
     missing = [r for r in roles_without_a_door(after) if r in theirs]
-    if missing:
+    # A ROLE WITH PAGES AND NO DOOR IS GIVEN ONE. The author's own reply holds
+    # the pages that role may open; the first concrete one — a dashboard before
+    # a list before anything else — becomes where it lands, rather than the
+    # whole build dying for a flag (FitTrackr qpqhdugb, 2026-10-16: five builds).
+    # The author may still say otherwise with `entry: true` of its own.
+    rank = {"dashboard": 0, "list": 1, "kanban": 1, "calendar": 1, "map": 1}
+    still: list[str] = []
+    for role in missing:
+        mine = [b for b in proposed if role in {str(n) for n in restricted_roles(after, b)}
+                and "[" not in str(b.get("route") or "")]
+        mine.sort(key=lambda b: rank.get(str(b.get("pattern") or ""), 2))
+        if mine:
+            mine[0]["entry"] = True
+        else:
+            still.append(role)
+    if still:
         raise RoleWithoutADoor(_all_of([
             f"{role} has pages only {role} may open and none marked as where {role} arrives — "
             f"give the page {role} opens first `entry: true` (a concrete route, no `[id]`)"
-            for role in missing]))
+            for role in still]))
 
 
 class InvalidNavigation(AuthorRefusal):
@@ -1427,6 +1459,18 @@ def check_mobile(result: "AgentResult", doc: dict | None) -> None:
             store = p.body.get("store") if isinstance(p.body.get("store"), dict) else {}
             if store.get("enabled") is True and not store.get("bundleId"):
                 problems.append("mobile.store: a store wrapper names its `bundleId` (com.example.app)")
+    native = mobile.get("native") if isinstance(mobile.get("native"), dict) else {}
+    if native.get("enabled") is True:
+        store = mobile.get("store") if isinstance(mobile.get("store"), dict) else {}
+        if not store.get("bundleId"):
+            problems.append("mobile.native: a native app names its bundle id — set `mobile.store.bundleId` (com.example.app)")
+        signin = ((doc.get("security") or {}).get("signIn") or {}) if isinstance(doc.get("security"), dict) else {}
+        for p in result.proposals:
+            if p.section == "security" and isinstance(p.body, dict) and isinstance(p.body.get("signIn"), dict):
+                signin = {**signin, **p.body["signIn"]}
+        if signin.get("password") is False:
+            problems.append("mobile.native: the phone signs in with email and password, and `security.signIn.password` is off — "
+                            "turn password sign-in on, or turn the native app off")
     push_on = mobile.get("push") is True
     for p in result.proposals:
         if p.section != "workflows" or not isinstance(p.body, dict):
@@ -1611,7 +1655,16 @@ def check_audit(result: "AgentResult", doc: dict | None) -> None:
             if level == "none":
                 problems.append(f"{name}: an `audit_trail` page needs a trail — `security.audit.level` is none")
             users = [alias.get(str(u), str(u)) for u in p.body.get("users") or []]
-            if not users or any(u not in reviewers for u in users):
+            if not users:
+                # THE TRAIL'S SCREEN IS THE REVIEWERS', AND THE POLICY ALREADY SAYS WHO
+                # THEY ARE. The page writer plans screens and does not author `users`
+                # (roles sit on sections), so the page is given the reviewers rather
+                # than refused for not naming them: refusing killed every build of an
+                # app with a trail at this node, four times over (FitTrackr qpqhdugb,
+                # 2026-10-16). Naming someone who is NOT a reviewer is still refused.
+                if reviewers:
+                    p.body["users"] = [alias.get(str(r), str(r)) for r in audit.get("reviewers") or []]
+            elif any(u not in reviewers for u in users):
                 problems.append(f"{name}: an `audit_trail` page is for the reviewers the audit policy names; "
                                 f"`users` must be among {reviewer_names or ['(none declared)']}")
     if problems:

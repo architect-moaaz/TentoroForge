@@ -2,6 +2,7 @@
 
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -13,6 +14,9 @@ from pydantic import BaseModel, Field
 class ProjectCreate(BaseModel):
     name: str
     description: str | None = None
+    # What the app is for: `responsive` (a website that works on phones) or `native` (a website AND a mobile app).
+    # Unset keeps the old behaviour (the server's default decides); the create dialog always sends one.
+    mobile_target: Literal["responsive", "native"] | None = None
 
 
 class ProjectUpdate(BaseModel):
@@ -31,6 +35,7 @@ class ProjectResponse(BaseModel):
     status: str
     preview_port: int | None
     db_port: int | None
+    publish_target: str = "production"
     created_at: datetime
     updated_at: datetime
 

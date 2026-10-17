@@ -4,7 +4,6 @@ chat. Started with the backend; quiet when publishing is not set up."""
 from __future__ import annotations
 
 import asyncio
-import fcntl
 import logging
 import os
 import tempfile
@@ -70,7 +69,21 @@ def _hold_watch(path: Path | None = None):
     lock = path or Path(os.environ.get("FORGE_DOMAIN_WATCH_LOCK_PATH") or Path(tempfile.gettempdir()) / "forge-domain-watch.lock")
     fh = open(lock, "a+")  # noqa: SIM115 — held for the life of the process
     try:
-        fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        try:
+            import fcntl  # POSIX-only (the platform's containers, macOS)
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except ImportError:
+            # WINDOWS HAS NO fcntl, and importing it at the top of this module stopped the backend from starting
+            # there at all. Lock the file's first byte instead: the same one-holder rule, released the same way.
+            try:
+                import msvcrt
+            except ImportError:
+                # Neither lock exists on this platform: every worker sweeps. An address checked twice is a repeated
+                # line in chat, not a fault, and the watch must not be the reason the backend cannot start.
+                logger.warning("[domain-watch] no file lock here: every worker runs the watch")
+                return fh
+            fh.seek(0)
+            msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
     except OSError:
         fh.close()
         return None

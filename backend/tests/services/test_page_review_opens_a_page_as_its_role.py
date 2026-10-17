@@ -160,3 +160,32 @@ def test_a_forbidden_page_is_reported_and_never_rewritten(monkeypatch, tmp_path)
     page = out["pages"]["PAGE-009"]
     assert page["passed"] is False and page["rewritten"] is False
     assert page["review"]["forbidden"] and "cannot be opened as Max (Parent)" in page["review"]["broken"][0]
+
+
+def test_stopping_the_app_on_windows_survives_a_process_that_will_not_end(monkeypatch, tmp_path):
+    """`taskkill` ran, the process still did not end within the wait: the clean-up goes on, it does not raise."""
+    import os
+    import subprocess
+    import types
+
+    class Holds:
+        pid = 4242
+
+        def wait(self, timeout=None):
+            raise subprocess.TimeoutExpired("next", timeout)
+
+    class FakeOS:
+        name = "nt"
+
+        def __getattr__(self, key):
+            return getattr(os, key)
+
+    ran = []
+    monkeypatch.setattr(pr, "os", FakeOS())
+    monkeypatch.setattr(pr.subprocess, "run", lambda cmd, **k: ran.append(cmd[0]) or types.SimpleNamespace(returncode=0))
+    monkeypatch.setattr("services.dev_servers.forget", lambda pid: None)
+    app = pr.RunningApp.__new__(pr.RunningApp)
+    app.proc, app._sink, app.clone, app.started_db = Holds(), None, None, False
+    app.root, app.dist_dir = tmp_path, "dist"
+    app._stop()                                                    # must not raise TimeoutExpired
+    assert ran == ["taskkill"]

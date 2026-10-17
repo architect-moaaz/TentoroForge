@@ -85,3 +85,23 @@ async def test_smoke_fails_when_probe_raises():
         ok, err = await _smoke_test_db("https://app.example.com")
     assert ok is False
     assert "probe failed" in (err or "")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [401, 403])
+async def test_smoke_ok_when_the_middleware_answers_401_or_403(status):
+    """An /api/* call without a session is answered 401 as JSON (a phone app cannot follow a redirect). The probe is such a
+    call: Iron Log's first publish was live and healthy, and the check said "database unhealthy: HTTP 401"."""
+    mock = AsyncMock(return_value=_resp(status, {"error": {"code": "UNAUTHORIZED", "message": "Sign in to use this."}}))
+    with patch("httpx.AsyncClient.get", mock):
+        ok, err = await _smoke_test_db("https://app.example.com")
+    assert ok is True and err is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [404, 500, 502])
+async def test_smoke_still_fails_on_a_real_server_fault(status):
+    mock = AsyncMock(return_value=_resp(status))
+    with patch("httpx.AsyncClient.get", mock):
+        ok, err = await _smoke_test_db("https://app.example.com")
+    assert ok is False and f"HTTP {status}" in (err or "")

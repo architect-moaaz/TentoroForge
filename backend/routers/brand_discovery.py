@@ -67,6 +67,10 @@ class BrandProfileUpdate(BaseModel):
     company_name: str | None = Field(default=None, max_length=255)
     identity: dict[str, Any] | None = None
     design: dict[str, Any] | None = None
+    #: The guidelines in the person's own words. Given, the document is theirs
+    #: and stays theirs across later corrections; "" hands it back to the
+    #: renderer. Absent, the document is re-rendered as before.
+    design_md: str | None = None
 
 
 class BrandProfileResponse(BaseModel):
@@ -225,13 +229,24 @@ async def update_brand_profile(
             design["logo"] = kept
         profile.design = design
 
-    profile.design_md = regenerate({
-        "company_name": profile.company_name,
-        "source_url": profile.source_url,
-        "identity": profile.identity or {},
-        "design": profile.design or {},
-        "evidence": profile.evidence or {},
-    })
+    # THE GUIDELINES MAY BE THE PERSON'S OWN. Written by hand, the document
+    # is kept as written across later corrections to a colour or a sentence
+    # (the renderer would otherwise overwrite it in the same call); cleared,
+    # it goes back to being rendered.
+    evidence = dict(profile.evidence or {})
+    if req.design_md is not None:
+        evidence["design_md_by_hand"] = bool(req.design_md.strip())
+        profile.evidence = evidence
+    if req.design_md is not None and req.design_md.strip():
+        profile.design_md = req.design_md.strip() + "\n"
+    elif not evidence.get("design_md_by_hand"):
+        profile.design_md = regenerate({
+            "company_name": profile.company_name,
+            "source_url": profile.source_url,
+            "identity": profile.identity or {},
+            "design": profile.design or {},
+            "evidence": profile.evidence or {},
+        })
     # An edited profile is a finished one, whatever it was before: somebody
     # has now said what this company looks like, which is the whole of what
     # `ready` means.

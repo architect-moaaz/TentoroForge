@@ -931,7 +931,10 @@ class DomainService:
         main = self.main_address()
         wanted = main or (production_alias(self.project_name) if sso_declared(self.output_dir) else "")
         org_base = self.organisations_domain()
-        env = {e.get("key"): e for e in await self.client.list_env(pid)}
+        # THE LIVE APP'S SETTINGS ONLY: the test version has its own rows of the
+        # same names (its own NEXTAUTH_URL), which a domain change never touches.
+        env = {e.get("key"): e for e in await self.client.list_env(pid)
+               if "production" in (e.get("target") or ["production"])}
         changed = False
         for key, value in (("NEXTAUTH_URL", wanted), ("FORGE_ORG_DOMAIN", org_base),
                            ("FORGE_ORG_SIGN_IN_MODE", (self.tenancy().get("addressSignIn") or "shared") if org_base else "")):
@@ -1025,6 +1028,20 @@ def project_root(path: str | Path) -> Path:
     if (p / ".forge").is_dir() or not (p.parent / ".forge").is_dir():
         return p
     return p.parent
+
+
+def live_address(output_dir: str | Path | None, short_id: str) -> str:
+    """The address people should open the live app at: its main address once
+    live (the owner's own, else its Tentoro address), or "" while only
+    `<project>.vercel.app` answers."""
+    if not output_dir:
+        return ""
+    try:
+        return DomainService(output_dir=str(project_root(output_dir)), client=None,
+                             project_name=vercel_project_name(short_id)).main_address()
+    except Exception:  # noqa: BLE001 — what is shown falls back to the Vercel address
+        logger.warning("[domains] could not read the main address of %s", short_id, exc_info=True)
+        return ""
 
 
 async def attach_after_publish(path: str | Path, client: Any, project_name: str,

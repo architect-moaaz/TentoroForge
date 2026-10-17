@@ -274,6 +274,35 @@ async def list_org_members(
     return [_member_row(m) for m in rows]
 
 
+@router.get("/api/me/invitations")
+async def my_invitations(
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """What waits for the signed-in person: organisations they were invited
+    into and already belong to (an invitation is taken up at sign-in), and
+    invitations still pending for their email — so somebody who signed up to
+    join a team sees the team, and somebody with nothing yet is told so."""
+    rows = (await db.execute(
+        select(OrgMember).where(
+            (OrgMember.user_id == user.id)
+            | ((OrgMember.user_id.is_(None)) & (func.lower(OrgMember.invite_email) == user.email.lower()))
+        ).options(selectinload(OrgMember.organization)).order_by(OrgMember.created_at)
+    )).scalars().all()
+    memberships, pending = [], []
+    for m in rows:
+        org = m.organization
+        if org is None or getattr(org, "is_removed", False):
+            continue
+        row = {"invite_id": str(m.id), "org_id": str(org.id), "name": org.name, "slug": org.slug,
+               "role": m.role.value, "invited": bool(m.invite_email), "joined_at": m.joined_at}
+        if m.invite_status == InviteStatus.accepted:
+            memberships.append(row)
+        elif m.invite_status == InviteStatus.pending:
+            pending.append(row)
+    return {"email": user.email, "memberships": memberships, "pending": pending}
+
+
 @router.post("/api/orgs/{org_id}/invite", response_model=InviteResponse, status_code=201)
 async def invite_member(
     org_id: uuid.UUID,

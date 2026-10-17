@@ -21,14 +21,34 @@ reinterpreted.
 from __future__ import annotations
 
 import contextlib
-import fcntl
 import hashlib
 import json
 import logging
 import re
+import threading
 import time
 from pathlib import Path
 from typing import Any, Iterator
+
+try:  # POSIX only; where it is missing (Windows) writers in ONE process are serialised by a per-app thread lock
+    import fcntl
+except ImportError:  # pragma: no cover - Windows
+    fcntl = None  # type: ignore[assignment]
+
+#: The Windows fallback (no fcntl): one lock PER APP, not one for the whole process, so a write to one app's rules does
+#: not block a write to another's — and two writers of the SAME app are still serialised. This serialises only within a
+#: process; without fcntl there is no cross-process lock, so run one worker on Windows (it is a development platform here).
+_PROCESS_LOCKS: dict[str, threading.Lock] = {}
+_PROCESS_LOCKS_GUARD = threading.Lock()
+
+
+def _process_lock(path: Path) -> threading.Lock:
+    key = str(path)
+    with _PROCESS_LOCKS_GUARD:
+        lock = _PROCESS_LOCKS.get(key)
+        if lock is None:
+            lock = _PROCESS_LOCKS[key] = threading.Lock()
+        return lock
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +108,15 @@ def write_lock(output_dir: str | Path, *, timeout: float | None = None) -> Itera
     import time
     path = Path(output_dir) / ".forge" / "blueprint" / ".rules.lock"
     path.parent.mkdir(parents=True, exist_ok=True)
+    if fcntl is None:
+        lock = _process_lock(path)
+        if not lock.acquire(timeout=-1 if timeout is None else timeout):
+            raise RuleError("Smith is changing this app's rules right now. Try again in a moment.", status=423)
+        try:
+            yield
+        finally:
+            lock.release()
+        return
     with open(path, "a+") as fh:
         if timeout is None:
             fcntl.flock(fh.fileno(), fcntl.LOCK_EX)

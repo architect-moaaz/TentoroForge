@@ -65,6 +65,10 @@ interface Deployment {
   git_commit_subject: string | null;
   app_version: string | null;
   vercel_deployment_id: string | null;
+  /** Which side it went to: the live app, or its test version. */
+  environment?: "test" | "production";
+  /** A promotion: the test deployment whose files went live. */
+  promoted_from?: string | null;
 }
 
 interface Props {
@@ -94,10 +98,16 @@ export function DeploymentHistory({ projectId }: Props) {
 
   // The latest successful deploy is the one currently live; earlier
   // ones can be rolled back to. Failed rows never get a rollback button.
-  const latestSucceededId = useMemo(
-    () => data?.find((r) => r.status === "succeeded")?.id ?? null,
-    [data],
-  );
+  // THE CURRENT BUILD OF EACH SIDE: the newest succeeded row of the live
+  // app, and of its test version.
+  const currentIds = useMemo(() => {
+    const out = new Set<string>();
+    for (const side of ["production", "test"]) {
+      const r = data?.find((d) => d.status === "succeeded" && (d.environment ?? "production") === side);
+      if (r) out.add(r.id);
+    }
+    return out;
+  }, [data]);
 
   if (isLoading) {
     return (
@@ -122,9 +132,10 @@ export function DeploymentHistory({ projectId }: Props) {
       {rows.map((r) => {
         const canRollback =
           r.status === "succeeded" &&
-          r.id !== latestSucceededId &&
+          !currentIds.has(r.id) &&
           !!r.vercel_deployment_id;
-        const isLive = r.id === latestSucceededId;
+        const isLive = currentIds.has(r.id);
+        const onTest = r.environment === "test";
         return (
           <div key={r.id} className="flex items-start gap-3 px-3 py-3">
             <div className="pt-0.5">
@@ -155,6 +166,15 @@ export function DeploymentHistory({ projectId }: Props) {
                     {r.error ?? r.status}
                   </span>
                 )}
+                <span
+                  className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                    onTest
+                      ? "bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200"
+                      : "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-200"
+                  }`}
+                >
+                  {onTest ? "Test" : r.promoted_from ? "Production · promoted" : "Production"}
+                </span>
                 {isLive && (
                   <span className="rounded bg-green-100 px-1.5 py-0.5 text-[10px] font-medium text-green-800">
                     current

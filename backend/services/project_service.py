@@ -35,11 +35,18 @@ async def create_project(
     name: str,
     description: str | None,
     db: AsyncSession,
+    mobile_target: str | None = None,
 ) -> Project:
-    """Create a new project with output directory and git init."""
+    """Create a new project with output directory and git init.
+
+    `mobile_target` is the person's choice in the create dialog (`responsive` or `native`); it is kept beside the
+    Blueprint-to-be and read when the Blueprint is created (`services.blueprint.app_target`)."""
     short_id = _generate_short_id()
     output_dir = str(OUTPUT_BASE / short_id)
     Path(output_dir).mkdir(parents=True, exist_ok=True)
+    if mobile_target:
+        from services.blueprint import app_target
+        app_target.write(output_dir, mobile_target)
 
     project = Project(
         org_id=org_id,

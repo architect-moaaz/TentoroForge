@@ -235,8 +235,10 @@ export async function GET(
       ),
       sort: url.searchParams.get("sort") || undefined,
       order: (url.searchParams.get("order") as "asc" | "desc") || "desc",
-      page: parseInt(url.searchParams.get("page") || "1"),
-      limit: parseInt(url.searchParams.get("limit") || "50"),
+      // A page is 1 or more; a page of rows is 1 to 200 (what the SDK gives a
+      // page). `limit=abc` is NaN and `limit=100000` a whole table in one answer.
+      page: Math.max(Number.parseInt(url.searchParams.get("page") || "1", 10) || 1, 1),
+      limit: Math.min(Math.max(Number.parseInt(url.searchParams.get("limit") || "50", 10) || 50, 1), 200),
     };
 
     const result = await measured({ operation: "list", entity },

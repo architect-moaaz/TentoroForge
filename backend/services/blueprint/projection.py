@@ -698,9 +698,11 @@ def project_frontend(doc: dict, app_root: str | Path,
     # sweep deleted it on every frontend projection and the layout fell back
     # to its flat menu.
     written_set = set(written) | {"src/schemas/shell.json"}
+    # POSIX spelling: `written` names files with `/`, and `str(Path)` on Windows has `\` — every
+    # page in a folder (`jobs/new.json`) read as stale and was deleted the moment it was written.
     stale = sorted(
-        str(f.relative_to(root)) for f in root.rglob("*.json")
-        if f"src/schemas/{f.relative_to(root)}" not in written_set
+        f.relative_to(root).as_posix() for f in root.rglob("*.json")
+        if f"src/schemas/{f.relative_to(root).as_posix()}" not in written_set
     )
     for name in stale:
         (root / name).unlink()
@@ -2187,6 +2189,12 @@ def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
         # Headings in the display face without every page having to ask.
         body_rule += ("h1, h2, h3, .font-heading {\n  font-family: var(--font-heading), "
                       "var(--font-body), ui-sans-serif, system-ui, sans-serif;\n}\n")
+    # THE DESIGN'S HEADING WEIGHT, for the web as for the phone (`native_tokens.heading`): one word from the
+    # design, not a guess in each place. A silent design emits nothing, and the page keeps what it asks for.
+    if (typography or {}).get("headingWeight"):
+        from services.blueprint import native_tokens as _tk
+        _w = {"regular": 400, "medium": 500, "semibold": 600, "bold": 700}[_tk.heading(doc)["weight"]]
+        body_rule += "h1, h2, h3, .font-heading {\n  font-weight: %d;\n}\n" % _w
     # THE BRAND GRADIENT, AS TWO CLASSES. `bg-gradient-to-br from-gradient-start
     # to-gradient-end` works too (the tailwind config names both stops); these
     # are the short spelling pages are told to use, with the primary and the
@@ -3401,6 +3409,29 @@ def _link_target(doc: dict, entity: dict, field: dict) -> str | None:
 SEED_ROWS = 12
 
 
+def seed_in_dependency_order(seed: dict[str, list[dict]]) -> dict[str, list[dict]]:
+    """The tables parents first (a row's `ref:<table>[i]` names its parent), each row's keys sorted. The file was
+    written with every key sorted, so tables came out alphabetically: invoices before the owners they point at,
+    and the seeder, which reads them in the file's order, gave a child a made-up parent (pawsco01, 2026-10-14)."""
+    parents = {t: {m for row in rows for v in row.values() if isinstance(v, str)
+                   for m in re.findall(r"^ref:([A-Za-z0-9_]+)\[", v) if m != t and m in seed}
+               for t, rows in seed.items()}
+    ordered: list[str] = []
+    seen: set[str] = set()
+
+    def visit(t: str) -> None:
+        if t in seen:
+            return
+        seen.add(t)
+        for parent in sorted(parents[t]):
+            visit(parent)
+        ordered.append(t)
+
+    for t in sorted(seed):
+        visit(t)
+    return {t: [dict(sorted(row.items())) for row in seed[t]] for t in ordered}
+
+
 def project_seed(doc: dict, app_root: str | Path, rows: int = SEED_ROWS) -> dict[str, Any]:
     """Write ``src/db/seed.json`` — a few rows per entity.
 
@@ -3423,11 +3454,10 @@ def project_seed(doc: dict, app_root: str | Path, rows: int = SEED_ROWS) -> dict
     (`services.smith.data_import`); the rows themselves are in the app's own
     database, never here.
     """
-    seed = seed_rows(doc, rows)
+    seed = seed_in_dependency_order(seed_rows(doc, rows))
     out = Path(app_root) / "src" / "db"
     out.mkdir(parents=True, exist_ok=True)
-    (out / "seed.json").write_text(
-        json.dumps(seed, indent=2, sort_keys=True) + "\n", "utf-8")
+    (out / "seed.json").write_text(json.dumps(seed, indent=2) + "\n", "utf-8")
     return {"files": ["src/db/seed.json"], "tables": len(seed),
             "rows": sum(len(v) for v in seed.values())}
 
@@ -3474,6 +3504,12 @@ def seed_rows(doc: dict, rows: int = SEED_ROWS, *, as_described: bool = True) ->
                     for e in entities if e.get("id")}
     labels_by_id = {str(e.get("id")): label_examples(e) for e in entities if e.get("id")}
 
+    # THE ROWS A PERSON OWNS ARE THEIRS: a column an ownership rule scopes to the signed-in user is filled with the
+    # FIRST user (the login the build seeds), not row k's user. Each demo row naming a different seeded person
+    # left the one who signs in with one row of twelve, and every list read as nearly empty.
+    owned = {(str(r.get("entity")), str(r.get("column"))) for r in ((doc.get("security") or {}).get("ownershipRules") or [])
+             if isinstance(r, dict) and r.get("kind") == "scope" and r.get("scope") == "user"}
+
     seed: dict[str, list[dict]] = {}
     for entity in entities:
         table = entity.get("table") or to_snake(entity.get("name") or "entity")
@@ -3505,9 +3541,12 @@ def seed_rows(doc: dict, rows: int = SEED_ROWS, *, as_described: bool = True) ->
                 # plus an embedding that fails; the vector is the platform's.
                 if is_image_field(field) or is_file_field(field) or is_embedding_field(field):
                     continue
-                record[field.get("name")] = (_ref_by_label(field, row, tables_by_id, labels_by_id)
-                                             or _seed_value(field, name, row, tables_by_id, period=period,
-                                                            person=bool(entity.get("account"))))
+                value = (_ref_by_label(field, row, tables_by_id, labels_by_id)
+                         or _seed_value(field, name, row, tables_by_id, period=period,
+                                        person=bool(entity.get("account"))))
+                if (name, str(field.get("name"))) in owned and isinstance(value, str) and value.startswith("ref:"):
+                    value = re.sub(r"\[\d+\]$", "[0]", value)
+                record[field.get("name")] = value
             out_rows.append(years_within_age(record, entity.get("fields") or []))
         seed[table] = out_rows
     return seed
@@ -4287,6 +4326,15 @@ def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
 
     # A public page is only public if what it fetches is reachable too.
     apis = public_apis(doc)
+    # A PUBLIC SCREEN ON THE PHONE READS OVER /api/read. The gate answered every call without a token with a 401 before
+    # the route ran, so a public screen of a gated app read nothing and the 401 sent the person to sign in. The read
+    # route decides for itself (`READ_ACCESS`: an anonymous caller gets only what a public page reads), so for a native
+    # app that has a public page of its own (not the sign-in pages) it is left to answer.
+    from services.blueprint.native_projection import enabled as _native_enabled
+    if _native_enabled(doc) and any(
+            str(p.get("access") or "") == "public" and str(p.get("pattern") or "") != "auth"
+            for p in _live(doc.get("pages"))):
+        apis = [*apis, "api/read"]
     excluded = list(_ALWAYS_OPEN) + open_routes + apis
     pattern = "|".join(excluded)
     # A negative lookahead cannot exclude the empty path, so `/` is matched by
@@ -4333,18 +4381,36 @@ def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
         *role_lines,
         '];',
         '',
+        '// A CALL TO THE API IS ANSWERED, NOT SENT SOMEWHERE. A person without a',
+        '// session is redirected to the sign-in page; a client that is not a',
+        '// browser (a phone app, a script) cannot follow that, and read a page of',
+        '// HTML where it expected JSON. `/api/*` answers 401 (no session) or 403',
+        '// (a session, the wrong role) as JSON, the shape the data route uses.',
+        'const isApi = (path: string) => path === "/api" || path.startsWith("/api/");',
+        'const refuse = (status: 401 | 403, code: string, message: string) =>',
+        '  NextResponse.json({ error: { code, message } }, { status });',
+        '',
         'export default withAuth(',
         '  function middleware(req) {',
-        '    const role = String((req.nextauth.token as { role?: unknown } | null)?.role ?? "");',
+        '    const token = req.nextauth.token as { role?: unknown } | null;',
         '    const path = req.nextUrl.pathname;',
+        '    if (!token && isApi(path)) return refuse(401, "UNAUTHORIZED", "Sign in to use this.");',
+        '    const role = String(token?.role ?? "");',
         '    for (const r of ROLE_ROUTES) {',
         '      if (r.route.test(path) && !r.roles.includes(role)) {',
+        '        if (isApi(path)) return refuse(403, "FORBIDDEN", "Your role may not use this.");',
         '        return NextResponse.redirect(new URL("/403", req.url));',
         '      }',
         '    }',
         '    return NextResponse.next();',
         '  },',
-        '  { pages: { signIn: "/login" }, cookies: sessionCookies() },',
+        '  {',
+        '    pages: { signIn: "/login" },',
+        '    cookies: sessionCookies(),',
+        '    // `withAuth` redirects every unauthorised request before the function',
+        '    // above runs; an API call is let through to it, which answers it.',
+        '    callbacks: { authorized: ({ token, req }) => !!token || isApi(req.nextUrl.pathname) },',
+        '  },',
         ');',
         '',
         'export const config = {',
@@ -5255,7 +5321,13 @@ def project_business_rules(doc: dict, app_root: str | Path) -> dict[str, Any]:
                 "whenFeel": rule.get("when") or rule.get("expression") or "true",
                 "then": [{"id": f"{rule.get('id')}-then-{i}", **a} for i, a in enumerate(rule.get("then") or [])],
                 "otherwise": [{"id": f"{rule.get('id')}-else-{i}", **a} for i, a in enumerate(rule.get("otherwise") or [])],
-                "scope": rule.get("scope") or "form",
+                # A RULE THAT SAYS NOTHING OF ITS SCOPE IS THE ENTITY'S. `form`
+                # rules run only as hints in a browser; a `show_error` of one
+                # never refused a write, so "reject if the total is under 10"
+                # held for nobody. `entity` runs on every write (server) and
+                # still answers the form's hints. A rule that means a form
+                # only says `form`.
+                "scope": rule.get("scope") or "entity",
                 "salience": int(rule.get("salience") or 0),
             },
         })

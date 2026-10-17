@@ -94,6 +94,18 @@ _STRIPE_KEYS: list[ConfigKey] = [
                   required=False, help_url="https://dashboard.stripe.com/webhooks"),
         ConfigKey(key="STRIPE_PUBLISHABLE_KEY", provider="stripe", label="Stripe publishable key", kind="text",
                   required=False, help_url="https://dashboard.stripe.com/apikeys"),
+        # THE TEST SIDE'S KEYS (Stripe test mode). A published app's test
+        # version uses these in place of the three above, or the payment
+        # stand-in when they are unset; production never receives them
+        # (services/deploy/environments.TEST_TWINS).
+        ConfigKey(key="STRIPE_TEST_SECRET_KEY", provider="stripe", label="Stripe test-mode secret key (test version)",
+                  kind="password", required=False, help_url="https://dashboard.stripe.com/test/apikeys"),
+        ConfigKey(key="STRIPE_TEST_WEBHOOK_SECRET", provider="stripe",
+                  label="Stripe test-mode webhook signing secret (test version)", kind="password", required=False,
+                  help_url="https://dashboard.stripe.com/test/webhooks"),
+        ConfigKey(key="STRIPE_TEST_PUBLISHABLE_KEY", provider="stripe",
+                  label="Stripe test-mode publishable key (test version)", kind="text", required=False,
+                  help_url="https://dashboard.stripe.com/test/apikeys"),
     ]
 
 NODE_CONFIG_SPECS: dict[str, list[ConfigKey]] = {

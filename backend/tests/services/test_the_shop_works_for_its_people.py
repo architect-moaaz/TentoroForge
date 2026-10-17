@@ -41,11 +41,17 @@ def _pages(*bodies):
         ArtifactProposal(section="pages", natural_key=str(b["route"]), body=b) for b in bodies])
 
 
-def test_a_role_with_pages_of_its_own_and_no_door_is_refused_at_the_page_author():
+def test_a_role_with_pages_of_its_own_and_no_door_is_given_one_at_the_page_author():
     doc = {"roles": ROLES, "navigation": {}, "pages": []}
+    # The author's reply holds Admin's pages; the first concrete one becomes the
+    # door rather than the build dying for a flag (FitTrackr, 2026-10-16).
+    res = _pages({"route": "/admin/products", "access": "role_restricted", "users": ["ROLE-002"]},
+                 {"route": "/admin/orders", "access": "role_restricted", "users": ["ROLE-002"]})
+    check_role_doors(res, doc)
+    assert res.proposals[0].body.get("entry") is True and not res.proposals[1].body.get("entry")
+    # Only pages with an `[id]` in them: nothing concrete to land on, still refused.
     with pytest.raises(RoleWithoutADoor) as refused:
-        check_role_doors(_pages({"route": "/admin/products", "access": "role_restricted", "users": ["ROLE-002"]},
-                                {"route": "/admin/orders", "access": "role_restricted", "users": ["ROLE-002"]}), doc)
+        check_role_doors(_pages({"route": "/admin/products/[id]", "access": "role_restricted", "users": ["ROLE-002"]}), doc)
     assert "Admin" in str(refused.value) and "`entry: true`" in str(refused.value)
     check_role_doors(_pages({"route": "/admin/products", "access": "role_restricted", "users": ["ROLE-002"],
                              "entry": True}), doc)

@@ -1,8 +1,29 @@
 import { withAuth } from "next-auth/middleware";
+import { NextResponse } from "next/server";
 
-export default withAuth({
-  pages: { signIn: "/login" },
-});
+// A call to the API is answered, not sent somewhere: a person without a
+// session is redirected to the sign-in page, a client that is not a browser
+// cannot follow that and read HTML where it expected JSON. `/api/*` answers
+// 401 as JSON, the shape the data route uses.
+const isApi = (path: string) => path === "/api" || path.startsWith("/api/");
+
+export default withAuth(
+  function middleware(req) {
+    if (!req.nextauth.token && isApi(req.nextUrl.pathname)) {
+      return NextResponse.json(
+        { error: { code: "UNAUTHORIZED", message: "Sign in to use this." } },
+        { status: 401 },
+      );
+    }
+    return NextResponse.next();
+  },
+  {
+    pages: { signIn: "/login" },
+    // `withAuth` redirects every unauthorised request before the function above
+    // runs; an API call is let through to it, which answers it.
+    callbacks: { authorized: ({ token, req }) => !!token || isApi(req.nextUrl.pathname) },
+  },
+);
 
 // Excludes:
 //   login/signup/set-password/api/auth — auth flow itself (set-password is

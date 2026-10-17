@@ -150,6 +150,48 @@ class NeonClient:
         r = await self._client.delete(f"{BASE}/projects/{project_id}/branches/{branch_id}")
         r.raise_for_status()
 
+    # ── Databases (the test side's own) ────────────────────────────
+
+    async def default_branch(self, project_id: str) -> str:
+        """The id of the project's default (production) branch."""
+        r = await self._client.get(f"{BASE}/projects/{project_id}/branches")
+        if not r.is_success:
+            raise RuntimeError(f"Neon list branches failed: project={project_id!r} status={r.status_code}")
+        branches = r.json().get("branches") or []
+        chosen = next((b for b in branches if b.get("default") or b.get("primary")), None) or (branches[:1] or [None])[0]
+        if not chosen:
+            raise RuntimeError(f"Neon project {project_id!r} has no branch")
+        return str(chosen["id"])
+
+    async def ensure_database(self, project_id: str, name: str, owner: str = "neondb_owner") -> dict[str, Any]:
+        """A database called `name` on the project's default branch, made
+        empty when it does not exist: `{"database_url", "created"}`. The test
+        side runs on one of these — no copy of the live data, ever."""
+        branch = await self.default_branch(project_id)
+        r = await self._client.get(f"{BASE}/projects/{project_id}/branches/{branch}/databases")
+        if not r.is_success:
+            raise RuntimeError(f"Neon list databases failed: project={project_id!r} status={r.status_code}")
+        have = {str(d.get("name")) for d in r.json().get("databases") or []}
+        created = name not in have
+        if created:
+            r = await self._client.post(f"{BASE}/projects/{project_id}/branches/{branch}/databases",
+                                        json={"database": {"name": name, "owner_name": owner}})
+            if not r.is_success:
+                raise RuntimeError(f"Neon create database failed: project={project_id!r} status={r.status_code}")
+        url = await self.get_connection_uri(project_id, role_name=owner, database_name=name)
+        return {"database_url": url, "created": created, "branch_id": branch}
+
+    async def drop_database(self, project_id: str, name: str) -> bool:
+        """Remove the database `name` (the test side's, to start it again
+        from demo data). False when there was none."""
+        branch = await self.default_branch(project_id)
+        r = await self._client.delete(f"{BASE}/projects/{project_id}/branches/{branch}/databases/{name}")
+        if r.status_code == 404:
+            return False
+        if not r.is_success:
+            raise RuntimeError(f"Neon drop database failed: project={project_id!r} status={r.status_code}")
+        return True
+
     # ── House-keeping ───────────────────────────────────────────────
 
     async def close(self) -> None:

@@ -21,10 +21,10 @@ export default function SignupPage() {
     try {
       await signup(email, name, password);
       // NOT "/" — that is the workspace picker, and a brand-new account has
-      // nothing to pick. Onboarding reads the company's site, makes the
-      // workspace from it, and sends them on; somebody who was invited to an
-      // existing organisation is bounced straight through.
-      router.push("/onboarding");
+      // nothing to pick. /start asks what kind of account this is (personal,
+      // business, joining a team) and makes the organisation or shows the
+      // invitations; the brand interview (/onboarding) is offered after.
+      router.push("/start");
     } catch {
       // error is set in store
     }

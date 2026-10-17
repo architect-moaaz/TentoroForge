@@ -18,15 +18,16 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import get_current_user
 from database import get_db
 from models.auth import PlatformUser
-from models.deployment import Deployment
+from models.deployment import LIVE_STATUSES, Deployment
 from models.platform_integration import PlatformIntegration
 from models.project import Project
 from services.deploy.provider import DeploySnapshot
@@ -37,6 +38,49 @@ from services.features import feature_gate
 
 log = logging.getLogger(__name__)
 router = APIRouter()
+
+
+class PublishRequest(BaseModel):
+    """What Publish is asked to do. Everything is optional: no body publishes
+    to the side the app's switch is on, as the button always did."""
+    #: "test" or "production"; the app's switch when left out.
+    environment: str | None = None
+    #: Send exactly what Test runs to production.
+    promote: bool = False
+    #: Test only: start the test data again from demo data first.
+    reset_test_data: bool = False
+
+
+class PublishTarget(BaseModel):
+    target: str
+
+
+def _side_view(r: Deployment | None) -> dict | None:
+    if r is None:
+        return None
+    return {"id": str(r.id), "status": r.status, "url": r.url, "deployment_url": r.deployment_url,
+            "environment": r.environment, "app_version": r.app_version, "source_digest": r.source_digest,
+            "promoted_from": str(r.promoted_from) if r.promoted_from else None,
+            "finished_at": r.finished_at.isoformat() if r.finished_at else None,
+            "created_at": r.created_at.isoformat() if r.created_at else None}
+
+
+async def _latest_live(db: AsyncSession, project_id: uuid.UUID, environment: str) -> Deployment | None:
+    res = await db.execute(
+        select(Deployment)
+        .where(Deployment.project_id == project_id, Deployment.environment == environment,
+               Deployment.status.in_(LIVE_STATUSES))
+        .order_by(Deployment.created_at.desc()).limit(1))
+    return res.scalars().first()
+
+
+async def _member_emails(org_id: uuid.UUID, db: AsyncSession) -> tuple[str, ...]:
+    """Who the test side may email: the organisation's accepted members."""
+    from models.org import InviteStatus, OrgMember
+    res = await db.execute(
+        select(PlatformUser.email).join(OrgMember, OrgMember.user_id == PlatformUser.id)
+        .where(OrgMember.org_id == org_id, OrgMember.invite_status == InviteStatus.accepted))
+    return tuple(sorted({str(e).lower() for (e,) in res.all() if e}))
 
 
 # --------------------------------------------------------------------------- #
@@ -124,16 +168,32 @@ async def _collect_integrations(
 @router.post("/api/projects/{project_id}/publish", dependencies=[Depends(feature_gate("publish"))])
 async def publish(
     project_id: uuid.UUID,
+    body: PublishRequest | None = Body(default=None),
     user: PlatformUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> StreamingResponse:
-    """Fire the deploy pipeline for this project; stream progress as SSE."""
+    """Fire the deploy pipeline for this project; stream progress as SSE.
+    It goes to the side the request names, else the side the app's switch is
+    on (`services.deploy.environments`); `promote` sends exactly what Test
+    runs to production."""
+    from services.deploy import environments as envs
     project = await _require_project(project_id, user, db)
     if not project.output_dir:
         raise HTTPException(
             400,
             "project has no generated output yet — run generation first",
         )
+    req = body or PublishRequest()
+    try:
+        side = envs.normalise(req.environment or project.publish_target or envs.PRODUCTION)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    promote_from = None
+    if req.promote:
+        tested = await _latest_live(db, project.id, envs.TEST)
+        if tested is None:
+            raise HTTPException(400, "There is no live test version to promote. Publish to Test first.")
+        side, promote_from = envs.PRODUCTION, str(tested.id)
     integrations = await _collect_integrations(project.org_id, db)
     snapshot = DeploySnapshot(
         project_id=str(project.id),
@@ -141,6 +201,10 @@ async def publish(
         output_dir=_deploy_app_dir(project.output_dir),
         integrations=integrations,
         triggered_by=str(user.id),
+        environment=side,
+        promote_from=promote_from,
+        reset_test_data=bool(req.reset_test_data and side == envs.TEST),
+        test_recipients=await _member_emails(project.org_id, db) if side == envs.TEST else (),
     )
 
     provider = VercelDeployProvider(db=db)
@@ -197,6 +261,7 @@ async def app_check_state(
 @router.get("/api/projects/{project_id}/deployments/latest")
 async def latest_deployment(
     project_id: uuid.UUID,
+    environment: str | None = None,
     user: PlatformUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict | None:
@@ -206,9 +271,12 @@ async def latest_deployment(
     SSE stream closes (to reconcile if the network dropped the terminal
     frame). DB is source of truth — SSE is best-effort progress."""
     await _require_project(project_id, user, db)
+    conditions = [Deployment.project_id == project_id]
+    if environment:
+        conditions.append(Deployment.environment == environment)
     res = await db.execute(
         select(Deployment)
-        .where(Deployment.project_id == project_id)
+        .where(*conditions)
         .order_by(Deployment.created_at.desc())
         .limit(1)
     )
@@ -217,6 +285,7 @@ async def latest_deployment(
         return None
     return {
         "id": str(r.id),
+        "environment": r.environment,
         "target": r.target,
         "status": r.status,
         "url": r.url,
@@ -293,8 +362,68 @@ async def list_deployments(
             "git_commit_subject": r.git_commit_subject,
             "app_version": r.app_version,
             "vercel_deployment_id": r.vercel_deployment_id,
+            "environment": r.environment,
+            "promoted_from": str(r.promoted_from) if r.promoted_from else None,
         })
     return out
+
+
+# --------------------------------------------------------------------------- #
+# Test and Production: the switch and where each side stands
+# --------------------------------------------------------------------------- #
+
+
+@router.get("/api/projects/{project_id}/publish-status")
+async def publish_status(
+    project_id: uuid.UUID,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Where Publish sends the app, what each side runs, and whether the app
+    has changed since it was tried on Test (`untested_changes`) or Test runs a
+    newer version than production (`test_ahead`)."""
+    from services.deploy import environments as envs
+    project = await _require_project(project_id, user, db)
+    test = await _latest_live(db, project.id, envs.TEST)
+    prod = await _latest_live(db, project.id, envs.PRODUCTION)
+    current = None
+    if project.output_dir:
+        try:
+            from services.deploy.snapshot import snapshot_digest
+            current = snapshot_digest(Path(_deploy_app_dir(project.output_dir)))
+        except Exception:  # noqa: BLE001 — the comparison is a hint
+            current = None
+    untested = bool(current and (test is None or test.source_digest != current))
+    test_ahead = bool(test and (prod is None or (test.source_digest and test.source_digest != prod.source_digest
+                                                 and test.created_at > prod.created_at)))
+    from services.deploy.domains import live_address
+    from services.deploy.vercel_provider import _slugify
+    # THE LIVE APP'S ADDRESS is its main one (own domain, else apps.tentoro.ai)
+    # once that answers; until then the Vercel address it was published at.
+    production_address = (live_address(project.output_dir, project.short_id) or prod.url) if prod else None
+    return {"target": project.publish_target or envs.PRODUCTION,
+            "test": _side_view(test), "production": _side_view(prod),
+            "test_address": f"https://{envs.test_alias(_slugify(project.short_id))}",
+            "production_address": production_address,
+            "untested_changes": untested, "test_ahead": test_ahead}
+
+
+@router.put("/api/projects/{project_id}/publish-target", dependencies=[Depends(feature_gate("publish"))])
+async def set_publish_target(
+    project_id: uuid.UUID,
+    body: PublishTarget,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Move the app's switch: Publish goes to Test or to Production from now."""
+    from services.deploy import environments as envs
+    project = await _require_project(project_id, user, db)
+    try:
+        project.publish_target = envs.normalise(body.target)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    await db.commit()
+    return {"target": project.publish_target}
 
 
 # --------------------------------------------------------------------------- #
@@ -308,21 +437,29 @@ async def rollback(
     user: PlatformUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
+    from services.deploy import environments as envs
     d = await db.get(Deployment, deployment_id)
     if d is None:
         raise HTTPException(404, "deployment not found")
+    # A ROLLBACK IS THE ORGANISATION'S, like a publish: only its members.
+    project = await _require_project(d.project_id, user, db)
     if d.target != "vercel" or not d.vercel_deployment_id:
         raise HTTPException(
             400, "only Vercel deployments with a deployment id can be rolled back"
         )
-    if d.status != "succeeded":
+    if d.status not in LIVE_STATUSES:
         raise HTTPException(
             400, f"cannot roll back to a {d.status} deployment"
         )
 
     vc = VercelClient()
     try:
-        await vc.promote_deployment(d.vercel_deployment_id)
+        if d.environment == envs.TEST:
+            # The test side's fixed address goes back to that build; production is not touched.
+            from services.deploy.vercel_provider import _slugify
+            await vc.alias_deployment(d.vercel_deployment_id, envs.test_alias(_slugify(project.short_id)))
+        else:
+            await vc.promote_deployment(d.vercel_deployment_id)
     finally:
         await vc.close()
 
@@ -338,6 +475,8 @@ async def rollback(
         vercel_project_id=d.vercel_project_id,
         vercel_deployment_id=d.vercel_deployment_id,
         neon_project_id=d.neon_project_id,
+        environment=d.environment,
+        source_digest=d.source_digest,
         started_at=datetime.now(timezone.utc),
         finished_at=datetime.now(timezone.utc),
         triggered_by=user.id,

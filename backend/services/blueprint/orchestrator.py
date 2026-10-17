@@ -396,7 +396,15 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
        ("ui_direction", "page_layouts", "workflow_steps", "install", "app_flows"), ("pageCode",),
        fanout="pages", optional=True,
        note="§34; each page as React, type-checked against the app SDK"),
-    _n("frontend", "frontend", ("page_layouts", "page_code"), ("codeMap",), kind="projection",
+    # THE SAME PAGES, FOR THE PHONE. Beside `page_code`, never after it: both
+    # read the same Blueprint page and write nothing the other reads, so they
+    # run side by side. A fan-out with no subjects completes without calling
+    # anything, which is what an application whose `mobile.native` is off gets.
+    _n("native_code", "native_engineer",
+       ("ui_direction", "page_layouts", "workflow_steps", "install", "app_flows"), ("nativeCode",),
+       fanout="native_pages", optional=True,
+       note="one React Native screen per page, against the native SDK and kit (opt-in: mobile.native)"),
+    _n("frontend", "frontend", ("page_layouts", "page_code", "native_code"), ("codeMap",), kind="projection",
        note="pattern templates + page contracts -> engine page schemas"),
 
     # §107 step 16 places workflow and rules alongside backend/API generation;
@@ -508,6 +516,9 @@ FANOUT: dict[str, Any] = {
         and p["id"] not in _deferred_pages(doc)
         and str(p.get("pattern") or "") != "audit_trail"
     ],
+    # The same pages, one native screen each — only when the application asks
+    # for a native app (`mobile.native.enabled`); none otherwise.
+    "native_pages": lambda doc: native_page_subjects(doc),
     # §107 step 16 — one call per declared workflow.
     "workflows": lambda doc: [
         w["id"] for w in (doc.get("workflows") or [])
@@ -800,7 +811,7 @@ def sections_of(doc: dict, artifact_ids: Iterable[str]) -> set[str]:
 INCREMENTAL_SECTIONS: frozenset[str] = frozenset({
     "requirements", "pages", "components", "widgets", "pageLayouts",
     # A page's code follows its page: adding a page must give it one.
-    "pageCode",
+    "pageCode", "nativeCode",
     "data.entities", "data.relationships",
     "data.constraints", "apis", "workflows", "businessRules", "tests",
     # The paths between the screens follow the screens and the processes.
@@ -1086,6 +1097,33 @@ def _code_present(doc: Mapping[str, Any], page_id: str) -> bool:
                for row in doc.get("pageCode") or [])
 
 
+def _native_present(doc: Mapping[str, Any], page_id: str) -> bool:
+    """A page has its native screen once it has its `nativeCode` row."""
+    return any(isinstance(row, dict) and str(row.get("page") or "") == page_id
+               for row in doc.get("nativeCode") or [])
+
+
+def native_page_subjects(doc: Mapping[str, Any]) -> list[str]:
+    """The pages `native_code` writes a screen for: the pages the web writes
+    code for, and only when the application is native (`mobile.native.enabled`).
+    One-to-one — a page with a web screen has a native one. The sign-in and sign-up
+    pages (at /login and /signup, where the native app's gate sends people) are
+    written too, but only as a FRAME: the session cookie flow is the kit's
+    `SignInForm` / `SignUpForm`, which the screen must place and cannot replace."""
+    from services.blueprint.native_projection import AUTH_FILES, enabled
+    if not enabled(doc):
+        return []
+
+    def route(p: Mapping[str, Any]) -> str:
+        return "/" + str(p.get("route") or "").strip("/")
+
+    return [p["id"] for p in (doc.get("pages") or [])
+            if p.get("id") and p.get("status") != "DEPRECATED"
+            and p["id"] not in _deferred_pages(doc)
+            and str(p.get("pattern") or "") != "audit_trail"
+            and (str(p.get("pattern") or "") != "auth" or route(p) in AUTH_FILES)]
+
+
 def _fields_present(doc: Mapping[str, Any], entity_id: str) -> bool:
     """A named entity is detailed once it carries fields. `data_model` and
     `entity_fields` both write `data.entities`; the declaration names and
@@ -1121,6 +1159,7 @@ def _steps_present(doc: Mapping[str, Any], workflow_id: str) -> bool:
 #: existed.
 _SUBJECT_AUTHORED: dict[str, Callable[[Mapping[str, Any], str], bool]] = {
     "pages": _code_present,
+    "native_pages": _native_present,
     "workflows": _steps_present,
     "page_features": _contracts_present,
     "entities": _fields_present,
@@ -2484,6 +2523,8 @@ OBSERVER_ROUNDS_BY_NODE: dict[str, int] = {
     "requirements": 0,
     "integrations": 0,
     "page_code": 0,
+    # Judged by the compiler and the looks, like `page_code`.
+    "native_code": 0,
     "ux_architecture": 0,
 }
 
@@ -3128,6 +3169,16 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
             "; ".join(f"{f['page']}: {str(f['reason'])[:120]}"
                       for f in result["failed"][:6]),
         )
+    # THE PHONE'S APP, BESIDE THE WEB'S: a native project in `<output>/native`,
+    # written only when the application asks for one (`mobile.native`). It
+    # follows the web in everything but the screens it holds, so its failing
+    # costs the web nothing — logged and left for the check that every page has
+    # its screen to say.
+    try:
+        from services.blueprint.native_projection import project_native
+        project_native(svc.doc, svc.output_dir)
+    except Exception as exc:  # noqa: BLE001 — additive: never the web app's loss
+        logger.warning("[frontend] the native project was not written: %s", exc)
 
 
 def _project_integration(svc: BlueprintService, app_root: str) -> None:

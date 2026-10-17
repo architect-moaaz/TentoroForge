@@ -18,7 +18,10 @@ Three endpoints:
 
 Auth: the standard org-membership gate via ``get_project_with_auth``.
 Gating:
-  * requires the project to have a ``mobile/`` folder (Slice A output)
+  * builds the project's own Expo project when it is a native app (``mobile.native.enabled``: ``native/``), else the
+    ``mobile/`` shell (Slice A output). A native build is prepared and checked first (``services.native_build``): the
+    phone project made current from the Blueprint, the web app's address written into it, and every reason it cannot
+    work said before an EAS build is queued
   * requires the project to have a deployed URL (or the shell has
     nothing to point at)
   * requires the org's EAS credentials via Slice B's loader
@@ -36,7 +39,7 @@ from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import desc, select
+from sqlalchemy import desc, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import get_current_user
@@ -44,13 +47,16 @@ from database import async_session, get_db
 from models.auth import PlatformUser
 from models.mobile_build import MobileBuild
 from models.project import Project
+from services import native_build
 from services.eas_client import (
+    NO_VCS,
     BuildState,
     EasClientError,
     create_build,
     is_terminal,
     normalize_status,
     poll_build,
+    submit_build,
 )
 from services.mobile_credentials import (
     MissingRequired,
@@ -102,6 +108,8 @@ class MobileBuildResponse(BaseModel):
     artifact_url: Optional[str] = None
     logs_url: Optional[str] = None
     error_message: Optional[str] = None
+    submit_status: Optional[str] = None      # None | submitting | submitted | submit_failed
+    submit_message: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     completed_at: Optional[datetime] = None
@@ -118,6 +126,8 @@ class MobileBuildResponse(BaseModel):
             artifact_url=row.artifact_url,
             logs_url=row.logs_url,
             error_message=row.error_message,
+            submit_status=row.submit_status,
+            submit_message=row.submit_message,
             created_at=row.created_at,
             updated_at=row.updated_at,
             completed_at=row.completed_at,
@@ -160,6 +170,15 @@ def _google_env(creds: MobileCredentials) -> dict[str, str]:
     return env
 
 
+def _blueprint_of(output_dir: str) -> dict:
+    """The project's Blueprint, or {} for one that has none (a project from before Blueprints)."""
+    try:
+        from services.blueprint.service import BlueprintService
+        return BlueprintService.load(output_dir=output_dir).doc
+    except Exception:  # noqa: BLE001 - no Blueprint is the shell's case, not an error
+        return {}
+
+
 async def _run_build_and_poll(
     build_row_id: uuid.UUID,
     mobile_dir: str,
@@ -167,26 +186,44 @@ async def _run_build_and_poll(
     platform: str,
     creds: MobileCredentials,
     deployed_url: str,
+    kind: str = "shell",
 ) -> None:
     """Background task: kick off the EAS build, then poll until terminal.
+
+    ``kind`` is "native" for the project's own Expo project: it is linked to an EAS project first (once; the shell's
+    owner ran `eas init` by hand) and EAS is told the folder has no git repository.
 
     Any failure updates the DB row with a human-readable
     ``error_message`` so the UI surfaces it — the task itself never
     re-raises to avoid noisy tracebacks in the background scheduler.
     """
+    staged = None
     try:
+        build_dir = mobile_dir
+        if kind == "native":
+            await native_build.ensure_eas_project(Path(mobile_dir), creds.expo_eas_token)
+            # EAS is run in a clean copy of the phone project, alone: see `native_build.stage`.
+            staged = native_build.stage(Path(mobile_dir))
+            build_dir = str(staged)
         state = await create_build(
-            mobile_dir,
+            build_dir,
             profile=profile,
             platform=platform,
             expo_token=creds.expo_eas_token,
             deployed_url=deployed_url,
             apple_env=_apple_env(creds) if platform == "ios" else None,
             google_env=_google_env(creds) if platform == "android" else None,
+            extra_env=NO_VCS if kind == "native" else None,
         )
     except EasClientError as exc:
         await _mark_failed(build_row_id, str(exc))
         return
+    except OSError as exc:
+        await _mark_failed(build_row_id, f"The phone project could not be copied for the build: {exc}")
+        return
+    finally:
+        if staged is not None:
+            native_build.unstage(staged)
 
     await _apply_state(build_row_id, state)
 
@@ -275,8 +312,10 @@ async def create_mobile_build(
             status_code=400,
             detail="This project doesn't have generated output yet.",
         )
-    mobile_dir = Path(project.output_dir) / "mobile"
-    if not mobile_dir.is_dir():
+    # WHAT IS BUILT: a native app's own Expo project (`native/`), else the shell (`mobile/`).
+    doc = _blueprint_of(project.output_dir)
+    target = native_build.choose_target(project.output_dir, doc)
+    if target is None:
         raise HTTPException(
             status_code=400,
             detail=(
@@ -284,6 +323,7 @@ async def create_mobile_build(
                 "generation to produce it."
             ),
         )
+    mobile_dir = target.dir
 
     if req.platform not in ("android", "ios"):
         raise HTTPException(
@@ -346,7 +386,10 @@ async def create_mobile_build(
     # back to the project's most recent successful deployment.
     deployed_url = (req.deployed_url or "").strip()
     if not deployed_url:
-        deployed_url = await _latest_deployed_url(project.id) or ""
+        # A store build runs against the live app; a preview build against the
+        # test version when there is one.
+        deployed_url = await _latest_deployed_url(
+            project.id, environment="production" if req.profile == "production" else None) or ""
     if not deployed_url:
         raise HTTPException(
             status_code=400,
@@ -355,6 +398,25 @@ async def create_mobile_build(
                 "the web app first, then build the mobile shell."
             ),
         )
+
+    # A NATIVE BUILD IS PREPARED AND CHECKED BEFORE IT IS QUEUED: the phone project made current, the web app's address
+    # written into it, and every reason it cannot work said now, not 15 minutes into an EAS build.
+    if target.kind == "native":
+        try:
+            native_build.prepare(project.output_dir, doc, deployed_url)
+        except native_build.NativeBuildError as exc:
+            raise HTTPException(status_code=400, detail={"message": str(exc), "problems": [str(exc)], "action": "fix_app"}) from exc
+        report = native_build.preflight(mobile_dir, doc, profile=req.profile, platform=req.platform, deployed_url=deployed_url)
+        if not report.ok:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": "The phone app cannot be built yet: " + " ".join(report.problems),
+                    "problems": report.problems,
+                    "warnings": report.warnings,
+                    "action": "fix_app",
+                },
+            )
 
     row = MobileBuild(
         project_id=project.id,
@@ -376,8 +438,102 @@ async def create_mobile_build(
         req.platform,
         creds,
         deployed_url,
+        target.kind,
     )
 
+    return MobileBuildResponse.from_row(row)
+
+
+async def _mark_submit(build_row_id: uuid.UUID, status: str, message: str) -> None:
+    async with async_session() as sess:
+        row = await sess.get(MobileBuild, build_row_id)
+        if row is None:
+            return
+        row.submit_status = status
+        row.submit_message = message
+        await sess.commit()
+
+
+async def _run_submit(build_row_id: uuid.UUID, native_dir: str, eas_build_id: str, platform: str, creds: MobileCredentials) -> None:
+    """Background task: send the finished build to its store from a staged copy that holds the keys, then say how it went.
+    Never re-raises: the outcome is written on the row for the panel to show."""
+    staged = None
+    try:
+        staged = native_build.stage(Path(native_dir))
+        native_build.write_submit_keys(
+            staged, platform,
+            google_json=creds.google.service_account_json or "", apple=creds.apple,
+        )
+        said = await submit_build(
+            str(staged), build_id=eas_build_id, platform=platform,
+            expo_token=creds.expo_eas_token, extra_env=NO_VCS,
+        )
+    except (EasClientError, native_build.NativeBuildError, OSError) as exc:
+        await _mark_submit(build_row_id, "submit_failed", str(exc))
+        return
+    finally:
+        if staged is not None:
+            native_build.unstage(staged)
+    where = "Google Play (Internal testing)" if platform == "android" else "App Store Connect (TestFlight)"
+    await _mark_submit(build_row_id, "submitted", f"Sent to {where}. {said}".strip())
+
+
+@router.post(
+    "/api/projects/{project_id}/mobile-builds/{build_id}/submit",
+    response_model=MobileBuildResponse,
+    status_code=202,
+)
+async def submit_mobile_build(
+    project_id: uuid.UUID,
+    build_id: uuid.UUID,
+    background: BackgroundTasks,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MobileBuildResponse:
+    """Send a finished production build to its store (`eas submit`). Returns at once; the row's ``submit_status`` goes
+    submitting → submitted / submit_failed."""
+    project = await _resolve_project(project_id, user, db)
+    row = await db.get(MobileBuild, build_id)
+    if row is None or row.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Build not found.")
+    if row.profile != "production":
+        raise HTTPException(status_code=400, detail="Only a store build (production) can be sent to a store; a preview build is for testing.")
+    if row.status != "completed" or not row.eas_build_id:
+        raise HTTPException(status_code=400, detail="This build has not finished, so there is nothing to submit yet.")
+    if row.submit_status in ("submitting", "submitted"):
+        raise HTTPException(status_code=409, detail=(
+            "This build is already being submitted."
+            if row.submit_status == "submitting"
+            else "This build has already been sent to its store."))
+    doc = _blueprint_of(project.output_dir or "")
+    target = native_build.choose_target(project.output_dir or "", doc)
+    if target is None or target.kind != "native":
+        raise HTTPException(status_code=400, detail="Submitting to a store is available for a native app's own phone project.")
+    try:
+        creds = await load_mobile_credentials(project.org_id, db)
+    except MissingRequired as exc:
+        raise HTTPException(status_code=400, detail={"message": str(exc), "missing_keys": exc.keys, "action": "add_credentials"}) from exc
+    if row.platform == "android":
+        missing = creds.missing_android_keys()
+        gone = "A Google Play service-account key is needed to submit."
+    else:
+        missing = creds.missing_ios_keys() + ([] if creds.apple.app_id else ["APPLE_ASC_APP_ID"])
+        gone = "Apple App Store Connect keys and the app's App Store Connect id are needed to submit."
+    if missing:
+        raise HTTPException(status_code=400, detail={"message": gone, "missing_keys": missing, "action": "add_credentials"})
+    # Claim the submit atomically: only a build that is not already in flight or sent (submit_status unset, or a prior
+    # attempt that failed) moves to "submitting". Two requests that race past the check above, or a double click, cannot
+    # both send the same build to the store — the second claims nothing and is told so.
+    claimed = await db.execute(
+        update(MobileBuild)
+        .where(MobileBuild.id == row.id,
+               or_(MobileBuild.submit_status.is_(None), MobileBuild.submit_status == "submit_failed"))
+        .values(submit_status="submitting", submit_message=None))
+    await db.commit()
+    if claimed.rowcount == 0:
+        raise HTTPException(status_code=409, detail="This build has already been sent to its store, or is being sent now.")
+    await db.refresh(row)
+    background.add_task(_run_submit, row.id, str(target.dir), row.eas_build_id, row.platform, creds)
     return MobileBuildResponse.from_row(row)
 
 
@@ -427,11 +583,16 @@ async def get_mobile_build(
 # Latest deployed URL lookup                                                   #
 # --------------------------------------------------------------------------- #
 
-async def _latest_deployed_url(project_id: uuid.UUID) -> Optional[str]:
-    """Find the URL of the most recent succeeded deployment. Nullable —
-    a project without any deployment gets a 400 above."""
+async def _latest_deployed_url(project_id: uuid.UUID, environment: Optional[str] = None) -> Optional[str]:
+    """Find the URL of the most recent succeeded deployment — of that side
+    when `environment` is given; otherwise the test version when one is
+    live, else production. Nullable — a project without any deployment
+    gets a 400 above."""
+    if environment is None:
+        return (await _latest_deployed_url(project_id, "test")
+                or await _latest_deployed_url(project_id, "production"))
     try:
-        from models.deployment import Deployment
+        from models.deployment import LIVE_STATUSES, Deployment
     except Exception:  # noqa: BLE001
         return None
     async with async_session() as sess:
@@ -439,7 +600,8 @@ async def _latest_deployed_url(project_id: uuid.UUID) -> Optional[str]:
             select(Deployment.url)
             .where(
                 Deployment.project_id == project_id,
-                Deployment.status == "succeeded",
+                Deployment.environment == environment,
+                Deployment.status.in_(LIVE_STATUSES),
                 Deployment.url.isnot(None),
             )
             .order_by(desc(Deployment.created_at))

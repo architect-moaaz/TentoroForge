@@ -19,6 +19,11 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
 
+#: A deployment that is up and answering. `succeeded_with_warnings` is the same app, live, with a note (the post-publish
+#: health check could not confirm something): its address is the app's address. Looking only for "succeeded" made a live
+#: app look unpublished to the mobile build ("No deployed URL is available") and to the admin apps list.
+LIVE_STATUSES = ("succeeded", "succeeded_with_warnings")
+
 
 class Deployment(Base):
     __tablename__ = "deployments"
@@ -88,3 +93,17 @@ class Deployment(Base):
     # From the app's package.json `version` field. Optional — apps
     # without a semver bumped on each change will just show sha.
     app_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    # --- which side of the app this went to ---
+    #: "production" — the live app, its domains and its real data — or
+    #: "test": its own address, its own empty database with demo data, test
+    #: keys. Rows from before the switch are production.
+    environment: Mapped[str] = mapped_column(String(16), nullable=False, server_default="production",
+                                             default="production")
+    #: What was shipped, as a fingerprint of the app's files (sha1 of every
+    #: file's path and sha): "has anything changed since it was tried on
+    #: Test?" is a comparison of two of these.
+    source_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    #: The test deployment a production row promoted — exactly those files.
+    promoted_from: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("deployments.id", ondelete="SET NULL"), nullable=True)

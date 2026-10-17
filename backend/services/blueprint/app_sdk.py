@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from services.blueprint.embeddings import entity_embeddings, is_embedding_field, is_file_field, is_image_field
+from services.blueprint.read_access import read_access
 from services.blueprint.projection import (
     _TYPES, _DEFAULT_TYPE, _is_credential_field, _live, is_list_type,
     reconcile_platform_table,
@@ -248,6 +249,14 @@ def emit_schema(doc: dict) -> str:
             or next((c for c in cols if c != "id"), "id")
         out.append(f"  {json.dumps(str(e.get('name')))}: {json.dumps(label)},")
     out.append("};")
+    out.append("")
+    out.append("/** Who may read each entity and widget over `/api/read/*`: the people who may open a page that reads it.")
+    out.append(" *  `anyone` (a public page), `signedIn` (an authenticated page), else the named `roles` (the administrator's too). */")
+    out.append("export interface ReadAccess { anyone: boolean; signedIn: boolean; roles: readonly string[] }")
+    out.append("export const READ_ACCESS: {")
+    out.append("  entities: Record<string, ReadAccess>;")
+    out.append("  widgets: Record<string, ReadAccess>;")
+    out.append("} = " + json.dumps(read_access(doc), indent=2, sort_keys=True) + ";")
     return "\n".join(out) + "\n"
 
 

@@ -844,6 +844,55 @@ def recode_pages_using(svc: Any, app_root: str | None, pages: list[dict], reques
     return done, notes
 
 
+def with_new_web_page(doc: dict, page: dict, body: dict) -> dict:
+    """The document as it will be once the web page's NEW code is saved.
+
+    The phone's writer is shown "the web page as it is written now". Called with the document as it was before the
+    change, it read the OLD `view.tsx` and wrote the phone screen from the page the person had just asked to change.
+    A copy (nothing is saved here): this page's `pageCode` row is the new body."""
+    pid = str(page.get("id"))
+    rows = [r for r in doc.get("pageCode") or [] if not (isinstance(r, dict) and str(r.get("page")) == pid)]
+    old = next((r for r in doc.get("pageCode") or [] if isinstance(r, dict) and str(r.get("page")) == pid), None)
+    rows.append({**(old or {}), **body, "page": pid})
+    return {**doc, "pageCode": rows}
+
+
+def native_follow(svc: Any, doc: dict, page: dict, *, brief: str, reasoning: Any = None, usage: Any = None,
+                  client: Any = None) -> tuple[dict | None, str]:
+    """The phone's screen of a page the web page was just changed or added: written to the SAME words.
+
+    A native application has one screen per page, and the web page is what a person asked Smith to change; left
+    alone the phone would keep the old one and the two would drift apart after every edit. Returns `(the nativeCode
+    body, a note)`: the body is None when there is nothing to write (the app is not native, or the page has no phone
+    screen) or when it could not be written - the note then says why, and the web change still stands."""
+    from services.blueprint import native_engineer
+    from services.blueprint.executors import tiered_router
+    from services.blueprint.native_projection import enabled, native_root
+    from services.blueprint.orchestrator import native_page_subjects
+    from services.blueprint.ui_engineer import CompileError, NeedsWorkflow
+
+    if not enabled(doc) or str(page.get("id")) not in set(native_page_subjects(doc)):
+        return None, ""
+    row = next((r for r in doc.get("nativeCode") or [] if isinstance(r, dict) and str(r.get("page")) == str(page.get("id"))), None)
+    route = str(page.get("route") or page.get("id"))
+    tell(reasoning, f"Writing {route} for the phone too.", "step")
+    try:
+        llm = client or tiered_router(reasoning=reasoning).for_task("native_code", "native_engineer")
+        body, spent = native_engineer.compose_screen(doc, page, native_root(svc.output_dir), llm, brief=brief,
+                                                     current=row, node="native_code")
+    except NeedsWorkflow as exc:
+        return None, f"the phone screen of {route} needs a change no workflow makes ({'; '.join(exc.needs)[:160]}), so it was left as it was"
+    except CompileError as exc:
+        return None, f"the phone screen of {route} did not compile, so it was left as it was: {str(exc)[:200]}"
+    except Exception as exc:  # noqa: BLE001 - the web change stands; what is left is said
+        logger.warning("[smith] native screen of %s not written: %s", route, exc)
+        return None, f"the phone screen of {route} could not be written ({type(exc).__name__}: {str(exc)[:160]})"
+    if usage is not None:
+        for u, elapsed, *who in spent:
+            usage.record(node="native_code", agent=who[0] if who else "native_engineer", usage=u, elapsed_s=elapsed)
+    return body, ""
+
+
 def recode_page(svc: Any, route: str, *, app_root: str, request: str,
                 wanted: Sequence[str] = (), executor: Any = None, client: Any = None,
                 reasoning: Any = None, whole: bool = False) -> dict:
@@ -948,14 +997,26 @@ def recode_page(svc: Any, route: str, *, app_root: str, request: str,
             return {"applied": False, "committed": [], "version": int(svc.doc.get("version") or 0),
                     "reason": "the page writer left the code as it was" + (f": {why}" if why else ""),
                     "missing": []}
+        # THE PHONE FOLLOWS THE WEB: a native application's screen of this page is written to the same words, and
+        # lands in the SAME version (one change, one undo). It never stops the web change: a screen that cannot be
+        # written is said, and the web page stands.
+        native_body, native_note = native_follow(svc, with_new_web_page(doc, page, body), page, brief=brief,
+                                                 reasoning=reasoning, usage=usage)
         before = svc.snapshot()
         committed: list[str] = []
         steps = [("analytics", list(widgets))] if widgets else []
         steps.append(("ui_engineer", [ArtifactProposal(section="pageCode", natural_key=str(page["id"]), body=body)]))
+        if native_body is not None:
+            steps.append(("native_engineer", [ArtifactProposal(section="nativeCode", natural_key=str(page["id"]), body=native_body)]))
+        native_done = False
         for agent, proposals in steps:
             application = apply_agent_result(svc, AgentResult(
                 task_id=f"TASK-smith-recode-{page['id']}-{agent}", agent=agent,
                 proposals=proposals, confidence=1.0), commit=False)
+            if not application.applied and agent == "native_engineer":
+                native_note = f"the phone screen of {route} was refused ({application.reason or 'no reason given'}), so it was left as it was"
+                continue
+            native_done = native_done or agent == "native_engineer"
             if not application.applied:
                 svc.doc = before
                 svc.save()
@@ -972,6 +1033,13 @@ def recode_page(svc: Any, route: str, *, app_root: str, request: str,
         # The SDK as the document has it, whichever way this went.
         ensure_sdk(svc.doc, root)
     project_code_pages(svc.doc, root)
+    if native_done:
+        try:
+            from services.blueprint.native_projection import project_native
+            project_native(svc.doc, svc.output_dir)
+        except Exception as exc:  # noqa: BLE001 - written in the document; projected again by the next build
+            logger.warning("[smith] native project not refreshed after %s: %s", route, exc)
+            native_note = native_note or f"the phone screen of {route} is saved but its files were not refreshed: {str(exc)[:120]}"
     # SHOWN MEANS DRAWN: a new widget counts when the new view reads it.
     keys = widget_keys(svc.doc)
     view = str(body.get("view") or "")
@@ -994,11 +1062,92 @@ def recode_page(svc: Any, route: str, *, app_root: str, request: str,
             missing.append(w)
     return {"applied": True, "committed": committed, "version": version,
             "reason": "", "missing": missing, "widgets": sorted(declared),
-            "rationale": str(body.get("rationale") or "").strip()}
+            "rationale": str(body.get("rationale") or "").strip(),
+            "native": "updated" if native_done else native_note}
 
 
 #: How many pages are laid out at once — the build's own fan-out width.
 RELAYOUT_WORKERS = 4
+
+
+def native_pass(svc: Any, routes: Sequence[str] = (), *, only_missing: bool = True, brief: str = "",
+                reasoning: Any = None) -> dict:
+    """Write the PHONE's screens of a native application and nothing else: the pages that have none, or the ones named.
+
+    The retry for a build whose phone screens failed (each is said in the hand-over message), and the second pass for
+    an app made as a website that is turned into a website AND a mobile app. Written in parallel, saved in ONE version,
+    then the Expo project is refreshed. The web pages are not touched.
+
+    Returns `{applied, written: [routes], failed: {route: why}, version, reason}`."""
+    import concurrent.futures as cf
+
+    from services.blueprint.agent_contract import AgentResult, ArtifactProposal, apply_agent_result
+    from services.blueprint.executors import RunUsage
+    from services.blueprint.native_projection import drawn_pages, enabled, project_native, screen_gaps
+
+    doc = svc.doc
+    if not enabled(doc):
+        return {"applied": False, "written": [], "failed": {}, "version": int(doc.get("version") or 0),
+                "reason": "this application is not a native app, so it has no phone screens to write"}
+    asked = [str(r).strip() for r in routes if str(r).strip()]
+    if asked:
+        targets, failed = [], {}
+        have = {str(p.get("route")): p for p in drawn_pages(doc)}
+        for route in dict.fromkeys(asked):
+            page = _page_for_route(doc, route)
+            if page is None or str(page.get("route")) not in have:
+                failed[route] = "this page has no phone screen to write (no such page, or one the phone does not draw)"
+            else:
+                targets.append(page)
+    else:
+        targets, failed = (screen_gaps(doc) if only_missing else drawn_pages(doc)), {}
+    if not targets:
+        return {"applied": False, "written": [], "failed": failed, "version": int(doc.get("version") or 0),
+                "reason": "" if failed else "every page already has a phone screen"}
+    usage = RunUsage.for_app(svc, phase="change")
+    words = (brief or "").strip() or "Write this screen for the phone, to the page's contract and the application's direction."
+
+    def write(page: dict) -> tuple[dict, dict | None, str]:
+        body, note = native_follow(svc, doc, page, brief=words, reasoning=reasoning, usage=usage)
+        return page, body, note
+
+    tell(reasoning, f"Writing {len(targets)} phone screen(s).", "step")
+    written: list[tuple[dict, dict]] = []
+    with cf.ThreadPoolExecutor(max_workers=RELAYOUT_WORKERS) as pool:
+        for fut in cf.as_completed([pool.submit(write, p) for p in targets]):
+            page, body, note = fut.result()
+            route = str(page.get("route"))
+            if body is None:
+                failed[route] = note or "the phone screen could not be written"
+            else:
+                written.append((page, body))
+                tell(reasoning, f"{route} written for the phone.", "step")
+    if not written:
+        return {"applied": False, "written": [], "failed": failed, "version": int(doc.get("version") or 0), "reason": ""}
+    before = svc.snapshot()
+    committed: list[str] = []
+    done: list[str] = []
+    for page, body in written:
+        application = apply_agent_result(svc, AgentResult(
+            task_id=f"TASK-smith-phone-{page['id']}", agent="native_engineer",
+            proposals=[ArtifactProposal(section="nativeCode", natural_key=str(page["id"]), body=body)], confidence=1.0),
+            commit=False)
+        if application.applied:
+            committed += list(application.artifacts or [])
+            done.append(str(page.get("route")))
+        else:
+            failed[str(page.get("route"))] = f"the phone screen was refused ({application.reason or 'no reason given'})"
+    if not done:
+        svc.doc = before
+        svc.save()
+        return {"applied": False, "written": [], "failed": failed, "version": int(svc.doc.get("version") or 0), "reason": ""}
+    record = svc.commit(user_request=words, smith_interpretation=f"write the phone screens: {', '.join(sorted(done))}",
+                        before=before, affected=sorted(set(committed)))
+    try:
+        project_native(svc.doc, svc.output_dir)
+    except Exception as exc:  # noqa: BLE001 - written in the document; projected again by the next build
+        logger.warning("[smith] native project not refreshed after the phone screens: %s", exc)
+    return {"applied": True, "written": sorted(done), "failed": failed, "version": int(record["version"]), "reason": ""}
 
 
 def relayout_pages(svc: Any, routes: Sequence[str], *, app_root: str, request: str,
@@ -1012,7 +1161,11 @@ def relayout_pages(svc: Any, routes: Sequence[str], *, app_root: str, request: s
     contract and the application's direction, every action it had held,
     compiled and looked at; the writing runs in parallel, the commit once,
     so the redesign is one change and one undo. Returns `{applied, done,
-    failed: {route: reason}, version, committed}`."""
+    failed: {route: reason}, version, committed, native: {route: "updated" | why not}}`.
+
+    A NATIVE APPLICATION'S PHONE SCREENS ARE LAID OUT AGAIN WITH THEIR WEB PAGES: each is written in the same worker,
+    saved in the same version, and a screen that cannot be written is said (`native`) without undoing the redesign.
+    Before this the redesign changed the web and left the phone as it was."""
     import concurrent.futures as cf
 
     from services.blueprint.agent_contract import AgentResult, ArtifactProposal, apply_agent_result
@@ -1038,6 +1191,8 @@ def relayout_pages(svc: Any, routes: Sequence[str], *, app_root: str, request: s
     ensure_sdk(doc, root)
 
     def write(route: str, page: dict, row: dict) -> tuple[str, dict | None, str]:
+        """One page: its web code, then its phone screen (when the app is native). The screen's outcome is kept in
+        `phone[route]`; the return is the web page's, as it always was."""
         llm = client_for() if client_for else router.for_task("page_code", "ui_engineer")
         critic = router.for_task("page_look", "page_reviewer")
         if not getattr(critic, "accepts_images", False):
@@ -1054,8 +1209,12 @@ def relayout_pages(svc: Any, routes: Sequence[str], *, app_root: str, request: s
             return route, None, f"{type(exc).__name__}: {str(exc)[:200]}"
         for u, elapsed, *who in spent:
             usage.record(node="page_code", agent=who[0] if who else "ui_engineer", usage=u, elapsed_s=elapsed)
+        phone[route] = native_follow(
+            svc, with_new_web_page(doc, page, body), page, reasoning=reasoning, usage=usage,
+            brief=f"Lay this screen out again from the start to: {request}. Keep every control and every workflow it already has.")
         return route, body, ""
 
+    phone: dict[str, tuple[dict | None, str]] = {}
     written: list[tuple[str, dict, dict]] = []
     tell(reasoning, f"Laying out {len(targets)} screen(s) again: {request}", "step")
     with cf.ThreadPoolExecutor(max_workers=RELAYOUT_WORKERS) as pool:
@@ -1070,9 +1229,10 @@ def relayout_pages(svc: Any, routes: Sequence[str], *, app_root: str, request: s
                 tell(reasoning, f"{route} laid out again.", "step")
     if not written:
         return {"applied": False, "done": [], "failed": failed, "version": int(svc.doc.get("version") or 0),
-                "committed": []}
+                "committed": [], "native": {}}
     before = svc.snapshot()
     committed: list[str] = []
+    phone_said: dict[str, str] = {}
     for route, page, body in written:
         application = apply_agent_result(svc, AgentResult(
             task_id=f"TASK-smith-relayout-{page['id']}", agent="ui_engineer",
@@ -1082,6 +1242,19 @@ def relayout_pages(svc: Any, routes: Sequence[str], *, app_root: str, request: s
             failed[route] = application.reason or "the new code was refused"
             continue
         committed += list(application.artifacts or [])
+        native_body, native_note = phone.get(route, (None, ""))
+        if native_body is not None:
+            seen = apply_agent_result(svc, AgentResult(
+                task_id=f"TASK-smith-relayout-native-{page['id']}", agent="native_engineer",
+                proposals=[ArtifactProposal(section="nativeCode", natural_key=str(page["id"]), body=native_body)],
+                confidence=1.0), commit=False)
+            if seen.applied:
+                committed += list(seen.artifacts or [])
+                phone_said[route] = "updated"
+            else:
+                phone_said[route] = f"the phone screen was refused ({seen.reason or 'no reason given'}), so it was left as it was"
+        elif native_note:
+            phone_said[route] = native_note
     done = [r for r, _p, _b in written if r not in failed]
     if not done:
         svc.doc = before
@@ -1093,8 +1266,14 @@ def relayout_pages(svc: Any, routes: Sequence[str], *, app_root: str, request: s
                             str(p["id"]) for r, p, _b in written if r in done}))
     ensure_sdk(svc.doc, root)
     project_code_pages(svc.doc, app_root)
+    if "updated" in phone_said.values():
+        try:
+            from services.blueprint.native_projection import project_native
+            project_native(svc.doc, svc.output_dir)
+        except Exception as exc:  # noqa: BLE001 - written in the document; projected again by the next build
+            logger.warning("[smith] native project not refreshed after the redesign: %s", exc)
     return {"applied": True, "done": sorted(done), "failed": failed, "version": int(record["version"]),
-            "committed": committed}
+            "committed": committed, "native": {r: phone_said[r] for r in sorted(done) if r in phone_said}}
 
 
 def run(output_dir: str, verb: str, *, route: str = "",
@@ -1192,7 +1371,9 @@ def run(output_dir: str, verb: str, *, route: str = "",
         did = (f"I rewrote {_where(svc, route)}{extra}"
                + (f", adding {', '.join(added)}" if added else "")
                + (f", but the new screen does not show {', '.join(out['missing'])}" if out["missing"] else "")
-               + ".")
+               + "."
+               + (" The phone screen is changed to match." if out.get("native") == "updated" else "")
+               + (f" Note: {out['native']}." if out.get("native") not in (None, "", "updated") else ""))
         return {"applied": out["applied"], "edited_paths": out["committed"],
                 "diff_summary": did, "version": out["version"], "reason": out["reason"],
                 "missing": out["missing"]}
