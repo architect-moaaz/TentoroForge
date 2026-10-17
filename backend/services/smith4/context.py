@@ -60,6 +60,16 @@ def opening(project_id: str, output_dir: str, ask: str, *, brief: str = "") -> s
                 + "\n\n" + page)
     except Exception:  # noqa: BLE001 — the page stands without the line
         pass
+    # WHAT EARLIER TURNS LEARNED, FIRST. The page used to start every turn
+    # from nothing: a file read last time was read again, a failed try was
+    # repeated, a fault already found was found again.
+    try:
+        from services.smith import notebook
+        known = notebook.recall(output_dir)
+        if known:
+            page = known + "\n\n" + page
+    except Exception:  # noqa: BLE001 — the page stands without the notebook
+        pass
     waiting = plan_mod.peek(output_dir) if plan_mod.is_agreed(output_dir) else []
     if waiting:
         page = ("STEPS OF AN AGREED PLAN STILL WAITING (each is a later turn, done when they say "

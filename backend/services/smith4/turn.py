@@ -214,6 +214,11 @@ def turn(ctx: Ctx, *, choose: Choose, history: list | None = None,
     finally:
         ASKED.reset(token)
         bench.close()
+    # THE TURN LEAVES A LINE IN THE NOTEBOOK: what it read, tried, changed and
+    # left — so the next turn starts where this one stopped instead of at the
+    # slice and the catalogue (2026-10-17).
+    from services.smith import notebook
+    notebook.record(ctx.out, asked, observations, out)
     out.steps = [o.tool for o in observations]
     # A PLATFORM PATCH IS KEPT ONLY ON PROOF: a try after the last edit that
     # passed, and nothing that failed before still failing.

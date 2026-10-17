@@ -239,7 +239,14 @@ WHAT NON-TECHNICAL OWNERS ACTUALLY SAY, and how to read it:
   it shows; `try_request` what the screen asks the app for. What the try
   shows is the bug report, in the app's own words. Then change what it
   points at — and try it again: a change is done when the try that failed
-  now works, not when the change was made.
+  now works, not when the change was made. When the complaint is wide ("the
+  pages don't work", "access is broken", "it lets everyone in"), `run_checks`
+  asks every screen as every person, every record scope and every rule in
+  one step and marks what is not right with ✗ — one call, not one `open_page`
+  per screen.
+- THE NOTEBOOK IS READ FIRST. The page opens with what earlier turns on this
+  application read, tried, changed and left; a file named there was read
+  then, a try named there was made then. Start from it, not from the slice.
 - A STRUCTURAL ASK IS THE WHOLE STRUCTURE. "Make it like Myntra", "a top bar
   instead of the sidebar", "tabs at the bottom on the phone", "redesign the
   app", "change the layout" are three changes, and all three are made in the
