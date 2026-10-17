@@ -1527,6 +1527,7 @@ export function ThinkingTrail({
   // labelled from the same table the build stage list uses.
   const steps = thoughts.filter((t) => t.kind === "step");
   const last = thoughts[thoughts.length - 1];
+  const SHOWN_STEPS = 6;
 
   // THE THINKING, SHOWN AS THINKING. The model's reasoning streams in as
   // fragments; joined, it is what Smith is weighing right now. It was hidden
@@ -1588,7 +1589,15 @@ export function ThinkingTrail({
           )}
         </div>
       )}
-      {steps.map((t, i) => (
+      {/* A long turn narrates every step; the trail keeps the last few in
+          view so the compose bar is never pushed off-screen, and says how
+          many came before. */}
+      {steps.length > SHOWN_STEPS + 2 && (
+        <p className="text-xs text-muted-foreground/70">
+          … {steps.length - SHOWN_STEPS} earlier steps
+        </p>
+      )}
+      {steps.slice(steps.length > SHOWN_STEPS + 2 ? -SHOWN_STEPS : 0).map((t, i) => (
         // Deterministic work, so it reads as status rather than thought —
         // upright, and labelled from the same table the stage list uses.
         <p key={i} className="flex items-center gap-1.5 text-xs text-muted-foreground">

@@ -554,6 +554,14 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
 
     import time as _time
     turn_started = _time.monotonic()
+    from services.smith import narrate
+    try:
+        from services.smith import notebook as _nb0
+        _known = bool(_nb0.entries(ctx.out))
+    except Exception:  # noqa: BLE001
+        _known = False
+    tell(ctx, narrate.opening(_known, _app_exists(ctx), defined=bool(ctx.doc())))
+    told_up_to = 0
     unreadable = 0
     budget, since, _step = max_steps, 0, 0
     while True:
@@ -567,8 +575,16 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
             logger.info("[smith-step] keeping at it: %d more steps at step %d, %.0fs in",
                         more, _step, _time.monotonic() - turn_started)
             observations.append(Observation(tool="done", status="error", said=KEEP_AT_IT.format(n=more)))
+            tell(ctx, "My steps were up, but this is getting somewhere, so I am carrying on…")
         _step += 1
         from services.smith4.definition import brief_of
+        # WHAT THE LAST STEP SHOWED, IN PLAIN WORDS, BEFORE THE NEXT IS CHOSEN.
+        for _o in observations[told_up_to:]:
+            if _o.said in _NOT_RUN or _o.status == "error":
+                continue
+            tell(ctx, narrate.seen(_o.tool, _o.args, _o.status, _o.said or "",
+                                   after_change=any(_is_change(x) for x in observations[:observations.index(_o)])))
+        told_up_to = len(observations)
         if _step > 1:
             # WHAT THIS TURN KNOWS SO FAR, KEPT IN CASE IT IS LOST. A turn the
             # process loses never reaches the notebook's end-of-turn line.
@@ -588,6 +604,7 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
                     sum(len(o.said or "") for o in observations), t2 - turn_started)
         args = chosen.get("args") if isinstance(chosen.get("args"), dict) else {}
         args = {k: v for k, v in args.items() if v not in (None, "")}
+        tell(ctx, narrate.starting(tool, args))
         # SAID TO THE LEDGER, so a long turn can be reported on while it runs.
         try:
             from services import run_registry as _rr
@@ -849,6 +866,23 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
     note = failing or loop_mod.remaining_note(observations, capped=True).replace(
         f"{loop_mod.MAX_STEPS} steps", f"{budget} steps")
     return _finished(landed, touched, last, note=note)
+
+
+def tell(ctx: Ctx, text: str) -> None:
+    """One plain-words line to the panel's thinking trail while the turn
+    runs (`thought`, kind `step`). Never raises; a turn without a listener
+    (tests, the platform's own turns) says nothing."""
+    if not text or ctx.unattended or not callable(getattr(ctx, "reasoning", None)):
+        return
+    try:
+        ctx.reasoning(text, kind="step")
+    except TypeError:
+        try:
+            ctx.reasoning(text)
+        except Exception:  # noqa: BLE001
+            pass
+    except Exception:  # noqa: BLE001 — a line to the panel never costs the turn
+        logger.debug("[smith] could not narrate a step", exc_info=True)
 
 
 def asked_text(ctx: Ctx) -> str:

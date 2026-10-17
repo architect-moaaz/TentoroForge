@@ -726,7 +726,9 @@ export function reduce(
       // turn out of the next.
       return {
         ...prev,
-        thoughts: [],
+        // A progress post ("Still at it (12 min): …") is not the answer: the
+        // trail of steps the person is following stays until the turn ends.
+        thoughts: data.status === "progress" ? prev.thoughts : [],
         messages: [...prev.messages, {
           text: String(data.text ?? ""),
           options: (data.options as string[]) ?? undefined,
