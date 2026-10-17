@@ -253,6 +253,89 @@ def _derive_edges_from_schemas(output_dir: str, screens: list[dict]) -> list[dic
     return edges
 
 
+def _nav_from_blueprint(output_dir: str) -> dict | None:
+    """The map drawn from the Blueprint, for an application that has one.
+
+    THE BLUEPRINT IS WHERE A BLUEPRINT APP'S SCREENS ARE. Every reader below
+    looks for `src/schemas`, `src/contracts` or `app-model.json` at the
+    project's root, and a Blueprint app keeps its generated tree under
+    `app/` — so the tab found nothing and drew an empty canvas for every
+    such app (Mark 8, Personal Finance, FitTrackr on forge-v3, 2026-10-17).
+
+    Screens are the live pages; the arrows are where a page says it leads
+    (`navigatesTo`) and each move in a flow from one screen to the next,
+    labelled with what the person does; the sidebar is the navigation tree.
+    None when there is no Blueprint, so the legacy readers still serve the
+    applications built before it."""
+    try:
+        from services.blueprint.service import BlueprintService
+        doc = BlueprintService.load(output_dir=output_dir).doc
+    except Exception:  # noqa: BLE001 — no Blueprint, or an unreadable one: the legacy readers decide
+        return None
+    pages = [p for p in doc.get("pages") or [] if isinstance(p, dict) and p.get("route")
+             and str(p.get("status") or "").upper() not in ("DEPRECATED", "REMOVED")]
+    if not pages:
+        return None
+    col_count, col_width, row_height, x_gap, y_gap = 3, 220, 140, 60, 60
+    home = ""
+    init = (doc.get("navigation") or {}).get("initialRoute")
+    if isinstance(init, dict):
+        home = str(init.get("authenticated") or init.get("default") or "")
+    elif isinstance(init, str):
+        home = init
+    screens: list[dict] = []
+    by_page: dict[str, str] = {}
+    for i, page in enumerate(pages):
+        route = str(page["route"])
+        sid = f"screen_{i}"
+        by_page[str(page.get("id") or route)] = sid
+        screens.append({
+            "id": sid,
+            "type": "screen",
+            "position": {"x": (i % col_count) * (col_width + x_gap), "y": (i // col_count) * (row_height + y_gap)},
+            "data": {
+                "label": page.get("name") or route,
+                "route": route,
+                "description": page.get("purpose") or "",
+                "isHome": route == (home or "/") or bool(page.get("entry")) and not home,
+            },
+        })
+    edges: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+
+    def edge(src: str | None, dst: str | None, label: str) -> None:
+        if not src or not dst or src == dst or (src, dst) in seen:
+            return
+        seen.add((src, dst))
+        edges.append({"id": f"edge_{len(edges)}", "source": src, "target": dst, "label": label})
+
+    for page in pages:
+        for target in page.get("navigatesTo") or []:
+            edge(by_page.get(str(page.get("id"))), by_page.get(str(target)), "Opens")
+    for flow in doc.get("flows") or []:
+        if not isinstance(flow, dict) or str(flow.get("status") or "").upper() in ("DEPRECATED", "SUPERSEDED"):
+            continue
+        steps = [st for st in flow.get("steps") or [] if isinstance(st, dict)]
+        for a, b in zip(steps, steps[1:]):
+            edge(by_page.get(str(a.get("page"))), by_page.get(str(b.get("page"))),
+                 str(a.get("does") or flow.get("name") or "Then")[:60])
+    sidebar: list[dict] = []
+    route_of = {str(p.get("id")): str(p["route"]) for p in pages}
+
+    def walk(nodes: list, depth: int = 0) -> None:
+        for node in nodes or []:
+            if not isinstance(node, dict):
+                continue
+            route = route_of.get(str(node.get("page") or ""))
+            if route and "[" not in route:
+                sidebar.append({"id": f"link_{len(sidebar)}", "label": node.get("label") or route,
+                                "route": route, "icon": node.get("icon") or ("layout-dashboard" if route == "/" else "file")})
+            walk(node.get("children") or [], depth + 1)
+    walk((doc.get("navigation") or {}).get("tree") or [])
+    default = next((s["id"] for s in screens if s["data"]["isHome"]), screens[0]["id"])
+    return {"screens": screens, "edges": edges, "sidebarLinks": sidebar, "topbarLinks": [], "defaultScreen": default}
+
+
 def _build_nav_from_app_model(output_dir: str) -> dict:
     """Auto-generate navigation.json content.
 
@@ -263,6 +346,9 @@ def _build_nav_from_app_model(output_dir: str) -> dict:
     Edges are derived by walking each schema and emitting a relationship for
     every Button.navigate / Link.navigate / Hero CTA action.to.
     """
+    drawn = _nav_from_blueprint(output_dir)
+    if drawn is not None:
+        return drawn
     pages = _pages_from_schemas(output_dir)
     if not pages:
         app_model_path = _find_app_model(output_dir)
