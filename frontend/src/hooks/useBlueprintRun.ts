@@ -119,6 +119,9 @@ export interface RunMessage {
   text: string;
   options?: string[];
   diffSummary?: string;
+  /** The server's word for the message: "progress" is a line said while a
+   *  turn runs, drawn quieter than an answer. */
+  status?: string;
 }
 
 /**
@@ -733,6 +736,7 @@ export function reduce(
           text: String(data.text ?? ""),
           options: (data.options as string[]) ?? undefined,
           diffSummary: (data.diffSummary as string) || undefined,
+          status: (data.status as string) || undefined,
         }].filter((m) => m.text),
       };
 

@@ -22,6 +22,10 @@ import {
   Table2,
   Building2,
   ChevronLeft,
+  ChevronRight,
+  ChevronDown,
+  MoreVertical,
+  FileText,
   Layers,
   Layout,
   KeyRound,
@@ -81,6 +85,117 @@ function Tooltip({ children, label, shortcut }: { children: React.ReactNode; lab
           {label}
           {shortcut && <kbd className="rounded bg-slate-700 px-1 py-0.5 text-[10px] font-mono text-slate-300 dark:bg-slate-200 dark:text-slate-600">{shortcut}</kbd>}
         </div>
+      </div>
+    </div>
+  );
+}
+
+type TabSpec = { id: Tab; label: string; icon: React.ComponentType<{ className?: string }>; shortcut?: string; feature?: FeatureKey };
+
+function HeaderIcon({ label, onClick, active, disabled, locked, children }: {
+  label: string; onClick: () => void; active?: boolean; disabled?: boolean; locked?: string; children: React.ReactNode;
+}) {
+  return (
+    <Tooltip label={label}>
+      <button
+        onClick={onClick}
+        disabled={disabled}
+        aria-label={label}
+        data-locked={locked}
+        className={`flex h-8 w-8 items-center justify-center rounded-md transition-colors disabled:opacity-50 disabled:cursor-wait ${
+          active ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900"
+                 : "text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"}`}
+      >
+        {children}
+      </button>
+    </Tooltip>
+  );
+}
+
+function MoreMenu({ items }: { items: Array<{ label: string; onClick: () => void; danger?: boolean; locked?: boolean }> }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        aria-label="More"
+        aria-expanded={open}
+        className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800"
+      >
+        <MoreVertical className="h-4 w-4" />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 z-20 mt-1 w-48 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-900">
+            {items.map((it) => (
+              <button
+                key={it.label}
+                onClick={() => { setOpen(false); it.onClick(); }}
+                className={`flex w-full items-center justify-between px-3 py-1.5 text-left text-[13px] hover:bg-slate-50 dark:hover:bg-slate-800 ${
+                  it.danger ? "text-red-600 dark:text-red-400" : "text-slate-700 dark:text-slate-200"}`}
+              >
+                {it.label}
+                {it.locked && <LockBadge />}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function TabRow({ tabs, more, active, onPick, allowed }: {
+  tabs: TabSpec[]; more: TabSpec[]; active: Tab; onPick: (t: Tab) => void; allowed: (f?: FeatureKey) => boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const activeMore = more.find((t) => t.id === active);
+  const tab = (t: TabSpec, inMenu = false) => {
+    const locked = !allowed(t.feature);
+    const Icon = t.icon;
+    const current = active === t.id;
+    return (
+      <button
+        key={t.id}
+        onClick={() => { setOpen(false); onPick(t.id); }}
+        aria-current={current ? "page" : undefined}
+        data-locked={locked ? t.feature : undefined}
+        className={inMenu
+          ? `flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] hover:bg-slate-50 dark:hover:bg-slate-800 ${current ? "text-brand-900 font-medium dark:text-white" : "text-slate-700 dark:text-slate-200"}`
+          : `relative flex h-11 items-center gap-1.5 px-1 text-[13px] transition-colors ${
+              current ? "font-medium text-brand-900 dark:text-white"
+                      : "text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"}`}
+      >
+        <Icon className="h-4 w-4" />
+        {t.label}
+        {locked && <LockBadge />}
+        {current && !inMenu && <span className="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-brand-900 dark:bg-white" />}
+      </button>
+    );
+  };
+  return (
+    <div className="flex shrink-0 items-center gap-5 border-b border-slate-200/80 bg-white px-5 dark:border-slate-800 dark:bg-slate-900">
+      {tabs.map((t) => tab(t))}
+      <div className="relative">
+        <button
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          className={`relative flex h-11 items-center gap-1 px-1 text-[13px] ${
+            activeMore ? "font-medium text-brand-900 dark:text-white" : "text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"}`}
+        >
+          {activeMore ? activeMore.label : "More"}
+          <ChevronDown className="h-3.5 w-3.5" />
+          {activeMore && <span className="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-brand-900 dark:bg-white" />}
+        </button>
+        {open && (
+          <>
+            <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+            <div className="absolute left-0 z-20 mt-1 w-52 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-900">
+              {more.map((t) => tab(t, true))}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -259,41 +374,25 @@ function ProjectWorkspace({
   ];
 
   // Sections for the visual sidebar — only show relevant tabs
-  const sidebarSections = [
-    {
-      label: "Create",
-      items: [
-        { id: "chat" as Tab, label: "Chat", icon: MessageSquare, shortcut: "⌘1" },
-        { id: "preview" as Tab, label: "Preview", icon: Eye, shortcut: "⌘2" },
-        { id: "code" as Tab, label: "Code", icon: Code, shortcut: "⌘3", feature: "code_view" as FeatureKey },
-      ],
-    },
-    {
-      label: "Model",
-      items: [
-        { id: "data" as Tab, label: "Data Model", icon: Database },
-        { id: "rules" as Tab, label: "Rules", icon: Shield },
-        { id: "business-rules" as Tab, label: "Business Rules", icon: Scale },
-        { id: "workflows" as Tab, label: "Workflows", icon: Workflow },
-        { id: "agents" as Tab, label: "Agents", icon: Bot, feature: "agents" as FeatureKey },
-      ],
-    },
-    {
-      label: "Design",
-      items: [
-        { id: "editor" as Tab, label: "Editor", icon: Layout },
-        { id: "navigation" as Tab, label: "Pages & Nav", icon: Map },
-        { id: "app-flow" as Tab, label: "App Flow", icon: Route },
-      ],
-    },
-    {
-      label: "Settings",
-      items: [
-        { id: "app-settings" as Tab, label: "App settings", icon: Settings },
-      ],
-    },
-  ];
 
+  // THE FIVE ACROSS THE TOP, AND THE REST BEHIND "MORE".
+  const primaryTabs: TabSpec[] = [
+    { id: "chat", label: "Chat", icon: MessageSquare, shortcut: "⌘1" },
+    { id: "code", label: "Files", icon: Code, shortcut: "⌘3", feature: "code_view" },
+    { id: "versions", label: "Versions", icon: GitBranch },
+    { id: "preview", label: "Preview", icon: Eye, shortcut: "⌘2" },
+    { id: "app-settings", label: "Settings", icon: Settings },
+  ];
+  const moreTabs: TabSpec[] = [
+    { id: "data", label: "Data Model", icon: Database },
+    { id: "rules", label: "Rules", icon: Shield },
+    { id: "business-rules", label: "Business Rules", icon: Scale },
+    { id: "workflows", label: "Workflows", icon: Workflow },
+    { id: "editor", label: "Editor", icon: Layout },
+    { id: "navigation", label: "Pages & Nav", icon: Map },
+    { id: "app-flow", label: "App Flow", icon: Route },
+    { id: "agents", label: "Agents", icon: Bot, feature: "agents" },
+  ];
   // Which tab belongs to which platform feature; a tab the organisation lacks
   // is shown locked, with the note saying who can open it.
   const feat = useOrgFeatures(orgId);
@@ -436,119 +535,75 @@ function ProjectWorkspace({
     <div className="flex h-full">
       {/* Project header bar */}
       <div className="absolute top-0 left-[220px] right-0 z-10 flex h-[70px] items-center justify-between border-b border-slate-200/80 bg-white/80 backdrop-blur-sm px-4 dark:bg-slate-900/80 dark:border-slate-800">
-        <div className="flex items-center gap-3">
+        {/* WHERE YOU ARE, AS A PATH. "‹ Projects › Mark 8": the list this
+            application came from is one click away, and the name stands on
+            its own without the description beside it. */}
+        <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5 text-sm">
           <button
-            onClick={() => window.history.back()}
+            onClick={() => router.push(`/org/${orgId}/projects`)}
+            aria-label="Back to projects"
             className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors dark:hover:bg-slate-800"
           >
             <ChevronLeft className="h-4 w-4" />
           </button>
-          <span className="text-sm font-medium text-slate-900 dark:text-white truncate max-w-[200px]">
+          <button
+            onClick={() => router.push(`/org/${orgId}/projects`)}
+            className="text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
+          >
+            Projects
+          </button>
+          <ChevronRight className="h-3.5 w-3.5 text-slate-300 dark:text-slate-600" />
+          <span className="truncate max-w-[260px] font-semibold text-slate-900 dark:text-white">
             {project?.name || "..."}
           </span>
-          {project?.description && (
-            <span className="hidden md:inline text-xs text-slate-400 truncate max-w-[300px]">
-              {project.description.length > 60 ? project.description.slice(0, 60) + "..." : project.description}
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-1.5">
-          <Tooltip label="Agents" shortcut="">
-            <button
-              onClick={() => setActiveTab("office")}
-              aria-label="Agents"
-              className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${activeTab === "office" ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900" : "text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800"}`}
-            >
-              <Building2 className="h-3.5 w-3.5" />
-            </button>
-          </Tooltip>
-          <Tooltip label="History">
-            <button
-              onClick={() => setActiveTab("versions")}
-              aria-label="History"
-              className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${activeTab === "versions" ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900" : "text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800"}`}
-            >
-              <GitBranch className="h-3.5 w-3.5" />
-            </button>
-          </Tooltip>
-          <div className="w-px h-4 bg-slate-200 mx-1 dark:bg-slate-700" />
-          <Tooltip label={syncIntegrations.isPending ? "Syncing…" : "Sync integrations to .env"}>
-            <button
-              onClick={() => syncIntegrations.mutate()}
-              disabled={syncIntegrations.isPending}
-              className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-wait"
-            >
-              <KeyRound className={`h-3.5 w-3.5 ${syncIntegrations.isPending ? "animate-pulse" : ""}`} />
-            </button>
-          </Tooltip>
-          <Tooltip label={feat.allowed("code_export") ? "Export" : "Export (locked)"}>
-            <button
-              onClick={() => (feat.allowed("code_export") ? setShowExport(true) : explainLock(feat.nameOf("code_export")))}
-              data-locked={feat.allowed("code_export") ? undefined : "code_export"}
-              className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors dark:hover:bg-slate-800"
-            >
-              {feat.allowed("code_export") ? <Download className="h-3.5 w-3.5" /> : <LockBadge />}
-            </button>
-          </Tooltip>
-          <SaveAsTemplateButton projectId={projectId} orgId={orgId} projectName={project?.name} />
-          <div className="w-px h-4 bg-slate-200 mx-1 dark:bg-slate-700" />
-          <PublishButton projectId={projectId} orgId={orgId} lockedWeb={!feat.allowed("publish")} lockedMobile={!feat.allowed("mobile_builds")} />
-        </div>
-      </div>
-
-      {/* Tab sidebar — 9 tabs in 3 sections with tooltips */}
-      <div className="flex w-12 flex-col items-center border-r border-slate-200/80 bg-white pt-[70px] pb-3 shrink-0 dark:bg-slate-900 dark:border-slate-800">
-        {sidebarSections.map((section, si) => (
-          <div key={section.label} className="w-full">
-            {si > 0 && (
-              <div className="mx-2.5 my-2 border-t border-slate-100 dark:border-slate-800" />
-            )}
-            <div className="flex flex-col items-center gap-0.5 px-1.5">
-              {section.items.map(({ id, label, icon: Icon, ...rest }) => {
-                const feature = "feature" in rest ? (rest as { feature?: FeatureKey }).feature : undefined;
-                const locked = !!feature && !feat.allowed(feature);
-                return (
-                <Tooltip key={id} label={locked ? `${label} (locked)` : label} shortcut={"shortcut" in rest ? (rest as { shortcut?: string }).shortcut : undefined}>
-                  <button
-                    onClick={() => setActiveTab(id)}
-                    data-locked={locked ? feature : undefined}
-                    /* A3-1: Tooltip gives a VISUAL label but no accessible name,
-                       so the workspace's primary navigation announced as a bare
-                       "button" (WCAG 2.2 4.1.2). Every tab already carries
-                       `label` — it simply was not exposed. */
-                    aria-label={label}
-                    aria-current={activeTab === id ? "page" : undefined}
-                    className={`relative flex h-9 w-9 items-center justify-center rounded-lg transition-all duration-150 ${
-                      activeTab === id
-                        ? "bg-slate-900 text-white shadow-sm dark:bg-white dark:text-slate-900"
-                        : "text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
-                    }`}
-                  >
-                    <Icon className="h-[16px] w-[16px]" />
-                    {locked && <LockBadge className="absolute -right-0.5 -top-0.5" />}
-                  </button>
-                </Tooltip>
-                );
-              })}
-            </div>
-          </div>
-        ))}
-
-        <div className="flex-1" />
-
-        <Tooltip label="Delete project">
-          <button
-            onClick={() => setShowDelete(true)}
-              aria-label="Delete project"
-            className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-300 hover:bg-red-50 hover:text-red-500 transition-colors dark:text-slate-600 dark:hover:bg-red-950/30"
+        </nav>
+        <div className="flex items-center gap-1">
+          <HeaderIcon
+            label={feat.allowed("code_export") ? "Export" : "Export (locked)"}
+            onClick={() => (feat.allowed("code_export") ? setShowExport(true) : explainLock(feat.nameOf("code_export")))}
+            locked={!feat.allowed("code_export") ? "code_export" : undefined}
           >
-            <Trash2 className="h-[16px] w-[16px]" />
-          </button>
-        </Tooltip>
+            {feat.allowed("code_export") ? <FileText className="h-4 w-4" /> : <LockBadge />}
+          </HeaderIcon>
+          <HeaderIcon label="Versions" onClick={() => setActiveTab("versions")} active={activeTab === "versions"}>
+            <GitBranch className="h-4 w-4" />
+          </HeaderIcon>
+          <HeaderIcon
+            label={syncIntegrations.isPending ? "Syncing…" : "Sync integrations to .env"}
+            onClick={() => syncIntegrations.mutate()}
+            disabled={syncIntegrations.isPending}
+          >
+            <KeyRound className={`h-4 w-4 ${syncIntegrations.isPending ? "animate-pulse" : ""}`} />
+          </HeaderIcon>
+          <SaveAsTemplateButton projectId={projectId} orgId={orgId} projectName={project?.name} />
+          <HeaderIcon label="App settings" onClick={() => setActiveTab("app-settings")} active={activeTab === "app-settings"}>
+            <Settings className="h-4 w-4" />
+          </HeaderIcon>
+          <div className="w-px h-5 bg-slate-200 mx-1.5 dark:bg-slate-700" />
+          <PublishButton projectId={projectId} orgId={orgId} lockedWeb={!feat.allowed("publish")} lockedMobile={!feat.allowed("mobile_builds")} />
+          <MoreMenu
+            items={[
+              { label: "Agents' office", onClick: () => setActiveTab("office"), locked: !feat.allowed("office") },
+              { label: "Delete project", onClick: () => setShowDelete(true), danger: true },
+            ]}
+          />
+        </div>
       </div>
 
       {/* Main content area */}
-      <div className="min-w-0 flex-1 overflow-hidden pt-[70px] bg-background">
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden pt-[70px] bg-background">
+        {/* THE TABS, ACROSS THE TOP. Five people use every day — Chat, Files,
+            Versions, Preview, Settings — and the rest behind "More", still a
+            click away and still reachable from ⌘K. A rail of nine icons down
+            the left needed a tooltip to read. */}
+        <TabRow
+          tabs={primaryTabs}
+          more={moreTabs}
+          active={activeTab}
+          onPick={setActiveTab}
+          allowed={(f) => !f || feat.allowed(f)}
+        />
+        <div className="min-h-0 flex-1 overflow-hidden">
         {/*
           HIDDEN, NOT UNMOUNTED. Every other tab here is safe to tear down and
           rebuild from its query cache; the chat is not. Its transcript and its
@@ -567,6 +622,7 @@ function ProjectWorkspace({
             projectId={projectId}
             blueprint={blueprintDoc ?? null}
             onRunComplete={onGenerationComplete}
+            showHeader={false}
             className="h-full border-l-0"
           />
         </div>
@@ -645,6 +701,7 @@ function ProjectWorkspace({
         {activeTab === "versions" && (
           <HistoryPanel projectId={projectId} />
         )}
+        </div>
       </div>
 
       <ExportDialog
