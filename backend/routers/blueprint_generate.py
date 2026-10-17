@@ -1404,6 +1404,56 @@ async def read_flows(
     return {**graph(svc.doc), "findings": flow_findings(svc.doc), "map": app_map(svc.doc)}
 
 
+@router.get("/api/projects/{project_id}/blueprint/history")
+async def read_blueprint_history(
+    project_id: uuid.UUID,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Build history: every recorded change to the application, newest first,
+    and which earlier versions can be restored. A Blueprint application keeps
+    its history here, not in git — its repository has no commits, so the old
+    git-based list showed nothing but publishes."""
+    project = await get_project_with_auth(project_id, user, db)
+    from services.blueprint.service import BlueprintService
+    from services.smith.revert import history
+    try:
+        svc = BlueprintService.load(output_dir=str(_output_dir(project)))
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="no Blueprint for this project") from None
+    return history(svc)
+
+
+class RestoreRequest(BaseModel):
+    version: int
+
+
+@router.post("/api/projects/{project_id}/blueprint/restore")
+async def restore_blueprint_version(
+    project_id: uuid.UUID,
+    req: RestoreRequest,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Bring the application back to how it stood at an earlier version and
+    write it out again. Recorded as a change of its own, so it can be undone;
+    the live app changes only when it is published again."""
+    project = await get_project_with_auth(project_id, user, db)
+    from services.blueprint.service import BlueprintService
+    from services.smith.revert import restore_to
+    from services.smith.section_change import SectionChangeError
+    out_dir = _output_dir(project)
+    try:
+        svc = BlueprintService.load(output_dir=str(out_dir))
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="no Blueprint for this project") from None
+    try:
+        out = await asyncio.to_thread(restore_to, svc, int(req.version), app_root=str(Path(out_dir) / "app"))
+    except SectionChangeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    return {"restored": out["restored"], "version": out["version"]}
+
+
 @router.get("/api/projects/{project_id}/gates")
 async def read_gates(
     project_id: uuid.UUID,
