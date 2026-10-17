@@ -684,6 +684,15 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
             ended = _ended(tool, args, landed, touched, last, observations)
             if tool != "answer" and ended.status not in ("asked",):
                 ended.said += _failing_note(observations, _time.monotonic() - turn_started)
+            if tool == "done" and landed and ended.status == "resolved":
+                # A FIX ENDS WITH ITS ACCOUNT — what was happening, what changed,
+                # what proved it — and leaves a guard the checks run again.
+                from services.smith import account, guards
+                try:
+                    ended.said = account.compose(ctx.ask or ctx.message or "", observations, ended.said)
+                except Exception:  # noqa: BLE001 — the receipt stands without the account
+                    logger.debug("[smith] the fix's account could not be composed", exc_info=True)
+                guards.record(ctx.out, ctx.ask or ctx.message or "", observations)
             return ended
         if not tools.is_tool(tool):
             observations.append(Observation(tool=tool, args=args, status="error", said=tools.unknown(tool)))

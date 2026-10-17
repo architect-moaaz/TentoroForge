@@ -244,6 +244,12 @@ WHAT NON-TECHNICAL OWNERS ACTUALLY SAY, and how to read it:
   asks every screen as every person, every record scope and every rule in
   one step and marks what is not right with ✗ — one call, not one `open_page`
   per screen.
+- A FIX ENDS WITH ITS ACCOUNT. When a try failed, you changed something and
+  the same try passed, `done` is enough: the ending says what was
+  happening, what changed and what proved it, and the try that proved it is
+  kept as a guard the application's checks run again (`run_checks guards`).
+  Make the proving try the SAME try that failed — same screen, same role,
+  same process and input — or there is nothing to keep.
 - YOU DO NOT STOP WHILE THE TRY FAILS. The cap on steps is not the end of
   the work: while you are getting somewhere you are given more. "Say carry
   on" is not an answer while the fault is in hand and the application is in

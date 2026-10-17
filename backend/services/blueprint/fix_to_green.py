@@ -199,8 +199,12 @@ def _check_everything(svc: Any, output_dir: str, app_root: str, report: Any, *, 
     say(f"Checked {total} page{'s' if total != 1 else ''}: {max(total - len(reds) - len(untried), 0)} work, "
         f"{len(reds)} don't" + (f", {len(untried)} I couldn't open" if untried else "") + ".")
     rules = _on_a_bench(svc, output_dir, bench_factory=bench_factory, client=client, cancelled=cancelled,
-                        what=("routes", "access", "rules", "systems", "audit", "domain"))
+                        what=("routes", "access", "rules", "systems", "audit", "domain", "guards"))
     _write_logic(svc, processes, rules.get("rules"))
+    if (rules.get("guards") or {}).get("total"):
+        # EARLIER FIXES, HELD. Each fix Smith made left the try that proved it;
+        # a later change that undoes one is said here, by the ask it was for.
+        say("\n".join(rules["guards"]["lines"]).replace("checks · ", ""))
     if rules.get("causes"):
         # ONE CAUSE, SAID AS ONE, BEFORE THE ITEMS. The headline of "2 of 106
         # served" was the sign-in nobody could do (fyuhs16i, 2026-10-06).
@@ -282,6 +286,12 @@ def _on_a_bench(svc: Any, output_dir: str, *, bench_factory: Any, client: Any, c
                 logger.warning("[fix-to-green] the rule trials failed", exc_info=True)
                 results["rules"] = {"total": 0, "green": [], "red": [],
                                     "untried": [sc.item("rules", "Rules", f"the check failed: {exc}"[:200], "rules")]}
+        if "guards" in what:
+            try:
+                from services.smith import guards as _guards
+                results["guards"] = _guards.run(bench, svc.doc)
+            except Exception:  # noqa: BLE001
+                logger.warning("[fix-to-green] the guards could not be run", exc_info=True)
         if "systems" in what:
             try:
                 from services.blueprint.clock_check import check_clock

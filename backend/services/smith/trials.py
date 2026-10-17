@@ -92,8 +92,9 @@ TRIALS = TRIALS + (
      "redirects and refusals as declared), `access` (every scoped record type: "
      "a person sees only their own), `rules` (every rule with a process: the "
      "process refuses the case the rule forbids), `pages` (open and press every "
-     "control on the screens named in `routes`, as `as`), or `all` (routes, "
-     "access and rules). `routes` narrows routes/pages to those screens (a route "
+     "control on the screens named in `routes`, as `as`), `guards` (every fix "
+     "made before on this app: the try that failed and then passed, run again), "
+     "or `all` (routes, access, rules and guards). `routes` narrows routes/pages to those screens (a route "
      "or a page name); `entities` narrows access to those record types. Lines "
      "marked ✗ are what is not right, with the reason; read them before "
      "deciding what to change, and run the same check again after changing it. "
@@ -880,8 +881,8 @@ def run_checks(bench: Bench, doc: dict, what: str, routes: list, entities: list,
     """
     from services.blueprint import access_check, route_check, rule_trials
     what = (what or "all").strip().lower()
-    kinds = {"all": ("routes", "access", "rules"), "routes": ("routes",), "access": ("access",),
-             "rules": ("rules",), "pages": ("pages",)}.get(what)
+    kinds = {"all": ("routes", "access", "rules", "guards"), "routes": ("routes",), "access": ("access",),
+             "rules": ("rules",), "pages": ("pages",), "guards": ("guards",)}.get(what)
     if kinds is None:
         raise ValueError(f"`what` is one of routes, access, rules, pages, all — not {what!r}")
     if "pages" in kinds and not routes:
@@ -902,6 +903,9 @@ def run_checks(bench: Bench, doc: dict, what: str, routes: list, entities: list,
             elif kind == "rules":
                 lines += _check_lines("rules", rule_trials.refuse_rules(doc, bench, _rules_client()),
                                       holds="rules refuse their refused case")
+            elif kind == "guards":
+                from services.smith import guards as _guards
+                lines += _guards.run(bench, doc, only_routes=[str(r) for r in routes] or None)["lines"]
             elif kind == "pages":
                 named = [str(r) for r in routes][:PAGES_PER_CALL]
                 for route in named:
