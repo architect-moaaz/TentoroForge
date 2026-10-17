@@ -102,3 +102,16 @@ def test_the_panel_and_smith_carry_the_guide_and_the_fault(tmp_path, monkeypatch
     assert view["detail"].startswith("xyz.abc.com already has an A record"), "the fault, not 'not there yet'"
     said = domain_change._said(view)
     assert "How to add it at GoDaddy" in said and "My Products" in said and "already has an A record" in said
+
+
+def test_an_old_ipv6_record_left_beside_the_new_a_record_is_named():
+    """Cloudflare's Domain Connect apply replaces the bare domain's A records
+    and keeps an AAAA: visitors on IPv6 reach the old host (Cloudflare,
+    2026-10-17)."""
+    found = _diag("abc.com", "apex", APEX, {("abc.com", "A"): [(1, "76.76.21.21")],
+                                            ("abc.com", "AAAA"): [(28, "2001:db8::7")]})
+    assert [f["code"] for f in found] == ["ipv6-in-the-way"] and "2001:db8::7" in found[0]["says"]
+    behind_cname = _diag("xyz.abc.com", "subdomain", SUB,
+                         {("xyz.abc.com", "CNAME"): [(5, "cname.vercel-dns.com.")],
+                          ("xyz.abc.com", "AAAA"): [(5, "cname.vercel-dns.com."), (28, "2001:db8::9")]})
+    assert behind_cname == [], "the AAAA answers behind a CNAME are the target's"
