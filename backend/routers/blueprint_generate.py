@@ -1398,7 +1398,10 @@ async def read_flows(
     except FileNotFoundError:
         raise HTTPException(status_code=404,
                             detail="no Blueprint for this project") from None
-    return {**graph(svc.doc), "findings": flow_findings(svc.doc)}
+    # THE WHOLE MAP beside the flows: every screen, the menu, the links and
+    # what is missing — the App Map view draws both on one canvas.
+    from services.blueprint.app_map import app_map
+    return {**graph(svc.doc), "findings": flow_findings(svc.doc), "map": app_map(svc.doc)}
 
 
 @router.get("/api/projects/{project_id}/gates")

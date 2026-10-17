@@ -52,7 +52,6 @@ import { IREditor } from "@/components/ir-editor/IREditor";
 import { DesignEditor } from "@/components/design-editor/DesignEditor";
 import { VisualEditorWorkspace } from "@/components/visual-editor/VisualEditorWorkspace";
 import { ReactEditor } from "@/components/react-editor/ReactEditor";
-import { NavigationPanel } from "@/components/navigation/NavigationPanel";
 import { AppFlowPanel } from "@/components/app-flow/AppFlowPanel";
 import { AppSettingsPanel } from "@/components/app-settings/AppSettingsPanel";
 import { useAppSettingsStore } from "@/stores/appSettings";
@@ -363,8 +362,7 @@ function ProjectWorkspace({
     { id: "schema-editor" as Tab, label: "Schema Editor (legacy)", icon: Layout },
     { id: "design-editor" as Tab, label: "AHTML Editor", icon: Table2 },
     { id: "ir-editor" as Tab, label: "IR Editor", icon: Building2 },
-    { id: "navigation" as Tab, label: "Nav", icon: Map },
-    { id: "app-flow" as Tab, label: "App Flow", icon: Route },
+    { id: "app-flow" as Tab, label: "App Map", icon: Route },
     { id: "agents" as Tab, label: "Agents", icon: Bot },
     { id: "ai" as Tab, label: "AI", icon: Sparkles },
     { id: "office" as Tab, label: "Office", icon: Building2 },
@@ -389,8 +387,8 @@ function ProjectWorkspace({
     { id: "business-rules", label: "Business Rules", icon: Scale },
     { id: "workflows", label: "Workflows", icon: Workflow },
     { id: "editor", label: "Editor", icon: Layout },
-    { id: "navigation", label: "Pages & Nav", icon: Map },
-    { id: "app-flow", label: "App Flow", icon: Route },
+    // ONE MAP OF THE APP: Pages & Nav and App Flow each drew half of it.
+    { id: "app-flow", label: "App Map", icon: Route },
     { id: "agents", label: "Agents", icon: Bot, feature: "agents" },
   ];
   // Which tab belongs to which platform feature; a tab the organisation lacks
@@ -680,8 +678,10 @@ function ProjectWorkspace({
         {activeTab === "ir-editor" && !lockedName && (
           <IREditor projectId={projectId} />
         )}
+        {/* The old address of Pages & Nav opens the App Map, which keeps the
+            old screen editor for a project with no Blueprint. */}
         {activeTab === "navigation" && (
-          <NavigationPanel projectId={projectId} />
+          <AppFlowPanel projectId={projectId} />
         )}
         {activeTab === "agents" && !lockedName && (
           <AgentBuilderPanel projectId={projectId} orgId={orgId} />

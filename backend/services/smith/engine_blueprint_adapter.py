@@ -192,6 +192,11 @@ def to_smith_fields(doc: dict[str, Any]) -> dict[str, Any]:
         # THE PATHS PEOPLE TAKE (`flows`), one line each, so "after checkout,
         # show the order" is read as a change to a flow, not a guess.
         "flows": _flow_lines(doc),
+        # THE WHOLE MAP, IN A FEW LINES: where each person lands, the menu,
+        # the links between screens, and what nothing reaches — so "people
+        # can't find the tax page" is read against the app as it is wired,
+        # not guessed from a list of pages.
+        "app_map": _app_map_lines(doc),
         # WHAT THE APP MUST DO, AND WHERE EACH LINE CAME FROM. Smith answers
         # questions from this context, and "which requirements came from the
         # document I uploaded?" has its answer in `requirements[].evidence`
@@ -289,6 +294,14 @@ def to_smith_fields(doc: dict[str, Any]) -> dict[str, Any]:
             for p in _live(doc.get("pages"))
         ],
     }
+
+
+def _app_map_lines(doc: dict[str, Any]) -> list[str]:
+    try:
+        from services.blueprint.app_map import describe
+        return describe(doc)
+    except Exception:  # noqa: BLE001 — Smith's context is never held up by a map
+        return []
 
 
 def _flow_lines(doc: dict[str, Any]) -> list[str]:
