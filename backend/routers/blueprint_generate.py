@@ -863,10 +863,17 @@ def _build_complete_message(doc: dict | None) -> str | None:
                     ) or [str(u.get("page")) for u in unbuilt]
     n = len(unbuilt)
     page_word = "page" if n == 1 else "pages"
+    if not served:
+        # NOT "EVERYTHING ELSE WORKS" WHEN NOTHING IS SERVED. A two-screen app
+        # with 0 of 2 pages was handed over with those words (8qug271e,
+        # 2026-10-09; Crumb, "0 of 4 pages ready… everything else works").
+        return (f"Your application is not usable yet — none of its {planned} pages could be composed "
+                f"({', '.join(routes)}), so nothing is served. Tell me to retry them, or say which "
+                "to start with." + later)
     return (f"Your application is built — {served} of {planned} pages are ready "
             f"to preview. {n} {page_word} couldn't be composed "
             f"({', '.join(routes)}) and {'is' if n == 1 else 'are'} not served "
-            f"yet; everything else works. Preview what's there, or tell me to "
+            f"yet; the other {served} work. Preview what's there, or tell me to "
             f"retry {'it' if n == 1 else 'them'}." + later)
 
 
@@ -2240,8 +2247,15 @@ async def smith_chat(
                 _turn_ledger.end(None if f.cancelled() else f.exception())
             _inner.add_done_callback(_ledger_end)
             _fut = asyncio.shield(_inner)
+            # FROM THE FIRST MINUTES, NOT FROM THE RELEASE. The progress line
+            # began only once the panel was released — an hour into a build —
+            # so a build was silent in chat for 33, 43 and 77 minutes while it
+            # ran (fyuhs16i, 97l5iqsp, 23libgx8, 2026-10). Every few minutes
+            # from the start: the stage the ledger says it is on.
+            _progress = asyncio.ensure_future(_post_progress(_inner, output_dir, emit))
             try:
                 _result = await asyncio.wait_for(_fut, timeout=_turn_timeout)
+                _progress.cancel()
                 emit("done", _result)
                 _after_turn(_result)
             except asyncio.TimeoutError:
@@ -2267,12 +2281,11 @@ async def smith_chat(
                              "do anything."),
                 })
                 emit("done", {"status": "timeout"})
-                # BETWEEN THAT NOTE AND THE END, SAY WHAT IS HAPPENING. The
-                # note was the last word for the rest of the turn — fifty
-                # minutes of it, and a turn that died read exactly the same
-                # (pcn4owv7, 2026-10-15). Every few minutes: the step the
-                # ledger says it is on; the moment the ledger stops: that.
-                _progress = asyncio.ensure_future(_post_progress(_inner, output_dir, emit))
+                # BETWEEN THAT NOTE AND THE END, THE PROGRESS LINE GOES ON. It
+                # was the last word for the rest of the turn — fifty minutes
+                # of it, and a turn that died read exactly the same (pcn4owv7,
+                # 2026-10-15). The poster started above keeps posting the step
+                # the ledger says it is on; the moment the ledger stops: that.
                 # WHEN THE BACKGROUND BUILD ACTUALLY FINISHES, SAY SO. The panel
                 # was released, but the run registry (which the panel now polls)
                 # must still learn the run ended — otherwise it stays "running"
@@ -3099,7 +3112,14 @@ def progress_line(snapshot: dict | None) -> str | None:
         return None
     minutes = int(max(0, int(snapshot.get("elapsedMs") or 0) // 60000))
     step = str(snapshot.get("step") or "").strip()
-    return f"Still at it ({minutes} min): {step}." if step else f"Still at it ({minutes} min)."
+    if step:
+        return f"Still at it ({minutes} min): {step}."
+    # A BUILD HAS NO STEP LINE; IT HAS A STAGE AND A COUNT.
+    stage = str(snapshot.get("stage") or "").strip()
+    done, total = int(snapshot.get("nodesDone") or 0), int(snapshot.get("nodesTotal") or 0)
+    where = f" at {stage}" if stage else ""
+    count = f", {done} of {total} steps done" if total else ""
+    return f"Still building ({minutes} min){where}{count}." if (stage or total) else f"Still at it ({minutes} min)."
 
 
 async def _post_progress(inner: Any, output_dir: Any, emit: Any, *, every: float | None = None) -> None:

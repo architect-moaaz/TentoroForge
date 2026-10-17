@@ -360,9 +360,14 @@ def _logic_line(svc: Any) -> str:
     if not total and not v.get("untried"):
         head = "No process or rule a trial could run here"
     else:
+        untried = list(v.get("untried") or [])
+        # WHY IT COULD NOT BE TRIED, NOT JUST THAT. "16 could not be tried" in a
+        # parenthesis, "7 I couldn't try — my own check failed" with no cause
+        # (qi0wldnl, cxz95dd1, 2026-10): the first reason is the headline.
+        why = str((untried[0] or {}).get("why") or "").strip() if untried and isinstance(untried[0], dict) else ""
         head = (f"Ran the processes and tried the rules: {v.get('green', 0)} of {total} hold"
                 + (f", {len(v.get('red') or [])} don't" if v.get("red") else "")
-                + (f", {len(v.get('untried') or [])} I couldn't try" if v.get("untried") else ""))
+                + (f", {len(untried)} I couldn't try" + (f" ({why[:140]})" if why else "") if untried else ""))
     if skipped:
         head += (f"; {skipped} rule{'s' if skipped != 1 else ''} gate{'s' if skipped == 1 else ''} no process, "
                  f"so there is nothing to try {'them' if skipped != 1 else 'it'} in")
