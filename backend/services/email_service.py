@@ -23,6 +23,49 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 TEMPLATES = {
+    # The Templates Gallery (services/template_gallery.py). Every value is
+    # HTML-escaped by the sender: names and descriptions are people's words.
+    "template_review_requested": {
+        "subject": "Template to review: {template_name}",
+        "html": """
+        <h2>A template is waiting for your review</h2>
+        <p><strong>{requester}</strong> ({org_name}) asked for <strong>{template_name}</strong>
+        (v{version}) to be added to the Templates Gallery.</p>
+        <p>{description}</p>
+        <p><a href="{review_url}">Review it in Tentoro Forge</a></p>
+        """,
+    },
+    "template_approved": {
+        "subject": "{template_name} is in the Templates Gallery",
+        "html": """
+        <h2>Your template was approved</h2>
+        <p>Hi {name}, <strong>{template_name}</strong> is now in the Templates Gallery, where
+        every team on Tentoro Forge can start an app from it.</p>
+        <p>Note from the reviewer: {note}</p>
+        <p><a href="{template_url}">See it in Forge</a></p>
+        """,
+    },
+    "template_changes_requested": {
+        "subject": "{template_name} needs changes before it is published",
+        "html": """
+        <h2>Your template needs a few changes</h2>
+        <p>Hi {name}, the Tentoro team reviewed <strong>{template_name}</strong> and asked for
+        changes before it goes into the Templates Gallery:</p>
+        <blockquote>{note}</blockquote>
+        <p>Make the changes, then submit it again.</p>
+        <p><a href="{template_url}">Open your template</a></p>
+        """,
+    },
+    "template_removed": {
+        "subject": "{template_name} was taken out of the Templates Gallery",
+        "html": """
+        <h2>Your template is no longer in the Gallery</h2>
+        <p>Hi {name}, <strong>{template_name}</strong> was taken out of the Templates Gallery:</p>
+        <blockquote>{note}</blockquote>
+        <p>Projects already made from it are not affected. You can submit it again.</p>
+        <p><a href="{template_url}">Open your template</a></p>
+        """,
+    },
     "welcome": {
         "subject": "Welcome to Tentoro Forge",
         "html": """

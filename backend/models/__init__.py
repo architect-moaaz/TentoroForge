@@ -22,6 +22,7 @@ from models.project import (
     Version,
 )
 from models.template import AppTemplate
+from models.template_gallery import TemplateEvent, TemplateListing, TemplateReview, TemplateUse
 from models.discovery import DiscoverySession
 from models.brand_profile import OrgBrandProfile, BrandDiscoveryStatus
 from models.rules import ProjectRule, AppAccessPolicy, FieldAccessPolicy
@@ -73,6 +74,10 @@ __all__ = [
     "AgentJob",
     "Version",
     "AppTemplate",
+    "TemplateListing",
+    "TemplateEvent",
+    "TemplateUse",
+    "TemplateReview",
     "DiscoverySession",
     "OrgBrandProfile",
     "BrandDiscoveryStatus",

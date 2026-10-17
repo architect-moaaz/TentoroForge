@@ -757,10 +757,17 @@ def save_as_template(ctx: Ctx, u: dict) -> Outcome:
         return Outcome(status="needs_user", said=str(exc))
     held = templates.counted((meta.get("summary") or {}).get("counts") or {},
                              ("pages", "entities", "workflows"))
+    version = int(meta.get("version") or 1)
+    # A DRAFT, NOT A PUBLICATION. Only the person can add the screenshots a
+    # reviewer looks at and press Submit, so a chat turn never says the
+    # template is in the Gallery — it says how it gets there.
     return Outcome(status="resolved", said=(
-        f"Saved “{meta['name']}” to Templates" + (f" — {held}" if held else "") + ". Anyone in "
-        "your organisation can start a new app from it there: the exact same app again, or "
-        "one like it. This application is unchanged."))
+        f"Saved “{meta['name']}”" + (f" (version {version})" if version > 1 else "") +
+        " to Templates as a private template" + (f" — {held}" if held else "") + ". Anyone in "
+        "your organisation can start a new app from it there: the exact same app again, or one "
+        "like it. To share it with everyone in the Templates Gallery, open it in Templates, add "
+        "screenshots and choose Submit for review — Tentoro reviews it first. This application "
+        "is unchanged."))
 
 
 def rebuild(ctx: Ctx, u: dict) -> Outcome:

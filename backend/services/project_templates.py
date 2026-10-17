@@ -35,6 +35,7 @@ HOW ONE IS USED. A project made from a template carries it, staged, in
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -70,6 +71,19 @@ PATCHES = "patches.json"
 NAME_MAX = 120
 DESCRIPTION_MAX = 2000
 
+#: Screenshots a template may carry, and how big each may be. What a gallery
+#: card and the reviewer look at; never the app's data.
+SCREENSHOTS_DIR = "screenshots"
+SCREENSHOT_MAX = 8
+SCREENSHOT_BYTES_MAX = 5 * 1024 * 1024
+#: Image kinds, told by their first bytes — never by the name or the type the
+#: browser claims, either of which a person can set to anything.
+_IMAGE_MAGIC = (
+    (b"\x89PNG\r\n\x1a\n", "png", "image/png"),
+    (b"\xff\xd8\xff", "jpg", "image/jpeg"),
+)
+_SHOT_ID = re.compile(r"^[0-9a-f]{32}$")
+
 
 class TemplateError(ValueError):
     """A template cannot be saved, found or used — the message says why."""
@@ -101,6 +115,57 @@ def _write_json(path: Path, data: Any) -> None:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def lineage_key(org_id: str, source_project_id: str, template_id: str) -> str:
+    """What every version of one app's template shares: the organisation and
+    the app it was taken from (a template with no source app is its own)."""
+    return f"{org_id}:{source_project_id or template_id}"[:80]
+
+
+def lineage_of(meta: dict) -> str:
+    """A template's lineage — read from its meta, or worked out for one saved
+    before versions existed."""
+    return str(meta.get("lineage") or lineage_key(str(meta.get("org_id") or ""),
+                                                  str(meta.get("source_project_id") or ""),
+                                                  str(meta.get("id") or "")))
+
+
+@contextlib.contextmanager
+def _file_lock(path: Path):
+    """One writer at a time, across processes (fcntl), or within this one
+    where there is no fcntl (Windows, a development platform here)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        import fcntl
+    except ImportError:  # pragma: no cover - Windows
+        fcntl = None  # type: ignore[assignment]
+    if fcntl is None:
+        with _THREAD_LOCKS_GUARD:
+            lock = _THREAD_LOCKS.setdefault(str(path), threading.Lock())
+        with lock:
+            yield
+        return
+    with open(path, "a+") as fh:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+
+
+_THREAD_LOCKS: dict[str, threading.Lock] = {}
+_THREAD_LOCKS_GUARD = threading.Lock()
+
+
+def _root_lock():
+    return _file_lock(templates_root() / ".save.lock")
+
+
+def _meta_lock(template_id: str):
+    """Held around every read-change-write of a template's meta.json, so two
+    screenshots uploaded at once both land."""
+    return _file_lock(_dir(template_id) / ".meta.lock")
 
 
 # --------------------------------------------------------------------------- #
@@ -136,7 +201,7 @@ def summary(doc: dict) -> dict:
             "rules": len(_live(doc.get("businessRules"))),
             "integrations": len(_live(doc.get("integrations"))),
         },
-        "pages": [str(p.get("title") or p.get("route") or "") for p in pages][:16],
+        "pages": [str(p.get("title") or p.get("name") or p.get("route") or "") for p in pages][:16],
         "entities": [str(e.get("name") or "") for e in entities][:16],
         "workflows": [str(w.get("name") or "") for w in workflows][:16],
         "roles": [str(r.get("name") or "") for r in roles][:8],
@@ -218,33 +283,42 @@ def save(*, output_dir: str | Path, org_id: str, created_by: str = "",
     name = (str(name or "").strip() or f"{facts['name'] or 'Application'} template")[:NAME_MAX]
     template_id = uuid.uuid4().hex
     root = _dir(template_id)
+    lineage = lineage_key(str(org_id), str(source_project_id or ""), template_id)
     try:
-        _write_json(root / "blueprint.json", snapshot(doc))
-        ids = output_dir / ".forge" / "ids.json"
-        if ids.is_file():
-            shutil.copyfile(ids, root / "ids.json")
-        edits = _active_edits(output_dir)
-        if edits:
-            _write_json(root / PATCHES, edits)
-        brand = output_dir / "brand"
-        if brand.is_dir():
-            shutil.copytree(brand, root / "brand", dirs_exist_ok=True)
-        meta = {
-            "id": template_id,
-            "org_id": str(org_id),
-            "name": name,
-            "description": (str(description or "").strip() or facts["description"])[:DESCRIPTION_MAX],
-            "category": str(category or facts["domain"] or "").strip()[:60],
-            "created_by": str(created_by or ""),
-            "created_by_name": str(created_by_name or "")[:120],
-            "source_project_id": str(source_project_id or ""),
-            "source_short_id": output_dir.name,
-            "source_version": int(doc.get("version") or 1),
-            "created_at": _now(),
-            "updated_at": _now(),
-            "summary": facts,
-        }
-        _write_json(root / "meta.json", meta)
+        # The next version of this app's template is counted and written under
+        # one lock, so two saves of the same app at once are v2 and v3, not two v2s.
+        with _root_lock():
+            version = 1 + max((int(m.get("version") or 1) for m in list_for_org(str(org_id))
+                               if lineage_of(m) == lineage), default=0)
+            _write_json(root / "blueprint.json", snapshot(doc))
+            ids = output_dir / ".forge" / "ids.json"
+            if ids.is_file():
+                shutil.copyfile(ids, root / "ids.json")
+            edits = _active_edits(output_dir)
+            if edits:
+                _write_json(root / PATCHES, edits)
+            brand = output_dir / "brand"
+            if brand.is_dir():
+                shutil.copytree(brand, root / "brand", dirs_exist_ok=True)
+            meta = {
+                "id": template_id,
+                "org_id": str(org_id),
+                "name": name,
+                "description": (str(description or "").strip() or facts["description"])[:DESCRIPTION_MAX],
+                "category": str(category or facts["domain"] or "").strip()[:60],
+                "created_by": str(created_by or ""),
+                "created_by_name": str(created_by_name or "")[:120],
+                "source_project_id": str(source_project_id or ""),
+                "source_short_id": output_dir.name,
+                "source_version": int(doc.get("version") or 1),
+                "lineage": lineage,
+                "version": version,
+                "screenshots": [],
+                "created_at": _now(),
+                "updated_at": _now(),
+                "summary": facts,
+            }
+            _write_json(root / "meta.json", meta)
     except Exception:
         shutil.rmtree(root, ignore_errors=True)  # never leave half a template behind
         raise
@@ -284,18 +358,24 @@ def list_for_org(org_id: str) -> list[dict]:
     return sorted(out, key=lambda m: str(m.get("created_at") or ""), reverse=True)
 
 
-def update(template_id: str, *, name: str | None = None, description: str | None = None) -> dict:
-    meta = get(template_id)
-    if not meta:
+def update(template_id: str, *, name: str | None = None, description: str | None = None,
+           category: str | None = None) -> dict:
+    if not get(template_id):
         raise TemplateError("That template does not exist.")
-    if name is not None:
-        if not str(name).strip():
-            raise TemplateError("A template needs a name.")
-        meta["name"] = str(name).strip()[:NAME_MAX]
-    if description is not None:
-        meta["description"] = str(description).strip()[:DESCRIPTION_MAX]
-    meta["updated_at"] = _now()
-    _write_json(_dir(template_id) / "meta.json", meta)
+    with _meta_lock(template_id):
+        meta = get(template_id)
+        if not meta:
+            raise TemplateError("That template does not exist.")
+        if name is not None:
+            if not str(name).strip():
+                raise TemplateError("A template needs a name.")
+            meta["name"] = str(name).strip()[:NAME_MAX]
+        if description is not None:
+            meta["description"] = str(description).strip()[:DESCRIPTION_MAX]
+        if category is not None:
+            meta["category"] = str(category).strip()[:60]
+        meta["updated_at"] = _now()
+        _write_json(_dir(template_id) / "meta.json", meta)
     return meta
 
 
@@ -313,6 +393,220 @@ def load_definition(template_id: str) -> dict:
     if not path.is_file():
         raise TemplateError("That template's definition is missing.")
     return json.loads(path.read_text("utf-8"))
+
+
+# --------------------------------------------------------------------------- #
+# Screenshots — what a reviewer and a gallery visitor look at
+# --------------------------------------------------------------------------- #
+
+def _image_kind(data: bytes) -> tuple[str, str] | None:
+    """``(extension, media type)`` from the file's own first bytes, or None."""
+    for magic, ext, media in _IMAGE_MAGIC:
+        if data.startswith(magic):
+            return ext, media
+    if len(data) > 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "webp", "image/webp"
+    return None
+
+
+def _decoded_size(data: bytes) -> tuple[int, int]:
+    """The picture's size, after decoding it in full: a file that only starts
+    like an image, or one that unpacks to a vast bitmap, is refused here."""
+    import io
+    import warnings
+
+    from PIL import Image
+
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(io.BytesIO(data)) as img:
+                img.verify()
+            with Image.open(io.BytesIO(data)) as img:
+                img.load()
+                return int(img.width), int(img.height)
+    except (Image.DecompressionBombWarning, Image.DecompressionBombError):
+        raise TemplateError("That picture is too large to show — use a normal screenshot.")
+    except Exception:
+        raise TemplateError("That file is not a picture Forge can read — use PNG, JPEG or WebP.")
+
+
+def add_screenshot(template_id: str, data: bytes, *, caption: str = "",
+                   source: str = "upload") -> dict:
+    """Keep one screenshot with the template. Returns its entry in the meta."""
+    if not get(template_id):
+        raise TemplateError("That template does not exist.")
+    if not data:
+        raise TemplateError("That file is empty.")
+    if len(data) > SCREENSHOT_BYTES_MAX:
+        raise TemplateError(f"A screenshot can be at most {SCREENSHOT_BYTES_MAX // (1024 * 1024)} MB.")
+    kind = _image_kind(data)
+    if kind is None:
+        raise TemplateError("Screenshots must be PNG, JPEG or WebP pictures.")
+    width, height = _decoded_size(data)
+    ext, media = kind
+    shot = {"id": uuid.uuid4().hex, "ext": ext, "media_type": media, "width": width,
+            "height": height, "caption": str(caption or "").strip()[:200],
+            "source": source if source in ("upload", "app") else "upload", "added_at": _now()}
+    with _meta_lock(template_id):
+        meta = get(template_id) or {}
+        shots = list(meta.get("screenshots") or [])
+        if len(shots) >= SCREENSHOT_MAX:
+            raise TemplateError(f"A template can show at most {SCREENSHOT_MAX} screenshots — "
+                                "remove one first.")
+        path = _dir(template_id) / SCREENSHOTS_DIR / f"{shot['id']}.{ext}"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_bytes(data)
+        os.replace(tmp, path)
+        meta["screenshots"] = shots + [shot]
+        meta["updated_at"] = _now()
+        _write_json(_dir(template_id) / "meta.json", meta)
+    return shot
+
+
+def remove_screenshot(template_id: str, shot_id: str) -> bool:
+    if not _SHOT_ID.match(str(shot_id or "")) or not get(template_id):
+        return False
+    with _meta_lock(template_id):
+        meta = get(template_id) or {}
+        shots = list(meta.get("screenshots") or [])
+        gone = [s for s in shots if s.get("id") == shot_id]
+        if not gone:
+            return False
+        meta["screenshots"] = [s for s in shots if s.get("id") != shot_id]
+        meta["updated_at"] = _now()
+        _write_json(_dir(template_id) / "meta.json", meta)
+    (_dir(template_id) / SCREENSHOTS_DIR / f"{shot_id}.{gone[0].get('ext')}").unlink(missing_ok=True)
+    return True
+
+
+def order_screenshots(template_id: str, order: list[str]) -> list[dict]:
+    """Put the screenshots in the given order; the first is the gallery cover.
+    Ids not named keep their place after the named ones."""
+    with _meta_lock(template_id):
+        meta = get(template_id)
+        if not meta:
+            raise TemplateError("That template does not exist.")
+        shots = list(meta.get("screenshots") or [])
+        rank = {sid: i for i, sid in enumerate(order or [])}
+        shots.sort(key=lambda s: rank.get(s.get("id"), len(rank)))
+        meta["screenshots"] = shots
+        meta["updated_at"] = _now()
+        _write_json(_dir(template_id) / "meta.json", meta)
+    return shots
+
+
+def screenshot_file(template_id: str, shot_id: str) -> tuple[Path, str] | None:
+    """The file and media type of one screenshot, or None. Named by id from
+    the meta — nothing from the URL is joined into a path."""
+    if not _SHOT_ID.match(str(shot_id or "")):
+        return None
+    meta = get(template_id)
+    shot = next((s for s in (meta or {}).get("screenshots") or [] if s.get("id") == shot_id), None)
+    if not shot or shot.get("ext") not in ("png", "jpg", "webp"):
+        return None
+    path = _dir(template_id) / SCREENSHOTS_DIR / f"{shot_id}.{shot['ext']}"
+    return (path, str(shot.get("media_type") or "image/png")) if path.is_file() else None
+
+
+def app_screens(output_dir: str | Path) -> list[tuple[str, Path]]:
+    """The build's own picture of each page — ``(page name, file)``, the
+    newest look of every page that has one, in the order of the app's pages."""
+    output_dir = Path(output_dir)
+    looks = output_dir / ".forge" / "look"
+    if not looks.is_dir():
+        return []
+    names: dict[str, str] = {}
+    order: list[str] = []
+    current = output_dir / ".forge" / "blueprint" / "current.json"
+    if current.is_file():
+        try:
+            doc = json.loads(current.read_text("utf-8"))
+            for p in _live(doc.get("pages")):
+                pid = str(p.get("id") or "")
+                names[pid] = str(p.get("name") or p.get("title") or p.get("route") or pid)
+                order.append(pid)
+        except (OSError, ValueError):
+            pass
+    out = []
+    for pid in order or sorted(d.name for d in looks.iterdir() if d.is_dir()):
+        page_dir = looks / pid
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", pid) or not page_dir.is_dir():
+            continue
+        attempts = sorted((d for d in page_dir.iterdir() if d.is_dir() and d.name.startswith("look-")
+                           and d.name[5:].isdigit()), key=lambda d: int(d.name[5:]))
+        for attempt in reversed(attempts):
+            shot = attempt / "desktop.png"
+            if shot.is_file():
+                out.append((names.get(pid, pid), shot))
+                break
+    return out
+
+
+def add_app_screens(template_id: str, output_dir: str | Path) -> list[dict]:
+    """Add the build's own page pictures, up to the limit. Pictures already
+    added from the app (same caption) are not added twice."""
+    meta = get(template_id)
+    if not meta:
+        raise TemplateError("That template does not exist.")
+    have = {(s.get("source"), s.get("caption")) for s in meta.get("screenshots") or []}
+    added = []
+    for name, path in app_screens(output_dir):
+        if len(meta.get("screenshots") or []) + len(added) >= SCREENSHOT_MAX:
+            break
+        if ("app", name[:200]) in have:
+            continue
+        try:
+            added.append(add_screenshot(template_id, path.read_bytes(), caption=name, source="app"))
+        except TemplateError as exc:
+            logger.warning("[templates] skipped the picture of %s: %s", name, exc)
+    return added
+
+
+# --------------------------------------------------------------------------- #
+# What the Gallery shows of a definition
+# --------------------------------------------------------------------------- #
+
+def preview(doc: dict) -> dict:
+    """The definition as a visitor reads it: screens, records and their
+    fields, processes and their steps, roles and rules — names and plain
+    words, no ids to resolve on the other side."""
+    roles = _live(doc.get("roles"))
+    role_name = {str(r.get("id")): str(r.get("name") or "") for r in roles}
+    entities = _live((doc.get("data") or {}).get("entities"))
+    entity_name = {str(e.get("id")): str(e.get("name") or "") for e in entities}
+    return {
+        "screens": [{
+            "name": str(p.get("name") or p.get("title") or p.get("route") or ""),
+            "route": str(p.get("route") or ""),
+            "purpose": str(p.get("purpose") or "")[:400],
+            "who": [role_name[u] for u in (p.get("users") or []) if u in role_name],
+        } for p in _live(doc.get("pages"))[:60]],
+        "records": [{
+            "name": str(e.get("name") or ""),
+            "description": str(e.get("description") or "")[:300],
+            "fields": [{
+                "name": str(f.get("name") or ""),
+                "type": str(f.get("type") or ""),
+                "required": bool(f.get("required")),
+                "description": str(f.get("description") or "")[:200],
+            } for f in (e.get("fields") or []) if isinstance(f, dict)][:60],
+        } for e in entities[:40]],
+        "workflows": [{
+            "name": str(w.get("name") or ""),
+            "purpose": str(w.get("purpose") or w.get("description") or "")[:400],
+            "trigger": str(((w.get("trigger") or {}) if isinstance(w.get("trigger"), dict) else {})
+                           .get("detail") or ""),
+            "steps": [str(st.get("name") or st.get("key") or "") for st in (w.get("steps") or [])
+                      if isinstance(st, dict)][:40],
+        } for w in _live(doc.get("workflows"))[:40]],
+        "roles": [{"name": str(r.get("name") or ""), "description": str(r.get("description") or "")[:300]}
+                  for r in roles[:20]],
+        "rules": [{"name": str(r.get("name") or ""), "statement": str(r.get("statement") or "")[:400],
+                   "record": entity_name.get(str(r.get("entity") or ""), "")}
+                  for r in _live(doc.get("businessRules"))[:60]],
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -520,6 +814,7 @@ def _sync_engine():
     global _SYNC_ENGINE
     if _SYNC_ENGINE is None:
         from sqlalchemy import create_engine
+
         from config import DATABASE_URL_SYNC
         with _SYNC_ENGINE_LOCK:
             if _SYNC_ENGINE is None:
@@ -543,7 +838,7 @@ def project_facts(project_id: str) -> dict | None:
                 "SELECT p.org_id, p.owner_id, p.name, u.name AS owner_name "
                 "FROM projects p LEFT JOIN platform_users u ON u.id = p.owner_id "
                 "WHERE p.id = :pid"), {"pid": str(project_id)}).first()
-    except Exception:  # noqa: BLE001 — a lookup that fails says so to the caller
+    except Exception:
         logger.exception("[templates] could not read project %s", project_id)
         return None
     if not row:
@@ -570,9 +865,41 @@ def mark_built(output_dir: str | Path) -> None:
 
 
 __all__ = [
-    "BUILT", "MODE_ADAPT", "MODE_EXACT", "PENDING", "PER_PROJECT_SECTIONS", "STAGE_DIR",
-    "TemplateError", "counted", "delete", "exact_build_pending", "project_facts", "get", "is_defined",
-    "is_modelled", "list_for_org",
-    "load_definition", "mark_built", "pending", "prepare_adapt", "reference_document", "save",
-    "snapshot", "source_of", "stage", "summary", "templates_root", "update", "use_exact",
+    "BUILT",
+    "MODE_ADAPT",
+    "MODE_EXACT",
+    "PENDING",
+    "PER_PROJECT_SECTIONS",
+    "STAGE_DIR",
+    "TemplateError",
+    "add_app_screens",
+    "add_screenshot",
+    "app_screens",
+    "counted",
+    "delete",
+    "exact_build_pending",
+    "get",
+    "is_defined",
+    "is_modelled",
+    "lineage_key",
+    "lineage_of",
+    "list_for_org",
+    "load_definition",
+    "mark_built",
+    "order_screenshots",
+    "pending",
+    "prepare_adapt",
+    "preview",
+    "project_facts",
+    "reference_document",
+    "remove_screenshot",
+    "save",
+    "screenshot_file",
+    "snapshot",
+    "source_of",
+    "stage",
+    "summary",
+    "templates_root",
+    "update",
+    "use_exact",
 ]

@@ -633,9 +633,11 @@ VERB_HELP: dict[str, str] = {
         "Keep this application as a TEMPLATE the organisation can start new apps "
         "from: \"save this as a template\", \"make a template of this app\", "
         "\"I want to reuse this app later\". Saves its whole definition — screens, "
-        "records, processes, rules, roles, look — to Templates, where anyone in the "
-        "organisation can use it for the same app again or one like it. Takes an "
-        "optional name in `new_value`; changes nothing in this application."
+        "records, processes, rules, roles, look — to Templates as a private template, "
+        "where anyone in the organisation can use it for the same app again or one like "
+        "it; publishing it to everyone in the Templates Gallery is a separate review by "
+        "Tentoro that the person starts from Templates. Takes an optional name in "
+        "`new_value`; changes nothing in this application."
     ),
     "back_up": (
         "A copy of the whole application the owner keeps: \"back it up "
