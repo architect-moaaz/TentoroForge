@@ -83,8 +83,26 @@ def _default_provider(prompt: str | list, reasoning: Callable[[str], None] | Non
     # ROOM TO THINK AND THEN ANSWER. The cap covers thinking and the reply
     # together; at 4000 a turn deep in its reads thought until the cap and
     # answered nothing (TCommerce, 2026-10-06). Only what is used is billed.
-    return complete(content=content, max_tokens=12000,
+    #
+    # THE STEP IS CHOSEN BY SMITH'S MODEL. Every step of a turn — which file to
+    # read, what the fault is, which verb — was decided by the one-shot model
+    # (a Sonnet, with a 4k thinking budget) while the build's specialists ran
+    # on the strongest models: the brain of the whole dev team was the
+    # cheapest seat in it. The person's own comparison ("why is Smith not like
+    # Claude", 2026-10-17) is answered first here. `FORGE_SMITH_LOOP_MODEL`
+    # overrides; the default is the Smith model the rest of the platform names.
+    return complete(content=content, max_tokens=12000, model=loop_model(),
                     reasoning_callback=reasoning)
+
+
+def loop_model() -> str:
+    """The model that decides each step of a Smith turn."""
+    import os
+    named = os.environ.get("FORGE_SMITH_LOOP_MODEL", "").strip()
+    if named:
+        return named
+    from services.blueprint.executors import SMITH_MODEL
+    return SMITH_MODEL
 
 
 def _render_history(history: list | None) -> str:

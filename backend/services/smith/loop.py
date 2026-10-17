@@ -57,7 +57,12 @@ logger = logging.getLogger(__name__)
 #: either.
 #: 20 since direct edits (2026-10-07): a fix is reproduce, read, edit, try —
 #: four steps, not one agent round trip — and twelve ran out while proving it.
-MAX_STEPS = 20
+#: Forty, not twenty: with a page open at half a minute instead of four and
+#: the step chosen by Smith's own model, a turn gets through its work in
+#: the same wall-clock as before and no longer stops with the change made
+#: and the try left (FitTrackr, 2026-10-16: "I stopped after 20 steps" with
+#: the receipt page rewritten at step 19).
+MAX_STEPS = 40
 
 #: How many observations the model is shown. The whole turn, in practice —
 #: this is a ceiling against a cap that someone later raises.

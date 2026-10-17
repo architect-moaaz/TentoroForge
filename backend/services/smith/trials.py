@@ -62,13 +62,16 @@ TRIALS: tuple[tuple[str, str, dict[str, str]], ...] = (
      "the data.",
      {"method": "string", "path": "string", "body": "object", "as": "string"}),
     ("open_page",
-     "Open a screen in a browser signed in as `as` and press its controls. "
-     "Shows where it ended up, the text on it, errors in the browser, and "
-     "what each button did. A route with `[id]` opens the first record. "
-     "`sign_in: true` instead signs in through the sign-in page's own form, "
-     "as the administrator, and shows where that lands — the only way to see "
-     "where a sign-in takes someone. On a copy of the data.",
-     {"route": "string", "as": "string", "sign_in": "boolean"}),
+     "Open a screen in a browser signed in as `as`. Shows where it ended up, "
+     "the text on it and errors in the browser — in about half a minute. "
+     "`press: \"all\"` also presses every control from a fresh load and says "
+     "what each did; that takes minutes on a screen with many buttons, so ask "
+     "for it when a control is the question, not to look at a page. A route "
+     "with `[id]` opens the first record. `sign_in: true` instead signs in "
+     "through the sign-in page's own form, as the administrator, and shows "
+     "where that lands — the only way to see where a sign-in takes someone. "
+     "On a copy of the data.",
+     {"route": "string", "as": "string", "press": "string", "sign_in": "boolean"}),
 )
 
 TRIALS = TRIALS + (
@@ -612,7 +615,12 @@ def _server_back(app: Any, timeout: float | None = None) -> bool:
     return False
 
 
-def open_page(bench: Bench, doc: dict, route: str, as_: str, sign_in: bool = False) -> str:
+def open_page(bench: Bench, doc: dict, route: str, as_: str, sign_in: bool = False,
+              press: bool = False) -> str:
+    """The page as a browser sees it. `press` presses every control from a
+    fresh load as well — what the after-change check does; for a look at a
+    page it cost Mark 8 four minutes an open (6 opens, 24 of 32 minutes,
+    2026-10-16), so it is asked for, not assumed."""
     from services.blueprint.page_review import BROKEN_OUTCOMES, ReviewUnavailable, run_shots
 
     route = (route or "").strip()
@@ -643,7 +651,7 @@ def open_page(bench: Bench, doc: dict, route: str, as_: str, sign_in: bool = Fal
     printed: list[str] = []
     notes: list[str] = []
     try:
-        shot = run_shots(app, [entry], shots_dir, states=False)[0]
+        shot = run_shots(app, [entry], shots_dir, probe=press, states=False)[0]
         # A RESTARTING SERVER IS NOT A BROKEN PAGE. `next dev` restarts itself
         # near its heap limit; the request in flight dies with a connection
         # error and the page "says it is loading". Three pages were rewritten
@@ -656,7 +664,7 @@ def open_page(bench: Bench, doc: dict, route: str, as_: str, sign_in: bool = Fal
                 return scrub(f"{route} as {who}: {SERVER_RESTARTED}; it had not answered again after "
                              f"{int(RESTART_WAIT_S)}s. Try it again in a moment — do not change the page for this.")
             notes.append(SERVER_RESTARTED + "; opened again once it was back")
-            shot = run_shots(app, [entry], shots_dir, states=False)[0]
+            shot = run_shots(app, [entry], shots_dir, probe=press, states=False)[0]
             before = bench.restarts
             printed += bench.server_said()
             if _server_gone(shot, bench.restarts > before):
@@ -673,6 +681,8 @@ def open_page(bench: Bench, doc: dict, route: str, as_: str, sign_in: bool = Fal
         out.append(f"the page says it is: {shot['state']}")
     out += [f"browser error: {e}" for e in shot.get("errors") or []]
     controls = shot.get("controls") or []
+    if not press:
+        out.append("controls not pressed (say `press: \"all\"` to press each from a fresh load)")
     if controls:
         out.append("controls, each pressed from a fresh load:")
         for c in controls:
@@ -791,7 +801,8 @@ def run(name: str, args: dict, *, bench: Bench, doc: dict) -> str:
             return try_upload(bench, doc, str(args.get("kind") or "image"), as_)
         if name == "open_page":
             sign_in = str(args.get("sign_in") or "").strip().lower() in ("true", "1", "yes")
-            return open_page(bench, doc, str(args.get("route") or ""), as_, sign_in=sign_in)
+            press = str(args.get("press") or "").strip().lower() in ("all", "true", "1", "yes", "every")
+            return open_page(bench, doc, str(args.get("route") or ""), as_, sign_in=sign_in, press=press)
     except TrialUnavailable as exc:
         return str(exc)
     except ValueError as exc:
