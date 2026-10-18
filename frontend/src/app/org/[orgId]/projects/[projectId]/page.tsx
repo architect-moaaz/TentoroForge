@@ -61,6 +61,7 @@ import { CostTrackingPanel } from "@/components/monitoring/CostTrackingPanel";
 import { DRDEditorPanel } from "@/components/decision/DRDEditorPanel";
 import { BusinessRulesPanel } from "@/components/business-rules/BusinessRulesPanel";
 import { ExportDialog } from "@/components/projects/ExportDialog";
+import { MORE_TABS, PRIMARY_TABS, TabRow, type Tab } from "@/components/projects/ProjectTabs";
 import { PublishButton } from "@/components/deploy/PublishButton";
 import { SaveAsTemplateButton } from "@/components/templates/SaveAsTemplateButton";
 import { DeleteProjectDialog } from "@/components/projects/DeleteProjectDialog";
@@ -72,7 +73,6 @@ import { VirtualOffice } from "@/components/virtual-office";
 import type { Project, ChatMessage } from "@/types/project";
 import type { CommandItem } from "@/types/portal";
 
-type Tab = "chat" | "preview" | "code" | "data" | "rules" | "business-rules" | "decisions" | "workflows" | "editor" | "schema-editor" | "design" | "design-editor" | "ir-editor" | "navigation" | "app-flow" | "agents" | "ai" | "monitoring" | "versions" | "office" | "app-settings";
 
 // Tooltip component — positioned to the right of the icon
 function Tooltip({ children, label, shortcut }: { children: React.ReactNode; label: string; shortcut?: string }) {
@@ -89,7 +89,6 @@ function Tooltip({ children, label, shortcut }: { children: React.ReactNode; lab
   );
 }
 
-type TabSpec = { id: Tab; label: string; icon: React.ComponentType<{ className?: string }>; shortcut?: string; feature?: FeatureKey };
 
 function HeaderIcon({ label, onClick, active, disabled, locked, children }: {
   label: string; onClick: () => void; active?: boolean; disabled?: boolean; locked?: string; children: React.ReactNode;
@@ -145,60 +144,6 @@ function MoreMenu({ items }: { items: Array<{ label: string; onClick: () => void
   );
 }
 
-function TabRow({ tabs, more, active, onPick, allowed }: {
-  tabs: TabSpec[]; more: TabSpec[]; active: Tab; onPick: (t: Tab) => void; allowed: (f?: FeatureKey) => boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const activeMore = more.find((t) => t.id === active);
-  const tab = (t: TabSpec, inMenu = false) => {
-    const locked = !allowed(t.feature);
-    const Icon = t.icon;
-    const current = active === t.id;
-    return (
-      <button
-        key={t.id}
-        onClick={() => { setOpen(false); onPick(t.id); }}
-        aria-current={current ? "page" : undefined}
-        data-locked={locked ? t.feature : undefined}
-        className={inMenu
-          ? `flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] hover:bg-slate-50 dark:hover:bg-slate-800 ${current ? "text-brand-900 font-medium dark:text-white" : "text-slate-700 dark:text-slate-200"}`
-          : `relative flex h-11 items-center gap-1.5 px-1 text-[13px] transition-colors ${
-              current ? "font-medium text-brand-900 dark:text-white"
-                      : "text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"}`}
-      >
-        <Icon className="h-4 w-4" />
-        {t.label}
-        {locked && <LockBadge />}
-        {current && !inMenu && <span className="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-brand-900 dark:bg-white" />}
-      </button>
-    );
-  };
-  return (
-    <div className="flex shrink-0 items-center gap-5 border-b border-slate-200/80 bg-white px-5 dark:border-slate-800 dark:bg-slate-900">
-      {tabs.map((t) => tab(t))}
-      <div className="relative">
-        <button
-          onClick={() => setOpen((o) => !o)}
-          aria-expanded={open}
-          className={`relative flex h-11 items-center gap-1 px-1 text-[13px] ${
-            activeMore ? "font-medium text-brand-900 dark:text-white" : "text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"}`}
-        >
-          {activeMore ? activeMore.label : "More"}
-          <ChevronDown className="h-3.5 w-3.5" />
-          {activeMore && <span className="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-brand-900 dark:bg-white" />}
-        </button>
-        {open && (
-          <>
-            <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-            <div className="absolute left-0 z-20 mt-1 w-52 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-900">
-              {more.map((t) => tab(t, true))}
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
 
 function ProjectWorkspace({
   orgId,
@@ -278,7 +223,7 @@ function ProjectWorkspace({
       key: "1",
       meta: true,
       action: () => setActiveTab("chat"),
-      description: "Switch to Chat",
+      description: "Switch to Smith",
     },
     {
       key: "2",
@@ -350,7 +295,7 @@ function ProjectWorkspace({
 
   // Visible tabs — streamlined from 16 to 9, grouped logically
   const tabs = [
-    { id: "chat" as Tab, label: "Chat", icon: MessageSquare },
+    { id: "chat" as Tab, label: "Smith", icon: MessageSquare },
     { id: "preview" as Tab, label: "Preview", icon: Eye },
     { id: "code" as Tab, label: "Code", icon: Code },
     { id: "data" as Tab, label: "Data", icon: Database },
@@ -373,24 +318,6 @@ function ProjectWorkspace({
 
   // Sections for the visual sidebar — only show relevant tabs
 
-  // THE FIVE ACROSS THE TOP, AND THE REST BEHIND "MORE".
-  const primaryTabs: TabSpec[] = [
-    { id: "chat", label: "Chat", icon: MessageSquare, shortcut: "⌘1" },
-    { id: "code", label: "Files", icon: Code, shortcut: "⌘3", feature: "code_view" },
-    { id: "versions", label: "Versions", icon: GitBranch },
-    { id: "preview", label: "Preview", icon: Eye, shortcut: "⌘2" },
-    { id: "app-settings", label: "Settings", icon: Settings },
-  ];
-  const moreTabs: TabSpec[] = [
-    { id: "data", label: "Data Model", icon: Database },
-    { id: "rules", label: "Rules", icon: Shield },
-    { id: "business-rules", label: "Business Rules", icon: Scale },
-    { id: "workflows", label: "Workflows", icon: Workflow },
-    { id: "editor", label: "Editor", icon: Layout },
-    // ONE MAP OF THE APP: Pages & Nav and App Flow each drew half of it.
-    { id: "app-flow", label: "App Map", icon: Route },
-    { id: "agents", label: "Agents", icon: Bot, feature: "agents" },
-  ];
   // Which tab belongs to which platform feature; a tab the organisation lacks
   // is shown locked, with the note saying who can open it.
   const feat = useOrgFeatures(orgId);
@@ -590,13 +517,13 @@ function ProjectWorkspace({
 
       {/* Main content area */}
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden pt-[70px] bg-background">
-        {/* THE TABS, ACROSS THE TOP. Five people use every day — Chat, Files,
-            Versions, Preview, Settings — and the rest behind "More", still a
-            click away and still reachable from ⌘K. A rail of nine icons down
+        {/* THE TABS, ACROSS THE TOP. Smith, Data Model, Editor, Workflows and
+            Agents; Files, Versions, Preview, Settings and the rest behind
+            "More", still a click away and still reachable from ⌘K. A rail of nine icons down
             the left needed a tooltip to read. */}
         <TabRow
-          tabs={primaryTabs}
-          more={moreTabs}
+          tabs={PRIMARY_TABS}
+          more={MORE_TABS}
           active={activeTab}
           onPick={setActiveTab}
           allowed={(f) => !f || feat.allowed(f)}
