@@ -27,7 +27,8 @@ describe("project tabs", () => {
   it("shows Smith and the four model views across the top, and the tools behind More", () => {
     render();
     expect(labels()).toEqual(["Smith", "Data Model", "Editor", "Workflows", "Agents", "More"]);
-    expect(MORE_TABS.slice(0, 4).map((t) => t.label)).toEqual(["Files", "Versions", "Preview", "Settings"]);
+    expect(MORE_TABS.map((t) => t.label)).toEqual(
+      ["Preview", "Versions", "App Map", "Business Rules", "Access & Rules", "Files", "Settings"]);
     expect(host.textContent).not.toContain("Chat");
   });
 
@@ -35,9 +36,23 @@ describe("project tabs", () => {
     render();
     const more = [...host.querySelectorAll("button")].find((b) => b.textContent?.trim() === "More")!;
     act(() => { more.click(); });
-    const preview = [...host.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Preview")!;
+    // A More item reads its label, its hint and its shortcut.
+    const preview = [...host.querySelectorAll("button")].find((b) => b.textContent?.trim().startsWith("PreviewUse the app"))!;
     act(() => { preview.click(); });
     expect(picked).toEqual(["preview"]);
+  });
+
+  it("groups More under headings, each item saying what it is for", () => {
+    render();
+    const more = [...host.querySelectorAll("button")].find((b) => b.textContent?.trim() === "More")!;
+    act(() => { more.click(); });
+    const groups = [...host.querySelectorAll("[data-more-group]")].map((g) => g.getAttribute("data-more-group"));
+    expect(groups).toEqual(["Try and ship", "How it works", "Project"]);
+    const howItWorks = host.querySelector('[data-more-group="How it works"]')!.textContent ?? "";
+    expect(howItWorks).toContain("App Map");
+    expect(howItWorks).toContain("Every screen and the paths through them");
+    expect(howItWorks).toContain("Who may see and do what");
+    expect(MORE_TABS.every((t) => t.group && t.hint)).toBe(true);
   });
 
   it("names the open tab from More in place of the word More", () => {
