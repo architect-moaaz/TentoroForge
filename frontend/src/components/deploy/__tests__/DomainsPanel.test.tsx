@@ -252,5 +252,21 @@ describe("DomainsPanel", () => {
     expect(intro()).toContain("(its first address, shop.vercel.app, opens it too)");
     apiGet.mockImplementation(async () => waiting);
   });
+
+  it("says one minute, not one minutes", async () => {
+    const at = (sec: number) => new Date(Date.now() - sec * 1000).toISOString();
+    apiGet.mockImplementation(async () => ({ ...waiting, domains: [
+      { ...waiting.domains[0], checkedAt: at(60) },
+      { ...waiting.domains[0], name: "b.acme.com", checkedAt: at(3600) },
+      { ...waiting.domains[0], name: "c.acme.com", checkedAt: at(7200) },
+    ] }));
+    await render();
+    const text = host.textContent ?? "";
+    expect(text).toContain("checked 1 minute ago");
+    expect(text).toContain("checked 1 hour ago");
+    expect(text).toContain("checked 2 hours ago");
+    expect(text).not.toMatch(/\b1 (second|minute|hour|day)s ago/);
+    apiGet.mockImplementation(async () => waiting);
+  });
 });
 

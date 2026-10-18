@@ -134,10 +134,11 @@ const KIND_LABEL: Record<DomainView["kind"], string> = {
 function ago(iso?: string | null): string {
   if (!iso) return "";
   const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
-  if (s < 60) return `${s} seconds ago`;
-  if (s < 3600) return `${Math.round(s / 60)} minutes ago`;
-  if (s < 86400) return `${Math.round(s / 3600)} hours ago`;
-  return `${Math.round(s / 86400)} days ago`;
+  const said = (n: number, unit: string) => `${n} ${unit}${n === 1 ? "" : "s"} ago`;
+  if (s < 60) return said(s, "second");
+  if (s < 3600) return said(Math.round(s / 60), "minute");
+  if (s < 86400) return said(Math.round(s / 3600), "hour");
+  return said(Math.round(s / 86400), "day");
 }
 
 function StatusPill({ d }: { d: DomainView }) {
