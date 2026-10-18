@@ -64,7 +64,13 @@ class FakeVercel:
                 "recommendedIPv4": [{"rank": 1, "value": ["76.76.21.21"]}]}
 
     async def remove_project_domain(self, pid, name):
+        if any(d.get("redirect") == name for d in self.domains.values()):
+            raise RuntimeError(f"Vercel remove_project_domain {name!r} failed: status=409 body={{'error': {{'code': 'domain_is_redirect', "
+                               f"'message': 'Cannot remove \"{name}\" until existing redirects to \"{name}\" are removed.'}}}}")
         self.domains.pop(name, None)
+
+    async def list_project_domains(self, pid):
+        return [dict(d) for d in self.domains.values()]
 
     async def redirect_project_domain(self, pid, name, to):
         self.redirects[name] = to
@@ -554,3 +560,43 @@ def test_only_one_worker_watches_the_addresses(tmp_path):
     again = domain_watch._hold_watch(lock)
     assert again is not None, "and takes over when the first is gone"
     again.close()
+
+
+def test_a_rename_points_redirects_at_the_new_name_and_a_retry_finds_its_own(tmp_path, monkeypatch):
+    """Mark 8 (2026-10-18): Vercel would not detach mark-8 because another of
+    the app's addresses redirected to it; the rename died with a 500 after
+    attaching mark8, and the retry was told mark8 was "taken by another app"."""
+    monkeypatch.setenv("FORGE_APPS_DOMAIN", "apps.tentoro.ai")
+    root = _project(tmp_path)
+    fake = FakeVercel()
+    fake.configured.update({"aquatrack.apps.tentoro.ai", "aqua.apps.tentoro.ai"})
+    run(dm.attach_after_publish(str(root / "app"), fake, "aqua"))
+    svc = _service(root, fake)
+    fake.domains["aqua.vercel.app"]["redirect"] = "aquatrack.apps.tentoro.ai"
+    # An earlier attempt attached the new name and stopped.
+    run(fake.add_project_domain("prj_1", "aqua.apps.tentoro.ai"))
+    view = run(svc.rename_tentoro("aqua"))
+    assert view["name"] == "aqua.apps.tentoro.ai" and view["main"] is True
+    assert "aquatrack.apps.tentoro.ai" not in fake.domains
+    assert fake.domains["aqua.vercel.app"]["redirect"] == "aqua.apps.tentoro.ai"
+
+
+def test_a_rename_that_cannot_let_the_old_name_go_changes_nothing(tmp_path, monkeypatch):
+    monkeypatch.setenv("FORGE_APPS_DOMAIN", "apps.tentoro.ai")
+    root = _project(tmp_path)
+    fake = FakeVercel()
+    fake.configured.update({"aquatrack.apps.tentoro.ai", "aqua.apps.tentoro.ai"})
+    run(dm.attach_after_publish(str(root / "app"), fake, "aqua"))
+    svc = _service(root, fake)
+    real_remove = fake.remove_project_domain
+
+    async def stuck(pid, name):
+        if name == "aquatrack.apps.tentoro.ai":
+            raise RuntimeError("Vercel remove_project_domain failed: status=500 body={'error': {'message': 'try again later'}}")
+        await real_remove(pid, name)
+    fake.remove_project_domain = stuck
+    with pytest.raises(DomainRefused) as e:
+        run(svc.rename_tentoro("aqua"))
+    assert "could not be let go, so nothing was renamed: try again later" in str(e.value)
+    assert "aqua.apps.tentoro.ai" not in fake.domains, "the name this attempt attached is detached again"
+    assert [x["name"] for x in svc.entries()] == ["aquatrack.apps.tentoro.ai"]
