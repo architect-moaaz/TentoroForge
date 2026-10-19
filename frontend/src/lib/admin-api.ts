@@ -53,6 +53,10 @@ export const adminApi = {
   people: (q: string, page = 1) => api.get<Paged<AdminPerson>>(`/api/admin/people${qs({ q, page })}`),
   disable: (id: string, reason: string) => api.post<AdminPerson>(`/api/admin/people/${id}/disable`, { reason }),
   enable: (id: string) => api.post<AdminPerson>(`/api/admin/people/${id}/enable`),
+  /** Remove a login for good: its apps pass to another owner or admin of their organisation. */
+  removeLogin: (id: string, confirm_email: string) =>
+    api.post<{ deleted: boolean; email: string; apps_handed_on: number; organisations_left: number }>(
+      `/api/admin/people/${id}/delete`, { confirm_email }),
   grant: (id: string) => api.post<AdminPerson>(`/api/admin/people/${id}/super-admin`),
   revoke: (id: string) => api.delete<AdminPerson>(`/api/admin/people/${id}/super-admin`),
   impersonate: (id: string) => api.post<ImpersonationGrant>(`/api/admin/people/${id}/impersonate`),

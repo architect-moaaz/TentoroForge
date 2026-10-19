@@ -12,6 +12,7 @@ import { adminApi, adminKeys } from "@/lib/admin-api";
 import type { AdminPerson } from "@/lib/admin-types";
 import { PeopleTable } from "@/components/admin/PeopleTable";
 import { ReasonDialog } from "@/components/admin/ReasonDialog";
+import { TypedConfirmDialog } from "@/components/admin/TypedConfirmDialog";
 import { useAuthStore } from "@/stores/auth";
 
 function AdminPeoplePageInner() {
@@ -23,6 +24,7 @@ function AdminPeoplePageInner() {
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
   const [disabling, setDisabling] = useState<AdminPerson | null>(null);
+  const [removing, setRemoving] = useState<AdminPerson | null>(null);
   const people = useQuery({ queryKey: adminKeys.people(q, page), queryFn: () => adminApi.people(q, page) });
 
   useEffect(() => {
@@ -34,6 +36,14 @@ function AdminPeoplePageInner() {
   const disable = useMutation({
     mutationFn: ({ id, reason }: { id: string; reason: string }) => adminApi.disable(id, reason),
     onSuccess: () => { toast.success("Login disabled"); refresh(); setDisabling(null); }, onError: (e) => fail(e, "Not disabled"),
+  });
+  const remove = useMutation({
+    mutationFn: ({ id, email }: { id: string; email: string }) => adminApi.removeLogin(id, email),
+    onSuccess: (r) => {
+      toast.success(`${r.email} removed` + (r.apps_handed_on ? ` — ${r.apps_handed_on} app${r.apps_handed_on === 1 ? "" : "s"} passed to another owner` : ""));
+      refresh(); setRemoving(null);
+    },
+    onError: (e) => fail(e, "Not removed"),
   });
   const enable = useMutation({ mutationFn: adminApi.enable, onSuccess: () => { toast.success("Login enabled"); refresh(); }, onError: (e) => fail(e, "Not enabled") });
   const grant = useMutation({ mutationFn: adminApi.grant, onSuccess: () => { toast.success("Super admin granted"); refresh(); }, onError: (e) => fail(e, "Not granted") });
@@ -67,7 +77,8 @@ function AdminPeoplePageInner() {
                      onGrant={(p) => { if (window.confirm(`Make ${p.email} a super admin of the whole platform?`)) grant.mutate(p.id); }}
                      onRevoke={(p) => { if (window.confirm(`Revoke ${p.email}'s super admin role?`)) revoke.mutate(p.id); }}
                      onImpersonate={onImpersonate}
-                     onWatchLive={(p) => router.push(`/admin/live?user=${p.id}`)} />
+                     onWatchLive={(p) => router.push(`/admin/live?user=${p.id}`)}
+                     onRemove={setRemoving} />
       </div>
       {pages > 1 && (
         <div className="flex items-center justify-end gap-2 text-xs">
@@ -76,6 +87,11 @@ function AdminPeoplePageInner() {
           <Button size="sm" variant="outline" disabled={page >= pages} onClick={() => setPage(page + 1)}>Next</Button>
         </div>
       )}
+      <TypedConfirmDialog open={!!removing} onOpenChange={(v) => !v && setRemoving(null)}
+                          title={`Remove ${removing?.email}`}
+                          prompt="The login is removed for good and their session ends at once. Apps they made stay with their organisation and pass to another owner or admin. Someone who is the only owner of an organisation cannot be removed until its ownership moves or it is purged."
+                          expected={removing?.email ?? ""} confirmText="Remove login" pending={remove.isPending}
+                          onConfirm={() => removing && remove.mutate({ id: removing.id, email: removing.email })} />
       <ReasonDialog open={!!disabling} onOpenChange={(v) => !v && setDisabling(null)} title={`Disable ${disabling?.email}`}
                     description="Their next request is refused, signing in is refused, and so is a refresh; enabling restores everything."
                     confirmText="Disable login" danger pending={disable.isPending}
