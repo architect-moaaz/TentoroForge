@@ -50,6 +50,10 @@ PAGE_PARALLEL = 3
 STEPS = 12
 #: How long to wait on a person's own Smith turn before fixing on the same tree.
 TURN_WAIT_S = 600
+#: Turns a cause may be given: one, and one more once every other cause has
+#: had its first. The same three reds were picked in every turn of FitTrackr's
+#: checks and all three turns turned nothing green (qpqhdugb, 2026-10-19).
+TRIES_PER_CAUSE = 2
 
 
 def _say(emit: Callable | None) -> Callable[[str], None]:
@@ -86,6 +90,8 @@ def run_checks_to_green(svc: Any, output_dir: str, app_root: str, report: Any, *
             emit("scorecard", {"summary": sc.summary(svc.doc), "phase": phase})
 
     turns, yields, stopped = 0, [], None
+    tries: dict[str, int] = {}
+    took: list[float] = []
     ledger_ctx = _ledger(output_dir if record else None, 1, node="checks", phase="checking")
     with ledger_ctx as ledger:
         sc.set_status(svc, "checking")
@@ -106,9 +112,22 @@ def run_checks_to_green(svc: Any, output_dir: str, app_root: str, report: Any, *
             if cancelled():
                 stopped = "stopped by the person"
                 break
+            # A TURN THE CLOCK CANNOT FIT IS NOT STARTED. The cap was only read
+            # between turns, so a turn begun at minute 44 ran to minute 60 (Mark
+            # 8, 2026-10-16). The longest turn so far is the estimate; a turn in
+            # progress is never cut off, which could leave a page half-changed.
+            if took and (time.time() - t0) + max(took) > FIX_MINUTES * 60:
+                stopped = "time"
+                break
             _wait_for_the_person(output_dir, cancelled)
             groups = by_cause(reds)
-            batch = _next_batch(groups)
+            batch = _next_batch(groups, tries)
+            if not batch:
+                stopped = "tried"
+                break
+            for g in batch:
+                tries[str(g["cause"])] = tries.get(str(g["cause"]), 0) + 1
+            started = time.time()
             turns += 1
             before = {(r["criterion"], r["id"]): r for r in reds}
             ledger.node_subject("checks", f"turn {turns}", turns, FIX_TURNS, True)
@@ -131,6 +150,7 @@ def run_checks_to_green(svc: Any, output_dir: str, app_root: str, report: Any, *
             turned = [(key[0], before[key]) for key in sorted(set(before) - after)]
             yields.append(len(turned))
             dry = 0 if turned else dry + 1
+            took.append(time.time() - started)
             for criterion, it in turned:
                 say(sc.green_line(criterion, it))
             scorecard_event("fixing")
@@ -431,11 +451,20 @@ def by_cause(reds: list[dict]) -> list[dict]:
     return sorted(groups.values(), key=lambda g: (order[g["kind"]], g["cause"]))
 
 
-def _next_batch(groups: list[dict]) -> list[dict]:
-    pages = [g for g in groups if g["kind"] == "page"]
-    if pages:
-        return pages[:PAGE_PARALLEL]
-    return groups[:1]
+def _next_batch(groups: list[dict], tries: dict[str, int] | None = None) -> list[dict]:
+    """The next causes to fix: pages first (three at once), else one other.
+    A cause already given a turn waits until every cause has had its first,
+    then gets one more; a cause given `TRIES_PER_CAUSE` turns is not picked
+    again — it is said in the closing as still not right. Empty when every
+    cause has had its tries."""
+    tries = tries or {}
+    for round_ in range(TRIES_PER_CAUSE):
+        fresh = [g for g in groups if tries.get(str(g["cause"]), 0) == round_]
+        if not fresh:
+            continue
+        pages = [g for g in fresh if g["kind"] == "page"]
+        return pages[:PAGE_PARALLEL] if pages else fresh[:1]
+    return []
 
 
 def ask_for(group: dict, doc: dict) -> str:
