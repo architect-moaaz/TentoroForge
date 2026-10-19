@@ -3010,6 +3010,10 @@ export const Runtime = z.object({
             green: z.number().default(0),
             red: z.array(z.record(z.string(), z.unknown())).default([]),
             untried: z.array(z.record(z.string(), z.unknown())).default([]),
+            /** What no check can judge here (a rule that gates no process, a
+             * trail nobody declared), with its reason; counted nowhere and
+             * never a red. Written by `scorecard._criterion` when there is any. */
+            skipped: z.array(z.record(z.string(), z.unknown())).optional(),
           }),
         )
         .default({}),
