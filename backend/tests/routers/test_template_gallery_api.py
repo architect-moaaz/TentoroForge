@@ -380,8 +380,8 @@ async def test_a_template_name_is_text_in_the_email_not_markup(auth_client, org_
     seen = {}
 
     async def capture(to, template, context=None):
-        from services.email_service import TEMPLATES, SafeDict
-        seen[to] = TEMPLATES[template]["html"].format_map(SafeDict(context or {}))
+        from services.email_service import TEMPLATES, render
+        seen[to] = render(TEMPLATES[template], context or {})
         return True
     monkeypatch.setattr("services.email_service.send_email", capture)
     src = await _defined_project(auth_client, org_id, "Esc")
@@ -390,8 +390,20 @@ async def test_a_template_name_is_text_in_the_email_not_markup(auth_client, org_
     await auth_client.post(f"/api/project-templates/{tpl['id']}/screenshots",
                            files={"file": ("s.png", _png(), "image/png")})
     assert (await auth_client.post(f"/api/project-templates/{tpl['id']}/submit", json={})).status_code == 200
-    html = seen["admin@tentoro.ai"]
+    subject, html = seen["admin@tentoro.ai"]
     assert '<a href="https://evil.example">' not in html and "&lt;a href=" in html
+    # The subject is plain text: the name as written, not as HTML.
+    assert subject == 'Template to review: <a href="https://evil.example">Click</a>'
+
+
+def test_a_subject_is_one_line_and_plain_text():
+    from services.email_service import TEMPLATES, render
+    subject, body = render(TEMPLATES["template_approved"], {
+        "name": "Dev", "template_name": "R&D Tracker\r\nBcc: everyone@example.com", "note": "ok",
+        "template_url": "https://x"})
+    assert "\n" not in subject and "\r" not in subject
+    assert subject == "R&D Tracker Bcc: everyone@example.com is in the Templates Gallery"
+    assert "R&amp;D Tracker" in body
 
 
 @pytest.mark.asyncio

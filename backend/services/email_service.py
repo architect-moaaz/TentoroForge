@@ -121,6 +121,21 @@ TEMPLATES = {
 }
 
 
+def render(tmpl: dict, ctx: dict) -> tuple[str, str]:
+    """The subject and the HTML body of one template, filled in.
+
+    VALUES ARE PEOPLE'S WORDS. An organisation or a template is named by
+    whoever made it, so each value is escaped for the HTML body — a name like
+    `<a href=…>` is text, never a link — and the subject, which is plain text,
+    is left unescaped ("R&D Tracker", not "R&amp;D Tracker") but held to one
+    line, so a name holding a line break cannot add a header to the message."""
+    import html as _html
+
+    subject = " ".join(tmpl["subject"].format_map(SafeDict({k: str(v) for k, v in ctx.items()})).split())
+    body = tmpl["html"].format_map(SafeDict({k: _html.escape(str(v), quote=True) for k, v in ctx.items()}))
+    return subject, body
+
+
 async def send_email(
     to: str,
     template: str,
@@ -142,8 +157,7 @@ async def send_email(
         logger.error("Unknown email template: %s", template)
         return False
 
-    subject = tmpl["subject"].format_map(SafeDict(ctx))
-    html = tmpl["html"].format_map(SafeDict(ctx))
+    subject, html = render(tmpl, ctx)
 
     if APP_ENV == "development":
         logger.info("DEV EMAIL → to=%s subject=%s", to, subject)
@@ -152,7 +166,10 @@ async def send_email(
     if SENDGRID_API_KEY:
         return await _send_via_sendgrid(to, subject, html)
     elif SMTP_HOST:
-        return _send_via_smtp(to, subject, html)
+        # smtplib blocks: on the event loop, one slow mail server froze every
+        # request the API was serving until it answered. It runs on a thread.
+        import asyncio
+        return await asyncio.to_thread(_send_via_smtp, to, subject, html)
     else:
         logger.warning("No email provider configured — email not sent to %s", to)
         return False

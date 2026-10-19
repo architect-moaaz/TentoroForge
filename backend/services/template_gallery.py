@@ -317,15 +317,12 @@ class Outbox:
     emails: list[tuple[str, str, dict]] = field(default_factory=list)
 
     async def send(self) -> None:
-        import html
-
+        # The builder's words are escaped where they are put into HTML
+        # (`email_service.render`), not here: a subject is plain text.
         from services.email_service import send_email
         for to, template, context in self.emails:
-            # Names and descriptions are the builder's words: escaped, so a
-            # template called "<a href=…>" is text in the email, not a link.
-            safe = {k: html.escape(str(v), quote=True) for k, v in context.items()}
             try:
-                await send_email(to, template, safe)
+                await send_email(to, template, context)
             except Exception:
                 logger.exception("[gallery] could not email %s (%s)", to, template)
 
