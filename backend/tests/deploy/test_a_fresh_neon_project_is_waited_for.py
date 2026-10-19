@@ -84,3 +84,16 @@ def test_the_provider_records_the_project_before_asking_it_for_a_database():
     asked = src.index("made = await self.neon.ensure_database(neon_project_id, envs.TEST_DATABASE)")
     recorded = src.index("row.neon_project_id = neon_project_id\n                    row.neon_branch_id = r.get(\"branch_id\")\n                    await self._flush()")
     assert made < recorded < asked
+
+
+@pytest.mark.asyncio
+async def test_a_refused_project_says_why_and_what_to_do():
+    """FitTrackr2 (pu8nt000, 2026-10-19) saw "422 Unprocessable Entity" and a
+    link to MDN: the Neon organisation was at its project limit."""
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.method == "POST" and req.url.path == "/api/v2/projects":
+            return httpx.Response(422, json={"code": "", "message": "projects limit exceeded"})
+        return httpx.Response(404)
+    with pytest.raises(RuntimeError) as refused:
+        await _client(handler).create_project(name="pu8nt000")
+    assert "projects limit exceeded" in str(refused.value) and "project limit" in str(refused.value)

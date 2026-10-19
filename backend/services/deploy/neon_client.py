@@ -76,6 +76,19 @@ class NeonClient:
             payload["project"]["org_id"] = self.org_id
 
         r = await self._client.post(f"{BASE}/projects", json=payload)
+        if r.status_code == 422:
+            # NEON SAID NO TO ANOTHER PROJECT, and its reason is in the body —
+            # on the free plan that is the 100-project limit, which 82 orphaned
+            # projects from failed publishes reached on 2026-10-19 (FitTrackr2
+            # saw "422 Unprocessable Entity" and nothing else).
+            try:
+                why = str(r.json().get("message") or r.text)
+            except Exception:  # noqa: BLE001
+                why = r.text
+            raise RuntimeError(
+                f"Neon would not create a project for the app: {why.strip() or 'no reason given'}. "
+                "This usually means the Neon organisation's project limit is reached — remove projects "
+                "no app uses, or raise the plan.")
         r.raise_for_status()
         body = r.json()
         project = body["project"]
