@@ -598,3 +598,39 @@ async def test_a_disabled_admin_is_not_written_to_and_no_admin_is_said_loudly(
     with caplog.at_level("ERROR"):
         assert (await auth_client.post(f"/api/project-templates/{tpl2['id']}/submit", json={})).status_code == 200
     assert any("no Tentoro admin is configured" in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_a_template_whose_files_are_gone_is_nowhere_and_never_counted(
+        auth_client, org_id, super_admin_client):
+    import shutil
+    _src, tpl = await _ready_template(auth_client, org_id)
+    await auth_client.post(f"/api/project-templates/{tpl['id']}/submit", json={})
+    assert (await super_admin_client.get("/api/admin/template-requests/count")).json() == {"pending": 1}
+    shutil.rmtree(templates.templates_root() / tpl["id"])  # a disk restored without it, say
+    assert (await super_admin_client.get("/api/admin/template-requests/count")).json() == {"pending": 0}
+    queue = (await super_admin_client.get("/api/admin/template-requests")).json()
+    assert queue["requests"] == [] and queue["counts"]["pending"] == 0
+    for path in (f"/api/project-templates/{tpl['id']}", f"/api/project-templates/{tpl['id']}/detail"):
+        assert (await super_admin_client.get(path)).status_code == 404
+    r = await super_admin_client.post(f"/api/admin/template-requests/{tpl['id']}/decision", json={"decision": "approve"})
+    assert r.status_code == 404
+    assert (await auth_client.get(f"/api/orgs/{org_id}/project-templates")).json()["templates"] == []
+
+
+@pytest.mark.asyncio
+async def test_oversized_words_are_refused_not_cut(auth_client, org_id, super_admin_client):
+    src = await _defined_project(auth_client, org_id, "Long")
+    url = f"/api/projects/{src['id']}/templates"
+    assert (await auth_client.post(url, json={"name": "x" * 121})).status_code == 422
+    assert (await auth_client.post(url, json={"description": "x" * 2001})).status_code == 422
+    assert (await auth_client.post(url, json={"category": "x" * 61})).status_code == 422
+    _src, tpl = await _ready_template(auth_client, org_id)
+    await auth_client.post(f"/api/project-templates/{tpl['id']}/submit", json={})
+    r = await super_admin_client.post(f"/api/admin/template-requests/{tpl['id']}/decision",
+                                      json={"decision": "reject", "note": "x" * 2001})
+    assert r.status_code == 422
+    r = await super_admin_client.post(f"/api/admin/template-requests/{tpl['id']}/decision",
+                                      json={"decision": "publish-everything"})
+    assert r.status_code == 422
+    assert (await auth_client.get(f"/api/project-templates/{tpl['id']}")).json()["status"] == "pending"

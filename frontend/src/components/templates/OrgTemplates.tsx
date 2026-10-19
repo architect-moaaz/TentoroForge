@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import { formatDate, type TemplateCardData } from "@/lib/templateGallery";
 import { GalleryCard } from "./GalleryCard";
+import { StatusBadge } from "./TemplateBits";
 
 /** What the builder sees under each of their templates: where it stands, and the next step. */
 function StatusLine({ t }: { t: TemplateCardData }) {
@@ -57,6 +58,7 @@ export function OrgTemplates({
 }) {
   const queryClient = useQueryClient();
   const [deleting, setDeleting] = useState<TemplateCardData | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const { data, isLoading } = useQuery({
     queryKey: ["project-templates", orgId],
@@ -79,6 +81,15 @@ export function OrgTemplates({
     (t) => !q || `${t.name} ${t.description} ${t.category}`.toLowerCase().includes(q),
   );
   const waiting = templates.filter((t) => t.status === "pending").length;
+  // ONE CARD PER APP. Saving an app's template again makes its next version;
+  // listed flat, every older one was a card of its own and the request that
+  // mattered was lost among them. The newest leads; the rest fold away.
+  const families = new Map<string, TemplateCardData[]>();
+  for (const t of templates) {
+    const key = t.family || t.id;
+    families.set(key, [...(families.get(key) ?? []), t]);
+  }
+  const groups = [...families.values()].map((g) => g.sort((a, b) => b.version - a.version));
 
   return (
     <section className="mb-10" aria-labelledby="org-templates-heading">
@@ -105,8 +116,33 @@ export function OrgTemplates({
         </p>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {templates.map((t) => (
+          {groups.flatMap((group) => {
+            const head = group[0];
+            // Folded versions whose state still matters are named on the
+            // card: a request waiting for review is never hidden behind a
+            // newer private draft.
+            const notable = group.slice(1).filter((t) => ["pending", "rejected", "approved"].includes(t.status));
+            const open = expanded.has(head.family);
+            const shown = open ? group : [head];
+            return shown.map((t, i) => (
             <div key={t.id} className="flex flex-col gap-2" data-org-template={t.id} data-status={t.status}>
+              {i === 0 && !open && notable.length > 0 && (
+                <ul className="space-y-0.5 px-1">
+                  {notable.map((v) => (
+                    <li key={v.id}>
+                      <button
+                        type="button"
+                        onClick={() => onOpen(v.id)}
+                        className="inline-flex items-center gap-1.5 text-[11px] hover:underline"
+                        data-notable-version={v.status}
+                      >
+                        <span className="text-muted-foreground">Version {v.version}:</span>
+                        <StatusBadge status={v.status} />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
               <GalleryCard tpl={t} onOpen={() => onOpen(t.id)} showStatus />
               <p className="px-1 text-[11px] leading-snug text-muted-foreground">
                 <StatusLine t={t} />
@@ -133,8 +169,26 @@ export function OrgTemplates({
                   </button>
                 </div>
               )}
+              {i === 0 && group.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setExpanded((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(head.family)) next.delete(head.family);
+                      else next.add(head.family);
+                      return next;
+                    })
+                  }
+                  className="self-start px-1 text-[11px] text-muted-foreground underline-offset-2 hover:underline"
+                  aria-expanded={open}
+                >
+                  {open ? "Hide older versions" : `Show ${group.length - 1} older version${group.length === 2 ? "" : "s"}`}
+                </button>
+              )}
             </div>
-          ))}
+            ));
+          })}
         </div>
       )}
 

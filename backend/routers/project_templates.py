@@ -14,6 +14,7 @@ private template's id reveals nothing about it.
 """
 from __future__ import annotations
 
+import hashlib
 import uuid
 from typing import Any
 
@@ -150,6 +151,9 @@ async def _cards(db: AsyncSession, pairs: list[tuple[dict, TemplateListing | Non
             "name": meta.get("name"), "description": meta.get("description") or "",
             "category": templates.clean_category(meta.get("category")),
             "version": int(meta.get("version") or 1),
+            # Which app's template this is a version of — opaque: a lineage
+            # names the organisation and source project, which are private.
+            "family": hashlib.sha1(lineage.encode()).hexdigest()[:12],
             "status": status, "creator": creator, "created_by": meta.get("created_by"),
             "created_by_name": (creator or {}).get("name") or meta.get("created_by_name") or "",
             "source_project_id": meta.get("source_project_id") if manage or who.is_admin else None,
@@ -433,9 +437,19 @@ async def unpublish_template(template_id: str, request: Request, user: PlatformU
 async def count_template_requests(admin: PlatformUser = Depends(require_super_admin),
                                   db: AsyncSession = Depends(get_db)):
     """How many requests are waiting — the badge on the cockpit's Templates."""
-    n = await db.scalar(select(func.count()).select_from(TemplateListing).where(
-        TemplateListing.status == gallery.PENDING))
-    return {"pending": int(n or 0)}
+    return {"pending": (await _counts(db))[gallery.PENDING]}
+
+
+async def _counts(db: AsyncSession) -> dict[str, int]:
+    """Listings per status — of templates that still exist. A row whose files
+    are gone is not shown in the queue, so it is not counted either: the
+    badge must never say one is waiting when the queue shows none."""
+    counts = {st: 0 for st in gallery.STATUSES}
+    for template_id, st in (await db.execute(
+            select(TemplateListing.template_id, TemplateListing.status))).all():
+        if st in counts and templates.get(template_id) is not None:
+            counts[st] += 1
+    return counts
 
 
 @router.get("/api/admin/template-requests")
@@ -451,11 +465,8 @@ async def list_template_requests(request: Request, status: str = Query(default="
         query = query.where(TemplateListing.status == status)
     rows = (await db.execute(query.order_by(TemplateListing.submitted_at.asc().nullslast()))).scalars().all()
     pairs = [(m, r) for r in rows if (m := templates.get(r.template_id))]
-    counts = {st: 0 for st in gallery.STATUSES}
-    for st, n in (await db.execute(select(TemplateListing.status, func.count())
-                                   .group_by(TemplateListing.status))).all():
-        counts[st] = int(n)
-    return {"requests": await _cards(db, pairs, _viewer_factory(db, admin, request)), "counts": counts}
+    return {"requests": await _cards(db, pairs, _viewer_factory(db, admin, request)),
+            "counts": await _counts(db)}
 
 
 @router.post("/api/admin/template-requests/{template_id}/decision")

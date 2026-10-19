@@ -43,6 +43,8 @@ export interface TemplateCardData {
   description: string;
   category: string;
   version: number;
+  /** Shared by every version of one app's template. */
+  family: string;
   status: TemplateStatus;
   creator: TemplatePerson | null;
   created_by_name: string;
