@@ -114,3 +114,5 @@ langchain-core>=0.3.30
 # every business actually has would make the import a feature for other
 # developers. Read-only use: openpyxl never writes a workbook here.
 openpyxl>=3.1.0
+# Requirements documents attached as PDF (services/document_text.py). Pure Python.
+pypdf>=4.2.0

@@ -50,8 +50,12 @@ import {
   XCircle,
   Check,
   FileCode2,
+  FileText,
   MessageSquare,
+  X,
 } from "lucide-react";
+import { toast } from "sonner";
+import { documentChipLabel, type AttachedDocument } from "./attachedDocuments";
 import ReactMarkdown from "react-markdown";
 import { MarkdownLink } from "@/components/chat/MarkdownLink";
 import remarkGfm from "remark-gfm";
@@ -604,6 +608,9 @@ export function SmithPanel({
   const composerRef = useRef<HTMLTextAreaElement>(null);
 
   const [shown, setShown] = useState<{ id: string; name: string }[]>([]);
+  // REQUIREMENTS DOCUMENTS — a BRD, a PRD — read on upload and sent with the
+  // next message, where their text joins what the definition reads.
+  const [docs, setDocs] = useState<AttachedDocument[]>([]);
   const [listening, setListening] = useState(false);
 
   const attach = async (files: File[]) => {
@@ -614,6 +621,7 @@ export function SmithPanel({
       ? { Authorization: `Bearer ${token}` }
       : {};
     const added: { id: string; name: string }[] = [];
+    const read: AttachedDocument[] = [];
     for (const f of files) {
       const body = new FormData();
       body.append("file", f);
@@ -622,13 +630,26 @@ export function SmithPanel({
           `${API_BASE}/api/projects/${projectId}/attachments`,
           { method: "POST", headers, credentials: "include", body },
         );
-        if (!r.ok) continue;
+        // A REFUSAL IS SAID. It used to be skipped in silence, so a file the
+        // server would not take looked, from the composer, like one it had.
+        if (!r.ok) {
+          const why = await r.json().catch(() => null);
+          toast.error(typeof why?.detail === "string" ? why.detail : `${f.name} could not be attached.`);
+          continue;
+        }
         const rec = await r.json();
-        if (rec?.id) added.push({ id: String(rec.id), name: f.name });
+        if (!rec?.id) continue;
+        if (rec.document) {
+          if (rec.unreadable) toast.warning(String(rec.unreadable));
+          else read.push({ id: String(rec.id), name: f.name, pages: rec.pages ?? null, truncated: !!rec.truncated });
+          continue;
+        }
+        added.push({ id: String(rec.id), name: f.name });
       } catch {
-        /* one attachment that will not upload is not a failed conversation */
+        toast.error(`${f.name} could not be attached.`);
       }
     }
+    if (read.length) setDocs((d) => [...d, ...read]);
     if (added.length === 0) return;
     const next = [...shown, ...added];
     setShown(next);
@@ -749,9 +770,12 @@ export function SmithPanel({
       // with every message and was dropped there.
       const prior = messages.slice(-SENT_HISTORY).map((m) => ({ role: m.role, text: m.text }));
       setMessages((m) => [...m, { role: "user", text, at: Date.now() }]);
-      void start({ description: text, evidence, history: prior });
+      const attachmentIds = docs.map((d) => d.id);
+      void start({ description: text, evidence, history: prior, attachmentIds });
+      // Sent: the server keeps the documents beside the app from here on.
+      if (attachmentIds.length) setDocs([]);
     },
-    [projectId, messages, evidence, start],
+    [projectId, messages, evidence, start, docs],
   );
 
   const send = () => {
@@ -1151,6 +1175,24 @@ export function SmithPanel({
       </div>
 
       <div className="border-t p-3">
+        {docs.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-1" data-attached-documents="">
+            {docs.map((d) => (
+              <span
+                key={d.id}
+                className="flex items-center gap-1 rounded bg-muted px-2 py-0.5 text-xs"
+                title="Read — goes with your next message"
+              >
+                <FileText className="h-3 w-3" />
+                {documentChipLabel(d)}
+                <button type="button" aria-label={`Remove ${d.name}`} className="ml-0.5 opacity-60 hover:opacity-100"
+                        onClick={() => setDocs((all) => all.filter((x) => x.id !== d.id))}>
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
         {shown.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-1">
             {shown.map((a) => (
@@ -1168,7 +1210,7 @@ export function SmithPanel({
         <div className="flex items-center gap-2">
           <label
             className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-xl border text-muted-foreground hover:bg-muted"
-            title="Attach a screenshot, a design, or a spreadsheet to load in"
+            title="Attach a requirements document (Word, PDF), a screenshot, a design, or a spreadsheet to load in"
           >
             <Paperclip className="h-[18px] w-[18px]" />
             {/* A SPREADSHEET IS THE POINT OF THE PAPERCLIP for an owner who
@@ -1179,7 +1221,7 @@ export function SmithPanel({
             <input
               type="file"
               multiple
-              accept="image/png,image/jpeg,image/webp,image/gif,.txt,.md,.markdown,.csv,.tsv,.xlsx"
+              accept="image/png,image/jpeg,image/webp,image/gif,.txt,.md,.markdown,.csv,.tsv,.xlsx,.docx,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
               className="hidden"
               disabled={busy}
               onChange={(e) => {

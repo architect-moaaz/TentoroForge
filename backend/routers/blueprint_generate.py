@@ -1593,6 +1593,10 @@ class SmithChatRequest(BaseModel):
     #: specification was read in the browser, carried to the project page,
     #: and dropped at this door — the requirements were written from the
     #: one-line brief alone and cited no document.
+    #: Files attached to this turn (`/api/projects/{id}/attachments`). The
+    #: requirements documents among them — a BRD, a PRD, as .docx, .pdf, .md
+    #: or .txt — are read at upload; their text joins `evidence` here.
+    attachment_ids: list[str] = Field(default_factory=list)
     evidence: list[str] = Field(default_factory=list)
     #: Which review an `approved` answers — `requirements` (lock them and work
     #: out the product model) or `product_model` (build). Empty means the
@@ -1715,6 +1719,44 @@ async def _adopt_mcp_servers(output_dir: Path, project: Any, db: AsyncSession) -
             logger.warning("[smith-chat] app settings not written for %s: %s", output_dir.name, exc)
 
 
+def _attached_documents(project_id: Any, attachment_ids: list[str]) -> list[dict]:
+    """The requirements documents attached to a turn, as read at upload."""
+    if not attachment_ids:
+        return []
+    from services import chat_attachments
+    try:
+        return chat_attachments.document_texts(chat_attachments.attachments_root(), str(project_id),
+                                               list(attachment_ids))
+    except Exception:  # noqa: BLE001 — a document that cannot be found is said below, never a lost turn
+        logger.warning("[smith] attached documents could not be read", exc_info=True)
+        return []
+
+
+def _document_evidence(doc: dict) -> str:
+    """One attached document as the evidence block the definition reads."""
+    pages = f" ({doc['pages']} pages)" if doc.get("pages") else ""
+    return f"# {doc['filename']}{pages}\n\n{doc['text']}"
+
+
+def _document_note(output_dir: str, docs: list[dict]) -> str:
+    """For a turn on an application that exists: keep each readable document
+    beside the Blueprint and tell Smith where it is, rather than putting forty
+    pages into every step of the turn. Smith opens it with `read_file`."""
+    from services.blueprint import documents as documents_mod
+    readable = [d for d in docs if d.get("text")]
+    if not readable:
+        return ""
+    documents_mod.store(output_dir, [_document_evidence(d) for d in readable])
+    lines = []
+    for d in readable:
+        path = documents_mod.path_of(output_dir, _document_evidence(d))
+        rel = f".forge/documents/{path.name}" if path else ".forge/documents/"
+        pages = f", {d['pages']} pages" if d.get("pages") else ""
+        lines.append(f"- {d['filename']}{pages}: its text is at `{rel}`")
+    return ("\n\nThe person attached these documents with this message. Read the parts that bear on the "
+            "ask with read_file before acting, and follow what they say:\n" + "\n".join(lines))
+
+
 @router.post("/api/projects/{project_id}/smith/chat")
 async def smith_chat(
     project_id: uuid.UUID,
@@ -1752,6 +1794,13 @@ async def smith_chat(
     from services.smith_chat_v2 import ChatV2Request, handle_chat_v2
 
     output_dir, app_root = await prepare_project_tree(project, db)
+
+    # THE DOCUMENTS ATTACHED TO THIS TURN. A BRD or PRD, read at upload, joins
+    # the evidence the definition reads — the same path a document supplied on
+    # the new-app page takes — so the requirements cite it as `document N`.
+    attached_docs = _attached_documents(project_id, list(getattr(req, "attachment_ids", None) or []))
+    if attached_docs:
+        req.evidence = list(req.evidence or []) + [_document_evidence(d) for d in attached_docs if d.get("text")]
 
     queue: asyncio.Queue = asyncio.Queue()
     loop = asyncio.get_running_loop()
@@ -1807,6 +1856,14 @@ async def smith_chat(
     # and nothing else waits on them.
     memory_lock = asyncio.Lock()
     _remember(loop, project_id, "user", req.message, lock=memory_lock)
+    for _d in attached_docs:
+        if _d.get("text"):
+            emit("thought", {"text": f"Read {_d['filename']}" + (f" ({_d['pages']} pages)" if _d.get("pages") else "")
+                             + (" — long, so only its first part was kept" if _d.get("truncated") else "") + ".",
+                             "kind": "reasoning", "node": ""})
+        else:
+            emit("message", {"text": f"{_d.get('unreadable') or 'I could not read ' + _d['filename'] + '.'} "
+                                     "I have gone on without it."})
 
     # `approved` is the difference between defining and building, and it is
     # what the panel needs to word the wait correctly.
@@ -2232,7 +2289,7 @@ async def smith_chat(
             # This is the conversation, and it is where the user asked for it.
             turn_result = handle_chat_v2(ChatV2Request(
                 project_id=str(project_id), output_dir=str(output_dir),
-                message=req.message,
+                message=req.message + _document_note(str(output_dir), attached_docs),
                 # The recent exchange only — Smith reads the last few turns.
                 history=[(t.role, t.text) for t in req.history if t.text][-10:],
                 reasoning_fn=lambda text, kind="reasoning", node="": emit(

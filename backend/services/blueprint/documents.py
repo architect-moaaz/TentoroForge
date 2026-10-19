@@ -79,6 +79,15 @@ def store(output_dir: str | Path, documents: Iterable[str]) -> list[Path]:
     return written
 
 
+def path_of(output_dir: str | Path, text: str) -> Path | None:
+    """The stored file holding exactly `text`, or None."""
+    want = str(text or "").strip()
+    for _, p in _entries(output_dir):
+        if p.read_text("utf-8") == want:
+            return p
+    return None
+
+
 def labelled(documents: Iterable[str]) -> str:
     """The block an agent reads: each document under its citation label."""
     blocks = [str(t).strip() for t in (documents or []) if str(t or "").strip()]

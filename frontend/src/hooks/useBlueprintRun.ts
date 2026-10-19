@@ -250,6 +250,9 @@ export interface StartOptions {
   gate?: "requirements" | "product_model";
   /** At the product model's review: the modules to build. Omitted is all. */
   modules?: string[] | null;
+  /** Requirements documents attached to this message (BRD, PRD as .docx/.pdf/.md/.txt),
+   *  already uploaded and read; the server adds their text to the evidence. */
+  attachmentIds?: string[];
 }
 
 export function useBlueprintRun(projectId: string | null) {
@@ -534,6 +537,7 @@ export function useBlueprintRun(projectId: string | null) {
               // §14 — the documents attached on /blueprint/new. Carried on
               // every turn: the definition re-reads the whole brief each time.
               evidence: opts.evidence ?? [],
+              ...(opts.attachmentIds?.length ? { attachment_ids: opts.attachmentIds } : {}),
               ...(opts.gate ? { gate: opts.gate } : {}),
               ...(opts.modules ? { modules: opts.modules } : {}),
             }),

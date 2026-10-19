@@ -8390,9 +8390,18 @@ async def _handle_smith_turn(project: Project, message: str, deferred: dict | No
                             len(_attach_files), len(_sheets))
             except Exception as _e:  # noqa: BLE001 — never lose the turn
                 logger.warning("attachment load failed: %s", _e)
+        # A REQUIREMENTS DOCUMENT attached here is read at upload; Smith is
+        # told where its text is kept and opens it with read_file.
+        _doc_note = ""
+        if attachment_ids:
+            try:
+                from routers.blueprint_generate import _attached_documents, _document_note
+                _doc_note = _document_note(str(output_dir), _attached_documents(project.id, list(attachment_ids)))
+            except Exception as _e:  # noqa: BLE001 — never lose the turn
+                logger.warning("attached documents could not be read: %s", _e)
         from services.smith4.platform import smith_result as _smith_turn
         _smith_worker = asyncio.create_task(asyncio.to_thread(
-            _smith_turn, str(project.id), output_dir, message,
+            _smith_turn, str(project.id), output_dir, message + _doc_note,
             history=prior_messages, attachments=_attach_files,
             reasoning=_reasoning_cb, commit=True,
             commit_message=f"smith: {message.strip()[:60]}",

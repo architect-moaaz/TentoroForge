@@ -46,9 +46,15 @@ class TestClassify:
     def test_text_formats(self, name):
         assert classify(name, "") == KIND_TEXT
 
-    @pytest.mark.parametrize("name", ["report.docx", "app.exe"])
+    @pytest.mark.parametrize("name", ["report.doc", "app.exe"])
     def test_unsupported_is_explicit(self, name):
         assert classify(name, "") == KIND_UNSUPPORTED
+
+    def test_a_word_document_is_read_now_that_there_is_a_reader(self):
+        """`.docx` used to be refused for want of a reader; requirements
+        arrive as Word files, so `services.document_text` reads them."""
+        from services.chat_attachments import KIND_DOCUMENT
+        assert classify("report.docx", "") == KIND_DOCUMENT
 
     def test_a_workbook_is_its_own_kind_now_that_its_rows_can_be_loaded(self):
         """`.xlsx` used to be refused as "a zip container we have no reader
@@ -94,6 +100,9 @@ class TestSave:
         """Better to reject on upload than to accept and silently drop it
         at prompt-assembly time."""
         with pytest.raises(AttachmentError, match="not supported"):
+            save_attachment(tmp_path, "p1", "app.exe", "", b"x")
+        # A Word file that cannot be read is refused too, with the reason.
+        with pytest.raises(AttachmentError, match="cannot read report.docx"):
             save_attachment(tmp_path, "p1", "report.docx", "", b"x")
 
 
