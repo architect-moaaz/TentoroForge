@@ -79,6 +79,12 @@ class NeonClient:
         r.raise_for_status()
         body = r.json()
         project = body["project"]
+        # A PROJECT IS NOT READY THE MOMENT IT IS RETURNED. Its branch and
+        # endpoint are still being made, and until those operations finish
+        # Neon answers every change to it with 423 Locked: a database asked
+        # for straight after creation failed four publishes of FitTrackr in
+        # eight minutes, each leaving a project behind (qpqhdugb, 2026-10-19).
+        await self.wait_until_idle(project["id"])
         # First entry in connection_uris is the pooled write endpoint,
         # which is what the generated app needs for both writes and reads.
         connection_uri = body["connection_uris"][0]["connection_uri"]
@@ -87,6 +93,40 @@ class NeonClient:
             "database_url": connection_uri,
             "branch_id": project.get("default_branch_id"),
         }
+
+    async def wait_until_idle(self, project_id: str, timeout_s: float = 90.0) -> bool:
+        """True once no operation on the project is running or scheduled;
+        False when `timeout_s` passed first (the caller then tries, and may
+        meet a 423). Never raises: a project whose operations cannot be
+        listed is tried as it is."""
+        import asyncio, time
+        deadline = time.monotonic() + timeout_s
+        delay = 1.0
+        while True:
+            try:
+                r = await self._client.get(f"{BASE}/projects/{project_id}/operations", params={"limit": 50})
+                ops = r.json().get("operations") or [] if r.is_success else []
+            except Exception:  # noqa: BLE001 — not being able to ask is not a reason to stop
+                ops = []
+            if not any(str(o.get("status")) in ("running", "scheduling", "scheduled", "pending") for o in ops):
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            await asyncio.sleep(delay)
+            delay = min(delay * 1.5, 5.0)
+
+    async def _post_when_unlocked(self, project_id: str, url: str, json: dict, attempts: int = 6) -> httpx.Response:
+        """POST `url`; on 423 Locked wait for the project's operations and try
+        again, up to `attempts` times. The last response is returned as is."""
+        import asyncio
+        r = await self._client.post(url, json=json)
+        for _ in range(attempts - 1):
+            if r.status_code != 423:
+                break
+            await self.wait_until_idle(project_id, timeout_s=30.0)
+            await asyncio.sleep(1.0)
+            r = await self._client.post(url, json=json)
+        return r
 
     async def delete_project(self, project_id: str) -> None:
         r = await self._client.delete(f"{BASE}/projects/{project_id}")
@@ -174,8 +214,8 @@ class NeonClient:
         have = {str(d.get("name")) for d in r.json().get("databases") or []}
         created = name not in have
         if created:
-            r = await self._client.post(f"{BASE}/projects/{project_id}/branches/{branch}/databases",
-                                        json={"database": {"name": name, "owner_name": owner}})
+            r = await self._post_when_unlocked(project_id, f"{BASE}/projects/{project_id}/branches/{branch}/databases",
+                                               json={"database": {"name": name, "owner_name": owner}})
             if not r.is_success:
                 raise RuntimeError(f"Neon create database failed: project={project_id!r} status={r.status_code}")
         url = await self.get_connection_uri(project_id, role_name=owner, database_name=name)
