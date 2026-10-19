@@ -36,12 +36,13 @@ def upgrade() -> None:
         sa.Column("price_cents", sa.Integer),
         sa.Column("currency", sa.String(3)),
         sa.Column("submitted_at", sa.DateTime(timezone=True)),
+        sa.Column("submitted_by", UUID, sa.ForeignKey("platform_users.id", ondelete="SET NULL")),
         sa.Column("reviewed_at", sa.DateTime(timezone=True)),
         sa.Column("reviewed_by", UUID, sa.ForeignKey("platform_users.id", ondelete="SET NULL")),
         sa.Column("review_note", sa.Text),
         sa.Column("published_at", sa.DateTime(timezone=True)),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
     )
     op.create_index("ix_template_listings_status", "template_listings", ["status"])
     op.create_index("ix_template_listings_org", "template_listings", ["org_id"])
@@ -55,7 +56,7 @@ def upgrade() -> None:
         sa.Column("status", sa.String(16), nullable=False),
         sa.Column("note", sa.Text),
         sa.Column("actor_id", UUID, sa.ForeignKey("platform_users.id", ondelete="SET NULL")),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
     )
     op.create_index("ix_template_events_template", "template_events", ["template_id", "created_at"])
 
@@ -68,7 +69,7 @@ def upgrade() -> None:
         sa.Column("user_id", UUID, sa.ForeignKey("platform_users.id", ondelete="SET NULL")),
         sa.Column("org_id", UUID),
         sa.Column("is_review", sa.Boolean, nullable=False, server_default=sa.false()),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.UniqueConstraint("project_id", name="uq_template_uses_project"),
     )
     op.create_index("ix_template_uses_lineage", "template_uses", ["lineage"])
@@ -81,8 +82,8 @@ def upgrade() -> None:
         sa.Column("user_id", UUID, sa.ForeignKey("platform_users.id", ondelete="CASCADE"), nullable=False),
         sa.Column("rating", sa.SmallInteger, nullable=False),
         sa.Column("comment", sa.Text),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.UniqueConstraint("lineage", "user_id", name="uq_template_reviews_lineage_user"),
         sa.CheckConstraint("rating BETWEEN 1 AND 5", name="ck_template_reviews_rating"),
     )

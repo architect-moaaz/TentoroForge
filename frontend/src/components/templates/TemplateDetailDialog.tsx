@@ -34,7 +34,7 @@ import {
   type TemplateDetailData,
   type TemplateReviewData,
 } from "@/lib/templateGallery";
-import { PersonAvatar, Shot, StarInput, Stars, StatusBadge } from "./TemplateBits";
+import { PersonAvatar, PriceBadge, Shot, StarInput, Stars, StatusBadge } from "./TemplateBits";
 
 /**
  * One template, all of it: what it looks like, what it holds, who built it,
@@ -100,9 +100,7 @@ export function TemplateDetailDialog({
                 {tpl.category && (
                   <span className="rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground">{tpl.category}</span>
                 )}
-                <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
-                  Free
-                </span>
+                <PriceBadge pricing={tpl.pricing} />
               </div>
               <DialogDescription asChild>
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-1 text-xs text-muted-foreground">
@@ -527,6 +525,18 @@ function Reviews({ tpl, onChanged }: { tpl: TemplateDetailData; onChanged: () =>
     },
     onError: (e: Error) => toast.error(e.message),
   });
+  const [removing, setRemoving] = useState<string | null>(null);
+  const [reason, setReason] = useState("");
+  const moderate = useMutation({
+    mutationFn: (id: string) => api.post(`/api/admin/template-reviews/${id}/remove`, { reason: reason.trim() }),
+    onSuccess: () => {
+      setRemoving(null);
+      setReason("");
+      done();
+      toast.success("Review removed; its writer was told why.");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
   const reviews = data?.reviews ?? [];
   return (
     <div className="space-y-4">
@@ -554,8 +564,10 @@ function Reviews({ tpl, onChanged }: { tpl: TemplateDetailData; onChanged: () =>
           </div>
         </div>
       )}
-      {tpl.status === "approved" && !tpl.can_rate && tpl.can_manage && (
-        <p className="text-xs text-muted-foreground">You built this template, so you can&apos;t rate it — but you can read what others say.</p>
+      {tpl.status === "approved" && !tpl.can_rate && tpl.own_org && (
+        <p className="text-xs text-muted-foreground">
+          Your organisation built this template, so its rating is for others to give — but you can read what they say.
+        </p>
       )}
       {isLoading ? (
         <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
@@ -577,6 +589,37 @@ function Reviews({ tpl, onChanged }: { tpl: TemplateDetailData; onChanged: () =>
                 <span className="ml-auto text-[11px] text-muted-foreground">{formatDate(r.updated_at || r.created_at)}</span>
               </div>
               {r.comment && <p className="mt-2 whitespace-pre-wrap text-sm">{r.comment}</p>}
+              {tpl.is_admin && removing !== r.id && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRemoving(r.id);
+                    setReason("");
+                  }}
+                  className="mt-2 inline-flex items-center gap-1 text-[11px] text-rose-700 hover:underline"
+                >
+                  <Trash2 className="h-3 w-3" /> Remove review
+                </button>
+              )}
+              {tpl.is_admin && removing === r.id && (
+                <div className="mt-2 space-y-2 rounded-md bg-rose-50 p-2 dark:bg-rose-950/40" data-testid="moderate">
+                  <Textarea
+                    rows={2}
+                    value={reason}
+                    maxLength={2000}
+                    onChange={(e) => setReason(e.target.value)}
+                    placeholder="Why it is being removed — its writer is told (required)"
+                  />
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="destructive" onClick={() => moderate.mutate(r.id)} disabled={!reason.trim() || moderate.isPending}>
+                      Remove
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setRemoving(null)}>
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              )}
             </li>
           ))}
         </ul>

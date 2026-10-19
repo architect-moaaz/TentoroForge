@@ -474,3 +474,115 @@ async def test_an_unknown_domain_is_not_a_category(auth_client, org_id):
     meta["category"] = "unknown"
     (templates.templates_root() / tpl["id"] / "meta.json").write_text(json.dumps(meta))
     assert (await auth_client.get(f"/api/project-templates/{tpl['id']}")).json()["category"] == ""
+
+
+async def _member(org_id: str, email: str, name: str, role: str) -> AsyncClient:
+    import uuid as _uuid
+
+    from database import async_session
+    from models.org import InviteStatus, OrgMember, OrgMemberRole
+    c = await _person(email, name)
+    me = (await c.get("/api/auth/me")).json()
+    async with async_session() as db:
+        db.add(OrgMember(org_id=_uuid.UUID(org_id), user_id=_uuid.UUID(me["id"]),
+                         role=OrgMemberRole(role), invite_status=InviteStatus.accepted))
+        await db.commit()
+    return c
+
+
+@pytest.mark.asyncio
+async def test_whoever_raised_the_request_is_told_as_well_as_the_builder(
+        auth_client, org_id, super_admin_client, mailbox):
+    """An admin of the organisation may submit a colleague's template: both
+    the person who asked and the builder hear the decision."""
+    _src, tpl = await _ready_template(auth_client, org_id)
+    boss = await _member(org_id, "boss@example.com", "Bea Boss", "admin")
+    try:
+        assert (await boss.post(f"/api/project-templates/{tpl['id']}/submit", json={})).status_code == 200
+        hist = (await auth_client.get(f"/api/project-templates/{tpl['id']}/detail")).json()["history"]
+        assert hist[0]["by"] == "Bea Boss"
+        await super_admin_client.post(f"/api/admin/template-requests/{tpl['id']}/decision",
+                                      json={"decision": "reject", "note": "Needs a clearer cover."})
+        told = sorted(to for to, t, _ in mailbox if t == "template_changes_requested")
+        assert told == ["boss@example.com", "test@example.com"]
+        for c in (boss, auth_client):
+            assert any(n["type"] == "template_changes_requested" for n in await _notifications(c))
+    finally:
+        await boss.aclose()
+
+
+@pytest.mark.asyncio
+async def test_tentoro_can_take_a_review_down_and_says_why(auth_client, org_id, super_admin_client):
+    _src, tpl = await _ready_template(auth_client, org_id)
+    await auth_client.post(f"/api/project-templates/{tpl['id']}/submit", json={})
+    await super_admin_client.post(f"/api/admin/template-requests/{tpl['id']}/decision", json={"decision": "approve"})
+    troll = await _person("troll@example.com", "Troll")
+    try:
+        await troll.put(f"/api/project-templates/{tpl['id']}/reviews/mine", json={"rating": 1, "comment": "spam spam"})
+        review = (await troll.get(f"/api/project-templates/{tpl['id']}/reviews")).json()["reviews"][0]
+        url = f"/api/admin/template-reviews/{review['id']}/remove"
+        # Not the builder's, not the reviewer's own way out, and never without a reason.
+        assert (await auth_client.post(url, json={"reason": "I dislike it"})).status_code == 403
+        assert (await super_admin_client.post(url, json={"reason": ""})).status_code == 422
+        assert (await super_admin_client.post(url, json={"reason": "Spam, not a review."})).status_code == 200
+        assert (await super_admin_client.post(url, json={"reason": "again"})).status_code == 404
+        card = (await troll.get(f"/api/project-templates/{tpl['id']}")).json()
+        assert card["ratings"] == 0 and card["rating"] is None
+        note = next(n for n in await _notifications(troll) if n["type"] == "template_review_removed")
+        assert "Spam, not a review." in note["content"]
+        audit = (await super_admin_client.get("/api/admin/audit")).json()
+        assert any(row["action"] == "template_review.removed" for row in audit)
+        # They may write a fresh one.
+        assert (await troll.put(f"/api/project-templates/{tpl['id']}/reviews/mine",
+                                json={"rating": 3})).status_code == 200
+    finally:
+        await troll.aclose()
+
+
+@pytest.mark.asyncio
+async def test_a_screenshot_says_what_it_shows_until_approved(auth_client, org_id, super_admin_client):
+    _src, tpl = await _ready_template(auth_client, org_id)
+    shot = templates.get(tpl["id"])["screenshots"][0]["id"]
+    url = f"/api/project-templates/{tpl['id']}/screenshots/{shot}"
+    r = await auth_client.patch(url, json={"caption": "  The pipeline board  "})
+    assert r.status_code == 200 and r.json()["caption"] == "The pipeline board"
+    assert (await auth_client.patch(url, json={"caption": "x" * 201})).status_code == 422
+    assert (await auth_client.patch(f"/api/project-templates/{tpl['id']}/screenshots/{'0' * 32}",
+                                    json={"caption": "x"})).status_code == 404
+    await auth_client.post(f"/api/project-templates/{tpl['id']}/submit", json={})
+    assert (await super_admin_client.get("/api/admin/template-requests/count")).json() == {"pending": 1}
+    assert (await auth_client.get("/api/admin/template-requests/count")).status_code == 403
+    await super_admin_client.post(f"/api/admin/template-requests/{tpl['id']}/decision", json={"decision": "approve"})
+    assert (await super_admin_client.get("/api/admin/template-requests/count")).json() == {"pending": 0}
+    assert (await auth_client.patch(url, json={"caption": "changed after approval"})).status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_a_disabled_admin_is_not_written_to_and_no_admin_is_said_loudly(
+        auth_client, org_id, client, mailbox, monkeypatch, caplog):
+    from datetime import datetime, timezone
+
+    from sqlalchemy import update
+
+    from database import async_session
+    from models.auth import PlatformUser
+    monkeypatch.setenv("FORGE_SUPER_ADMIN_EMAILS", "gone@tentoro.ai, here@tentoro.ai")
+    for email in ("gone@tentoro.ai", "here@tentoro.ai"):
+        await client.post("/api/auth/signup", json={"email": email, "name": "A", "password": "Testpass123"})
+    async with async_session() as db:
+        await db.execute(update(PlatformUser).where(PlatformUser.email == "gone@tentoro.ai")
+                         .values(disabled_at=datetime.now(timezone.utc)))
+        await db.commit()
+    _src, tpl = await _ready_template(auth_client, org_id)
+    assert (await auth_client.post(f"/api/project-templates/{tpl['id']}/submit", json={})).status_code == 200
+    assert [to for to, t, _ in mailbox if t == "template_review_requested"] == ["here@tentoro.ai"]
+
+    # Nobody configured and nobody holding the role: kept, queued, and logged as an error.
+    monkeypatch.setenv("FORGE_SUPER_ADMIN_EMAILS", "")
+    async with async_session() as db:
+        await db.execute(update(PlatformUser).values(platform_role=None))
+        await db.commit()
+    _src2, tpl2 = await _ready_template(auth_client, org_id, name="Second")
+    with caplog.at_level("ERROR"):
+        assert (await auth_client.post(f"/api/project-templates/{tpl2['id']}/submit", json={})).status_code == 200
+    assert any("no Tentoro admin is configured" in r.getMessage() for r in caplog.records)

@@ -74,3 +74,20 @@ anyone's approved templates, and an admin's test copy of anything.
    - end-to-end against the running Forge with three real accounts (builder, admin, a person in another org)
    - a browser walk-through of every screen
    - Smith on Kimi
+
+## Hardening pass (2026-10-19, on smithv5 c764d796)
+
+smithv5 brought a redesigned project page (tabs across the top, a More menu);
+"Save as template" stays in its header. Every ask is tested again from scratch,
+aimed at what the first pass did not reach:
+
+| Area | How it is tested |
+|---|---|
+| Every route × every kind of person | A matrix test: builder, org member (not builder), org admin, outsider, Tentoro admin, Tentoro admin **impersonating** someone, signed out — each against every template route, with the answer each must get. |
+| Two people at once | Against the real Postgres, concurrently: two admins deciding one request, a double-clicked Submit, a double-clicked rating, two saves. Exactly one wins; nothing answers 500. |
+| Email really leaves | Forge's production SMTP path pointed at a local mail sink: the admin's and the builder's emails arrive with the right subject, link and escaped text. |
+| A Gallery template becomes a working app | Another organisation uses an approved template, Smith (Kimi) is told "the exact same app", it is built, and its preview runs. |
+| Every screen, every state | In the browser, through the redesigned project page: save → publish wizard (upload, reorder, remove, app screens) → admin asks for changes → builder resubmits → admin approves → another org uses and rates it → builder takes it out of the Gallery → deletes it. |
+| A full Gallery | 30 approved templates: every cover loads, nothing answers 429, and the page and its API stay fast. |
+| Edges | Templates saved before the Gallery existed; a template whose files were removed; oversized fields; ids that try to walk out of the folder; markup in names. |
+| Regressions | The full backend suite against a clean smithv5 checkout, test by test; type-check of the frontend. |

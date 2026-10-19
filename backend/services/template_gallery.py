@@ -31,6 +31,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.auth import SUPER_ADMIN, PlatformUser
@@ -178,17 +179,41 @@ def status_of(row: TemplateListing | None) -> str:
     return row.status if row is not None else DRAFT
 
 
+async def _locked(db: AsyncSession, template_id: str) -> TemplateListing | None:
+    """The listing, locked until this request commits, and read afresh.
+
+    TWO PEOPLE AT ONCE. Every step reads the status, checks it may move, and
+    writes the next one. Unlocked, six admins deciding one request at the
+    same moment all read "pending" and all won — the history said rejected
+    three times and approved three times, and the builder was sent six
+    contradictory emails (found on Postgres, 2026-10-19). Locked, the second
+    waits for the first, then reads what it decided and is refused.
+    `populate_existing`: the request may already hold this row from an
+    earlier unlocked read, which would otherwise be handed back unchanged."""
+    return (await db.execute(
+        select(TemplateListing).where(TemplateListing.template_id == template_id)
+        .with_for_update().execution_options(populate_existing=True))).scalar_one_or_none()
+
+
 async def _ensure_listing(db: AsyncSession, meta: dict) -> TemplateListing:
-    row = await listing(db, meta["id"])
-    if row is None:
-        row = TemplateListing(
-            template_id=meta["id"], org_id=_uuid(meta["org_id"]),
-            created_by=_uuid(meta.get("created_by")),
-            source_project_id=_uuid(meta.get("source_project_id")),
-            lineage=templates.lineage_of(meta), version=int(meta.get("version") or 1),
-            status=DRAFT, pricing_model="free")
-        db.add(row)
-        await db.flush()
+    """The template's listing, locked — made first if it has none. Two first
+    submits at once both try to make it: the loser's insert is undone on its
+    own (a savepoint) and it takes the winner's row, locked, like any step."""
+    row = await _locked(db, meta["id"])
+    if row is not None:
+        return row
+    try:
+        async with db.begin_nested():
+            db.add(TemplateListing(
+                template_id=meta["id"], org_id=_uuid(meta["org_id"]),
+                created_by=_uuid(meta.get("created_by")),
+                source_project_id=_uuid(meta.get("source_project_id")),
+                lineage=templates.lineage_of(meta), version=int(meta.get("version") or 1),
+                status=DRAFT, pricing_model="free"))
+    except IntegrityError:
+        pass  # made by the request beside this one
+    row = await _locked(db, meta["id"])
+    assert row is not None
     return row
 
 
@@ -336,7 +361,11 @@ async def admins(db: AsyncSession) -> tuple[list[PlatformUser], set[str]]:
         PlatformUser.disabled_at.is_(None),
         or_(PlatformUser.platform_role == SUPER_ADMIN,
             func.lower(PlatformUser.email).in_(sorted(emails) or [""]))))).scalars().all()
-    return list(users), emails | {u.email.lower() for u in users}
+    # A configured address whose login was disabled is not written to either.
+    disabled = {e.lower() for e in (await db.execute(select(PlatformUser.email).where(
+        PlatformUser.disabled_at.is_not(None),
+        func.lower(PlatformUser.email).in_(sorted(emails) or [""])))).scalars().all()}
+    return list(users), (emails - disabled) | {u.email.lower() for u in users}
 
 
 # --------------------------------------------------------------------------- #
@@ -374,7 +403,7 @@ async def submit(db: AsyncSession, meta: dict, who: Viewer, *, pricing_model: st
     if failed:
         raise GalleryError("It is not ready to submit: " + " ".join(c["detail"] for c in failed), 422)
     row.status, row.pricing_model, row.price_cents, row.currency = PENDING, model, cents, cur
-    row.submitted_at, row.review_note = _now(), None
+    row.submitted_at, row.submitted_by, row.review_note = _now(), who.user.id, None
     resubmitted = await db.scalar(select(func.count()).select_from(TemplateEvent).where(
         TemplateEvent.template_id == row.template_id, TemplateEvent.status == PENDING))
     _event(db, row.template_id, PENDING, who.user, "Sent again for review" if resubmitted else None)
@@ -389,6 +418,11 @@ async def submit(db: AsyncSession, meta: dict, who: Viewer, *, pricing_model: st
                f"(v{row.version}) to be added to the Templates Gallery.")
     await _notify(db, [u.id for u in admin_users], "template_review_requested", title, content,
                   admin_link(meta), meta)
+    if not emails:
+        # Nobody to tell: the request is kept and is in the queue, but no
+        # admin will hear of it until one looks. Said loudly, not silently.
+        logger.error("[gallery] %s was submitted but no Tentoro admin is configured "
+                     "(FORGE_SUPER_ADMIN_EMAILS is empty and nobody holds the role)", meta.get("id"))
     for email in sorted(emails):
         outbox.emails.append((email, "template_review_requested", {
             "template_name": meta.get("name"), "requester": who_name, "org_name": org_name or "—",
@@ -401,7 +435,7 @@ async def cancel(db: AsyncSession, meta: dict, who: Viewer) -> TemplateListing:
     """Take back a request that has not been decided."""
     if not may_manage(meta, who):
         raise GalleryError("Only the template's builder or an admin of its organisation can do that.", 403)
-    row = await listing(db, meta["id"])
+    row = await _locked(db, meta["id"])
     if row is None or row.status != PENDING:
         raise GalleryError("There is no request waiting for review to take back.", 409)
     row.status = DRAFT
@@ -413,7 +447,7 @@ async def unpublish(db: AsyncSession, meta: dict, who: Viewer) -> TemplateListin
     """The builder takes their template out of the Gallery."""
     if not may_manage(meta, who):
         raise GalleryError("Only the template's builder or an admin of its organisation can do that.", 403)
-    row = await listing(db, meta["id"])
+    row = await _locked(db, meta["id"])
     if row is None or row.status != APPROVED:
         raise GalleryError("It is not in the Gallery.", 409)
     row.status = REMOVED
@@ -426,7 +460,15 @@ async def decide(db: AsyncSession, meta: dict, admin: PlatformUser, decision: st
     """A Tentoro admin's decision: ``approve``, ``reject`` (ask for changes)
     or ``remove`` (take an approved one out of the Gallery)."""
     note = str(note or "").strip()[:NOTE_MAX]
-    row = await listing(db, meta["id"])
+    # Every version of this app is locked, always in the same order: approving
+    # v3 retires v2, so two admins approving v2 and v3 at once must not each
+    # see the other still pending (both would stay in the Gallery) — and
+    # locking only one's own row first would let them wait on each other.
+    lineage_rows = (await db.execute(
+        select(TemplateListing).where(TemplateListing.lineage == templates.lineage_of(meta))
+        .order_by(TemplateListing.template_id)
+        .with_for_update().execution_options(populate_existing=True))).scalars().all()
+    row = next((r for r in lineage_rows if r.template_id == meta["id"]), None)
     status = status_of(row)
     if decision == "approve":
         if status != PENDING:
@@ -456,9 +498,8 @@ async def decide(db: AsyncSession, meta: dict, admin: PlatformUser, decision: st
     if new_status == APPROVED:
         row.published_at = now
         # The newest approved version is the one in the Gallery.
-        older = (await db.execute(select(TemplateListing).where(
-            TemplateListing.lineage == row.lineage, TemplateListing.status == APPROVED,
-            TemplateListing.template_id != row.template_id))).scalars().all()
+        older = [r for r in lineage_rows
+                 if r.status == APPROVED and r.template_id != row.template_id]
         for old in older:
             if old.version < row.version:
                 old.status = SUPERSEDED
@@ -468,18 +509,25 @@ async def decide(db: AsyncSession, meta: dict, admin: PlatformUser, decision: st
     _event(db, row.template_id, row.status, admin, note)
 
     outbox = Outbox()
-    creator = await db.get(PlatformUser, row.created_by) if row.created_by else None
-    if creator is not None:
-        words = {APPROVED: ("is in the Templates Gallery", "template_approved"),
-                 SUPERSEDED: ("was approved, but a newer version is already in the Gallery",
-                              "template_approved"),
-                 REJECTED: ("needs changes before it can be published", "template_changes_requested"),
-                 REMOVED: ("was taken out of the Templates Gallery", "template_removed")}[row.status]
-        title = f"“{meta.get('name')}” {words[0]}"
-        await _notify(db, [creator.id], words[1], title,
+    # Told: whoever asked for this review, and the template's builder — one
+    # person when they are the same, two when an organisation's admin
+    # submitted a colleague's template. A disabled login is not written to.
+    told = []
+    for uid in dict.fromkeys(u for u in (row.submitted_by, row.created_by) if u):
+        person = await db.get(PlatformUser, uid)
+        if person is not None and person.disabled_at is None:
+            told.append(person)
+    words = {APPROVED: ("is in the Templates Gallery", "template_approved"),
+             SUPERSEDED: ("was approved, but a newer version is already in the Gallery",
+                          "template_approved"),
+             REJECTED: ("needs changes before it can be published", "template_changes_requested"),
+             REMOVED: ("was taken out of the Templates Gallery", "template_removed")}[row.status]
+    if told:
+        await _notify(db, [p.id for p in told], words[1], f"“{meta.get('name')}” {words[0]}",
                       note or "Tentoro reviewed your template.", creator_link(meta), meta)
-        outbox.emails.append((creator.email, words[1], {
-            "name": creator.name or "there", "template_name": meta.get("name"),
+    for person in told:
+        outbox.emails.append((person.email, words[1], {
+            "name": person.name or "there", "template_name": meta.get("name"),
             "note": note or "—", "template_url": app_url(creator_link(meta), origin)}))
     return row, outbox
 
@@ -569,27 +617,52 @@ async def reviews(db: AsyncSession, lineage: str, *, limit: int = 100) -> list[d
             for r, u in rows]
 
 
-async def rate(db: AsyncSession, meta: dict, row: TemplateListing | None, user: PlatformUser,
+def may_rate(meta: dict, status: str, who: Viewer) -> bool:
+    """Anyone signed in may rate a template in the Gallery — except the
+    organisation that made it: its builder and their colleagues would be
+    marking their own work, and the stars are for people choosing one."""
+    return status == APPROVED and not who.in_org and str(meta.get("created_by")) != str(who.user.id)
+
+
+async def rate(db: AsyncSession, meta: dict, row: TemplateListing | None, who: Viewer,
                rating: Any, comment: str = "") -> tuple[TemplateReview, bool]:
     """Set this person's rating of the template. Returns it and whether it is new."""
+    user = who.user
     if status_of(row) != APPROVED:
         raise GalleryError("Only a template in the Gallery can be rated.", 409)
     if str(meta.get("created_by")) == str(user.id):
         raise GalleryError("You cannot rate your own template.", 403)
+    if who.in_org:
+        raise GalleryError("Your organisation built this template, so its rating is for others to give.", 403)
     if isinstance(rating, bool) or not isinstance(rating, int) or not 1 <= rating <= 5:
         raise GalleryError("A rating is a whole number of stars from 1 to 5.")
     comment = str(comment or "").strip()
     if len(comment) > COMMENT_MAX:
         raise GalleryError(f"Feedback can be at most {COMMENT_MAX} characters.")
     lineage = templates.lineage_of(meta)
-    mine = (await db.execute(select(TemplateReview).where(
-        TemplateReview.lineage == lineage, TemplateReview.user_id == user.id))).scalar_one_or_none()
-    new = mine is None
-    if new:
-        mine = TemplateReview(lineage=lineage, template_id=meta["id"], user_id=user.id,
-                              rating=rating, comment=comment or None)
-        db.add(mine)
-    else:
+
+    async def own_review() -> TemplateReview | None:
+        return (await db.execute(
+            select(TemplateReview).where(TemplateReview.lineage == lineage,
+                                         TemplateReview.user_id == user.id)
+            .with_for_update().execution_options(populate_existing=True))).scalar_one_or_none()
+
+    mine = await own_review()
+    new = False
+    if mine is None:
+        # A double-clicked "Post review": both find none and both insert. The
+        # second insert is undone on its own and becomes an edit of the first,
+        # instead of a 500 at commit.
+        try:
+            async with db.begin_nested():
+                db.add(TemplateReview(lineage=lineage, template_id=meta["id"], user_id=user.id,
+                                      rating=rating, comment=comment or None))
+            new = True
+        except IntegrityError:
+            pass
+        mine = await own_review()
+        assert mine is not None
+    if not new:
         mine.rating, mine.comment, mine.template_id = rating, comment or None, meta["id"]
         mine.updated_at = _now()
     if new and meta.get("created_by") and _uuid(meta.get("created_by")):
@@ -612,6 +685,31 @@ async def unrate(db: AsyncSession, meta: dict, user: PlatformUser) -> bool:
     return True
 
 
+async def moderate(db: AsyncSession, review_id: Any, admin: PlatformUser, reason: str) -> dict:
+    """Tentoro takes a review down — abusive, off-topic, or not about the
+    template. The reason is required, the reviewer is told it, and the
+    removal is on the audit record. Returns what was removed."""
+    reason = str(reason or "").strip()[:NOTE_MAX]
+    if not reason:
+        raise GalleryError("Say why the review is being removed — its writer is told.")
+    rid = _uuid(review_id)
+    review = (await db.execute(select(TemplateReview).where(TemplateReview.id == rid)
+                               .with_for_update())).scalar_one_or_none() if rid else None
+    if review is None:
+        raise GalleryError("That review does not exist.", 404)
+    meta = templates.get(review.template_id) or {"id": review.template_id, "name": "a template"}
+    gone = {"id": str(review.id), "template_id": review.template_id, "user_id": str(review.user_id),
+            "rating": int(review.rating), "comment": review.comment or ""}
+    await db.delete(review)
+    from services.audit_service import audit_log
+    await audit_log(db, admin.id, "template_review.removed", "template_review", gone["id"],
+                    changes={**gone, "reason": reason}, actor_user_id=admin.id)
+    await _notify(db, [review.user_id], "template_review_removed",
+                  f"Your review of “{meta.get('name')}” was removed",
+                  f"Tentoro removed it: {reason}", "", meta)
+    return gone
+
+
 async def forget(db: AsyncSession, template_id: str) -> None:
     """A deleted template leaves the review queue and the Gallery. Its uses
     and ratings stay with the lineage: a newer version keeps them."""
@@ -623,7 +721,7 @@ async def forget(db: AsyncSession, template_id: str) -> None:
 __all__ = [
     "APPROVED", "DRAFT", "EDITABLE", "PENDING", "REJECTED", "REMOVED", "STATUSES", "SUBMITTABLE",
     "SUPERSEDED", "GalleryError", "Outbox", "Viewer", "admins", "blocking_failures", "cancel",
-    "checks", "decide", "forget", "history", "is_admin", "listing", "listings", "may_manage",
+    "checks", "decide", "forget", "moderate", "history", "is_admin", "listing", "listings", "may_manage", "may_rate",
     "may_use", "may_view", "membership", "org_names", "people", "published", "rate", "record_use",
     "reviews", "scan_secrets", "stats", "status_of", "submit", "unpublish", "unrate", "viewer",
 ]

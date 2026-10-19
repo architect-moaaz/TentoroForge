@@ -513,6 +513,23 @@ def remove_screenshot(template_id: str, shot_id: str) -> bool:
     return True
 
 
+def caption_screenshot(template_id: str, shot_id: str, caption: str) -> dict | None:
+    """Say what one screenshot shows. None when there is no such picture."""
+    if not _SHOT_ID.match(str(shot_id or "")) or not get(template_id):
+        return None
+    with _meta_lock(template_id):
+        meta = get(template_id) or {}
+        shots = list(meta.get("screenshots") or [])
+        shot = next((s for s in shots if s.get("id") == shot_id), None)
+        if shot is None:
+            return None
+        shot["caption"] = str(caption or "").strip()[:200]
+        meta["screenshots"] = shots
+        meta["updated_at"] = _now()
+        _write_json(_dir(template_id) / "meta.json", meta)
+    return shot
+
+
 def order_screenshots(template_id: str, order: list[str]) -> list[dict]:
     """Put the screenshots in the given order; the first is the gallery cover.
     Ids not named keep their place after the named ones."""
@@ -907,6 +924,8 @@ __all__ = [
     "add_app_screens",
     "add_screenshot",
     "app_screens",
+    "caption_screenshot",
+    "clean_category",
     "counted",
     "delete",
     "exact_build_pending",

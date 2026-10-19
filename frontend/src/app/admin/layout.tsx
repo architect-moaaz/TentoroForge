@@ -5,6 +5,8 @@ import { usePathname } from "next/navigation";
 import {
   Activity, AppWindow, BarChart3, Building2, ChevronLeft, Coins, LayoutDashboard, LayoutTemplate, LogOut, ShieldCheck, Users, ToggleLeft, Radio } from "lucide-react";
 import { NotificationBell } from "@/components/NotificationBell";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "@/lib/api";
 import { AuthGuard } from "@/components/auth-guard";
 import { SuperAdminGate } from "@/components/admin/SuperAdminGate";
 import { Badge } from "@/components/ui/badge";
@@ -40,6 +42,24 @@ const NAV: { label?: string; items: NavItem[] }[] = [
   },
 ];
 
+/** Template requests waiting for review: a Tentoro admin sees them from any cockpit page. */
+function PendingTemplates() {
+  const { data } = useQuery({
+    queryKey: ["template-requests", "count"],
+    queryFn: () => api.get<{ pending: number }>("/api/admin/template-requests/count"),
+    refetchInterval: 60_000,
+  });
+  if (!data?.pending) return null;
+  return (
+    <span
+      className="ml-auto rounded-full bg-amber-500 px-1.5 text-[10px] font-semibold leading-4 text-white"
+      aria-label={`${data.pending} waiting for review`}
+    >
+      {data.pending}
+    </span>
+  );
+}
+
 function CockpitShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { user, logout } = useAuthStore();
@@ -71,6 +91,7 @@ function CockpitShell({ children }: { children: React.ReactNode }) {
                                    : "text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"}`}>
                       <Icon className={`h-[15px] w-[15px] ${active ? "text-white" : "text-slate-400"}`} />
                       {label}
+                      {href === "/admin/templates" && <PendingTemplates />}
                     </Link>
                   );
                 })}

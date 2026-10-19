@@ -67,6 +67,8 @@ export interface TemplateCardData {
   can_manage: boolean;
   can_use: boolean;
   can_rate: boolean;
+  /** The person belongs to the organisation that built it. */
+  own_org: boolean;
   editable: boolean;
 }
 

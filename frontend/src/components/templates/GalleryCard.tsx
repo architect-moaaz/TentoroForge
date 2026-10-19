@@ -65,8 +65,8 @@ export function GalleryCard({
           ) : (
             <span className="text-[11px] text-muted-foreground">Unknown builder</span>
           )}
-          <span className="ml-auto shrink-0 text-[11px] text-muted-foreground" title="When it was built">
-            {formatDate(tpl.created_at)}
+          <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">
+            Built {formatDate(tpl.created_at)}
           </span>
         </div>
       </div>

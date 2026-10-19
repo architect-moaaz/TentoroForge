@@ -9,6 +9,7 @@ import {
   initials,
   shotPath,
   useAuthedImage,
+  type TemplateCardData,
   type TemplatePerson,
   type TemplateStatus,
 } from "@/lib/templateGallery";
@@ -146,6 +147,34 @@ export function PersonAvatar({
       )}
     >
       {initials(person?.name)}
+    </span>
+  );
+}
+
+/** Free, or the price — paid templates are stored ready, and shown as they are. */
+export function PriceBadge({ pricing }: { pricing: TemplateCardData["pricing"] | undefined }) {
+  const paid = pricing?.model === "paid" && pricing.price_cents != null;
+  let label = "Free";
+  if (paid) {
+    const amount = pricing!.price_cents! / 100;
+    try {
+      label = new Intl.NumberFormat(undefined, { style: "currency", currency: pricing!.currency || "USD" }).format(amount);
+    } catch {
+      // A currency code the browser does not know: the number, plainly, never a crash.
+      label = `${amount.toFixed(2)} ${pricing!.currency ?? ""}`.trim();
+    }
+  }
+  return (
+    <span
+      data-price={paid ? pricing!.price_cents : 0}
+      className={cn(
+        "rounded-full px-2 py-0.5 text-[11px] font-medium",
+        paid
+          ? "bg-amber-50 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
+          : "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300",
+      )}
+    >
+      {label}
     </span>
   );
 }

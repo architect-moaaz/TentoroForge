@@ -78,6 +78,14 @@ class RateRequest(BaseModel):
     comment: str = Field(default="", max_length=gallery.COMMENT_MAX)
 
 
+class CaptionRequest(BaseModel):
+    caption: str = Field(default="", max_length=200)
+
+
+class ModerationRequest(BaseModel):
+    reason: str = Field(min_length=1, max_length=gallery.NOTE_MAX)
+
+
 class DecisionRequest(BaseModel):
     decision: str = Field(pattern="^(approve|reject|remove)$")
     note: str = Field(default="", max_length=gallery.NOTE_MAX)
@@ -157,7 +165,8 @@ async def _cards(db: AsyncSession, pairs: list[tuple[dict, TemplateListing | Non
                             for s in meta.get("screenshots") or []],
             **counted.get(lineage, {"uses": 0, "rating": None, "ratings": 0}),
             "can_manage": manage, "can_use": gallery.may_use(status, who),
-            "can_rate": status == gallery.APPROVED and str(meta.get("created_by")) != str(who.user.id),
+            "can_rate": gallery.may_rate(meta, status, who),
+            "own_org": who.in_org,
             "editable": manage and status in gallery.EDITABLE,
         })
     return out
@@ -325,6 +334,19 @@ async def order_screenshots(template_id: str, req: OrderRequest, request: Reques
                             for s in shots]}
 
 
+@router.patch("/api/project-templates/{template_id}/screenshots/{shot_id}")
+async def caption_screenshot(template_id: str, shot_id: str, req: CaptionRequest, request: Request,
+                             user: PlatformUser = Depends(get_current_user),
+                             db: AsyncSession = Depends(get_db)):
+    """Say what a screenshot shows — the words under it in the Gallery."""
+    _meta, row, _who = await _managed(db, template_id, user, request)
+    _editable(row)
+    shot = templates.caption_screenshot(template_id, shot_id, req.caption)
+    if shot is None:
+        raise HTTPException(status_code=404, detail="No such screenshot")
+    return {k: shot.get(k) for k in ("id", "caption", "width", "height", "source")}
+
+
 @router.delete("/api/project-templates/{template_id}/screenshots/{shot_id}", status_code=204)
 async def delete_screenshot(template_id: str, shot_id: str, request: Request,
                             user: PlatformUser = Depends(get_current_user),
@@ -407,6 +429,15 @@ async def unpublish_template(template_id: str, request: Request, user: PlatformU
     return await _card(db, meta, row, who)
 
 
+@router.get("/api/admin/template-requests/count")
+async def count_template_requests(admin: PlatformUser = Depends(require_super_admin),
+                                  db: AsyncSession = Depends(get_db)):
+    """How many requests are waiting — the badge on the cockpit's Templates."""
+    n = await db.scalar(select(func.count()).select_from(TemplateListing).where(
+        TemplateListing.status == gallery.PENDING))
+    return {"pending": int(n or 0)}
+
+
 @router.get("/api/admin/template-requests")
 async def list_template_requests(request: Request, status: str = Query(default="pending"),
                                  admin: PlatformUser = Depends(require_super_admin),
@@ -444,6 +475,20 @@ async def decide_template_request(template_id: str, req: DecisionRequest, reques
     background.add_task(outbox.send)
     who = await gallery.viewer(db, meta, admin, request.state)
     return await _card(db, meta, row, who)
+
+
+@router.post("/api/admin/template-reviews/{review_id}/remove")
+async def remove_template_review(review_id: uuid.UUID, req: ModerationRequest,
+                                 admin: PlatformUser = Depends(require_super_admin),
+                                 db: AsyncSession = Depends(get_db)):
+    """Tentoro takes a review down, saying why; its writer is told."""
+    try:
+        gone = await gallery.moderate(db, review_id, admin, req.reason)
+    except gallery.GalleryError as exc:
+        await db.rollback()
+        raise _fail(exc)
+    await db.commit()
+    return {"removed": gone["id"]}
 
 
 # --------------------------------------------------------------------------- #
@@ -488,7 +533,7 @@ async def rate_template(template_id: str, req: RateRequest, request: Request,
                         db: AsyncSession = Depends(get_db)):
     meta, row, who = await _seen(db, template_id, user, request)
     try:
-        _review, new = await gallery.rate(db, meta, row, user, req.rating, req.comment)
+        _review, new = await gallery.rate(db, meta, row, who, req.rating, req.comment)
     except gallery.GalleryError as exc:
         await db.rollback()
         raise _fail(exc)

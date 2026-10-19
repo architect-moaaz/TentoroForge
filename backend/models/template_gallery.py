@@ -62,6 +62,10 @@ class TemplateListing(Base):
     price_cents: Mapped[int | None] = mapped_column(Integer)
     currency: Mapped[str | None] = mapped_column(String(3))
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: Who sent it for review this time — told of the decision with its builder,
+    #: since an admin of the organisation may submit a colleague's template.
+    submitted_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("platform_users.id", ondelete="SET NULL"))
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     reviewed_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("platform_users.id", ondelete="SET NULL"))

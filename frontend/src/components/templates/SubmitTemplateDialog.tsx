@@ -132,6 +132,13 @@ export function SubmitTemplateDialog({
     onError: (e: Error) => toast.error(e.message || "Could not remove it"),
   });
 
+  const caption = useMutation({
+    mutationFn: ({ id, caption }: { id: string; caption: string }) =>
+      api.patch(`/api/project-templates/${templateId}/screenshots/${id}`, { caption }),
+    onSuccess: refresh,
+    onError: (e: Error) => toast.error(e.message || "Could not save the caption"),
+  });
+
   const reorder = useMutation({
     mutationFn: (order: string[]) =>
       api.put(`/api/project-templates/${templateId}/screenshots/order`, { order }),
@@ -285,6 +292,12 @@ export function SubmitTemplateDialog({
                       Paid <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium">Coming soon</span>
                     </span>
                     <span className="block text-xs text-muted-foreground">Set a price people pay to use it.</span>
+                    <span className="mt-2 flex gap-2" aria-hidden>
+                      <input disabled placeholder="Amount" className="h-7 w-24 rounded border bg-muted px-2 text-xs" />
+                      <select disabled className="h-7 rounded border bg-muted px-1 text-xs">
+                        <option>USD</option>
+                      </select>
+                    </span>
                   </span>
                 </label>
               </div>
@@ -371,9 +384,21 @@ export function SubmitTemplateDialog({
                           <X className="h-3 w-3" />
                         </button>
                       </div>
-                      {s.caption && (
-                        <figcaption className="truncate border-t px-2 py-1 text-[11px] text-muted-foreground">{s.caption}</figcaption>
-                      )}
+                      <figcaption className="border-t">
+                        <input
+                          key={`${s.id}:${s.caption}`}
+                          defaultValue={s.caption}
+                          maxLength={200}
+                          placeholder="Say what this shows"
+                          aria-label={`Caption for screenshot ${i + 1}`}
+                          onBlur={(e) => {
+                            const next = e.target.value.trim();
+                            if (next !== s.caption) caption.mutate({ id: s.id, caption: next });
+                          }}
+                          onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+                          className="w-full bg-transparent px-2 py-1 text-[11px] text-muted-foreground outline-none focus:text-foreground"
+                        />
+                      </figcaption>
                     </figure>
                   ))}
                   {Array.from({ length: uploading }).map((_, i) => (

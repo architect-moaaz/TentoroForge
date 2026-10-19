@@ -765,8 +765,9 @@ def save_as_template(ctx: Ctx, u: dict) -> Outcome:
         f"Saved “{meta['name']}”" + (f" (version {version})" if version > 1 else "") +
         " to Templates as a private template" + (f" — {held}" if held else "") + ". Anyone in "
         "your organisation can start a new app from it there: the exact same app again, or one "
-        "like it. To share it with everyone in the Templates Gallery, open it in Templates, add "
-        "screenshots and choose Submit for review — Tentoro reviews it first. This application "
+        "like it. To share it with everyone in the Templates Gallery, "
+        f"[submit it for review](/org/{facts['org_id']}/templates?submit={meta['id']}): add "
+        "screenshots, and Tentoro reviews it before anyone else can use it. This application "
         "is unchanged."))
 
 
