@@ -504,7 +504,7 @@ class DomainService:
         `www.` companion's with it). `{written, conflicts, message, provider}`.
         Nothing is written when anything is in the way, unless `replace`; mail
         and proof records are never replaced."""
-        from services.deploy.dns_providers import DnsRefused, Record, plan, said_conflicts
+        from services.deploy.dns_providers import DnsAccessDenied, DnsRefused, Record, plan, said_conflicts
         name = _canon(raw)
         entry = next((e for e in self.entries() if e["name"] == name), None)
         if entry is None:
@@ -532,9 +532,13 @@ class DomainService:
             return {"written": False, "conflicts": False, "provider": "",
                     "message": f"{name} needs no records now: " + _said_state(self.view_of(name))}
         provider = zone = None
+        denied: list[str] = []
         for p in self.dns:
             try:
                 zone = await p.zone_for(name)
+            except DnsAccessDenied as exc:
+                denied.append(str(exc))
+                zone = None
             except RuntimeError:
                 logger.warning("[domains] %s could not look for %s", getattr(p, "label", p), name, exc_info=True)
                 zone = None
@@ -542,6 +546,9 @@ class DomainService:
                 provider = p
                 break
         if provider is None or not zone:
+            if denied:
+                raise DomainRefused(" ".join(denied) + " Add the records yourself: the steps are shown under "
+                                    f"{name}.")
             raise DomainRefused(f"None of your connected DNS accounts ({', '.join(p.label for p in self.dns)}) "
                                 f"holds {name}. Connect the account that does, or add the records yourself.")
         plans = {}
