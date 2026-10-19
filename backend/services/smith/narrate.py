@@ -100,6 +100,12 @@ def starting(tool: str, args: dict | None) -> str:
         return f"Reading {a.get('url') or 'the page'}…"
     if t == "look_at_site":
         return f"Looking at {a.get('url') or 'the site'}…"
+    if t == "list_services":
+        return "Checking what the organisation has connected…"
+    if t == "call_api":
+        return f"Calling {str(a.get('method') or 'GET').upper()} {a.get('url') or 'the service'}…"
+    if t == "call_mcp_tool":
+        return f"Running {a.get('tool') or 'a tool'} on {a.get('server') or 'the MCP server'}…"
     if t == "open_decisions":
         return "Checking what the brief leaves unsaid…"
     if t == "define_application":

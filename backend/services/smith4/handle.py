@@ -117,9 +117,10 @@ def _handle(*, project_id: str, output_dir: str, message: str,
     # answered never happened — twice (F&B live test, 2026-10-02). With a
     # confirmation waiting, a yes goes to it: the held step runs again with
     # the yes, and the rest of the plan stays waiting.
+    from services.smith import act as _act
     from services.smith import confirm as confirm_mod
     if answers_plan and typed not in (plan_mod.ALL_LABEL, plan_mod.FIRST_LABEL) \
-            and confirm_mod.waiting(output_dir) and confirm_mod.is_yes(typed):
+            and (confirm_mod.waiting(output_dir) or _act.held(output_dir)) and confirm_mod.is_yes(typed):
         answers_plan = False
     if plan_mod.peek(output_dir):
         if answers_plan:

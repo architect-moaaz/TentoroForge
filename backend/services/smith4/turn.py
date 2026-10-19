@@ -31,7 +31,7 @@ from typing import Any, Callable
 
 from services.smith import loop as loop_mod
 from services.smith import plan as plan_mod
-from services.smith import reads, tools, trials, web, writes
+from services.smith import act, reads, tools, trials, web, writes
 from services.smith.loop import Observation
 from services.smith.understand_ask import UNREADABLE_HEAD
 from services.smith.verbs import missing_fields
@@ -536,6 +536,13 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
             f"out again from its definition on the current one ({len(ctx.engine_refreshed)} "
             f"file(s): {shown}). A fault they reported may already be fixed by that: try it before "
             "changing anything, and if the try passes, say it works now and why.")))
+    if not observations and not ctx.unattended:
+        # A CALL SHOWN LAST TURN, ANSWERED NOW. The yes sends exactly what was
+        # shown — not whatever the model would write again — and anything
+        # else drops it, said, so the model knows it did not go.
+        replied = act.answer_held(ctx.out, ctx.message, said=web.person_said(ctx.ask, history))
+        if replied:
+            observations.append(Observation(tool=replied[0], args=replied[1], status="read", said=replied[2]))
     faults = standing_faults(ctx.doc()) if not observations else []
     if faults:
         # WHAT THE PLATFORM ALREADY KNOWS IS WRONG, SAID BEFORE ANYTHING ELSE.
@@ -660,7 +667,10 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
                 "I could not reach my reasoning service just now, so I stopped here"
                 + (" — what is above is done and kept." if landed else " and nothing was changed.")
                 + " Please try again in a few minutes.")))
-        if tool == "answer" and not landed and _app_exists(ctx):
+        if tool == "answer" and not landed and _app_exists(ctx) \
+                and not any(tools.is_act(o.tool) and o.status == "read" for o in observations):
+            # An answer after a call to a service reports that call; it is not
+            # about what the application does, so nothing there needs trying.
             heard = [o.said or "" for o in observations if o.tool == "answer" and o.status == "error"]
             if not any(tools.is_trial(o.tool) for o in observations):
                 # AN ANSWER ABOUT WHAT THE APP DOES COMES FROM USING IT. TCommerce's
@@ -729,6 +739,17 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
             seen = web.run(tool, args, said=web.person_said(ctx.ask, history), output_dir=ctx.out)
             logger.info("[smith-web] %s %s -> %s", tool, args, " | ".join(seen.splitlines()[:2])[:300])
             observations.append(Observation(tool=tool, args=args, status="read", said=seen))
+            continue
+
+        if tools.is_act(tool):
+            step_ = act.run(tool, args, said=web.person_said(ctx.ask, history), output_dir=ctx.out,
+                            unattended=ctx.unattended)
+            logger.info("[smith-act] %s %s -> %s", tool, {k: str(v)[:80] for k, v in args.items()},
+                        " | ".join(step_.said.splitlines()[:2])[:300])
+            if step_.ask:
+                return _finished(landed, touched, Outcome(status="asked", said=step_.ask,
+                                                          options=list(step_.options)))
+            observations.append(Observation(tool=tool, args=args, status="read", said=step_.said))
             continue
 
         if tools.is_definition(tool):
