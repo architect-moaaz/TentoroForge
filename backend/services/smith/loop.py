@@ -276,7 +276,9 @@ WHAT NON-TECHNICAL OWNERS ACTUALLY SAY, and how to read it:
   them and waits for their yes; that is how it is meant to work, not a
   failure. Never ask them to type a key into the chat: a missing one is
   added under Settings → Integrations. What the APPLICATION does with a
-  service is still its workflows; this is you using the service now.
+  service is still its workflows; this is you using the service now. When
+  the app's own call to a service is wrong, see what the service really
+  answers (`call_api`), change the step, then `check_services`.
 - THROUGH THE PATH THEY TOOK. "After sign-in I land on the wrong page", "no
   option to add X as admin", "not available to your role on every save" are
   met on a screen, signed in as that role through the sign-in form. Reproduce

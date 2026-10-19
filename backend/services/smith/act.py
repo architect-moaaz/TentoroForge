@@ -84,6 +84,11 @@ ACT: tuple[tuple[str, str, dict[str, str]], ...] = (
      "they say yes — the turn ends there. Read the service's documentation with `fetch_url` first.",
      {"method": "string", "url": "string", "query": "object", "headers": "object", "body": "object",
       "encoding": "string", "credential": "string", "send_as": "string"}),
+    ("check_services",
+     "Hold every call the application makes to an outside service (its `http_call` steps) against "
+     "that service's documentation, and call each one that only reads with the stored key — what the "
+     "service really answers against what the workflow reads. Run it after changing such a step.",
+     {}),
     ("call_mcp_tool",
      "Run one tool on one of the organisation's MCP servers (`list_services` names them) with "
      "`arguments` as an object. A tool its server marks read-only runs now; any other is shown "
@@ -582,12 +587,15 @@ def call_mcp_tool(args: dict, *, output_dir: str = "", consented: bool = False,
 
 
 def run(name: str, args: dict, *, said: Iterable[str], output_dir: str = "", consented: bool = False,
-        unattended: bool = False) -> Step:
+        unattended: bool = False, doc: dict | None = None) -> Step:
     """Carry out one call. A refusal IS the observation."""
     args = {k: v for k, v in (args or {}).items() if v not in (None, "")}
     try:
         if name == "list_services":
             return Step(said=list_services(output_dir))
+        if name == "check_services":
+            from services.blueprint import api_reference
+            return Step(said=scrub(api_reference.check_report(output_dir, doc or {})))
         if name == "call_api":
             return call_api(args, said=said, output_dir=output_dir, consented=consented, unattended=unattended)
         if name == "call_mcp_tool":

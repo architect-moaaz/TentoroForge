@@ -491,7 +491,7 @@ def _failing_note(observations: list[Observation], elapsed_s: float | None = Non
     return ""
 
 
-def standing_faults(doc: dict | None) -> list[str]:
+def standing_faults(doc: dict | None, output_dir: str = "") -> list[str]:
     """Faults the platform's own checks see in a built application: a page
     handed something it never reads, pages of one module disagreeing on who
     may open them. Best-effort — a check that cannot run says nothing."""
@@ -519,6 +519,13 @@ def standing_faults(doc: dict | None) -> list[str]:
             out.append(f"{routes.get(str(row.get('page')), row.get('page'))} signs people in through "
                        "next-auth itself, so it decides where each person lands instead of their role "
                        "— rewrite it with SignInForm/useSignIn (or SignUpForm/useSignUp) from @/sdk/client.")
+    # A CALL TO AN OUTSIDE SERVICE THAT ITS DOCUMENTATION, OR THE SERVICE
+    # ITSELF, SAYS IS WRONG — the live call made once its key is stored.
+    try:
+        from services.blueprint import api_reference
+        out += api_reference.standing(output_dir, doc)
+    except Exception:  # noqa: BLE001
+        logger.debug("[smith] service check failed", exc_info=True)
     return out
 
 
@@ -543,7 +550,7 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
         replied = act.answer_held(ctx.out, ctx.message, said=web.person_said(ctx.ask, history))
         if replied:
             observations.append(Observation(tool=replied[0], args=replied[1], status="read", said=replied[2]))
-    faults = standing_faults(ctx.doc()) if not observations else []
+    faults = standing_faults(ctx.doc(), ctx.out) if not observations else []
     if faults:
         # WHAT THE PLATFORM ALREADY KNOWS IS WRONG, SAID BEFORE ANYTHING ELSE.
         # F&B's order page dropped the basket the menu handed it, and its
@@ -743,7 +750,7 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
 
         if tools.is_act(tool):
             step_ = act.run(tool, args, said=web.person_said(ctx.ask, history), output_dir=ctx.out,
-                            unattended=ctx.unattended)
+                            unattended=ctx.unattended, doc=ctx.doc())
             logger.info("[smith-act] %s %s -> %s", tool, {k: str(v)[:80] for k, v in args.items()},
                         " | ".join(step_.said.splitlines()[:2])[:300])
             if step_.ask:

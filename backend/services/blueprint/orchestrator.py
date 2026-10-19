@@ -431,7 +431,7 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # what that node declares it needs, refused at apply otherwise — the same
     # gate as before, now per workflow, so one refused workflow re-asks for
     # one workflow rather than for all thirty-five.
-    _n("workflow_steps", "workflow", ("workflows",), ("workflows",),
+    _n("workflow_steps", "workflow", ("workflows", "api_reference"), ("workflows",),
        fanout="workflows",
        note="§107 step 16; one authored step graph per declared workflow"),
     # THE PATHS BETWEEN THE SCREENS. With the screens and the processes
@@ -451,6 +451,16 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
        note="§100; placed after the data model because permissions guard entities, and after the "
             "integrations because a sign-in through an identity provider names its `auth` row"),
     _n("integrations", "integration", ("application_model",), ("integrations",)),
+    # WHAT EACH OUTSIDE SYSTEM'S DOCUMENTATION SAYS, before a step calls it.
+    # The manual the person handed over reached the requirements and stopped
+    # there; the author of the calls wrote them from memory. Kept beside the
+    # Blueprint (`api_reference`), shown to `workflow_steps` and held against
+    # every `http_call` step; nothing is written when nothing was documented.
+    _n("api_reference", "integration", ("integrations",), (), kind="service",
+       note="each outside system's documentation, read into a short reference for the step author"),
+    # AND CALLED FOR REAL, where it can be: a reading step whose key is stored.
+    _n("service_check", "integration", ("workflow_steps",), (), kind="service",
+       note="one real read-only call per outside step whose key is stored, against what the workflow reads"),
 
     # join
     _n("integration", "backend",
@@ -3553,7 +3563,25 @@ def _find_imagery(svc: BlueprintService) -> None:
                 out.get("empty"), out.get("why") or "")
 
 
+def _read_api_documentation(svc: BlueprintService) -> None:
+    """Write `.forge/api-reference.json` from what the person handed over (see `api_reference`)."""
+    from services.blueprint import api_reference
+
+    refs = api_reference.write(svc.output_dir, svc.doc)
+    logger.info("[api-reference] %d documented service(s)", len(refs))
+
+
+def _check_services(svc: BlueprintService) -> None:
+    """Call each reading `http_call` step whose key is stored (see `api_reference.probe`)."""
+    from services.blueprint import api_reference
+
+    results = api_reference.probe(svc.output_dir, svc.doc)
+    logger.info("[service-check] %s", "; ".join(f"{r['workflow']}/{r['step']}: {r['ok']}" for r in results) or "no outside calls")
+
+
 SERVICE_HANDLERS: dict[str, Any] = {
+    "api_reference": _read_api_documentation,
+    "service_check": _check_services,
     "imagery": _find_imagery,
     "page_layouts": _compose_page_layouts,
     "auth_pages": _declare_auth_pages,
