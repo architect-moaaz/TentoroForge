@@ -3146,6 +3146,9 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
     project_middleware(view, app_root)
     # The data route needs the same list the matcher was built from.
     project_public_resources(view, app_root)
+    # The tools the app offers an assistant, from the same gates (`app_mcp`).
+    from services.blueprint.app_mcp import project_app_mcp
+    project_app_mcp(view, app_root)
     # …and a page the matcher lets through needs a door that is not inside
     # `(dashboard)`, whose layout redirects anyone without a session. After
     # the middleware, because the two are one statement about the same pages.

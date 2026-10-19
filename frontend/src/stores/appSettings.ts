@@ -4,7 +4,7 @@ import { create } from "zustand";
  * "Manage in App settings": the Publish dialog asks for the App settings tab,
  * on one section, and the project page opens it.
  */
-export type AppSettingsSection = "domains" | "publishing";
+export type AppSettingsSection = "domains" | "publishing" | "assistants";
 
 interface AppSettingsState {
   section: AppSettingsSection;

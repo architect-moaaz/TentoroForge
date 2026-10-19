@@ -104,6 +104,10 @@ def starting(tool: str, args: dict | None) -> str:
         return "Checking what the organisation has connected…"
     if t == "call_api":
         return f"Calling {str(a.get('method') or 'GET').upper()} {a.get('url') or 'the service'}…"
+    if t == "app_mcp":
+        act_ = str(a.get("action") or "status").lower()
+        return {"on": "Turning on assistant access to the app…", "off": "Turning off assistant access to the app…"}.get(
+            act_, "Checking what assistants can do in the app…")
     if t == "check_services":
         return "Checking the app's calls to outside services against their documentation…"
     if t == "call_mcp_tool":

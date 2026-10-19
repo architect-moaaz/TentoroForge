@@ -4104,6 +4104,10 @@ _ALWAYS_OPEN: tuple[str, ...] = (
     # The stand-in checkout: a signed-out buyer (a guest cart) is sent here
     # too; it shows an amount by a session id and charges nothing.
     "pay", "api/pay",
+    # AN ASSISTANT HOLDS A TOKEN, NOT A SESSION. The MCP route checks the
+    # person's token itself (and answers 404 unless the owner turned it on);
+    # its token routes ask for the session themselves.
+    "api/mcp",
 )
 
 

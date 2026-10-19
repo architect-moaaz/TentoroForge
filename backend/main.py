@@ -42,6 +42,7 @@ from config import ALLOWED_ORIGINS, RATE_LIMIT_REQUESTS_PER_MINUTE, RATE_LIMIT_B
 
 # Routers
 from routers.auth import router as auth_router
+from routers.app_mcp import router as app_mcp_router
 from routers.orgs import router as orgs_router
 from routers.project_events import router as project_events_router
 # Schema editor (Phase 5 port): output_projects must be registered BEFORE the
@@ -195,6 +196,7 @@ app.include_router(platform_integrations_router)
 app.include_router(platform_mcp_servers_router)
 app.include_router(preview_proxy_router)
 app.include_router(deployments_router)
+app.include_router(app_mcp_router)
 app.include_router(domains_router)
 app.include_router(verify_router)
 app.include_router(generate_router)
