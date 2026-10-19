@@ -459,8 +459,12 @@ class DomainService:
         gone = {name} | {e["name"] for e in self.entries() if e.get("redirectTo") == name}
         pid = await self.project_id()
         if pid:
-            for n in sorted(gone):
-                await self.client.remove_project_domain(pid, n)
+            try:
+                await detach(self.client, pid, gone)
+            except RuntimeError as exc:
+                m = re.search(r"'message':\s*'([^']+)'", str(exc))
+                raise DomainRefused(f"{name} could not be removed, so nothing was changed"
+                                    + (f": {m.group(1)}" if m else ".")) from exc
         await self._unwrite(gone)
 
         def change(dep: dict) -> None:
@@ -738,15 +742,21 @@ class DomainService:
         before = self.main_address()
         pid = await self.project_id()
         if pid:
-            try:
-                await self.client.add_project_domain(pid, new)
-            except RuntimeError as exc:
-                text = str(exc)
-                if "409" in text or "already" in text.lower() or "in use" in text.lower():
-                    raise DomainRefused(f"{new} is taken by another app; choose another name.") from exc
-                raise
+            # A RETRY FINDS ITS OWN NAME. When an earlier attempt attached the
+            # new name and then stopped, Vercel answers "in use" for it — in use
+            # by this very app, which is not "taken by another" (Mark 8,
+            # 2026-10-18).
+            mine = await self.client.get_project_domain(pid, new) is not None
+            if not mine:
+                try:
+                    await self.client.add_project_domain(pid, new)
+                except RuntimeError as exc:
+                    text = str(exc)
+                    if "409" in text or "already" in text.lower() or "in use" in text.lower():
+                        raise DomainRefused(f"{new} is taken by another app; choose another name.") from exc
+                    raise
             if old:
-                await self.client.remove_project_domain(pid, old["name"])
+                await self._let_go(pid, old["name"], new, added=not mine)
         now = _iso(self.now())
 
         def change(dep: dict) -> None:
@@ -768,6 +778,24 @@ class DomainService:
         if self.main_address() != before:
             await self.follow()
         return view
+
+    async def _let_go(self, pid: str, old: str, new: str, *, added: bool) -> None:
+        """Detach the old Tentoro name once the new one is attached; whatever
+        redirected to it now redirects to the new name (`detach`). If it still
+        cannot be let go, a name this attempt attached is detached again, so
+        nothing has changed and the person is told why — not a 500 with the
+        app answering at both names (Mark 8, 2026-10-18)."""
+        try:
+            await detach(self.client, pid, [old], repoint_to=new)
+        except RuntimeError as exc:
+            if added:
+                try:
+                    await self.client.remove_project_domain(pid, new)
+                except RuntimeError:
+                    pass
+            m = re.search(r"'message':\s*'([^']+)'", str(exc))
+            raise DomainRefused(f"{old} could not be let go, so nothing was renamed"
+                                + (f": {m.group(1)}" if m else ".")) from exc
 
     # ── checking ────────────────────────────────────────────────────
 
@@ -1079,17 +1107,65 @@ async def attach_after_publish(path: str | Path, client: Any, project_name: str,
     return svc.view()["domains"]
 
 
+def _redirect_target(d: dict) -> str:
+    return str(d.get("redirect") or "").split("//")[-1].strip("/").lower()
+
+
+async def detach(client: Any, pid: str, names: set[str] | list[str], *, repoint_to: str | None = None) -> list[str]:
+    """Detach `names` from the Vercel project, and nothing else.
+
+    VERCEL WILL NOT DETACH A NAME ANOTHER ADDRESS REDIRECTS TO (409
+    `domain_is_redirect`). The app's other addresses point at its main one, a
+    `www` companion at its bare domain, the old `vercel.app` address at the
+    main address — so a rename, a remove or an app deletion died half-way
+    (Mark 8's rename, 2026-10-18). Addresses that stay and redirect to one
+    being detached are pointed at `repoint_to` (None: they stop redirecting;
+    the caller's `follow` sets them again), and among those going, the ones
+    that redirect are detached before what they redirect to.
+
+    Raises RuntimeError from Vercel after putting the repointed redirects
+    back; returns the names detached."""
+    going = {n.lower() for n in names}
+    domains = await client.list_project_domains(pid)
+    moved: list[tuple[str, str]] = []
+    try:
+        for d in domains:
+            name = str(d.get("name") or "").lower()
+            if name and name not in going and _redirect_target(d) in going:
+                await client.redirect_project_domain(pid, name, repoint_to)
+                moved.append((name, _redirect_target(d)))
+        order = sorted(going, key=lambda n: (0 if any(str(d.get("name") or "").lower() == n and _redirect_target(d) in going
+                                                       for d in domains) else 1, n))
+        done: list[str] = []
+        for n in order:
+            await client.remove_project_domain(pid, n)
+            done.append(n)
+        return done
+    except RuntimeError:
+        for name, was in moved:
+            try:
+                await client.redirect_project_domain(pid, name, was)
+            except RuntimeError:
+                pass
+        raise
+
+
 async def detach_all(path: str | Path, client: Any, project_name: str) -> list[str]:
     """When an app is deleted: let go of every address it holds in Vercel, so
     the owner (or another app) can use them again. The names let go."""
     svc = DomainService(output_dir=str(project_root(path)), client=client, project_name=project_name)
     names = [e["name"] for e in svc.entries()]
     pid = await svc.project_id() if names else None
+    if not pid:
+        return []
+    try:
+        return await detach(client, pid, names)
+    except RuntimeError:
+        logger.warning("[domains] %s: could not let go of every address at once", project_name, exc_info=True)
     done: list[str] = []
-    for n in names if pid else []:
+    for n in names:
         try:
-            await client.remove_project_domain(pid, n)
-            done.append(n)
+            done += await detach(client, pid, [n])
         except RuntimeError:
             logger.warning("[domains] %s: could not let go of %s", project_name, n, exc_info=True)
     return done

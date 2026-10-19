@@ -123,6 +123,19 @@ _STATUS_ASK = re.compile(
 _CHANGE_START = re.compile(r"^(please\s+|can you\s+|could you\s+)?(fix|change|add|remove|make|rename|build|create|delete|set|show|open|edit|update|rebuild)\b", re.I)
 
 
+#: A message that means "go on with what stopped": the whole message, in
+#: these words, nothing else asked in it.
+_CARRY_ON = re.compile(
+    r"^(please\s+)?(carry on|continue|resume|rerun|re-run|retry|try again|restart( and rebuild)?|rebuild"
+    r"|build( (the )?(app|application|it))?( again)?|run (it )?again|start again|go on|keep going|pick it up"
+    r"|finish (it|the build))$", re.I)
+
+
+def _asks_to_carry_on(message: str) -> bool:
+    word = " ".join((message or "").strip().lower().rstrip(".!?").split())
+    return bool(word) and bool(_CARRY_ON.match(word))
+
+
 def _lifecycle_verb(message: str) -> str | None:
     """The lifecycle verb a message IS, or None. Only an exact one-word command
     counts — 'define the roles for me' is a sentence, not the `define` verb —
@@ -865,10 +878,17 @@ def _build_complete_message(doc: dict | None) -> str | None:
                     ) or [str(u.get("page")) for u in unbuilt]
     n = len(unbuilt)
     page_word = "page" if n == 1 else "pages"
+    if not served:
+        # NOT "EVERYTHING ELSE WORKS" WHEN NOTHING IS SERVED. A two-screen app
+        # with 0 of 2 pages was handed over with those words (8qug271e,
+        # 2026-10-09; Crumb, "0 of 4 pages ready… everything else works").
+        return (f"Your application is not usable yet — none of its {planned} pages could be composed "
+                f"({', '.join(routes)}), so nothing is served. Tell me to retry them, or say which "
+                "to start with." + later)
     return (f"Your application is built — {served} of {planned} pages are ready "
             f"to preview. {n} {page_word} couldn't be composed "
             f"({', '.join(routes)}) and {'is' if n == 1 else 'are'} not served "
-            f"yet; everything else works. Preview what's there, or tell me to "
+            f"yet; the other {served} work. Preview what's there, or tell me to "
             f"retry {'it' if n == 1 else 'them'}." + later)
 
 
@@ -1400,7 +1420,60 @@ async def read_flows(
     except FileNotFoundError:
         raise HTTPException(status_code=404,
                             detail="no Blueprint for this project") from None
-    return {**graph(svc.doc), "findings": flow_findings(svc.doc)}
+    # THE WHOLE MAP beside the flows: every screen, the menu, the links and
+    # what is missing — the App Map view draws both on one canvas.
+    from services.blueprint.app_map import app_map
+    return {**graph(svc.doc), "findings": flow_findings(svc.doc), "map": app_map(svc.doc)}
+
+
+@router.get("/api/projects/{project_id}/blueprint/history")
+async def read_blueprint_history(
+    project_id: uuid.UUID,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Build history: every recorded change to the application, newest first,
+    and which earlier versions can be restored. A Blueprint application keeps
+    its history here, not in git — its repository has no commits, so the old
+    git-based list showed nothing but publishes."""
+    project = await get_project_with_auth(project_id, user, db)
+    from services.blueprint.service import BlueprintService
+    from services.smith.revert import history
+    try:
+        svc = BlueprintService.load(output_dir=str(_output_dir(project)))
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="no Blueprint for this project") from None
+    return history(svc)
+
+
+class RestoreRequest(BaseModel):
+    version: int
+
+
+@router.post("/api/projects/{project_id}/blueprint/restore")
+async def restore_blueprint_version(
+    project_id: uuid.UUID,
+    req: RestoreRequest,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Bring the application back to how it stood at an earlier version and
+    write it out again. Recorded as a change of its own, so it can be undone;
+    the live app changes only when it is published again."""
+    project = await get_project_with_auth(project_id, user, db)
+    from services.blueprint.service import BlueprintService
+    from services.smith.revert import restore_to
+    from services.smith.section_change import SectionChangeError
+    out_dir = _output_dir(project)
+    try:
+        svc = BlueprintService.load(output_dir=str(out_dir))
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="no Blueprint for this project") from None
+    try:
+        out = await asyncio.to_thread(restore_to, svc, int(req.version), app_root=str(Path(out_dir) / "app"))
+    except SectionChangeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    return {"restored": out["restored"], "version": out["version"]}
 
 
 @router.get("/api/projects/{project_id}/gates")
@@ -1811,6 +1884,22 @@ async def smith_chat(
             # built… what would you like to do?" (pcn4owv7, 2026-10-15 05:36).
             if _yes_to_a_carry_on_offer(req.history, req.message):
                 req.message = "carry on"
+            # A BUILD THAT STOPPED SHORT IS PICKED UP, NOT POINTED AT. "continue",
+            # "resume", "rerun", "Build app" after a build whose process went
+            # away or whose step failed got the card to press, a canned "press
+            # Approve and build", a tool loop inventing a change, or nothing
+            # at all (fyuhs16i, qpqhdugb, 97l5iqsp, grpz7rl5, 23libgx8,
+            # fnocleub, 20nhpelj, 2026-10). The ledger says where it stopped;
+            # say that, then run the same phase again from the definition.
+            from services.smith import plan as _plan_mod
+            dead = run_registry.dead_build(output_dir) if _asks_to_carry_on(req.message) else None
+            if dead is not None and not _plan_mod.peek(output_dir) and not req.approved:
+                emit("message", {"text": run_registry.stopped_line(dead)
+                                 + " Starting it again from the definition now; what was already "
+                                   "built is kept.", "status": "reported"})
+                _phase = str(dead.get("phase") or "") or "build"
+                return _run_dag(str(output_dir), app_root, "", approved=_phase == "build", emit=emit,
+                                app_name=getattr(project, "name", "") or "", phase=_phase)
             verb = _lifecycle_verb(req.message)
             if verb == "status":
                 emit("message", {"text": _status_report(svc.doc if svc else {}, output_dir),
@@ -1998,8 +2087,12 @@ async def smith_chat(
             if svc is not None and defined and not _answers_smith \
                     and (_is_build_consent(req.message) or _is_forced_rebuild(req.message)):
                 from services.blueprint import approval as _approval
+                # A BUILD THAT STOPPED SHORT IS NOT "ALREADY BUILT". "approve and
+                # build" after one got "already built, nothing has changed since"
+                # with no hand-over on record (baicuft0, 2026-10-09).
                 if not _is_forced_rebuild(req.message) and _is_built(output_dir) \
-                        and _approval.state_of(svc.doc, "plan") == "approved":
+                        and _approval.state_of(svc.doc, "plan") == "approved" \
+                        and run_registry.dead_build(output_dir) is None:
                     # Already built, and nothing has changed since it was
                     # approved: rebuilding costs minutes and money for the
                     # same application, so it is asked rather than assumed.
@@ -2166,6 +2259,7 @@ async def smith_chat(
                 history=[(t.role, t.text) for t in req.history if t.text][-10:],
                 reasoning_fn=lambda text, kind="reasoning", node="": emit(
                     "thought", {"text": text, "kind": kind, "node": node}),
+                defer_check=True,
             ))
             # A TURN ALWAYS ANSWERS. An empty answer posted an empty bubble —
             # or, read back from the transcript, no reply at all.
@@ -2179,10 +2273,32 @@ async def smith_chat(
                 "status": turn_result.status,
                 "intent": turn_result.intent,
             })
+            # THE CHECK, AFTER THE ANSWER. The pages the change reaches are
+            # opened as the people they are for and what this change broke is
+            # repaired once; what was already not working is said as known.
+            if turn_result.status in ("resolved", "needs_user") and turn_result.touched_paths:
+                try:
+                    run_registry.turn_step(output_dir, "checking the pages the change reaches")
+                    # SAID IN THE TRAIL, so the panel reads "Checking…" and not
+                    # "Thinking" for the minutes this takes (cxz95dd1, 13:38 UTC).
+                    emit("thought", {"text": "Checking the pages this change reaches, as the people they are for…",
+                                     "kind": "step", "node": ""})
+                    from services.blueprint.app_check import check_change as _check_change
+                    _checked = _check_change(str(output_dir), list(turn_result.touched_paths),
+                                             asked=req.message, emit=emit)
+                    if _checked and _checked.get("said"):
+                        emit("message", {"text": _checked["said"], "status": "resolved"})
+                except Exception:  # noqa: BLE001 — the change landed; its check is a bonus
+                    logger.exception("[smith4] checking the pages a change reaches failed")
 
             # `asked` and `needs_user` are the conversation doing its job —
             # §16 holds rather than guessing. `resolved` already changed the
             # Blueprint. Only a handoff needs the graph.
+            _follow = str(getattr(turn_result, "follow_up", "") or "")
+            if _follow.startswith("run:"):
+                _phase = _follow[4:] or "build"
+                return _run_dag(str(output_dir), app_root, "", approved=_phase == "build", emit=emit,
+                                app_name=getattr(project, "name", "") or "", phase=_phase)
             if turn_result.status in ("handoff", "not_enabled"):
                 return _run_dag(str(output_dir), app_root, req.message,
                                 approved=req.approved, emit=emit,
@@ -2229,8 +2345,15 @@ async def smith_chat(
                 _turn_ledger.end(None if f.cancelled() else f.exception())
             _inner.add_done_callback(_ledger_end)
             _fut = asyncio.shield(_inner)
+            # FROM THE FIRST MINUTES, NOT FROM THE RELEASE. The progress line
+            # began only once the panel was released — an hour into a build —
+            # so a build was silent in chat for 33, 43 and 77 minutes while it
+            # ran (fyuhs16i, 97l5iqsp, 23libgx8, 2026-10). Every few minutes
+            # from the start: the stage the ledger says it is on.
+            _progress = asyncio.ensure_future(_post_progress(_inner, output_dir, emit))
             try:
                 _result = await asyncio.wait_for(_fut, timeout=_turn_timeout)
+                _progress.cancel()
                 emit("done", _result)
                 _after_turn(_result)
             except asyncio.TimeoutError:
@@ -2256,12 +2379,11 @@ async def smith_chat(
                              "do anything."),
                 })
                 emit("done", {"status": "timeout"})
-                # BETWEEN THAT NOTE AND THE END, SAY WHAT IS HAPPENING. The
-                # note was the last word for the rest of the turn — fifty
-                # minutes of it, and a turn that died read exactly the same
-                # (pcn4owv7, 2026-10-15). Every few minutes: the step the
-                # ledger says it is on; the moment the ledger stops: that.
-                _progress = asyncio.ensure_future(_post_progress(_inner, output_dir, emit))
+                # BETWEEN THAT NOTE AND THE END, THE PROGRESS LINE GOES ON. It
+                # was the last word for the rest of the turn — fifty minutes
+                # of it, and a turn that died read exactly the same (pcn4owv7,
+                # 2026-10-15). The poster started above keeps posting the step
+                # the ledger says it is on; the moment the ledger stops: that.
                 # WHEN THE BACKGROUND BUILD ACTUALLY FINISHES, SAY SO. The panel
                 # was released, but the run registry (which the panel now polls)
                 # must still learn the run ended — otherwise it stays "running"
@@ -2653,6 +2775,21 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
                         _approval.record(svc, _g)
                     except Exception:  # noqa: BLE001 — a gate that cannot be written must not stop the build
                         logger.exception("could not record the %s approval for %s", _g, output_dir)
+            # WHAT WAS OFFERED AND BUILT PAST IS LEFT OUT ON PURPOSE. The reference
+            # items the product model's review said were "not in the model yet"
+            # are declined here, with the reason, so the checks after hand-over
+            # hold the app to the model that was approved and not to a list the
+            # person chose to build without (Mark 8, 2026-10-16).
+            try:
+                from services.blueprint.reference_coverage import decline_unasked
+                _left_out = decline_unasked(svc, by="build")
+                if _left_out:
+                    emit("thought", {"text": "Left out, as built: " + ", ".join(d["name"] for d in _left_out[:8])
+                                     + (" and more" if len(_left_out) > 8 else "")
+                                     + " — such products have them; this one was built without. Ask for any of them to add it.",
+                                     "kind": "step", "node": "domain_reference"})
+            except Exception:  # noqa: BLE001 — a note on the record, never the build
+                logger.exception("could not record what the build left out for %s", output_dir)
         if description:
             # AN ANSWER ADDS TO THE BRIEF, IT DOES NOT REPLACE IT. This
             # assigned, so a clarifying exchange destroyed the request that
@@ -2933,9 +3070,11 @@ def _gate_turn(svc: Any, gate: str, output_dir: str, app_root: str, req: Any, *,
                                              request=req.message, reasoning=reasoning,
                                              parts=list(turn.get("parts") or []),
                                              decline=list(turn.get("decline") or []))
+            _names = {str(r.get("id")): str(r.get("description") or r.get("title") or "")
+                      for r in (svc.doc.get("requirements") or []) if isinstance(r, dict)}
             text = _gates.say_requirements_change(out["diff"], out["version"],
                                                   declined=list(out.get("declined") or []),
-                                                  reference=bool(out.get("reference")))
+                                                  reference=bool(out.get("reference")), names=_names)
         else:
             out = _gates.revise_model(svc, turn, request=req.message, reasoning=reasoning,
                                       detail=lambda s: _detail_new_records(s, reasoning))
@@ -3071,7 +3210,14 @@ def progress_line(snapshot: dict | None) -> str | None:
         return None
     minutes = int(max(0, int(snapshot.get("elapsedMs") or 0) // 60000))
     step = str(snapshot.get("step") or "").strip()
-    return f"Still at it ({minutes} min): {step}." if step else f"Still at it ({minutes} min)."
+    if step:
+        return f"Still at it ({minutes} min): {step}."
+    # A BUILD HAS NO STEP LINE; IT HAS A STAGE AND A COUNT.
+    stage = str(snapshot.get("stage") or "").strip()
+    done, total = int(snapshot.get("nodesDone") or 0), int(snapshot.get("nodesTotal") or 0)
+    where = f" at {stage}" if stage else ""
+    count = f", {done} of {total} steps done" if total else ""
+    return f"Still building ({minutes} min){where}{count}." if (stage or total) else f"Still at it ({minutes} min)."
 
 
 async def _post_progress(inner: Any, output_dir: Any, emit: Any, *, every: float | None = None) -> None:

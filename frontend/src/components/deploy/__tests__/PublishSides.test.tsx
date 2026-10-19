@@ -165,6 +165,29 @@ describe("Publish, Test and Production", () => {
     expect(document.body.textContent).toContain("acme.apps.tentoro.ai");
   });
 
+  it("pressing Publish shows the new publish's progress, never the last result", async () => {
+    // Mark 8, 2026-10-17: the dialog opened on the last Test publish (read
+    // from /latest), and pressing Publish to Test showed every stage struck
+    // through and "Test version live at" the OLD address. People closed and
+    // reopened the dialog to get a publish that actually ran.
+    status = { target: "test", test: side("https://cxz95dd1-test.vercel.app"), production: side("https://mark-8.vercel.app"),
+               test_address: "https://cxz95dd1-test.vercel.app", untested_changes: false, test_ahead: true };
+    latest = { id: "d9", status: "succeeded", url: "https://cxz95dd1-test.vercel.app", error: null, finished_at: "2026-10-17T12:48:33Z" };
+    await render();
+    expect(document.body.textContent).toContain("cxz95dd1-test.vercel.app");
+    await act(async () => { button("Publish to Test")!.click(); });
+    for (let i = 0; i < 3; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(started).toEqual([{ environment: "test", reset_test_data: false }]);
+    const text = document.body.textContent ?? "";
+    expect(text).not.toContain("Test version live at");
+    expect(text).not.toContain("Live at");
+    // The stages are shown for the publish that just began: the first one is
+    // current, none is struck through.
+    const struck = [...document.body.querySelectorAll("span.line-through")].map((e) => e.textContent);
+    expect(struck).toEqual([]);
+    expect(text).toContain("Packaging app source");
+  });
+
   it("opening the dialog while a publish runs follows it and never starts another", async () => {
     status = { target: "test", test: null, production: null, test_address: "https://acme-test.vercel.app",
                untested_changes: true, test_ahead: false };

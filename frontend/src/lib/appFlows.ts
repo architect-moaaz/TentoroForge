@@ -11,7 +11,16 @@ export type FlowNode = {
 };
 export type FlowEdge = { from: string; to: string; does: string; process: string; then: "go" | "offer" | "menu" };
 export type Flow = { id: string; name: string; role: string; goal: string; ends: string; nodes: FlowNode[]; edges: FlowEdge[] };
-export type FlowsResponse = { flows: Flow[]; findings: string[] };
+/** The whole application on one map (`app_map.app_map`): every screen, how a
+ *  person reaches it, and what nothing reaches. */
+export type MapScreen = {
+  id: string; name: string; route: string; purpose: string; pattern: string; access: string;
+  who: string[]; menu: string; landing: string[]; entry: boolean; afterSignup?: boolean;
+  flows: string[]; starts: string[];
+};
+export type MapGap = { kind: "unreachable" | "no_path"; page: string; text: string };
+export type AppMap = { screens: MapScreen[]; links: { from: string; to: string }[]; menu: unknown[]; gaps: MapGap[] };
+export type FlowsResponse = { flows: Flow[]; findings: string[]; map?: AppMap };
 
 type Row = Record<string, any>;
 const live = (rows: unknown): Row[] =>

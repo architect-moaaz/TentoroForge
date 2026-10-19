@@ -259,3 +259,14 @@ def test_the_key_works_from_an_environment_file_with_its_line_breaks_escaped(mon
     url = dc.apply_url(GODADDY, "forge-subdomain", "abc.com", "xyz", {"target": "cname.vercel-dns.com"}, [],
                        redirect_uri="https://forge-v3.tentoro.ai/x", state="s")
     _verify(url, key_pem)
+
+
+def test_a_subdomain_link_always_names_its_host():
+    """Cloudflare ignores hostRequired: a subdomain link without `host=` would
+    put the CNAME on the bare domain (Cloudflare, 2026-10-17). No such link."""
+    from services.deploy import domain_connect as dc
+    rec = [{"host": "abc.com", "type": "CNAME", "value": "cname.vercel-dns.com"}]
+    assert dc.plan_apply("subdomain", "abc.com", "abc.com", rec) is None
+    service, host, values, groups = dc.plan_apply(
+        "subdomain", "app.abc.com", "abc.com", [{"host": "app.abc.com", "type": "CNAME", "value": "cname.vercel-dns.com"}])
+    assert host == "app" and values == {"target": "cname.vercel-dns.com"} and groups == []

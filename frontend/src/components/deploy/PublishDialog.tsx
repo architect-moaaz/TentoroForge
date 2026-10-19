@@ -115,6 +115,14 @@ export function PublishDialog({
 
   const publish = (body?: { environment?: Side; promote?: boolean; reset_test_data?: boolean }) => {
     if (started) return;
+    // A NEW PUBLISH SHOWS ITS OWN PROGRESS, NOT THE LAST RESULT. The summary
+    // above the button is read from /latest when the dialog opens; left in
+    // place it made every stage read as done and "live at" name the previous
+    // address the moment Publish was pressed (Mark 8, 2026-10-17 — people
+    // closed and reopened the dialog to get a real publish).
+    setReconciledUrl(null);
+    setReconciledError(null);
+    setPriorFinishedAt(null);
     setStarted(true);
     setConfirmProduction(false);
     setPublishedSide(body?.promote ? "production" : body?.environment ?? side);
@@ -195,8 +203,11 @@ export function PublishDialog({
     return () => {
       cancelled = true;
     };
+    // `started` is a dependency so that pressing Publish while /latest is
+    // still answering cancels that read: its late answer must not paint the
+    // previous publish over the one just begun.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, projectId, side]);
+  }, [open, projectId, side, started]);
 
   // When SSE ends without a terminal frame, reconcile against /latest.
   // Poll every 3s until succeeded/failed or 10 min. Only runs after the

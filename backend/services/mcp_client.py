@@ -71,6 +71,8 @@ class McpTool:
     name: str
     description: str
     input_schema: dict[str, Any]
+    #: The server's own `readOnlyHint`: the tool only looks. Absent is False.
+    read_only: bool = False
 
 
 # --------------------------------------------------------------------------- #
@@ -210,6 +212,7 @@ async def list_tools(server: PlatformMcpServer, *, use_cache: bool = True) -> li
                 name=t.name,
                 description=(t.description or ""),
                 input_schema=dict(t.inputSchema or {}),
+                read_only=bool(getattr(getattr(t, "annotations", None), "readOnlyHint", False)),
             )
             for t in (result.tools or [])
         ]

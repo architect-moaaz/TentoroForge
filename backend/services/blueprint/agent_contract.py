@@ -475,7 +475,8 @@ WHERE_COMPARISONS = frozenset({"ne", "neq", "not", "!=", "gt", ">", "gte", ">=",
 
 
 def check_workflow_steps(result: "AgentResult", doc: dict | None = None,
-                         mcp_servers: list[dict] | None = None) -> None:
+                         mcp_servers: list[dict] | None = None,
+                         api_refs: list[dict] | None = None) -> None:
     """Reject workflows whose steps are not configured catalog nodes.
 
     The same argument as :func:`check_pattern_templates`: accepting a step
@@ -513,6 +514,11 @@ def check_workflow_steps(result: "AgentResult", doc: dict | None = None,
     from services.blueprint.mcp_catalog import workflow_errors as mcp_errors
     for proposal in proposals:
         problems.extend(mcp_errors(with_loop_bodies(proposal.body), mcp_servers))
+    # A CALL TO A DOCUMENTED SERVICE IS THE CALL ITS DOCUMENTATION DESCRIBES:
+    # an endpoint it has, fields it takes and answers with, signed its way.
+    from services.blueprint.api_reference import workflow_errors as api_errors
+    for proposal in proposals:
+        problems.extend(api_errors(with_loop_bodies(proposal.body), api_refs or []))
     # A LOOKUP THE ENGINE CAN READ. `where` maps a field to a value (equals)
     # or to ONE comparison: `{"id": {"ne": "{{customer.id}}"}}`. ToroCommerce
     # wrote `"id__neq"` and `{"ne": …}` with nothing to read either: the first
@@ -1999,7 +2005,9 @@ def apply_agent_result(
     translate_layout_vocabulary(result, svc.doc)
     check_pattern_templates(result, svc.doc)
     from services.blueprint.mcp_catalog import load as _mcp_servers
-    check_workflow_steps(result, svc.doc, _mcp_servers(getattr(svc, "output_dir", None)))
+    from services.blueprint.api_reference import load as _api_refs
+    check_workflow_steps(result, svc.doc, _mcp_servers(getattr(svc, "output_dir", None)),
+                         _api_refs(getattr(svc, "output_dir", None)))
     check_workflow_triggers(result, svc.doc)
     check_integrations(result, svc.doc)
     check_audit(result, svc.doc)

@@ -62,13 +62,16 @@ TRIALS: tuple[tuple[str, str, dict[str, str]], ...] = (
      "the data.",
      {"method": "string", "path": "string", "body": "object", "as": "string"}),
     ("open_page",
-     "Open a screen in a browser signed in as `as` and press its controls. "
-     "Shows where it ended up, the text on it, errors in the browser, and "
-     "what each button did. A route with `[id]` opens the first record. "
-     "`sign_in: true` instead signs in through the sign-in page's own form, "
-     "as the administrator, and shows where that lands — the only way to see "
-     "where a sign-in takes someone. On a copy of the data.",
-     {"route": "string", "as": "string", "sign_in": "boolean"}),
+     "Open a screen in a browser signed in as `as`. Shows where it ended up, "
+     "the text on it and errors in the browser — in about half a minute. "
+     "`press: \"all\"` also presses every control from a fresh load and says "
+     "what each did; that takes minutes on a screen with many buttons, so ask "
+     "for it when a control is the question, not to look at a page. A route "
+     "with `[id]` opens the first record. `sign_in: true` instead signs in "
+     "through the sign-in page's own form, as the administrator, and shows "
+     "where that lands — the only way to see where a sign-in takes someone. "
+     "On a copy of the data.",
+     {"route": "string", "as": "string", "press": "string", "sign_in": "boolean"}),
 )
 
 TRIALS = TRIALS + (
@@ -81,7 +84,29 @@ TRIALS = TRIALS + (
      {"kind": "string", "as": "string"}),
 )
 
+TRIALS = TRIALS + (
+    ("run_checks",
+     "Run the application's own checks on the bench and read the result the way "
+     "the build does — in one step instead of one try per screen. `what`: "
+     "`routes` (every screen asked as every kind of person: answers, sign-in "
+     "redirects and refusals as declared), `access` (every scoped record type: "
+     "a person sees only their own), `rules` (every rule with a process: the "
+     "process refuses the case the rule forbids), `pages` (open and press every "
+     "control on the screens named in `routes`, as `as`), `guards` (every fix "
+     "made before on this app: the try that failed and then passed, run again), "
+     "or `all` (routes, access, rules and guards). `routes` narrows routes/pages to those screens (a route "
+     "or a page name); `entities` narrows access to those record types. Lines "
+     "marked ✗ are what is not right, with the reason; read them before "
+     "deciding what to change, and run the same check again after changing it. "
+     "On a copy of the data.",
+     {"what": "string", "routes": "array", "entities": "array", "as": "string"}),
+)
+
 TRIAL_NAMES: frozenset[str] = frozenset(name for name, _d, _a in TRIALS)
+#: How a check's report marks one thing that is not right.
+CHECK_RED = "✗"
+#: How many screens `pages` presses in one call; each takes minutes.
+PAGES_PER_CALL = 4
 
 #: A 1×1 PNG and a one-page PDF: the smallest files each picker accepts.
 _PNG = bytes.fromhex("89504e470d0a1a0a0000000d4948445200000001000000010806000000"
@@ -612,7 +637,12 @@ def _server_back(app: Any, timeout: float | None = None) -> bool:
     return False
 
 
-def open_page(bench: Bench, doc: dict, route: str, as_: str, sign_in: bool = False) -> str:
+def open_page(bench: Bench, doc: dict, route: str, as_: str, sign_in: bool = False,
+              press: bool = False) -> str:
+    """The page as a browser sees it. `press` presses every control from a
+    fresh load as well — what the after-change check does; for a look at a
+    page it cost Mark 8 four minutes an open (6 opens, 24 of 32 minutes,
+    2026-10-16), so it is asked for, not assumed."""
     from services.blueprint.page_review import BROKEN_OUTCOMES, ReviewUnavailable, run_shots
 
     route = (route or "").strip()
@@ -643,7 +673,7 @@ def open_page(bench: Bench, doc: dict, route: str, as_: str, sign_in: bool = Fal
     printed: list[str] = []
     notes: list[str] = []
     try:
-        shot = run_shots(app, [entry], shots_dir, states=False)[0]
+        shot = run_shots(app, [entry], shots_dir, probe=press, states=False)[0]
         # A RESTARTING SERVER IS NOT A BROKEN PAGE. `next dev` restarts itself
         # near its heap limit; the request in flight dies with a connection
         # error and the page "says it is loading". Three pages were rewritten
@@ -656,7 +686,7 @@ def open_page(bench: Bench, doc: dict, route: str, as_: str, sign_in: bool = Fal
                 return scrub(f"{route} as {who}: {SERVER_RESTARTED}; it had not answered again after "
                              f"{int(RESTART_WAIT_S)}s. Try it again in a moment — do not change the page for this.")
             notes.append(SERVER_RESTARTED + "; opened again once it was back")
-            shot = run_shots(app, [entry], shots_dir, states=False)[0]
+            shot = run_shots(app, [entry], shots_dir, probe=press, states=False)[0]
             before = bench.restarts
             printed += bench.server_said()
             if _server_gone(shot, bench.restarts > before):
@@ -673,6 +703,8 @@ def open_page(bench: Bench, doc: dict, route: str, as_: str, sign_in: bool = Fal
         out.append(f"the page says it is: {shot['state']}")
     out += [f"browser error: {e}" for e in shot.get("errors") or []]
     controls = shot.get("controls") or []
+    if not press:
+        out.append("controls not pressed (say `press: \"all\"` to press each from a fresh load)")
     if controls:
         out.append("controls, each pressed from a fresh load:")
         for c in controls:
@@ -777,6 +809,130 @@ def try_upload(bench: Bench, doc: dict, kind: str, as_: str) -> str:
     return scrub("\n".join(out))
 
 
+# ── the application's own checks, as one try ────────────────────────────────
+
+def _page_ids(doc: dict, named: list) -> set[str] | None:
+    """Page ids for the routes or names the call gave; None means every page."""
+    wanted = [str(n).strip().lower() for n in (named or []) if str(n).strip()]
+    if not wanted:
+        return None
+    out: set[str] = set()
+    for p in (doc.get("pages") or []):
+        if not isinstance(p, dict):
+            continue
+        keys = {str(p.get(k) or "").strip().lower() for k in ("id", "route", "name", "path")}
+        if any(w in keys for w in wanted):
+            out.add(str(p.get("id")))
+    return out
+
+
+def _entity_ids(doc: dict, named: list) -> set[str] | None:
+    wanted = [str(n).strip().lower() for n in (named or []) if str(n).strip()]
+    if not wanted:
+        return None
+    out: set[str] = set()
+    for e in (doc.get("data") or {}).get("entities") or []:
+        if isinstance(e, dict) and any(
+                w in {str(e.get(k) or "").strip().lower() for k in ("id", "name", "table")} for w in wanted):
+            out.add(str(e.get("id")))
+    return out
+
+
+def _rules_client() -> Any:
+    """What composes a rule's breaking input: the build's own small model."""
+    from services.blueprint.executors import DEFAULT_MODEL, AnthropicModel
+    return AnthropicModel(model=DEFAULT_MODEL, effort="low")
+
+
+def _check_lines(kind: str, result: dict, *, holds: str) -> list[str]:
+    total = int(result.get("total") or 0)
+    green = result.get("green") or []
+    n_green = len(green) if isinstance(green, list) else int(green or 0)
+    red = list(result.get("red") or [])
+    untried = list(result.get("untried") or [])
+    skipped = list(result.get("skipped") or [])
+    if total == 0 and not skipped:
+        return [f"checks · {kind}: nothing to check"]
+    head = f"checks · {kind}: {n_green} of {total} {holds}"
+    if red:
+        head += f", {len(red)} not right"
+    if untried:
+        head += f", {len(untried)} could not be tried"
+    if skipped:
+        head += f", {len(skipped)} outside the count"
+    lines = [head]
+    lines += [f"  {CHECK_RED} {i.get('label')}: {i.get('why')}" for i in red[:25]]
+    if len(red) > 25:
+        lines.append(f"  … and {len(red) - 25} more not right")
+    lines += [f"  ? {i.get('label')}: {i.get('why')}" for i in untried[:8]]
+    if len(untried) > 8:
+        lines.append(f"  … and {len(untried) - 8} more untried")
+    lines += [f"  – {i.get('label')}: {i.get('why')}" for i in skipped[:4]]
+    return lines
+
+
+def run_checks(bench: Bench, doc: dict, what: str, routes: list, entities: list, as_: str) -> str:
+    """The build's own checks, run on the bench, reported as one observation.
+
+    A fault a check can see used to be found by Smith one `open_page` at a
+    time, four minutes each (Mark 8, 2026-10-17). The build already knows how
+    to ask every screen as every person, every scoped record type and every
+    rule; this is that knowledge offered as one try.
+    """
+    from services.blueprint import access_check, route_check, rule_trials
+    what = (what or "all").strip().lower()
+    kinds = {"all": ("routes", "access", "rules", "guards"), "routes": ("routes",), "access": ("access",),
+             "rules": ("rules",), "pages": ("pages",), "guards": ("guards",)}.get(what)
+    if kinds is None:
+        raise ValueError(f"`what` is one of routes, access, rules, pages, all — not {what!r}")
+    if "pages" in kinds and not routes:
+        raise ValueError("`pages` presses the screens named in `routes`; name at least one")
+    lines: list[str] = []
+    page_ids = _page_ids(doc, routes)
+    if routes and page_ids == set():
+        return f"No screen is called {', '.join(str(r) for r in routes)} — name a route or a page name."
+    for kind in kinds:
+        try:
+            if kind == "routes":
+                lines += _check_lines("routes", route_check.check_routes(bench.app(), doc, only=page_ids),
+                                      holds="screens answer as declared")
+            elif kind == "access":
+                lines += _check_lines("access", access_check.check_access(bench.app(), doc,
+                                                                          only=_entity_ids(doc, entities)),
+                                      holds="record scopes hold")
+            elif kind == "rules":
+                lines += _check_lines("rules", rule_trials.refuse_rules(doc, bench, _rules_client()),
+                                      holds="rules refuse their refused case")
+            elif kind == "guards":
+                from services.smith import guards as _guards
+                lines += _guards.run(bench, doc, only_routes=[str(r) for r in routes] or None)["lines"]
+            elif kind == "pages":
+                named = [str(r) for r in routes][:PAGES_PER_CALL]
+                for route in named:
+                    said = open_page(bench, doc, route, as_, press=True)
+                    bad = failed(said)
+                    lines.append(f"checks · page {route} as {as_ or 'the administrator'}: "
+                                 f"{'not right' if bad else 'nothing wrong seen'}")
+                    body = said.splitlines()[:40]
+                    if bad and body:
+                        body[0] = f"{CHECK_RED} {body[0]}"
+                    lines += ["  " + l for l in body]
+                if len(routes) > PAGES_PER_CALL:
+                    lines.append(f"  ({len(routes) - PAGES_PER_CALL} more screens were not pressed this call; "
+                                 f"name them in another)")
+        except TrialUnavailable as exc:
+            lines.append(f"checks · {kind}: could not run — {exc}")
+            break
+        except Exception as exc:  # noqa: BLE001 — one check breaking is a line, not the end
+            logger.exception("[trials] run_checks %s failed", kind)
+            lines.append(f"checks · {kind}: the check itself failed — {type(exc).__name__}: {str(exc)[:200]}")
+    server = bench.server_said() if bench.running else []
+    if server:
+        lines.append("the server printed:")
+        lines += [f"  {l}" for l in server[:8]]
+    return scrub("\n".join(lines))
+
+
 def run(name: str, args: dict, *, bench: Bench, doc: dict) -> str:
     """Carry out one trial. The observation is returned, never raised."""
     args = {k: v for k, v in (args or {}).items() if v not in (None, "")}
@@ -789,9 +945,16 @@ def run(name: str, args: dict, *, bench: Bench, doc: dict) -> str:
                                args.get("body"), as_)
         if name == "try_upload":
             return try_upload(bench, doc, str(args.get("kind") or "image"), as_)
+        if name == "run_checks":
+            routes = args.get("routes") or []
+            routes = routes if isinstance(routes, list) else [routes]
+            entities = args.get("entities") or []
+            entities = entities if isinstance(entities, list) else [entities]
+            return run_checks(bench, doc, str(args.get("what") or "all"), routes, entities, as_)
         if name == "open_page":
             sign_in = str(args.get("sign_in") or "").strip().lower() in ("true", "1", "yes")
-            return open_page(bench, doc, str(args.get("route") or ""), as_, sign_in=sign_in)
+            press = str(args.get("press") or "").strip().lower() in ("all", "true", "1", "yes", "every")
+            return open_page(bench, doc, str(args.get("route") or ""), as_, sign_in=sign_in, press=press)
     except TrialUnavailable as exc:
         return str(exc)
     except ValueError as exc:
@@ -815,8 +978,11 @@ def failed(said: str) -> bool:
         return True
     if "browser error:" in said or "\nthe server printed:" in said:
         return True
+    # A CHECK'S REPORT MARKS EACH THING NOT RIGHT. One ✗ line is a fault seen.
+    if re.search(rf"^\s*{re.escape(CHECK_RED)} ", said, re.M):
+        return True
     return any(f": {v}" in said for v in BROKEN_OUTCOMES.values())
 
 
 __all__ = ["TRIALS", "TRIAL_NAMES", "Bench", "TrialUnavailable", "run", "failed",
-           "try_workflow", "try_request", "open_page"]
+           "try_workflow", "try_request", "open_page", "run_checks", "CHECK_RED"]

@@ -139,12 +139,27 @@ function watch(page) {
   return errors;
 }
 
+// THE FIRST PAGE OF A RUN COMPILES BEFORE IT ANSWERS. A dev server builds a
+// route on its first request — Mark 8's one page took 35 s the first time and
+// a quarter of a second after (2026-10-16) — and a timeout spent compiling is
+// the check's, not the page's. The first navigation that times out is given
+// one longer second attempt before anything is recorded against the page.
+let warmed = false;
+
 async function open(context, url, { shot } = {}) {
   const page = await context.newPage();
   const errors = watch(page);
   let status = null;
   try {
-    const res = await page.goto(cfg.baseUrl + url, { waitUntil: "load", timeout: 120000 });
+    let res;
+    try {
+      res = await page.goto(cfg.baseUrl + url, { waitUntil: "load", timeout: 120000 });
+    } catch (e) {
+      if (warmed || !/Timeout|timeout/.test(String(e.message))) throw e;
+      warmed = true;
+      res = await page.goto(cfg.baseUrl + url, { waitUntil: "load", timeout: 240000 });
+    }
+    warmed = true;
     status = res?.status() ?? null;
     await page.waitForTimeout(1000);
   } catch (e) {

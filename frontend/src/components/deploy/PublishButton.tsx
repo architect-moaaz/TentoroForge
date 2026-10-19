@@ -1,14 +1,27 @@
 "use client";
 
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { Lock, Smartphone, Upload } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ChevronDown, FlaskConical, Globe, Lock, Smartphone, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { api } from "@/lib/api";
 import { PublishDialog } from "./PublishDialog";
 import { lockedNote } from "@/lib/features";
 import { explainLock } from "@/components/features/Locked";
-import { SideLink, usePublishStatus } from "./PublishSides";
+import {
+  SideLink,
+  publishStatusKey,
+  usePublishStatus,
+  useSetPublishTarget,
+  type PublishStatus,
+  type Side,
+} from "./PublishSides";
 
 interface LatestDeployment {
   id: string;
@@ -85,11 +98,28 @@ export function PublishButton({ projectId, orgId, size = "sm", lockedWeb = false
   // address — own domain, else apps.tentoro.ai — once that answers) and the
   // test version's, each one click away whichever way the switch is set.
   const { data: sides } = usePublishStatus(projectId, isReady && !lockedWeb);
-  const onTest = sides?.target === "test";
   const productionUrl = sides
     ? sides.production ? sides.production_address || sides.production.url : null
     : data?.status === "succeeded" ? data.url : null;
   const testUrl = sides?.test?.url ?? null;
+
+  // Picking Test or Production from the dropdown sets where Publish goes, then
+  // opens the dialog on that side. The cache is updated at once so the dialog
+  // opens on the chosen side without waiting for the PUT to come back; the
+  // mutation then persists the switch (the same one App settings → Publishing
+  // and the dialog show).
+  const qc = useQueryClient();
+  const setTarget = useSetPublishTarget(projectId);
+  const choosePublish = (target: Side) => {
+    if (lockedWeb) { explainLock("Publish to the web"); return; }
+    qc.setQueryData<PublishStatus | undefined>(
+      publishStatusKey(projectId),
+      (old) => (old ? { ...old, target } : old),
+    );
+    if (sides?.target !== target) setTarget.mutate(target);
+    setInitialTab("web");
+    setOpen(true);
+  };
 
   return (
     <div className="flex min-w-0 items-center gap-1.5">
@@ -99,18 +129,9 @@ export function PublishButton({ projectId, orgId, size = "sm", lockedWeb = false
           {testUrl && <SideLink side="test" url={testUrl} />}
         </div>
       )}
-      <Button
-        variant="default"
-        size={size}
-        onClick={() => {
-          if (lockedWeb) { explainLock("Publish to the web"); return; }
-          setInitialTab("web");
-          setOpen(true);
-        }}
-        disabled={!projectId || (!isReady && !lockedWeb)}
-        className="shrink-0"
-        data-locked={lockedWeb ? "publish" : undefined}
-        title={
+      {(() => {
+        const disabled = !projectId || (!isReady && !lockedWeb);
+        const title =
           lockedWeb ? lockedNote("Publish to the web") :
           !projectId
             ? undefined
@@ -122,12 +143,52 @@ export function PublishButton({ projectId, orgId, size = "sm", lockedWeb = false
                   ? "Nothing to publish yet — build the app first."
                   : projectStatus === "archived"
                     ? "This project is archived."
-                    : undefined
+                    : undefined;
+        const label = (
+          <>
+            {lockedWeb ? <Lock className="mr-1.5 h-3.5 w-3.5" /> : <Upload className="mr-1.5 h-3.5 w-3.5" />}
+            {productionUrl ? "Republish" : "Publish"}
+            {!lockedWeb && <ChevronDown className="ml-1 h-3.5 w-3.5 opacity-70" />}
+          </>
+        );
+        // Locked: no menu — the click explains why it is locked, as before.
+        if (lockedWeb) {
+          return (
+            <Button
+              variant="default" size={size} className="shrink-0" data-locked="publish"
+              title={title} onClick={() => explainLock("Publish to the web")}
+            >
+              {label}
+            </Button>
+          );
         }
-      >
-        {lockedWeb ? <Lock className="mr-1.5 h-3.5 w-3.5" /> : <Upload className="mr-1.5 h-3.5 w-3.5" />}
-        {onTest ? "Publish to Test" : productionUrl ? "Republish" : "Publish"}
-      </Button>
+        // Click Publish → choose Test or Production → the dialog opens on it.
+        return (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="default" size={size} className="shrink-0" disabled={disabled} title={title}>
+                {label}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-60">
+              <DropdownMenuItem onSelect={() => choosePublish("test")} className="gap-2">
+                <FlaskConical className="h-4 w-4 text-amber-600" />
+                <span className="flex flex-col">
+                  <span className="font-medium">Publish to Test</span>
+                  <span className="text-xs text-muted-foreground">Its own address and demo data — the live app is not touched</span>
+                </span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => choosePublish("production")} className="gap-2">
+                <Globe className="h-4 w-4 text-emerald-600" />
+                <span className="flex flex-col">
+                  <span className="font-medium">Publish to Production</span>
+                  <span className="text-xs text-muted-foreground">Updates the live app</span>
+                </span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        );
+      })()}
       <Button
         variant="outline"
         size={size}

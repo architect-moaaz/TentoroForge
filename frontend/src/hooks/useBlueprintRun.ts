@@ -119,6 +119,9 @@ export interface RunMessage {
   text: string;
   options?: string[];
   diffSummary?: string;
+  /** The server's word for the message: "progress" is a line said while a
+   *  turn runs, drawn quieter than an answer. */
+  status?: string;
 }
 
 /**
@@ -726,11 +729,14 @@ export function reduce(
       // turn out of the next.
       return {
         ...prev,
-        thoughts: [],
+        // A progress post ("Still at it (12 min): …") is not the answer: the
+        // trail of steps the person is following stays until the turn ends.
+        thoughts: data.status === "progress" ? prev.thoughts : [],
         messages: [...prev.messages, {
           text: String(data.text ?? ""),
           options: (data.options as string[]) ?? undefined,
           diffSummary: (data.diffSummary as string) || undefined,
+          status: (data.status as string) || undefined,
         }].filter((m) => m.text),
       };
 

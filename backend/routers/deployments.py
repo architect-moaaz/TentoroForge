@@ -207,28 +207,17 @@ async def publish(
         test_recipients=await _member_emails(project.org_id, db) if side == envs.TEST else (),
     )
 
-    provider = VercelDeployProvider(db=db)
-
-    async def stream():
-        try:
-            async for evt in provider.publish(snapshot):
-                payload = {
-                    "stage": evt.stage,
-                    "message": evt.message,
-                    "progress": evt.progress,
-                    "data": evt.data,
-                }
-                yield f"data: {json.dumps(payload)}\n\n"
-        except Exception as exc:
-            # Belt-and-suspenders — the provider promises to catch its
-            # own errors, but if something slips through, emit a final
-            # error frame so the UI doesn't hang on a dead stream.
-            log.exception("publish stream leaked exception")
-            err = {"stage": "error", "message": str(exc)}
-            yield f"data: {json.dumps(err)}\n\n"
+    # THE PUBLISH IS THE SERVER'S TO FINISH. It runs on its own task and its
+    # own session (the request's closes with the response); this response only
+    # relays its progress, so a dialog closed half-way no longer cancels the
+    # publish and strands its row at "snapshot" (`services.deploy.runs`).
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    from services.deploy import runs
+    queue = runs.start(lambda own: VercelDeployProvider(db=own).publish(snapshot),
+                       async_sessionmaker(db.bind, expire_on_commit=False))
 
     return StreamingResponse(
-        stream(),
+        runs.frames(queue),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache, no-transform",
@@ -271,6 +260,8 @@ async def latest_deployment(
     SSE stream closes (to reconcile if the network dropped the terminal
     frame). DB is source of truth — SSE is best-effort progress."""
     await _require_project(project_id, user, db)
+    from services.deploy.runs import close_stale
+    await close_stale(db, project_id)
     conditions = [Deployment.project_id == project_id]
     if environment:
         conditions.append(Deployment.environment == environment)
@@ -307,6 +298,8 @@ async def list_deployments(
     a human, not a uuid). `duration_seconds` is null while a row is
     still running."""
     await _require_project(project_id, user, db)
+    from services.deploy.runs import close_stale
+    await close_stale(db, project_id)
     res = await db.execute(
         select(Deployment)
         .where(Deployment.project_id == project_id)
@@ -383,7 +376,9 @@ async def publish_status(
     has changed since it was tried on Test (`untested_changes`) or Test runs a
     newer version than production (`test_ahead`)."""
     from services.deploy import environments as envs
+    from services.deploy.runs import close_stale
     project = await _require_project(project_id, user, db)
+    await close_stale(db, project.id)
     test = await _latest_live(db, project.id, envs.TEST)
     prod = await _latest_live(db, project.id, envs.PRODUCTION)
     current = None

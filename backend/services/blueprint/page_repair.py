@@ -179,11 +179,22 @@ def _repair(svc: Any, output_dir: str, app_root: str, todo: list[dict], *, say: 
 
     fixed: list[str] = []
     tried: dict[str, str] = {}
+    seen_reason: dict[str, str] = {}
     total = len(todo)
     for round_ in range(1, rounds + 1):
         if not todo:
             break
         for i, item in enumerate(todo, 1):
+            # THE SAME FAILURE TWICE IS SAID ONCE AND NOT REPAIRED TWICE. Two
+            # screens' "Invalid or unexpected token" were posted and repaired
+            # twice with the same words (wta55kt2, 2026-10-08).
+            if seen_reason.get(item["page"]) == item["reason"][:200]:
+                say("message", {"text": f"{item['name']} ({item['route']}) fails the same way after the last "
+                                        f"repair — {item['reason'][:200]} I am not repeating that repair; it "
+                                        "goes to the hand-over as it stands."})
+                tried[item["page"]] = "the same failure after a repair: " + item["reason"][:300]
+                continue
+            seen_reason[item["page"]] = item["reason"][:200]
             ledger.repair("page_repair", item["page"], round_, rounds, item["reason"])
             say("message", {"text": f"{item['name']} ({item['route']}) did not build — {item['reason'][:200]} "
                                     "Fixing the cause and writing it again."})

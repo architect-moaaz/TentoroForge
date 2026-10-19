@@ -199,8 +199,16 @@ def _check_everything(svc: Any, output_dir: str, app_root: str, report: Any, *, 
     say(f"Checked {total} page{'s' if total != 1 else ''}: {max(total - len(reds) - len(untried), 0)} work, "
         f"{len(reds)} don't" + (f", {len(untried)} I couldn't open" if untried else "") + ".")
     rules = _on_a_bench(svc, output_dir, bench_factory=bench_factory, client=client, cancelled=cancelled,
-                        what=("routes", "access", "rules", "systems", "audit", "domain"))
+                        what=("routes", "access", "rules", "systems", "audit", "domain", "guards"))
     _write_logic(svc, processes, rules.get("rules"))
+    if (rules.get("guards") or {}).get("total"):
+        # EARLIER FIXES, HELD. Each fix Smith made left the try that proved it;
+        # a later change that undoes one is said here, by the ask it was for.
+        say("\n".join(rules["guards"]["lines"]).replace("checks · ", ""))
+    if rules.get("causes"):
+        # ONE CAUSE, SAID AS ONE, BEFORE THE ITEMS. The headline of "2 of 106
+        # served" was the sign-in nobody could do (fyuhs16i, 2026-10-06).
+        say(causes_line(rules["causes"]))
     say(_logic_line(svc))
 
 
@@ -248,6 +256,8 @@ def _on_a_bench(svc: Any, output_dir: str, *, bench_factory: Any, client: Any, c
                             out[k] = list(out[k]) + list(part[k])
                         out["total"] = int(out["total"]) + int(part["total"])
                 _merge(svc, "routes", out, only_pages)
+                if out.get("causes"):
+                    results["causes"] = [str(c) for c in out["causes"]]
             except Exception as exc:  # noqa: BLE001
                 logger.warning("[fix-to-green] the route check failed", exc_info=True)
                 sc.write(svc, "routes", green=0, red=[], untried=[sc.item("routes", sc.LABELS["routes"], f"the check failed: {exc}"[:200], "routes")])
@@ -276,6 +286,12 @@ def _on_a_bench(svc: Any, output_dir: str, *, bench_factory: Any, client: Any, c
                 logger.warning("[fix-to-green] the rule trials failed", exc_info=True)
                 results["rules"] = {"total": 0, "green": [], "red": [],
                                     "untried": [sc.item("rules", "Rules", f"the check failed: {exc}"[:200], "rules")]}
+        if "guards" in what:
+            try:
+                from services.smith import guards as _guards
+                results["guards"] = _guards.run(bench, svc.doc)
+            except Exception:  # noqa: BLE001
+                logger.warning("[fix-to-green] the guards could not be run", exc_info=True)
         if "systems" in what:
             try:
                 from services.blueprint.clock_check import check_clock
@@ -341,18 +357,42 @@ def _write_logic(svc: Any, processes: dict, rules: dict | None) -> None:
     green = len(processes.get("passed") or []) + len(processes.get("fixed") or [])
     red = [sc.item(t["workflow"], t["name"], t["reason"], t["workflow"]) for t in processes.get("left") or []]
     untried = [sc.item(t["workflow"], t["name"], t["reason"], t["workflow"]) for t in processes.get("untried") or []]
+    skipped: list[dict] = []
     if rules:
         green += len(rules.get("green") or [])
         red += list(rules.get("red") or [])
         untried += list(rules.get("untried") or [])
-    sc.write(svc, "logic", green=green, red=red, untried=untried)
+        skipped += list(rules.get("skipped") or [])
+    sc.write(svc, "logic", green=green, red=red, untried=untried, skipped=skipped)
+
+
+def causes_line(causes: list[str]) -> str:
+    return ("Behind the screens I could not try there is one cause each, not a fault per screen: "
+            + "; ".join(str(c) for c in causes[:4]) + ". That is what to fix first.")
 
 
 def _logic_line(svc: Any) -> str:
+    """What the checks could judge, said as such; what nothing here can judge
+    said apart, so "0 of 7 hold, 7 I couldn't try" never stands for seven
+    rules no process carries (Mark 8, 2026-10-16)."""
     v = (sc.read(svc.doc) or {}).get("criteria", {}).get("logic") or {}
-    return (f"Ran the processes and tried the rules: {v.get('green', 0)} of {v.get('total', 0)} hold"
-            + (f", {len(v.get('red') or [])} don't" if v.get("red") else "")
-            + (f", {len(v.get('untried') or [])} I couldn't try" if v.get("untried") else "") + ".")
+    skipped = len(v.get("skipped") or [])
+    total = int(v.get("total") or 0)
+    if not total and not v.get("untried"):
+        head = "No process or rule a trial could run here"
+    else:
+        untried = list(v.get("untried") or [])
+        # WHY IT COULD NOT BE TRIED, NOT JUST THAT. "16 could not be tried" in a
+        # parenthesis, "7 I couldn't try — my own check failed" with no cause
+        # (qi0wldnl, cxz95dd1, 2026-10): the first reason is the headline.
+        why = str((untried[0] or {}).get("why") or "").strip() if untried and isinstance(untried[0], dict) else ""
+        head = (f"Ran the processes and tried the rules: {v.get('green', 0)} of {total} hold"
+                + (f", {len(v.get('red') or [])} don't" if v.get("red") else "")
+                + (f", {len(untried)} I couldn't try" + (f" ({why[:140]})" if why else "") if untried else ""))
+    if skipped:
+        head += (f"; {skipped} rule{'s' if skipped != 1 else ''} gate{'s' if skipped == 1 else ''} no process, "
+                 f"so there is nothing to try {'them' if skipped != 1 else 'it'} in")
+    return head + "."
 
 
 def _write_smith(svc: Any, turns: int, yields: list[int], *, before_total: int) -> None:
@@ -534,8 +574,10 @@ def _check_again(svc: Any, output_dir: str, app_root: str, report: Any, batch: l
             out = results["rules"]
             red = [r for r in prior["red"] if str(r.get("cause")) not in rules] + list(out["red"])
             untried = [u for u in prior["untried"] if str(u.get("cause")) not in rules] + list(out["untried"])
+            skipped = [u for u in prior.get("skipped") or [] if str(u.get("cause")) not in rules] + list(out.get("skipped") or [])
             total = int(prior["total"])
-            sc.write(svc, "logic", green=max(total - len(red) - len(untried), 0), red=red, untried=untried, total=total)
+            sc.write(svc, "logic", green=max(total - len(red) - len(untried), 0), red=red, untried=untried, total=total,
+                     skipped=skipped)
 
 
 def _wait_for_the_person(output_dir: str, cancelled: Callable[[], bool]) -> None:

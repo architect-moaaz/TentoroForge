@@ -122,6 +122,8 @@ export interface DomainsState {
   organisations?: { available: boolean; signIn: "shared" | "per_organisation" };
 }
 
+const bare = (address: string) => address.replace(/^https?:\/\//, "");
+
 const KIND_LABEL: Record<DomainView["kind"], string> = {
   subdomain: "Your subdomain",
   apex: "Your domain",
@@ -132,10 +134,11 @@ const KIND_LABEL: Record<DomainView["kind"], string> = {
 function ago(iso?: string | null): string {
   if (!iso) return "";
   const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
-  if (s < 60) return `${s} seconds ago`;
-  if (s < 3600) return `${Math.round(s / 60)} minutes ago`;
-  if (s < 86400) return `${Math.round(s / 3600)} hours ago`;
-  return `${Math.round(s / 86400)} days ago`;
+  const said = (n: number, unit: string) => `${n} ${unit}${n === 1 ? "" : "s"} ago`;
+  if (s < 60) return said(s, "second");
+  if (s < 3600) return said(Math.round(s / 60), "minute");
+  if (s < 86400) return said(Math.round(s / 3600), "hour");
+  return said(Math.round(s / 86400), "day");
 }
 
 function StatusPill({ d }: { d: DomainView }) {
@@ -302,8 +305,16 @@ export function DomainsPanel({ projectId, compact = false }: { projectId: string
     <div className="space-y-4">
       {!compact && (
         <p className="text-sm text-slate-600 dark:text-slate-300">
-          Your app answers at <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">{data.vercelAddress.replace("https://", "")}</code>.
-          Add your own domain or a subdomain of it; Forge shows the record to add and tells you in chat when it is live.
+          {/* THE MAIN ADDRESS FIRST: the one people are sent to once it is live;
+              the Vercel address only while there is no other. */}
+          Your app is at <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">{bare(data.mainAddress)}</code>
+          {bare(data.mainAddress) !== bare(data.vercelAddress) && (
+            <>
+              {" "}(its first address, <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">{bare(data.vercelAddress)}</code>,{" "}
+              {data.oldAddress === "redirect" ? "sends people there" : "opens it too"})
+            </>
+          )}
+          . Add your own domain or a subdomain of it; Forge shows the record to add and tells you in chat when it is live.
         </p>
       )}
 

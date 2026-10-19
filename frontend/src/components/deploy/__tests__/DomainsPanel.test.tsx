@@ -232,4 +232,41 @@ describe("DomainsPanel", () => {
     expect(host.textContent).toContain("How to add this at Cloudflare");
     expect(host.textContent).toContain("DNS only (grey cloud)");
   });
+
+  it("leads with the main address, and says what the first address does", async () => {
+    const intro = () => host.querySelector("p")?.textContent?.replace(/\s+/g, " ") ?? "";
+    await render();
+    expect(intro()).toContain("Your app is at shop.vercel.app.");
+    expect(intro()).not.toContain("first address");
+
+    act(() => root.unmount());
+    root = createRoot(host);
+    apiGet.mockImplementation(async () => ({ ...tentoro, mainAddress: "https://shop.apps.tentoro.ai" }));
+    await render();
+    expect(intro()).toContain("Your app is at shop.apps.tentoro.ai (its first address, shop.vercel.app, sends people there).");
+
+    act(() => root.unmount());
+    root = createRoot(host);
+    apiGet.mockImplementation(async () => ({ ...tentoro, mainAddress: "https://shop.apps.tentoro.ai", oldAddress: "keep" }));
+    await render();
+    expect(intro()).toContain("(its first address, shop.vercel.app, opens it too)");
+    apiGet.mockImplementation(async () => waiting);
+  });
+
+  it("says one minute, not one minutes", async () => {
+    const at = (sec: number) => new Date(Date.now() - sec * 1000).toISOString();
+    apiGet.mockImplementation(async () => ({ ...waiting, domains: [
+      { ...waiting.domains[0], checkedAt: at(60) },
+      { ...waiting.domains[0], name: "b.acme.com", checkedAt: at(3600) },
+      { ...waiting.domains[0], name: "c.acme.com", checkedAt: at(7200) },
+    ] }));
+    await render();
+    const text = host.textContent ?? "";
+    expect(text).toContain("checked 1 minute ago");
+    expect(text).toContain("checked 1 hour ago");
+    expect(text).toContain("checked 2 hours ago");
+    expect(text).not.toMatch(/\b1 (second|minute|hour|day)s ago/);
+    apiGet.mockImplementation(async () => waiting);
+  });
 });
+

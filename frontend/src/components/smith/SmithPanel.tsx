@@ -48,6 +48,9 @@ import {
   Send,
   SkipForward,
   XCircle,
+  Check,
+  FileCode2,
+  MessageSquare,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { MarkdownLink } from "@/components/chat/MarkdownLink";
@@ -160,6 +163,9 @@ function notifyDone(awaitingApproval: boolean, ranAnything: boolean): void {
 interface Message {
   role: "user" | "smith";
   text: string;
+  /** The server's word for the message: "progress" is said while a turn
+   *  runs and is drawn quieter than an answer. */
+  status?: string;
   /** When the turn arrived, so the transcript reads as a conversation.
    *  Client-side: the server persists no turn, so there is no other clock. */
   at?: number;
@@ -198,6 +204,8 @@ export interface SmithPanelProps {
   /** Told when a run finishes, so the preview pane can refresh itself. */
   onRunComplete?: () => void;
   className?: string;
+  /** False where the page names Smith itself (the project workspace). */
+  showHeader?: boolean;
 }
 
 /**
@@ -210,6 +218,73 @@ export interface SmithPanelProps {
  * visible. Compact on purpose — the bubble is a chat message, not a
  * document — so headings are flattened to bold and lists sit tight.
  */
+function clock(at: number): string {
+  return new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+/** How a message is drawn: the person's, a line said while a turn runs, a
+ *  change with the files it touched, or Smith's words. */
+/** A receipt line — "Changed `src/app/globals.css`: …", "Removed **Tax**…" —
+ *  is a change even when no file list came with it. */
+const RECEIPT = /^(Changed|Added|Removed|Rewrote|Renamed|Restyled|Laid out|Edited)\b/;
+
+function kindOf(m: Message): "user" | "progress" | "update" | "smith" {
+  if (m.role === "user") return "user";
+  if (m.status === "progress" || /^Still (at it|working on it|checking)/.test(m.text)) return "progress";
+  if (m.diffSummary || RECEIPT.test(m.text)) return "update";
+  return "smith";
+}
+
+/** The files a receipt names in code spans: `src/app/globals.css`. */
+function filesNamed(text: string): string[] {
+  const out: string[] = [];
+  for (const m of text.matchAll(/`([^`\s]+\/[^`\s]+\.[a-z0-9]+)`/gi)) if (!out.includes(m[1])) out.push(m[1]);
+  return out;
+}
+
+/** A change as a card: a tick, its first line as the title, the rest as
+ *  prose, and the files it touched in their own box (§71). */
+function UpdateCard({ text, files }: { text: string; files: string }) {
+  const [first, ...rest] = text.split("\n");
+  // "Changed `globals.css`: make the background dark blue." → title "Changed
+  // globals.css", body "Make the background dark blue."
+  const m = /^((?:Changed|Added|Removed|Rewrote|Renamed|Restyled|Laid out|Edited)\b[^:]{0,80}):\s*([\s\S]*)$/.exec(first);
+  const title = (m ? m[1] : first).replace(/\*\*/g, "").replace(/`/g, "").replace(/[.:]\s*$/, "");
+  const lead = m ? m[2].charAt(0).toUpperCase() + m[2].slice(1) : "";
+  const body = [lead, ...rest].join("\n").trim();
+  const list = files.split(/,\s*|\n/).map((f) => f.trim()).filter(Boolean);
+  return (
+    <div>
+      <div className="flex items-start gap-3">
+        <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white">
+          <Check className="h-3.5 w-3.5" />
+        </span>
+        <div className="min-w-0">
+          <div className="text-[15px] font-semibold leading-tight">{title}</div>
+        </div>
+      </div>
+      {body && (
+        <div className="mt-3">
+          <SmithProse text={body} />
+        </div>
+      )}
+      {list.length > 0 && (
+        <div className="mt-3 flex gap-3 rounded-lg bg-blue-50 px-3 py-2.5 dark:bg-blue-950/40">
+          <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200">
+            <FileCode2 className="h-3.5 w-3.5" />
+          </span>
+          <div className="min-w-0 text-xs">
+            <div className="font-semibold text-foreground">Files changed</div>
+            <ul className="mt-0.5 space-y-0.5 text-muted-foreground">
+              {list.map((f) => <li key={f} className="truncate font-mono">{f}</li>)}
+            </ul>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SmithProse({ text }: { text: string }) {
   return (
     <div
@@ -244,6 +319,7 @@ export function SmithPanel({
   blueprint,
   onRunComplete,
   className,
+  showHeader = true,
 }: SmithPanelProps) {
   const { run, start, stop } = useBlueprintRun(projectId);
   // THE TWO REVIEWS — requirements, then the product model. Re-read whenever
@@ -285,6 +361,7 @@ export function SmithPanel({
               text: String(r.content ?? ""),
               options: (meta.options as string[]) ?? undefined,
               diffSummary: (meta.diffSummary as string) || undefined,
+              status: (meta.status as string) || undefined,
               at: r.created_at ? Date.parse(String(r.created_at)) : Date.now(),
             };
           })
@@ -496,6 +573,7 @@ export function SmithPanel({
               at: r.created_at ? Date.parse(String(r.created_at)) : undefined,
               options: (meta.options as string[]) ?? undefined,
               diffSummary: (meta.diffSummary as string) || undefined,
+              status: (meta.status as string) || undefined,
             };
           });
         setMessages((m) => (m.length ? m : past));
@@ -628,6 +706,7 @@ export function SmithPanel({
         text: x.text,
         options: x.options,
         diffSummary: x.diffSummary,
+        status: x.status,
         at: Date.now(),
       })),
     ]);
@@ -831,15 +910,20 @@ export function SmithPanel({
         at what it built; renders nothing until a review starts. */}
     <ReviewWindow review={run.review} />
     <div className="flex h-full min-w-0 flex-1 flex-col border-l bg-background">
-      <header className="flex items-center justify-between border-b px-4 py-3">
-        <div>
-          <h2 className="text-sm font-semibold">Smith</h2>
-          <p className="text-xs text-muted-foreground">Application architect</p>
-        </div>
+      {/* THE PANEL'S OWN HEADER is for the pages that mount Smith as a side
+          column. The project workspace names Smith on every turn instead
+          (`showHeader={false}`) and keeps only the Stop control. */}
+      <header className={cn("flex items-center justify-between px-4", showHeader ? "border-b py-3" : "py-0")}>
+        {showHeader ? (
+          <div>
+            <h2 className="text-sm font-semibold">Smith</h2>
+            <p className="text-xs text-muted-foreground">Application architect</p>
+          </div>
+        ) : <span />}
         {(busy || run.checks?.active) && (
           <button
             onClick={stop}
-            className="text-xs text-muted-foreground hover:text-foreground"
+            className={cn("text-xs text-muted-foreground hover:text-foreground", !showHeader && "mt-2 rounded-md border px-2 py-1")}
           >
             Stop
           </button>
@@ -911,7 +995,7 @@ export function SmithPanel({
         {messages.map((m, i) => (
           <div
             key={i}
-            className={cn("max-w-[90%]", m.role === "user" && "ml-auto")}
+            className={cn("max-w-[90%]", m.role === "user" && "ml-auto w-fit")}
           >
             {/*
               WHO SAID IT AND WHEN. The transcript was bare bubbles, so a
@@ -921,24 +1005,25 @@ export function SmithPanel({
               not relabelled — a run of Smith's turns reads as one voice.
             */}
             {!m.plan && (i === 0 || messages[i - 1].role !== m.role) && (
-              <div
-                className={cn(
-                  "mb-1 flex items-baseline gap-2 text-xs",
-                  m.role === "user" && "justify-end",
-                )}
-              >
-                <span className="font-medium">
-                  {m.role === "user" ? "You" : "Smith"}
-                </span>
-                {m.at && (
-                  <span className="tabular-nums text-muted-foreground">
-                    {new Date(m.at).toLocaleTimeString([], {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
+              m.role === "user" ? (
+                <div className="mb-1 flex items-baseline justify-end gap-2 text-xs">
+                  <span className="font-medium">You</span>
+                  {m.at && <span className="tabular-nums text-muted-foreground">{clock(m.at)}</span>}
+                </div>
+              ) : (
+                // SMITH, AS A COLLEAGUE: a mark, a name, what it is, and when.
+                <div className="mb-1.5 flex items-center gap-3">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-900 text-white shadow-sm dark:bg-white dark:text-slate-900">
+                    <MessageSquare className="h-4 w-4" />
                   </span>
-                )}
-              </div>
+                  <span className="leading-tight">
+                    <span className="block text-sm font-semibold">Smith</span>
+                    <span className="block text-xs text-muted-foreground">
+                      Application architect{m.at ? ` · ${clock(m.at)}` : ""}
+                    </span>
+                  </span>
+                </div>
+              )
             )}
             {m.plan?.awaitingApproval ? (
               // THE BLUEPRINT'S CARD. A definition is the one plan whose
@@ -998,23 +1083,20 @@ export function SmithPanel({
             ) : (
             <div
               className={cn(
-                "rounded-lg px-3 py-2 text-sm",
-                m.role === "user"
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-muted",
+                "text-sm",
+                kindOf(m) === "user" && "rounded-xl bg-blue-600 px-4 py-2.5 text-white shadow-sm",
+                kindOf(m) === "progress" && "ml-[52px] rounded-lg bg-muted/60 px-3 py-2 text-[13px] text-muted-foreground",
+                kindOf(m) === "update" && "ml-[52px] rounded-xl border bg-card p-4 shadow-sm",
+                kindOf(m) === "smith" && "ml-[52px] rounded-xl bg-muted/60 px-4 py-3",
               )}
             >
-            {m.role === "user" ? (
+            {kindOf(m) === "user" ? (
               <p className="whitespace-pre-wrap">{m.text}</p>
+            ) : kindOf(m) === "update" ? (
+              // A CHANGE, AS A CARD: what it did, then the files it touched.
+              <UpdateCard text={m.text} files={m.diffSummary || filesNamed(m.text).join(", ")} />
             ) : (
               <SmithProse text={m.text} />
-            )}
-
-            {m.diffSummary && (
-              // §71 — what the change touched, before it is believed.
-              <p className="mt-1 border-t border-current/15 pt-1 text-xs opacity-80">
-                {m.diffSummary}
-              </p>
             )}
 
             {m.options && m.options.length > 0 && (
@@ -1087,12 +1169,12 @@ export function SmithPanel({
             ))}
           </div>
         )}
-        <div className="flex items-end gap-2">
+        <div className="flex items-center gap-2">
           <label
-            className="cursor-pointer rounded-md border p-2 text-muted-foreground hover:bg-muted"
+            className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-xl border text-muted-foreground hover:bg-muted"
             title="Attach a screenshot, a design, or a spreadsheet to load in"
           >
-            <Paperclip className="h-4 w-4" />
+            <Paperclip className="h-[18px] w-[18px]" />
             {/* A SPREADSHEET IS THE POINT OF THE PAPERCLIP for an owner who
                 already has a business: they attach customers.xlsx and say
                 "load it in" (services/smith/data_import.py). Leaving the sheet
@@ -1118,13 +1200,13 @@ export function SmithPanel({
               aria-label="Dictate"
               title="Speak instead of typing"
               className={cn(
-                "rounded-md border p-2 hover:bg-muted",
+                "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border hover:bg-muted",
                 listening
                   ? "animate-pulse border-primary text-primary"
                   : "text-muted-foreground",
               )}
             >
-              <Mic className="h-4 w-4" />
+              <Mic className="h-[18px] w-[18px]" />
             </button>
           )}
           <textarea
@@ -1137,24 +1219,24 @@ export function SmithPanel({
                 void send();
               }
             }}
-            rows={2}
+            rows={1}
             disabled={busy}
             placeholder={
               building
                 ? "Building…"
                 : busy
                   ? "Smith is working on your last message…"
-                  : "Describe the application, or a change to it"
+                  : "Describe the application, or a change to it…"
             }
-            className="flex-1 resize-none rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
+            className="min-h-11 flex-1 resize-none rounded-xl border bg-background px-4 py-[11px] text-sm leading-5 outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
           />
           <button
             onClick={() => void send()}
             disabled={busy || !draft.trim()}
-            className="rounded-md bg-primary p-2 text-primary-foreground disabled:opacity-40"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm hover:bg-blue-700 disabled:opacity-40"
             aria-label="Send"
           >
-            <Send className="h-4 w-4" />
+            <Send className="h-[18px] w-[18px]" />
           </button>
         </div>
       </div>
@@ -1248,6 +1330,10 @@ export function SmithPanel({
             status={summaryStatus}
             onBuild={approve}
             onEdit={() => composerRef.current?.focus()}
+            onAddPage={() => {
+              setDraft((d) => d || "Add a page that ");
+              composerRef.current?.focus();
+            }}
             className="min-h-0 flex-1"
           />
         </>
@@ -1535,6 +1621,7 @@ export function ThinkingTrail({
   // labelled from the same table the build stage list uses.
   const steps = thoughts.filter((t) => t.kind === "step");
   const last = thoughts[thoughts.length - 1];
+  const SHOWN_STEPS = 6;
 
   // THE THINKING, SHOWN AS THINKING. The model's reasoning streams in as
   // fragments; joined, it is what Smith is weighing right now. It was hidden
@@ -1568,9 +1655,14 @@ export function ThinkingTrail({
   // describe the wrong half of the turn.
   const running = nodes.find((n) => n.state === "running");
   const stepNode = last?.kind === "step" ? last.node : undefined;
+  // A narrated step ("Opening /orders as Manager…", "Checking the pages this
+  // change reaches…") is already the action, in the present tense; the header
+  // says it rather than "Thinking" over it.
+  const stepText = last?.kind === "step" && !last.node ? last.text.replace(/[.…]+$/, "").trim() : "";
   const activity =
     (running && (STAGE_VERB[running.key] ?? labelFor(running.key))) ||
     (stepNode && (STAGE_VERB[stepNode] ?? labelFor(stepNode))) ||
+    stepText ||
     "Thinking";
 
   return (
@@ -1596,7 +1688,15 @@ export function ThinkingTrail({
           )}
         </div>
       )}
-      {steps.map((t, i) => (
+      {/* A long turn narrates every step; the trail keeps the last few in
+          view so the compose bar is never pushed off-screen, and says how
+          many came before. */}
+      {steps.length > SHOWN_STEPS + 2 && (
+        <p className="text-xs text-muted-foreground/70">
+          … {steps.length - SHOWN_STEPS} earlier steps
+        </p>
+      )}
+      {steps.slice(steps.length > SHOWN_STEPS + 2 ? -SHOWN_STEPS : 0).map((t, i) => (
         // Deterministic work, so it reads as status rather than thought —
         // upright, and labelled from the same table the stage list uses.
         <p key={i} className="flex items-center gap-1.5 text-xs text-muted-foreground">

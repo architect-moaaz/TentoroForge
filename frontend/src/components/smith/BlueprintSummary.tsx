@@ -68,6 +68,8 @@ export interface BlueprintSummaryProps {
   /** §113 — a page row opens that page in the live application, where there is one. */
   onOpenPage?: (route: string) => void;
   className?: string;
+  /** "Add page" in the Pages header: hands the composer a start. */
+  onAddPage?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -309,6 +311,7 @@ function Section({
   count,
   open,
   onToggle,
+  action,
   children,
 }: {
   title: string;
@@ -316,26 +319,32 @@ function Section({
   count: number;
   open: boolean;
   onToggle: () => void;
+  /** The one thing to do from this section's header — "Add page", "Open". */
+  action?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <section className="border-t">
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-expanded={open}
-        className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left hover:bg-muted/40"
-      >
-        <span className={cn("h-2 w-2 rounded-full", TONE[tone].dot)} />
-        <span className="text-sm font-semibold">{title}</span>
-        {!open && <span className="text-xs text-muted-foreground tabular-nums">{count}</span>}
-        <ChevronDown
-          className={cn(
-            "ml-auto h-4 w-4 text-muted-foreground transition-transform",
-            open && "rotate-180",
-          )}
-        />
-      </button>
+      <div className="flex items-center gap-2.5 px-4 py-2.5">
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={open}
+          className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
+        >
+          <span className={cn("h-2 w-2 rounded-full", TONE[tone].dot)} />
+          <span className="text-sm font-semibold">{title}</span>
+          {!open && <span className="text-xs text-muted-foreground tabular-nums">{count}</span>}
+          <ChevronDown
+            className={cn(
+              "ml-auto h-4 w-4 text-muted-foreground transition-transform",
+              open && "rotate-180",
+              action && "hidden",
+            )}
+          />
+        </button>
+        {action}
+      </div>
       {open && <div className="px-4 pb-3">{children}</div>}
     </section>
   );
@@ -370,6 +379,7 @@ export function BlueprintSummary({
   onBuild,
   onEdit,
   onOpenPage,
+  onAddPage,
   className,
 }: BlueprintSummaryProps) {
   // Requirements start closed: they are the longest list and the one a
@@ -452,10 +462,11 @@ export function BlueprintSummary({
               </div>
             </div>
             <div className="mt-3 flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs leading-none">
-                <Globe className="h-3.5 w-3.5 text-muted-foreground" />
-                {languageName(locale)}
-              </span>
+              {palette.length > 0 && (
+                <span className="inline-flex items-center rounded-full border px-2.5 py-1 text-xs leading-none text-muted-foreground">
+                  Theme
+                </span>
+              )}
               {palette.length > 0 && (
                 <span
                   className="inline-flex items-center gap-1.5 rounded-full border px-2 py-1"
@@ -474,6 +485,10 @@ export function BlueprintSummary({
                   ))}
                 </span>
               )}
+              <span className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs leading-none text-muted-foreground">
+                <Globe className="h-3.5 w-3.5" />
+                {languageName(locale)}
+              </span>
             </div>
           </div>
 
@@ -494,7 +509,23 @@ export function BlueprintSummary({
           </div>
 
           {pages.length > 0 && (
-            <Section title="Pages" tone="sky" count={pages.length} open={!!open.pages} onToggle={() => toggle("pages")}>
+            <Section
+              title="Pages"
+              tone="sky"
+              count={pages.length}
+              open={!!open.pages}
+              onToggle={() => toggle("pages")}
+              action={onAddPage && (
+                <button
+                  type="button"
+                  onClick={onAddPage}
+                  className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400"
+                >
+                  <SquarePlus className="h-3.5 w-3.5" />
+                  Add page
+                </button>
+              )}
+            >
               <ul className="divide-y">
                 {visiblePages.map((p, i) => {
                   const route = text(p.route);

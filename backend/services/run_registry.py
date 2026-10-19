@@ -342,6 +342,55 @@ def live_state(output_dir: str | Path) -> str:
     return f"NOTHING IS RUNNING NOW. The last {kind_of(path)} ended at {clock(ended)}."
 
 
+def last_build(output_dir: str | Path) -> dict[str, Any] | None:
+    """The newest build run (not a turn, not a check), folded, whatever state
+    it is in — the record a "continue" or "rerun" is answered from."""
+    import glob
+    import os
+    runs = sorted(glob.glob(os.path.join(str(output_dir), ".forge", "runs", "*.jsonl")))
+    for path in reversed(runs):
+        stem = os.path.basename(path)
+        if stem.endswith("-smith-turn.jsonl") or stem.endswith("-checks.jsonl") or stem.endswith("-app-check.jsonl"):
+            continue
+        return _fold(path)
+    return None
+
+
+def dead_build(output_dir: str | Path) -> dict[str, Any] | None:
+    """The last build when it stopped short — its process went away, or it
+    ended with a step failed or paused — and nothing is running now. None
+    when the last build finished, is still going, or there was none.
+
+    Eight asks in two weeks were "continue", "resume", "rerun" or "Build app"
+    typed after such a build (fyuhs16i, qpqhdugb, 97l5iqsp, grpz7rl5,
+    23libgx8, fnocleub, 20nhpelj): they were answered with the card to press,
+    or with nothing. The record of what stopped was on disk the whole time."""
+    run = last_build(output_dir)
+    if not run or run.get("active"):
+        return None
+    if run.get("status") == "error":
+        return run
+    if run.get("failedNodes") or run.get("pausedBecause"):
+        return run
+    return None
+
+
+def stopped_line(run: dict[str, Any]) -> str:
+    """Where a build stopped and why, in one line, from its ledger."""
+    def clock(epoch: Any) -> str:
+        return time.strftime("%H:%M UTC", time.gmtime(float(epoch))) if epoch else "?"
+    where = str(run.get("stage") or "")
+    failed = list(run.get("failedNodes") or [])
+    why = str(run.get("error") or run.get("pausedBecause") or "")
+    if failed:
+        why = f"{', '.join(failed[:3])} did not finish" + (f" ({why})" if why else "")
+    done, total = int(run.get("nodesDone") or 0), int(run.get("nodesTotal") or 0)
+    progress = f", {done} of {total} steps done" if total else ""
+    return (f"The build that started at {clock(run.get('startedAt'))} stopped at {clock(run.get('endedAt'))}"
+            + (f" at step {where}" if where else "") + progress
+            + (f" — {why}" if why else "") + ".")
+
+
 def close_orphaned_ledgers(root: str | Path) -> list[str]:
     """A RESTART CLOSES WHAT IT KILLED. Every ledger is written by this
     process; one still open when the process starts belonged to the one
@@ -462,6 +511,13 @@ def _fold(path: str) -> dict[str, Any] | None:
         run["status"] = "complete" if last.get("event") == "run:end" else "error"
         run["endedAt"] = _epoch(last.get("at")) or os.path.getmtime(path)
         run["awaitingApproval"] = bool(last.get("awaitingApproval"))
+        # HOW IT ENDED, KEPT. A run that ended with a node failed or paused
+        # was "complete" to every reader; the person was told to press Build
+        # again with no word of what stopped it (fnocleub, grpz7rl5, 2026-10).
+        run["failedNodes"] = [str(x) for x in (last.get("failed") or []) if x] if last.get("event") == "run:end" else []
+        run["pausedBecause"] = str(last.get("pausedBecause") or "")
+        if last.get("event") == "run:crashed":
+            run["error"] = str(last.get("error") or run.get("error") or "its process went away")
     elif age > LEDGER_STALE_S:
         run["status"] = "error"
         if _is_turn(path):

@@ -722,6 +722,20 @@ class VercelDeployProvider:
                 f"Deployment timed out after {_POLL_CEILING_S} seconds",
             )
 
+        except asyncio.CancelledError:
+            # THE PLATFORM STOPPED UNDER IT (a restart, a cutover). The row is
+            # closed as interrupted rather than left at its last stage forever.
+            if row is not None and row.status not in ("succeeded", "succeeded_with_warnings", "failed"):
+                from services.deploy.runs import INTERRUPTED
+                row.status = "failed"
+                row.error = INTERRUPTED
+                row.finished_at = datetime.now(timezone.utc)
+                try:
+                    await self._flush()
+                except Exception:  # noqa: BLE001 — the restart wins; close_stale finishes the job
+                    pass
+            raise
+
         except Exception as exc:
             # Never let a raw traceback leak to the SSE stream.
             if row is not None:
