@@ -1,0 +1,112 @@
+# TentoroForge test stack on its own EC2 box (t3.medium, 30 GB).
+#
+#  - everything lives in ./data (bind mounts), so removing this folder removes everything the stack ever wrote
+#  - one published port, on 127.0.0.1 only (reach it with an SSH tunnel); nothing else is published
+#  - memory caps sized for a 3.8 GB machine with 4 GB of swap
+#
+# Images are built by ./build.sh (an isolated builder whose cache is removed afterwards).
+name: ttf
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: ttf-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - ./data/pg:/var/lib/postgresql/data
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: ttf-redis
+    restart: unless-stopped
+    command: redis-server --maxmemory 96mb --maxmemory-policy allkeys-lru
+    mem_limit: 128m
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    image: ttf-backend:1
+    container_name: ttf-backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      tunnel:
+        condition: service_started
+    env_file:
+      - keys.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: ${SECRET_KEY}
+      # "staging", not "production": production refuses to start without a model key
+      APP_ENV: ${APP_ENV:-staging}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS}
+      FORGE_INTEGRATIONS_SECRET: ${FORGE_INTEGRATIONS_SECRET}
+      # Watch live: reaching the app on a builder's own computer through its reverse SSH tunnel (services/agent_tunnel.py)
+      FORGE_TUNNEL_DIR: /tunnel
+      FORGE_TUNNEL_HOST: tunnel
+      FORGE_TUNNEL_PUBLIC_HOST: ${PUBLIC_HOST:-}
+      FORGE_TUNNEL_SSH_PORT: ${TUNNEL_SSH_PORT:-2222}
+      FORGE_SELF_HEAL: "1"
+      FORGE_PLANNER_CRITIC: "0"
+      FORGE_WIZARD: "1"
+    volumes:
+      - ./data/output:/output
+      - ./data/tunnel:/tunnel
+      - ./src/packages:/packages:ro
+    mem_limit: 1536m
+    cpus: 2
+    # no published ports: the proxy is the only way in
+
+  frontend:
+    image: ttf-frontend:1
+    container_name: ttf-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      NEXT_PUBLIC_API_URL: ""
+      FASTAPI_URL: "http://backend:6500"
+    mem_limit: 768m
+
+  # The only other way in: an SSH server that accepts reverse port forwards (key login, no shell, no commands).
+  # Open TCP ${TUNNEL_SSH_PORT:-2222} in the server's security group for the computers that will connect.
+  tunnel:
+    image: ttf-tunnel:1
+    container_name: ttf-tunnel
+    restart: unless-stopped
+    ports:
+      - "${TUNNEL_SSH_PORT:-2222}:22"
+    volumes:
+      - ./data/tunnel:/keys
+      - ./data/tunnel-host:/hostkeys
+    mem_limit: 64m
+
+  proxy:
+    image: caddy:2-alpine
+    container_name: ttf-proxy
+    restart: unless-stopped
+    depends_on:
+      - backend
+      - frontend
+    ports:
+      - "127.0.0.1:3100:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    mem_limit: 64m
