@@ -501,8 +501,9 @@ function RuleSheet({ projectId, draft, setDraft, views, catalogue, model, buildi
           </div>
         )}
 
-        <div className="grid h-[calc(100%-57px)] grid-cols-1 overflow-hidden lg:grid-cols-[1fr_380px]">
-          <div className="space-y-4 overflow-y-auto p-5">
+        {/* Wide: editor and side panel scroll on their own. Narrow: one column, one scroll. */}
+        <div className="grid h-[calc(100%-57px)] grid-cols-1 overflow-y-auto lg:grid-cols-[1fr_380px] lg:overflow-hidden">
+          <div className="space-y-4 p-5 lg:overflow-y-auto">
             {sentence && (
               <p className="rounded-lg bg-muted/50 px-3 py-2 text-sm" data-testid="reads-as">
                 <span className="mr-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Reads as</span>{sentence}
@@ -588,7 +589,7 @@ function RuleSheet({ projectId, draft, setDraft, views, catalogue, model, buildi
             )}
           </div>
 
-          <aside className="space-y-4 overflow-y-auto border-l bg-muted/20 p-4">
+          <aside className="space-y-4 border-t bg-muted/20 p-4 lg:overflow-y-auto lg:border-l lg:border-t-0">
             {(draft.kind === "condition_action" || draft.kind === "decision_table") && (
               <>
                 <TestPanel projectId={projectId} payload={payload} ruleId={draft.id}
