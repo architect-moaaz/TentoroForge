@@ -661,3 +661,14 @@ async def test_one_request_per_app_the_newest_version(auth_client, org_id, super
     await admin.post(f"/api/admin/template-requests/{v2['id']}/decision", json={"decision": "approve"})
     r = await builder.post(f"/api/project-templates/{v1['id']}/submit", json={})
     assert r.status_code == 409 and "in the Gallery" in r.text
+
+
+@pytest.mark.asyncio
+async def test_tentoros_admins_judge_the_gallery_and_do_not_rate_it(auth_client, org_id, super_admin_client):
+    builder, admin = auth_client, super_admin_client
+    _, tpl = await _ready_template(builder, org_id)
+    await builder.post(f"/api/project-templates/{tpl['id']}/submit", json={})
+    await admin.post(f"/api/admin/template-requests/{tpl['id']}/decision", json={"decision": "approve"})
+    assert (await admin.get(f"/api/project-templates/{tpl['id']}")).json()["can_rate"] is False
+    r = await admin.put(f"/api/project-templates/{tpl['id']}/reviews/mine", json={"rating": 5})
+    assert r.status_code == 403 and "do not rate" in r.text

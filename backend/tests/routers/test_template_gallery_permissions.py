@@ -183,8 +183,10 @@ async def test_once_approved_everyone_signed_in_may_see_use_and_rate(cast):
         for person in PEOPLE:
             _expect(seen, person, (await cast["who"][person].get(path)).status_code, path)
     # Rating: not the organisation that built it; anyone else signed in may.
+    # Tentoro's admins judge the Gallery and do not score it; acting as a
+    # person, an admin rates as that person.
     rate = {"builder": 403, "org_admin": 403, "member": 403, "outsider": 200,
-            "tentoro": 200, "imperson": 200, "anon": 401}
+            "tentoro": 403, "imperson": 200, "anon": 401}
     for person in PEOPLE:
         r = await cast["who"][person].put(f"/api/project-templates/{t}/reviews/mine", json={"rating": 4})
         _expect(rate, person, r.status_code, "rate")

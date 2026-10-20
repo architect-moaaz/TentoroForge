@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { countsLine, formatDate, STATUS_LABEL, type TemplateCardData, type TemplateStatus } from "@/lib/templateGallery";
 import { PersonAvatar, Shot, Stars, StatusBadge } from "@/components/templates/TemplateBits";
 import { TemplateDetailDialog } from "@/components/templates/TemplateDetailDialog";
+import { CreatorProfileDialog } from "@/components/templates/CreatorProfileDialog";
 
 const TABS: TemplateStatus[] = ["pending", "approved", "rejected", "removed"];
 
@@ -23,6 +24,7 @@ function TemplateRequests() {
   const params = useSearchParams();
   const [status, setStatus] = useState<TemplateStatus | "all">("pending");
   const [open, setOpen] = useState<string | null>(null);
+  const [creator, setCreator] = useState<string | null>(null);
   useEffect(() => {
     const linked = params.get("request");
     if (linked && /^[0-9a-f]{32}$/.test(linked)) setOpen(linked);
@@ -138,6 +140,16 @@ function TemplateRequests() {
             setOpen(null);
             if (params.get("request")) router.replace(pathname);
           }
+        }}
+        onOpenCreator={setCreator}
+      />
+      <CreatorProfileDialog
+        userId={creator}
+        open={!!creator}
+        onOpenChange={(o) => !o && setCreator(null)}
+        onOpenTemplate={(id) => {
+          setCreator(null);
+          setOpen(id);
         }}
       />
     </div>

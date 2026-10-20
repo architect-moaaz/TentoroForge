@@ -108,7 +108,7 @@ export function TemplateDetailDialog({
                     <button
                       type="button"
                       onClick={() => tpl.creator?.id && onOpenCreator?.(tpl.creator.id)}
-                      disabled={!onOpenCreator || tpl.status !== "approved"}
+                      disabled={!onOpenCreator || (tpl.status !== "approved" && !tpl.is_admin)}
                       className="inline-flex items-center gap-1.5 font-medium text-foreground enabled:hover:underline"
                     >
                       <PersonAvatar person={tpl.creator} className="h-5 w-5" />
@@ -361,6 +361,9 @@ function ReviewState({
     onError: (e: Error) => toast.error(e.message),
   });
   const failing = (tpl.checks ?? []).filter((c) => !c.ok);
+  // Taking it out is for everyone at once, and coming back is a new review: asked first.
+  const [confirmOut, setConfirmOut] = useState(false);
+  useEffect(() => setConfirmOut(false), [tpl.id, tpl.status]);
   return (
     <div className="space-y-3 rounded-lg border p-3" data-testid="review-state">
       <div className="flex items-center justify-between">
@@ -391,10 +394,22 @@ function ReviewState({
               </Button>
             </>
           )}
-          {tpl.status === "approved" && (
-            <Button size="sm" variant="ghost" onClick={() => act.mutate("unpublish")} disabled={act.isPending}>
+          {tpl.status === "approved" && !confirmOut && (
+            <Button size="sm" variant="ghost" onClick={() => setConfirmOut(true)} disabled={act.isPending}>
               Take out of the Gallery
             </Button>
+          )}
+          {tpl.status === "approved" && confirmOut && (
+            <div className="space-y-2 rounded-md border border-rose-200 bg-rose-50/60 p-2 text-xs dark:border-rose-900 dark:bg-rose-950/30">
+              <p>Nobody else can start an app from it after this; apps already made from it keep working.
+                To put it back, submit it again and Tentoro reviews it again.</p>
+              <div className="flex gap-2">
+                <Button size="sm" variant="destructive" className="h-7 text-xs" onClick={() => act.mutate("unpublish")} disabled={act.isPending}>
+                  Take it out
+                </Button>
+                <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setConfirmOut(false)}>Keep it</Button>
+              </div>
+            </div>
           )}
         </div>
       )}

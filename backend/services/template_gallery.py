@@ -636,8 +636,10 @@ async def reviews(db: AsyncSession, lineage: str, *, limit: int = 100) -> list[d
 def may_rate(meta: dict, status: str, who: Viewer) -> bool:
     """Anyone signed in may rate a template in the Gallery — except the
     organisation that made it: its builder and their colleagues would be
-    marking their own work, and the stars are for people choosing one."""
-    return status == APPROVED and not who.in_org and str(meta.get("created_by")) != str(who.user.id)
+    marking their own work, and the stars are for people choosing one. Nor
+    Tentoro's admins: they judge what is in the Gallery, so they do not score it."""
+    return (status == APPROVED and not who.in_org and not who.is_admin
+            and str(meta.get("created_by")) != str(who.user.id))
 
 
 async def rate(db: AsyncSession, meta: dict, row: TemplateListing | None, who: Viewer,
@@ -650,6 +652,8 @@ async def rate(db: AsyncSession, meta: dict, row: TemplateListing | None, who: V
         raise GalleryError("You cannot rate your own template.", 403)
     if who.in_org:
         raise GalleryError("Your organisation built this template, so its rating is for others to give.", 403)
+    if who.is_admin:
+        raise GalleryError("Tentoro's admins decide what is in the Gallery, so they do not rate it.", 403)
     if isinstance(rating, bool) or not isinstance(rating, int) or not 1 <= rating <= 5:
         raise GalleryError("A rating is a whole number of stars from 1 to 5.")
     comment = str(comment or "").strip()

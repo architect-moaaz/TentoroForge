@@ -203,7 +203,7 @@ export function OrgTemplates({
       <Dialog open={!!deleting} onOpenChange={(o) => !o && setDeleting(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete “{deleting?.name}”?</DialogTitle>
+            <DialogTitle>Delete “{deleting?.name}” (version {deleting?.version})?</DialogTitle>
             <DialogDescription>
               It disappears from Templates for everyone in the organisation
               {deleting?.status === "approved" ? " and from the Gallery" : ""}

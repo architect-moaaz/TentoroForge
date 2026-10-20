@@ -115,6 +115,8 @@ export interface WorkflowNodeConfig {
   // Decision node
   decisionTableId?: string;
   decisionTable?: import("@/types/decision").DecisionTableDefinition;
+  /** A business rule of the app, run as this decision step (RULE-012). */
+  rule?: string;
   outputMapping?: Record<string, string>;
 
   // Wait node
