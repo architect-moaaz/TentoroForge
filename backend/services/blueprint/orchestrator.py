@@ -2000,6 +2000,16 @@ def _execute(
                 if kept:
                     logger.warning("[%s] repair of %s returned nothing for %s — what was authored there stands",
                                    key, spec.subject, ", ".join(sorted(kept)))
+                # …AND NEVER WHAT IS STILL IN USE. A rewrite that came back with
+                # one role and one permission retired the other seven roles and
+                # forty-five permissions while every screen still named them
+                # (pah7lhfz, forge-v3 2026-10-20). What a live part of the
+                # Blueprint points at is not superseded; it was left unsaid.
+                in_use = _still_in_use(svc.doc, stale)
+                if in_use:
+                    logger.warning("[%s] repair of %s left out %d artifact(s) still in use — kept: %s", key,
+                                   spec.subject, len(in_use), ", ".join(sorted(str(i[2]) for i in in_use))[:400])
+                    stale = stale - in_use
                 if stale:
                     _retire(svc, stale,
                             note=f"superseded by the observer's repair of "
@@ -2312,6 +2322,52 @@ def _proposed_identities(result: Any, application: Any) -> set[tuple]:
                 out.add(("id", section, ids[i]))
             i += 1
     return out
+
+
+_ARTIFACT_ID = re.compile(r"^[A-Z]+-\d{3,}$")
+
+
+def _still_in_use(doc: dict, identities: set[tuple]) -> set[tuple]:
+    """The id-bearing identities among `identities` that a live part of the
+    document still points at — a screen's `users` naming a role, a role
+    holding a permission. Worked to a fixed point: what is kept because it is
+    in use keeps what IT points at. Keyed rows are not looked at."""
+    candidates = {str(i[2]): i for i in identities if i[0] == "id"}
+    kept: set[str] = set()
+    while True:
+        retiring = set(candidates) - kept
+        used: set[str] = set()
+
+        def walk(node: Any, depth: int = 0) -> None:
+            if depth > 14:
+                return
+            if isinstance(node, dict):
+                own = node.get("id")
+                if isinstance(own, str) and own in retiring:
+                    return                                   # a source that is going: not a user
+                if str(node.get("status") or "").upper() in ("DEPRECATED", "REMOVED") and isinstance(own, str):
+                    return
+                for k, v in node.items():
+                    if k == "id":
+                        continue
+                    if isinstance(v, str):
+                        if _ARTIFACT_ID.match(v):
+                            used.add(v)
+                    else:
+                        walk(v, depth + 1)
+            elif isinstance(node, list):
+                for item in node:
+                    if isinstance(item, str):
+                        if _ARTIFACT_ID.match(item):
+                            used.add(item)
+                    else:
+                        walk(item, depth + 1)
+        walk(doc)
+        newly = (retiring & used) - kept
+        if not newly:
+            break
+        kept |= newly
+    return {candidates[k] for k in kept}
 
 
 def _retire(svc: BlueprintService, identities: set[tuple], *, note: str) -> None:
