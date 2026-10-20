@@ -49,8 +49,8 @@ import type {
 /** An agent saves itself this long after the last change, so typing is not a save per key. */
 const AUTOSAVE_MS = 1200;
 
-/** Watch live is built but not open yet: its page says "Coming soon". Switch this on to bring the real page back. */
-const WATCH_LIVE_READY = false;
+/** Watch live is open. Switch this off to put its "Coming soon" page (and a Soon badge on its button) back in its place. */
+const WATCH_LIVE_READY = true;
 
 interface AgentBuilderPanelProps {
   projectId: string;
