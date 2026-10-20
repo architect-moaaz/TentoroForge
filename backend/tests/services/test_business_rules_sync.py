@@ -187,11 +187,15 @@ def test_a_decision_table_is_bound_to_its_record_and_runs(app):
     table = {"hitPolicy": "F",
              "inputs": [{"id": "in_1", "name": "openingsCount", "type": "number", "variableBinding": "openingsCount"}],
              "outputs": [{"id": "out_1", "name": "status", "type": "string"}],
-             "rules": [{"id": "r1", "inputEntries": ["> 10"], "outputEntries": ['"hiring"']},
+             # Role.status is open or closed: a value outside those is refused
+             # as a typo now ("hiring" was saved, and could never be written).
+             "rules": [{"id": "r1", "inputEntries": ["> 10"], "outputEntries": ['"closed"']},
                        {"id": "r2", "inputEntries": ["-"], "outputEntries": ['"open"']}]}
     made = br.create(app, {"name": "Status by openings", "kind": "decision_table", "entity": ROLE,
                            "table": table})["rule"]
-    assert made["runs"] == "everywhere"
+    # On every save — the form does not evaluate tables, so "everywhere"
+    # (live on the form too) was never true of one.
+    assert made["runs"] == "save"
     row = next(r for r in _app_rules(app) if r["id"] == made["rule"]["id"])
     assert row["rule_type"] == "decision_table" and row["model_name"] == "Role"
     assert row["config"]["table"]["rules"][0]["inputEntries"] == ["> 10"]

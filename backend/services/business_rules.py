@@ -237,6 +237,12 @@ def _field_type(f: dict) -> str:
     return "string"
 
 
+def _enum_values(f: dict) -> list:
+    """An enum field's choices, whichever way the definition spells them."""
+    vals = f.get("enumValues") or f.get("values") or f.get("options") or []
+    return [v.get("value") if isinstance(v, dict) else v for v in vals if v not in (None, "")]
+
+
 def catalogue(doc: dict) -> dict:
     """What a rule can name: the records with their fields (type, choices),
     the workflows it can start, the requirements it can cite."""
@@ -245,13 +251,18 @@ def catalogue(doc: dict) -> dict:
         entities.append({
             "id": e.get("id"), "name": e.get("name"), "table": e.get("table"),
             "fields": [{"name": f.get("name"), "type": _field_type(f),
-                        "enumValues": [str(v) for v in f.get("enumValues") or []],
+                        "enumValues": [str(v) for v in _enum_values(f)],
                         "required": bool(f.get("required"))}
                        for f in e.get("fields") or [] if isinstance(f, dict) and f.get("name")],
         })
     return {
         "entities": entities,
-        "workflows": [{"id": w.get("id"), "name": w.get("name")} for w in _live(doc.get("workflows"))],
+        # With their steps, so a rule can be placed after one of them.
+        "workflows": [{"id": w.get("id"), "name": w.get("name"),
+                       "steps": [{"key": st.get("key"), "name": st.get("name") or st.get("key"),
+                                  "type": st.get("type")}
+                                 for st in w.get("steps") or [] if isinstance(st, dict) and st.get("key")]}
+                      for w in _live(doc.get("workflows"))],
         "requirements": [{"id": r.get("id"), "description": r.get("description")}
                          for r in _live(doc.get("requirements"))],
     }
@@ -275,7 +286,9 @@ def where_it_runs(rule: dict) -> str:
     if kind == "prerequisite":
         return "before"
     if kind == "decision_table":
-        return "everywhere" if rule.get("entity") and (rule.get("table") or {}).get("rules") else "nowhere"
+        # A table sets fields when the record is saved; the form does not
+        # evaluate tables, so it never ran "live on the form" as it was labelled.
+        return "save" if rule.get("entity") and (rule.get("table") or {}).get("rules") else "nowhere"
     if kind != "condition_action" or not rule.get("entity"):
         return "nowhere"
     acts = list(rule.get("then") or []) + list(rule.get("otherwise") or [])
@@ -307,6 +320,9 @@ def view(rule: dict, doc: dict) -> dict:
         # What it answers now: an ask withdrawn since is not listed as one.
         "requirements": [{"id": r, "description": reqs[str(r)]} for r in rule.get("requirements") or []
                          if str(r) in reqs],
+        # Where else it acts: as a workflow step, the workflows it starts, and
+        # the workflows that save its record (its checks run there too).
+        "usages": usages(doc, rule),
     }
 
 
@@ -381,6 +397,34 @@ def _condition_fields(feel: str) -> set[str]:
     return names
 
 
+def table_findings(rule: dict) -> list[dict]:
+    """What the app's engine finds in a decision table (``rule_lab``):
+    cells it cannot read, rows that overlap under Unique, rows a First table
+    can never use, values that are not the column's. Memoised on the table,
+    so a check and its advice read it once."""
+    table = (rule or {}).get("table") or {}
+    key = json.dumps(table, sort_keys=True)
+    if _TABLE_FINDINGS.get("key") != key:
+        from services.blueprint import rule_lab
+        _TABLE_FINDINGS.update(key=key, findings=rule_lab.analyze_table(table))
+    return list(_TABLE_FINDINGS.get("findings") or [])
+
+
+_TABLE_FINDINGS: dict = {}
+
+
+def advice(doc: dict, rule: dict) -> list[str]:
+    """What is worth saying about a rule that is not a reason to refuse it."""
+    out: list[str] = []
+    if (rule.get("kind") or "") == "decision_table":
+        out += [f["message"] for f in table_findings(rule) if f.get("severity") == "warning"]
+    on = rule.get("on") or []
+    if on == ["create"] and "previous." in str(rule.get("when") or ""):
+        out.append("It fires only when a record is created, when there is no previous value — "
+                   "a condition on “previous” never holds then.")
+    return out
+
+
 def check(doc: dict, rule: dict) -> list[str]:
     """What is wrong with `rule` against this definition — empty when it
     would be accepted. The build's own checks (`authoring_findings`: the
@@ -407,8 +451,11 @@ def check(doc: dict, rule: dict) -> list[str]:
         if not str(rule.get("when") or "").strip():
             problems.append("Say when the rule applies (its condition).")
         acts = list(rule.get("then") or []) + list(rule.get("otherwise") or [])
-        if not rule.get("then"):
-            problems.append("Add at least one thing the rule does when its condition holds.")
+        # "When the amount is at most 5000 or there is a note: fine; otherwise
+        # refuse" acts only in its otherwise — a rule, as long as it does
+        # something on one side.
+        if not acts:
+            problems.append("Add at least one thing the rule does — when its condition holds, or otherwise.")
         if ent is not None:
             unknown = sorted(n for n in _condition_fields(str(rule.get("when") or "")) if n not in readable)
             if unknown:
@@ -436,6 +483,14 @@ def check(doc: dict, rule: dict) -> list[str]:
             problems.append("A decision table needs at least one input and one output column.")
         if not table.get("rules"):
             problems.append("A decision table needs at least one row.")
+        policy = str(table.get("hitPolicy") or "F").upper()
+        if policy == "R" or (policy == "C" and not table.get("aggregation")):
+            problems.append("A table that sets a record's fields needs one value per field: use First, Unique, "
+                            "Priority or Any — or Collect with a sum, count, minimum or maximum. Rule order and "
+                            "plain Collect give a list, which only a workflow step can use.")
+        outs = [str(c.get("variableBinding") or c.get("name") or "") for c in table.get("outputs") or []]
+        if len(set(outs)) != len(outs):
+            problems.append("Each output column sets a different field.")
         if ent is not None:
             for col in list(table.get("inputs") or []) + list(table.get("outputs") or []):
                 name = str(col.get("variableBinding") or col.get("name") or "")
@@ -445,6 +500,9 @@ def check(doc: dict, rule: dict) -> list[str]:
             for i, row in enumerate(table.get("rules") or [], 1):
                 if len(row.get("inputEntries") or []) != width_in or len(row.get("outputEntries") or []) != width_out:
                     problems.append(f"Row {i} does not have a cell for every column.")
+    if kind == "decision_table" and not problems:
+        # The cells, overlaps and typos — read by the app's own engine.
+        problems += [f["message"] for f in table_findings(rule) if f.get("severity") == "error"]
     if problems:
         return problems
     # The build's own checks, exactly as an agent's rule meets them.
@@ -528,23 +586,55 @@ def normalise(payload: dict, doc: dict, *, existing: dict | None = None) -> dict
             raise RuleError("Priority must be a whole number.") from None
     if "enabled" in payload:
         rule["enabled"] = bool(payload["enabled"])
+    if "on" in payload:
+        on = [str(x) for x in (payload.get("on") or []) if str(x) in ("create", "update")]
+        on = [x for x in ("create", "update") if x in on]   # in order, once each
+        if on and on != ["create", "update"]:
+            rule["on"] = on
+        else:
+            rule.pop("on", None)                            # both is the default
     for key in ("then", "otherwise"):
         if key in payload:
             rule[key] = [_clean_action(a) for a in payload.get(key) or []]
     if "table" in payload:
         t = payload.get("table") or {}
+        policy = str(t.get("hitPolicy") or "F").upper()
+        if policy not in ("U", "F", "A", "P", "C", "R"):
+            raise RuleError(f"“{t.get('hitPolicy')}” is not a hit policy.")
+        cols = ("id", "name", "label", "type", "variableBinding")
+
+        def column(c: dict) -> dict:
+            out = {k: c[k] for k in cols if k in c and c[k] not in (None, "")}
+            # An output column keeps the field it writes (it was dropped, so
+            # an output named apart from its field wrote nowhere).
+            if not out.get("variableBinding") and out.get("name"):
+                out["variableBinding"] = out["name"]
+            vals = [str(v).strip() for v in c.get("values") or [] if str(v).strip()]
+            if vals:
+                out["values"] = list(dict.fromkeys(vals))
+            return out
         rule["table"] = {
-            "hitPolicy": str(t.get("hitPolicy") or "F"),
-            "inputs": [{k: c[k] for k in ("id", "name", "label", "type", "variableBinding") if k in c and c[k] not in (None, "")}
-                       for c in t.get("inputs") or [] if isinstance(c, dict)],
-            "outputs": [{k: c[k] for k in ("id", "name", "label", "type", "variableBinding") if k in c and c[k] not in (None, "")}
-                        for c in t.get("outputs") or [] if isinstance(c, dict)],
+            "hitPolicy": policy,
+            **({"aggregation": str(t["aggregation"]).upper()}
+               if policy == "C" and str(t.get("aggregation") or "").upper() in ("SUM", "COUNT", "MIN", "MAX") else {}),
+            "inputs": [column(c) for c in t.get("inputs") or [] if isinstance(c, dict)],
+            "outputs": [column(c) for c in t.get("outputs") or [] if isinstance(c, dict)],
             "rules": [{"inputEntries": [str(x) for x in r.get("inputEntries") or []],
                        "outputEntries": [str(x) for x in r.get("outputEntries") or []],
                        **({"annotation": str(r["annotation"])} if r.get("annotation") else {})}
                       for r in t.get("rules") or [] if isinstance(r, dict)],
         }
+        # A column's type and values follow its field: an enum's values are
+        # what Priority ranks by and what a typo is caught against.
+        ent = _entities(doc).get(str(payload.get("entity") or base.get("entity") or ""))
+        fields = {str(f.get("name")): f for f in (ent or {}).get("fields") or [] if isinstance(f, dict)}
         for col in rule["table"]["inputs"] + rule["table"]["outputs"]:
+            f = fields.get(str(col.get("variableBinding") or col.get("name") or ""))
+            if f is not None:
+                col["type"] = _field_type(f) if _field_type(f) in ("string", "number", "boolean", "date") else "string"
+                enum_vals = [str(v) for v in _enum_values(f)]
+                if enum_vals and not col.get("values"):
+                    col["values"] = enum_vals
             col["type"] = col.get("type") if col.get("type") in ("string", "number", "boolean", "date", "any") else "any"
     if "requirements" in payload:
         known = {str(r.get("id")) for r in _live(doc.get("requirements"))}
@@ -773,8 +863,11 @@ def try_rule(output_dir: str | Path, payload: dict, *, rule_id: str | None = Non
     except RuleError as exc:
         return {"ok": False, "problems": exc.problems}
     problems = check(svc.doc, rule)
+    findings = table_findings(rule) if rule.get("kind") == "decision_table" else []
     return {"ok": not problems, "problems": problems, "runs": where_it_runs(rule),
-            "statement": rule.get("statement")}
+            "statement": rule.get("statement"), "advice": advice(svc.doc, rule),
+            # Per row and column, so the table can mark the cell itself.
+            "findings": findings}
 
 
 # ---------------------------------------------------------------------------
@@ -942,3 +1035,246 @@ __all__ = [
     "normalise", "read", "remove", "revision", "set_enabled", "try_rule", "update", "view",
     "where_it_runs", "write_lock",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Test it — the app's own engine, on a sample record
+# ---------------------------------------------------------------------------
+
+DRAFT_ID = "RULE-DRAFT"
+
+
+def test_rule(output_dir: str | Path, payload: dict | None, *, rule_id: str | None = None,
+              entity: str | None = None, record: dict | None = None, previous: dict | None = None,
+              event: str = "create", user: dict | None = None) -> dict:
+    """What the app would do with this save: the draft rule (or, with no
+    payload, the rules as they are) among every other rule of its record, run
+    by the app's own engine (`rule_lab`). Nothing is saved.
+
+    ``{ok, problems, advice, refused, errors, patches, formHints, record,
+    sideEffects, trace, focus}`` — `focus` is the draft's own line: did it
+    fire on this event, did its condition hold, which rows matched."""
+    from services.blueprint import rule_lab
+    from services.blueprint.projection import business_rule_rows
+    from services.blueprint.service import BlueprintService
+    svc = BlueprintService.load(output_dir=str(output_dir))
+    doc = json.loads(json.dumps(svc.doc))
+    problems: list[str] = []
+    draft = None
+    if payload is not None:
+        existing = _find(doc, rule_id) if rule_id else None
+        try:
+            draft = normalise(payload, doc, existing=existing)
+        except RuleError as exc:
+            return {"ok": False, "problems": exc.problems or [str(exc)], "advice": []}
+        problems = check(doc, draft)
+        draft = {**draft, "id": rule_id or DRAFT_ID, "enabled": True, "status": "PROPOSED"}
+        rows = [r for r in doc.get("businessRules") or []
+                if not (isinstance(r, dict) and str(r.get("id")) == str(draft["id"]))]
+        doc["businessRules"] = rows + [draft]
+    if draft is not None and draft.get("kind") == "statement":
+        return {"ok": False, "problems": ["A written rule is not checked by the app, so there is nothing to test — "
+                                          "make it enforceable first."], "advice": []}
+    ent_id = str((draft or {}).get("entity") or entity or "")
+    ent = _entities(doc).get(ent_id)
+    if ent is None:
+        return {"ok": False, "problems": problems or ["Choose the record to test it on."], "advice": []}
+    rows = [r for r in business_rule_rows(doc) if str(r.get("model_name")) == str(ent.get("name"))]
+    try:
+        result = rule_lab.simulate(model=str(ent.get("name")), rules=rows, record=dict(record or {}),
+                                   event="update" if event == "update" else "create",
+                                   previous=dict(previous or {}) if event == "update" else None,
+                                   user=user, focus=str(draft["id"]) if draft else None)
+    except rule_lab.LabUnavailable as exc:
+        return {"ok": False, "problems": problems, "advice": [],
+                "unavailable": f"The test could not run here: {exc}."}
+    return {"ok": not problems, "problems": problems,
+            "advice": advice(doc, draft) if draft else [], **result}
+
+
+# ---------------------------------------------------------------------------
+# Rules in workflows
+# ---------------------------------------------------------------------------
+
+#: How a rule's step in a workflow is keyed: one step per rule per workflow.
+def _step_key(rule_id: str) -> str:
+    return "rule_" + re.sub(r"[^a-z0-9]+", "_", str(rule_id).lower()).strip("_")
+
+
+def usages(doc: dict, rule: dict) -> dict:
+    """Where a rule acts beyond the record's own saves:
+    ``steps`` — workflow steps that run it; ``starts`` — the workflows it
+    starts; ``saves`` — the workflows that save its record, where the record's
+    rules are checked on every write anyway."""
+    rid = str(rule.get("id") or "")
+    ent = _entities(doc).get(str(rule.get("entity") or "")) or {}
+    table = str(ent.get("table") or "").lower()
+    starts = {str(a.get("workflow")) for a in list(rule.get("then") or []) + list(rule.get("otherwise") or [])
+              if isinstance(a, dict) and a.get("type") == "trigger_workflow" and a.get("workflow")}
+    steps, saves, started = [], [], []
+    for w in _live(doc.get("workflows")):
+        wid, wname = str(w.get("id")), str(w.get("name") or w.get("id"))
+        if wid in starts:
+            started.append({"workflow": wid, "name": wname})
+        saved = False
+        for st in w.get("steps") or []:
+            if not isinstance(st, dict):
+                continue
+            cfg = st.get("config") or {}
+            if st.get("type") == "decision" and str(cfg.get("rule") or "") == rid:
+                steps.append({"workflow": wid, "name": wname, "step": st.get("key"),
+                              "stepName": st.get("name") or st.get("key"),
+                              "stops": any(str(n).endswith("_refused") for n in (st.get("next") or [])[1:2])})
+            # A write of this record: a db_insert/db_update of its table, or an
+            # action step naming the record with no other action type (how the
+            # build writes "create the role").
+            writes = cfg.get("actionType") in ("db_insert", "db_update", "db_upsert") or (
+                st.get("type") == "action" and not cfg.get("actionType"))
+            names_it = (str(st.get("entity") or "") == str(rule.get("entity") or "")
+                        or (table and str(cfg.get("table") or "").lower() == table))
+            if writes and names_it:
+                saved = True
+        if saved and rule.get("entity"):
+            saves.append({"workflow": wid, "name": wname})
+    return {"steps": steps, "starts": started, "saves": saves}
+
+
+def _refusal_message(rule: dict) -> str:
+    for side in ("then", "otherwise"):
+        for a in rule.get(side) or []:
+            if isinstance(a, dict) and a.get("type") == "show_error" and str(a.get("message") or "").strip():
+                return str(a["message"]).strip()
+    return str(rule.get("message") or "").strip() or f"Stopped by the rule “{rule.get('name') or rule.get('id')}”."
+
+
+def attach(output_dir: str | Path, rule_id: str, *, workflow: str, after: str | None,
+           on_refusal: str = "stop", actor: str = "") -> dict:
+    """Run a rule as a step of a workflow, after the step `after` (None: at
+    the start). A rule that can refuse becomes a gate: with ``on_refusal ==
+    "stop"`` its else-path ends the workflow, refused, with the rule's own
+    message; ``"continue"`` carries on either way (its values still reach the
+    steps after). A decision table's outputs are written for the steps after.
+    A rule already in that workflow is moved, not added twice."""
+    from services.blueprint.projection import project_workflows
+    from services.blueprint.service import BlueprintService
+    if on_refusal not in ("stop", "continue"):
+        raise RuleError("Say whether a refusal stops the workflow or it carries on.")
+    _guard_writable(output_dir)
+    with write_lock(output_dir, timeout=TAB_LOCK_WAIT):
+        _refuse_if_building(output_dir)
+        svc = BlueprintService.load(output_dir=str(output_dir))
+        rule = _find(svc.doc, rule_id)
+        if rule.get("kind") not in ("condition_action", "decision_table"):
+            raise RuleError("Only a rule the app checks — a when/then rule or a decision table — can be a step "
+                            "of a workflow. Make this one enforceable first.")
+        if rule.get("enabled") is False:
+            raise RuleError("This rule is switched off; switch it on to use it in a workflow.")
+        flow = next((w for w in _live(svc.doc.get("workflows")) if str(w.get("id")) == str(workflow)), None)
+        if flow is None:
+            raise RuleError(f"{workflow} is not a workflow of this application.", status=404)
+        before = svc.snapshot()
+        key = _step_key(rule_id)
+        _detach_in(flow, key)
+        steps = flow.setdefault("steps", [])
+        by_key = {s.get("key"): s for s in steps if isinstance(s, dict)}
+        if after is not None and after not in by_key:
+            raise RuleError(f"The workflow has no step “{after}”.", status=404)
+        if after is not None and by_key[after].get("type") in ("end", "end_event"):
+            raise RuleError("A step cannot come after the end of the workflow — choose a step before it.")
+        gate = rule.get("kind") == "condition_action" and any(
+            isinstance(a, dict) and a.get("type") == "show_error"
+            for a in list(rule.get("then") or []) + list(rule.get("otherwise") or []))
+        step = {"key": key, "name": f"Check: {rule.get('name') or rule_id}", "type": "decision",
+                "config": {"rule": str(rule_id)}, "next": []}
+        if rule.get("entity"):
+            step["entity"] = rule["entity"]
+        if after is None:
+            # After the trigger step when the workflow has one, else first.
+            at = next((i + 1 for i, s in enumerate(steps) if isinstance(s, dict) and s.get("type") == "trigger"), 0)
+            first = steps[at]["key"] if at < len(steps) else None
+            if at > 0:
+                trig = steps[at - 1]
+                tnext = list(trig.get("next") or [])
+                if tnext:
+                    first = tnext[0]
+                    trig["next"] = [key] + tnext[1:]
+                else:
+                    trig["next"] = [key]
+            follow = first
+            steps.insert(at, step)
+        else:
+            prev = by_key[after]
+            pnext = list(prev.get("next") or [])
+            follow = pnext[0] if pnext else None
+            prev["next"] = [key] + pnext[1:]
+            steps.insert(steps.index(prev) + 1, step)
+        if follow is None:
+            # The step handed to the workflow's end; make that end explicit.
+            end_key = f"{key}_done"
+            steps.append({"key": end_key, "name": "Done", "type": "end", "config": {"refused": False}, "next": []})
+            follow = end_key
+        step["next"] = [follow]
+        if gate and on_refusal == "stop":
+            refused = f"{key}_refused"
+            steps.append({"key": refused, "name": f"Refused: {rule.get('name') or rule_id}", "type": "end",
+                          "config": {"refused": True, "message": _refusal_message(rule)}, "next": []})
+            step["next"] = [follow, refused]
+        try:
+            svc.validate()
+        except Exception as exc:  # noqa: BLE001 — refused whole, nothing saved
+            raise RuleError(f"The workflow would not be valid with this step: {exc}") from exc
+        version = _commit(svc, before, f"Business Rules tab: run “{rule.get('name')}” in {flow.get('name')}"
+                          + (f" (by {actor})" if actor else ""),
+                          f"Added {rule_id} as a step of {workflow}", [str(rule_id), str(workflow)])
+        files = _project(svc)
+        app = Path(svc.output_dir) / "app"
+        if app.is_dir():
+            project_workflows(svc.doc, str(app))
+            files.append("src/lib/workflows/definitions/")
+        return {"rule": view(rule, svc.doc), "version": version, "files": files}
+
+
+def _detach_in(flow: dict, key: str) -> bool:
+    """Take a rule's step out of a workflow: whatever led to it now leads to
+    what came after it on its then-path, and the ends it added go with it."""
+    steps = flow.get("steps") or []
+    step = next((s for s in steps if isinstance(s, dict) and s.get("key") == key), None)
+    if step is None:
+        return False
+    own = {f"{key}_refused", f"{key}_done"}
+    follow = (step.get("next") or [None])[0]
+    if follow in own:
+        follow = None          # it led to its own end: those before it now end there
+    for s in steps:
+        if s is step or not isinstance(s, dict) or key not in (s.get("next") or []):
+            continue
+        s["next"] = [follow if n == key else n for n in s["next"] if n != key or follow]
+    flow["steps"] = [s for s in steps if s is not step and not (isinstance(s, dict) and s.get("key") in own)]
+    return True
+
+
+def detach(output_dir: str | Path, rule_id: str, *, workflow: str, actor: str = "") -> dict:
+    """Stop running a rule as a step of a workflow."""
+    from services.blueprint.projection import project_workflows
+    from services.blueprint.service import BlueprintService
+    _guard_writable(output_dir)
+    with write_lock(output_dir, timeout=TAB_LOCK_WAIT):
+        _refuse_if_building(output_dir)
+        svc = BlueprintService.load(output_dir=str(output_dir))
+        rule = _find(svc.doc, rule_id)
+        flow = next((w for w in _live(svc.doc.get("workflows")) if str(w.get("id")) == str(workflow)), None)
+        if flow is None:
+            raise RuleError(f"{workflow} is not a workflow of this application.", status=404)
+        before = svc.snapshot()
+        if not _detach_in(flow, _step_key(rule_id)):
+            raise RuleError("This rule is not a step of that workflow.", status=404)
+        svc.validate()
+        version = _commit(svc, before, f"Business Rules tab: stop running “{rule.get('name')}” in {flow.get('name')}"
+                          + (f" (by {actor})" if actor else ""),
+                          f"Removed {rule_id}'s step from {workflow}", [str(rule_id), str(workflow)])
+        files = _project(svc)
+        app = Path(svc.output_dir) / "app"
+        if app.is_dir():
+            project_workflows(svc.doc, str(app))
+            files.append("src/lib/workflows/definitions/")
+        return {"rule": view(rule, svc.doc), "version": version, "files": files}

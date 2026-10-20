@@ -9,6 +9,7 @@
  */
 
 import { evaluateExpression } from "../feel-lite";
+import { evaluateTable, type DecisionTableDef } from "./decision-table";
 import type {
   ProjectRule,
   ValidationRuleConfig,
@@ -968,102 +969,52 @@ function dispatchActions(
  * them uniformly.
  */
 // ── Decision tables (rule_type="decision_table") ────────────────────────────
-// A DMN-style table: inputs (bound to entity fields) × rules (rows) → outputs
-// (field patches). Previously accepted + stored + exported but NEVER evaluated,
-// so authored tables did nothing. Each input cell is a DMN unary test
-// ("> 1000", "active", "a,b" = OR, "-"/"" = any); each output cell is a literal
-// or a FEEL-lite expression over the entity. First-match-wins (correct for the
-// common Unique/First/Priority hit policies; Collect/RuleOrder fall back to
-// last-write on scalar fields).
+// Inputs bound to the record's fields × rows → outputs (field patches). The
+// cells, hit policies and analysis are `decision-table.ts`.
 
-function _splitTopLevel(s: string, sep: string): string[] {
-  const out: string[] = [];
-  let depth = 0, quote = "", cur = "";
-  for (const ch of s) {
-    if (quote) { cur += ch; if (ch === quote) quote = ""; continue; }
-    if (ch === '"' || ch === "'") { quote = ch; cur += ch; continue; }
-    if (ch === "(" || ch === "[") depth++;
-    if (ch === ")" || ch === "]") depth--;
-    if (ch === sep && depth === 0) { out.push(cur); cur = ""; continue; }
-    cur += ch;
-  }
-  if (cur.trim()) out.push(cur);
-  return out;
+/**
+ * Does this rule fire on this event? `on` lists "create" and/or "update";
+ * absent, it fires on both — every rule written before `on` existed.
+ */
+export function firesOn(config: { on?: unknown } | undefined, event: string): boolean {
+  const on = (config as { on?: unknown } | undefined)?.on;
+  if (!Array.isArray(on) || on.length === 0) return true;
+  return on.map(String).includes(event);
 }
 
-function _rhsLiteral(raw: string): string {
-  const s = raw.trim();
-  if (/^-?\d+(\.\d+)?$/.test(s) || s === "true" || s === "false") return s;
-  if (/^["'].*["']$/.test(s)) return s;
-  return JSON.stringify(s);
-}
-
-function _matchDecisionCell(binding: string, cell: string, ctx: Record<string, unknown>): boolean {
-  const c = (cell ?? "").trim();
-  if (c === "" || c === "-") return true; // any
-  for (const raw of _splitTopLevel(c, ",")) {
-    const a = raw.trim();
-    if (!a) continue;
-    const m = a.match(/^(>=|<=|!=|>|<|=)\s*(.+)$/);
-    const expr = m ? `${binding} ${m[1]} ${_rhsLiteral(m[2])}` : `${binding} = ${_rhsLiteral(a)}`;
-    try {
-      if (evaluateExpression(expr, ctx as any)) return true;
-    } catch { /* try next alternative */ }
-  }
-  return false;
-}
-
-function _decisionOutputValue(cell: string, ctx: Record<string, unknown>): unknown {
-  const c = (cell ?? "").trim();
-  if (c === "" || c === "-") return undefined;
-  if (/^["'].*["']$/.test(c)) return c.slice(1, -1);
-  if (/^-?\d+(\.\d+)?$/.test(c)) return Number(c);
-  if (c === "true") return true;
-  if (c === "false") return false;
-  try {
-    return evaluateExpression(c, ctx as any);
-  } catch {
-    return c;
-  }
-}
-
+/**
+ * Decision tables over a record — `decision-table.ts` is the one evaluator
+ * (the editor's tester and workflow steps use it too). Outputs skip a field a
+ * condition_action rule of higher standing has already claimed. A broken hit
+ * policy (two rows under Unique, disagreeing rows under Any) is logged and the
+ * first row used: the table was checked at save, so this is data no row was
+ * written for, not a reason to refuse the person's save.
+ */
 async function evaluateDecisionTables(
   modelName: string,
   working: Record<string, unknown>,
   out: RuleSetResult,
   claims?: FieldClaims,
+  event: string = "create",
 ): Promise<void> {
   const rules = ruleCache.filter(
     (r) => r.rule_type === "decision_table" && ruleGoverns(r.model_name, modelName) && isRuleActive(r),
   );
   for (const rule of rules) {
-    const table = (rule.config as any)?.table;
+    const config = (rule.config as any) || {};
+    const table = config.table as DecisionTableDef | undefined;
     if (!table || !Array.isArray(table.inputs) || !Array.isArray(table.outputs) || !Array.isArray(table.rules)) {
       continue;
     }
-    const hit = String(table.hitPolicy || "F");
-    for (const row of table.rules) {
-      const inCells: string[] = row.inputEntries || [];
-      let matched = true;
-      for (let i = 0; i < table.inputs.length; i++) {
-        const inp = table.inputs[i] || {};
-        const binding = inp.variableBinding || inp.name;
-        if (!binding) continue;
-        if (!_matchDecisionCell(binding, inCells[i] ?? "", working)) { matched = false; break; }
+    if (!firesOn(config, event)) continue;
+    const result = evaluateTable(table, working);
+    if (result.violation) console.warn(`[rules] ${rule.name}: ${result.violation}`);
+    for (const [field, val] of Object.entries(result.outputs)) {
+      if (claims && claims.has(field)) continue;
+      if (val !== undefined && working[field] !== val) {
+        out.patches[field] = val;
+        working[field] = val;
       }
-      if (!matched) continue;
-      const outCells: string[] = row.outputEntries || [];
-      for (let j = 0; j < table.outputs.length; j++) {
-        const outp = table.outputs[j] || {};
-        const field = outp.variableBinding || outp.name;
-        if (!field || (claims && claims.has(field))) continue;
-        const val = _decisionOutputValue(outCells[j] ?? "", working);
-        if (val !== undefined && working[field] !== val) {
-          out.patches[field] = val;
-          working[field] = val;
-        }
-      }
-      if (hit === "F" || hit === "U" || hit === "P" || hit === "A") break; // first match wins
     }
   }
 }
@@ -1076,7 +1027,7 @@ async function applyTypedRules(
   claims?: FieldClaims,
 ): Promise<void> {
   // decision tables → output patches (before computed/validation so those see them).
-  await evaluateDecisionTables(modelName, working, out, claims);
+  await evaluateDecisionTables(modelName, working, out, claims, event);
   // computed → patches (skip a field a condition_action rule already claimed).
   try {
     const computed = await computeFields(modelName, working);
@@ -1146,7 +1097,8 @@ export async function evaluateRuleSet(
       (r) =>
         r.rule_type === "condition_action" &&
         ruleGoverns(r.model_name, modelName) &&
-        isRuleActive(r),
+        isRuleActive(r) &&
+        firesOn(r.config as ConditionActionConfig, event),
     )
     // Server path runs every rule that refuses or changes data (see
     // effectiveScope); purely visual rules are the form's.
@@ -1207,12 +1159,16 @@ export async function evaluateFormRules(
 ): Promise<Pick<RuleSetResult, "patches" | "formHints" | "errors">> {
   await loadRules();
   const out: RuleSetResult = { patches: {}, errors: [], formHints: [], sideEffects: [] };
+  // A form for a record that has no id yet is creating one; otherwise it is
+  // editing — so a rule that fires only on create never speaks on an edit.
+  const event = previous || (entity && (entity as any).id) ? "update" : "create";
   const rules = ruleCache
     .filter(
       (r) =>
         r.rule_type === "condition_action" &&
         ruleGoverns(r.model_name, modelName) &&
-        isRuleActive(r),
+        isRuleActive(r) &&
+        firesOn(r.config as ConditionActionConfig, event),
     )
     .filter((r) => {
       const scope = effectiveScope(r.config as ConditionActionConfig);

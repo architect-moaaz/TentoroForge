@@ -156,6 +156,8 @@ export interface ConditionActionConfig {
   /** entity = form + server; form = client only; server = server only. */
   scope?: "entity" | "form" | "server";
   salience?: number;
+  /** When it fires: on a record being created, updated, or both (absent). */
+  on?: Array<"create" | "update">;
 }
 
 /** A form-only outcome (visibility/required/readonly/recommendation) — collected

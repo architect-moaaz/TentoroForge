@@ -45,6 +45,8 @@ class RulePayload(BaseModel):
     table: dict[str, Any] | None = None
     message: str | None = Field(default=None, max_length=1000)
     requirements: list[str] | None = None
+    #: When it fires: ["create"], ["update"], or both (absent or both).
+    on: list[str] | None = None
 
     def body(self) -> dict:
         return self.model_dump(exclude_unset=True)
@@ -54,6 +56,25 @@ class EditPayload(RulePayload):
     #: The rule's revision when the person opened it; an edit of a rule that
     #: has changed since is refused (409) instead of overwriting the change.
     revision: str | None = None
+
+
+class TestPayload(BaseModel):
+    """A sample save to run through the app's own engine. `rule` is the
+    draft as the editor holds it (omit it to test the rules as they are);
+    `rule_id` the rule it edits; `entity` the record when there is no draft."""
+    rule: RulePayload | None = None
+    rule_id: str | None = None
+    entity: str | None = None
+    record: dict[str, Any] = Field(default_factory=dict)
+    previous: dict[str, Any] | None = None
+    event: str = Field(default="create", pattern="^(create|update)$")
+
+
+class AttachPayload(BaseModel):
+    workflow: str = Field(min_length=1, max_length=40)
+    #: The step it comes after; omitted, at the start.
+    after: str | None = Field(default=None, max_length=120)
+    on_refusal: str = Field(default="stop", pattern="^(stop|continue)$")
 
 
 class EnabledPayload(BaseModel):
@@ -170,5 +191,46 @@ async def delete_business_rule(project_id: uuid.UUID, rule_id: str,
     try:
         return await asyncio.to_thread(rules.remove, _dir(project), rule_id,
                                        expected=revision, actor=user.name or "")
+    except Exception as exc:  # noqa: BLE001
+        raise _fail(exc) from exc
+
+
+@router.post("/api/projects/{project_id}/business-rules/test")
+async def test_business_rule(project_id: uuid.UUID, req: TestPayload,
+                             user: PlatformUser = Depends(get_current_user),
+                             db: AsyncSession = Depends(get_db)):
+    """What the app would do with a sample save — by the app's own engine,
+    with the draft among the record's other rules. Nothing is saved."""
+    project = await get_project_with_auth(project_id, user, db)
+    who = {"id": str(user.id), "email": user.email, "name": user.name or ""}
+    try:
+        return await asyncio.to_thread(
+            rules.test_rule, _dir(project), req.rule.body() if req.rule else None, rule_id=req.rule_id,
+            entity=req.entity, record=req.record, previous=req.previous, event=req.event, user=who)
+    except Exception as exc:  # noqa: BLE001
+        raise _fail(exc) from exc
+
+
+@router.post("/api/projects/{project_id}/business-rules/{rule_id}/workflows")
+async def attach_business_rule(project_id: uuid.UUID, rule_id: str, req: AttachPayload,
+                               user: PlatformUser = Depends(get_current_user),
+                               db: AsyncSession = Depends(get_db)):
+    """Run the rule as a step of a workflow, after a step of it."""
+    project = await get_project_with_auth(project_id, user, db)
+    try:
+        return await asyncio.to_thread(rules.attach, _dir(project), rule_id, workflow=req.workflow,
+                                       after=req.after, on_refusal=req.on_refusal, actor=user.name or "")
+    except Exception as exc:  # noqa: BLE001
+        raise _fail(exc) from exc
+
+
+@router.delete("/api/projects/{project_id}/business-rules/{rule_id}/workflows/{workflow_id}")
+async def detach_business_rule(project_id: uuid.UUID, rule_id: str, workflow_id: str,
+                               user: PlatformUser = Depends(get_current_user),
+                               db: AsyncSession = Depends(get_db)):
+    project = await get_project_with_auth(project_id, user, db)
+    try:
+        return await asyncio.to_thread(rules.detach, _dir(project), rule_id, workflow=workflow_id,
+                                       actor=user.name or "")
     except Exception as exc:  # noqa: BLE001
         raise _fail(exc) from exc

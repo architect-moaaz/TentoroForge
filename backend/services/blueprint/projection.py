@@ -5298,6 +5298,21 @@ def project_business_rules(doc: dict, app_root: str | Path) -> dict[str, Any]:
     and the loader reads ONE directory, so both must hold every file. Always
     written, so an empty file and a never-run projection stay distinguishable.
     """
+    rows = business_rule_rows(doc)
+    text = json.dumps(rows, indent=2)
+    files = []
+    for rel in ("rules", "src/rules"):
+        out = Path(app_root) / rel
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "blueprint-rules.json").write_text(text, "utf-8")
+        files.append(f"{rel}/blueprint-rules.json")
+    return {"files": files, "rules": len(rows)}
+
+
+def business_rule_rows(doc: dict) -> list[dict]:
+    """The rules the app runs, in the row shape its engine reads — what
+    ``project_business_rules`` writes, and what the rule lab tests a draft
+    among (so a test is of the rules as the app will hold them)."""
     entities = {str(e.get("id")): e for e in (doc.get("data") or {}).get("entities") or []}
     rows = []
     for rule in doc.get("businessRules") or []:
@@ -5317,7 +5332,8 @@ def project_business_rules(doc: dict, app_root: str | Path) -> dict[str, Any]:
             if not table.get("inputs") or not table.get("outputs") or not table.get("rules"):
                 continue
             rows.append({**base, "rule_type": "decision_table",
-                         "config": {"source": "blueprint", "table": table}})
+                         "config": {"source": "blueprint", "table": table,
+                                    **({"on": list(rule["on"])} if rule.get("on") else {})}})
             continue
         rows.append({
             **base, "rule_type": "condition_action",
@@ -5333,14 +5349,9 @@ def project_business_rules(doc: dict, app_root: str | Path) -> dict[str, Any]:
                 # only says `form`.
                 "scope": rule.get("scope") or "entity",
                 "salience": int(rule.get("salience") or 0),
+                # When it fires: created, updated, or both (absent).
+                **({"on": list(rule["on"])} if rule.get("on") else {}),
             },
         })
-    text = json.dumps(rows, indent=2)
-    files = []
-    for rel in ("rules", "src/rules"):
-        out = Path(app_root) / rel
-        out.mkdir(parents=True, exist_ok=True)
-        (out / "blueprint-rules.json").write_text(text, "utf-8")
-        files.append(f"{rel}/blueprint-rules.json")
-    return {"files": files, "rules": len(rows)}
+    return rows
 
