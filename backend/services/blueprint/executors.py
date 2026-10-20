@@ -3407,6 +3407,12 @@ _DECLARED_PAGE_FIELDS: frozenset[str] = frozenset({
     "name", "route", "purpose", "pattern", "module", "data", "access", "entry",
     "presentation", "figmaFrame", "requirements", "confidence", "status",
     "addsHere", "sections", "menuEntry",
+    # WHO MAY OPEN IT. The brief asks for `users` on every restricted page and
+    # `check_page_access` refuses a restricted page without them — and this
+    # list dropped them, so every page arrived nameless however the writer
+    # answered: Refund And Chargeback (0qtb9jiy, forge-v3 2026-10-20) was
+    # refused twice for fifteen pages and the build stopped with no screens.
+    "users",
 })
 
 #: What the declaration decided and the contract author may not move.
