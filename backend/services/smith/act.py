@@ -89,6 +89,12 @@ ACT: tuple[tuple[str, str, dict[str, str]], ...] = (
      "that service's documentation, and call each one that only reads with the stored key — what the "
      "service really answers against what the workflow reads. Run it after changing such a step.",
      {}),
+    ("app_mcp",
+     "This application as an MCP server, so an assistant such as Claude can use it as a person: "
+     "`action` status (default) says whether it is on and which tools it offers each role; on or off "
+     "turns it on or off. A person connects on the app's /connect-ai page with their own token; "
+     "the live app hears a change with its next publish.",
+     {"action": "string"}),
     ("call_mcp_tool",
      "Run one tool on one of the organisation's MCP servers (`list_services` names them) with "
      "`arguments` as an object. A tool its server marks read-only runs now; any other is shown "
@@ -586,6 +592,42 @@ def call_mcp_tool(args: dict, *, output_dir: str = "", consented: bool = False,
     return Step(said="\n".join(out))
 
 
+def app_mcp(output_dir: str, action: str, *, unattended: bool = False) -> str:
+    """Say, or change, whether assistants may connect to this application."""
+    from services import app_settings
+    from services.blueprint.app_mcp import CATALOG
+
+    action = action.strip().lower()
+    if action in ("on", "off"):
+        if unattended:
+            return "Whether assistants may connect is the owner's choice; nothing was changed."
+        app_settings.set_mcp(output_dir, action == "on", by="smith")
+    elif action not in ("", "status"):
+        return "`action` is status, on or off."
+    on = app_settings.mcp_enabled(output_dir)
+    lines = [("On" if on else "Off") + " — assistants " + ("may" if on else "may not") + " connect to this app"
+             + (" (the preview now; the live app with its next publish)." if action in ("on", "off") else ".")]
+    try:
+        data = json.loads((Path(output_dir) / "app" / CATALOG).read_text("utf-8"))
+    except (OSError, ValueError):
+        data = {}
+    def who(roles: Any) -> str:
+        return "anyone signed in" if not roles else ", ".join("everyone" if r == "*" else
+                                                               "anyone signed in" if r == "@signed-in" else r
+                                                               for r in roles)
+    flows, records = data.get("workflows") or [], data.get("records") or []
+    if flows or records:
+        lines.append(f"Tools ({len(flows)} processes, {len(records)} record types — each as the person whose token it is):")
+        lines += [f"- `{w['tool']}` runs {w['name']} — {who(w.get('roles'))}" for w in flows[:40]]
+        lines += [f"- `{r['find']}` / `{r['get']}` read {r['name']} — {who(r.get('roles'))}" for r in records[:40]]
+    else:
+        lines.append("The tool list has not been written for this app yet; it is written with the next sync.")
+    if on:
+        lines.append("A person connects on the app's “Connect an AI assistant” page (/connect-ai): "
+                     "the address is the app's /api/mcp, with a token they make there.")
+    return "\n".join(lines)
+
+
 def run(name: str, args: dict, *, said: Iterable[str], output_dir: str = "", consented: bool = False,
         unattended: bool = False, doc: dict | None = None) -> Step:
     """Carry out one call. A refusal IS the observation."""
@@ -593,6 +635,8 @@ def run(name: str, args: dict, *, said: Iterable[str], output_dir: str = "", con
     try:
         if name == "list_services":
             return Step(said=list_services(output_dir))
+        if name == "app_mcp":
+            return Step(said=app_mcp(output_dir, str(args.get("action") or "status"), unattended=unattended))
         if name == "check_services":
             from services.blueprint import api_reference
             return Step(said=scrub(api_reference.check_report(output_dir, doc or {})))

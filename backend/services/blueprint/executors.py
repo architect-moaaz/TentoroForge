@@ -87,6 +87,8 @@ logger = logging.getLogger(__name__)
 #: FORGE_ONESHOT_MODEL default, which is still pinned to an older Sonnet.
 AGENT_MODEL = os.environ.get("FORGE_AGENT_MODEL", "").strip() or "claude-sonnet-5"
 SMITH_MODEL = os.environ.get("FORGE_SMITH_MODEL", "").strip() or "claude-opus-5"
+#: The model for the last try at a reply a check refused twice (`escalated`).
+ESCALATION_MODEL = os.environ.get("FORGE_ESCALATION_MODEL", "").strip() or SMITH_MODEL
 
 #: What `AnthropicModel()` and `tiered_router()` run on when not told: the
 #: specialists' model. Kept under its old name because the router, the
@@ -470,16 +472,23 @@ def image_block(path: str | Path) -> dict[str, Any]:
     import base64
 
     p = Path(path)
+    data = base64.standard_b64encode(p.read_bytes()).decode()
+    # A DESIGN SHOWN AS A PDF — a Figma export, a designer's deck — goes as a
+    # document block: Claude reads each page as a picture as well as its text,
+    # so the pages arrive as the design they are, not as the words on them.
+    if p.suffix.lower() == ".pdf":
+        return {"type": "document",
+                "source": {"type": "base64", "media_type": "application/pdf", "data": data},
+                "cache_control": _CACHE_CONTROL}
     media = IMAGE_MEDIA_TYPES.get(p.suffix.lower())
     if media is None:
         raise ValueError(
             f"{p.name}: not an image Anthropic accepts "
-            f"({', '.join(sorted(IMAGE_MEDIA_TYPES))})"
+            f"({', '.join(sorted(IMAGE_MEDIA_TYPES))}) nor a PDF"
         )
     return {
         "type": "image",
-        "source": {"type": "base64", "media_type": media,
-                   "data": base64.standard_b64encode(p.read_bytes()).decode()},
+        "source": {"type": "base64", "media_type": media, "data": data},
         "cache_control": _CACHE_CONTROL,
     }
 
@@ -487,6 +496,10 @@ def image_block(path: str | Path) -> dict[str, Any]:
 def _content(shown: Sequence[str | Path], user: str) -> Any:
     """Images first (the stable half of the prefix), then the user text."""
     text = _user_blocks(user)
+    # A PDF is read only by Anthropic's own endpoint; an Anthropic-compatible
+    # host (`ANTHROPIC_BASE_URL`) is shown the pictures alone.
+    if not _endpoint_enforces_schema():
+        shown = [p for p in shown if Path(p).suffix.lower() != ".pdf"]
     if not shown:
         return text
     return [*image_blocks(shown), *(text if isinstance(text, list) else [{"type": "text", "text": text}])]
@@ -2080,7 +2093,9 @@ NODE_TASKS: dict[str, str] = {
     ),
     "integrations": (
         "Declare each outside system this application talks to, from the "
-        "requirements and the domain reference: `name`, `kind` (email, "
+        "requirements, the domain reference and any documents the person "
+        "supplied — name a documented system as its documentation names it: "
+        "`name`, `kind` (email, "
         "storage, payment, auth, webhook, mcp, other), `provider` (the product, "
         "in lower case) and `secretRefs` — the NAMES of the variables its "
         "credentials live in, UPPER_SNAKE (`XERO_API_KEY`), never a value. "
@@ -3394,6 +3409,12 @@ _DECLARED_PAGE_FIELDS: frozenset[str] = frozenset({
     "name", "route", "purpose", "pattern", "module", "data", "access", "entry",
     "presentation", "figmaFrame", "requirements", "confidence", "status",
     "addsHere", "sections", "menuEntry",
+    # WHO MAY OPEN IT. The brief asks for `users` on every restricted page and
+    # `check_page_access` refuses a restricted page without them — and this
+    # list dropped them, so every page arrived nameless however the writer
+    # answered: Refund And Chargeback (0qtb9jiy, forge-v3 2026-10-20) was
+    # refused twice for fifteen pages and the build stopped with no screens.
+    "users",
 })
 
 #: What the declaration decided and the contract author may not move.
@@ -4117,6 +4138,21 @@ def after_refusal(client: Any, spec: Any) -> Any:
     return dataclasses.replace(client, effort="high")
 
 
+def escalated(client: Any, spec: Any) -> Any:
+    """The client for the LAST TRY at a reply a check refused the same way
+    twice (`TaskSpec.escalate`): the strongest model, at high effort. Asking
+    the same model the same way a third time gets the same answer; the build
+    used to stop there (Refund And Chargeback and three before it,
+    2026-10-20). Any other call is left as it is."""
+    import dataclasses
+
+    if not getattr(spec, "escalate", False) or not dataclasses.is_dataclass(client) \
+            or not hasattr(client, "model") or not hasattr(client, "effort"):
+        return client
+    return dataclasses.replace(client, model=ESCALATION_MODEL,
+                               effort="high" if str(client.effort) not in ("xhigh", "max") else client.effort)
+
+
 #: One notch down, never below `low`.
 _LOWER_EFFORT = {"max": "xhigh", "xhigh": "high", "high": "medium", "medium": "low", "low": "low"}
 
@@ -4500,8 +4536,8 @@ def make_executor(
         from services.blueprint.artifact_patch import patch_node_output
         from services.blueprint.orchestrator import DAG
 
-        client = for_repair(model.for_task(spec.node, spec.agent)
-                            if isinstance(model, ModelRouter) else model, spec)
+        client = escalated(for_repair(model.for_task(spec.node, spec.agent)
+                                      if isinstance(model, ModelRouter) else model, spec), spec)
         try:
             with svc.lock:
                 system, context = build_prompt(
@@ -4730,12 +4766,12 @@ def make_executor(
             composed = _compose_via_a2ui(spec)
             if composed is not None:
                 return composed
-        client = for_repair(after_refusal(after_no_answer(
+        client = escalated(for_repair(after_refusal(after_no_answer(
             model.for_task(spec.node, spec.agent)
             if isinstance(model, ModelRouter)
             else model,
             spec.feedback,
-        ), spec), spec)
+        ), spec), spec), spec)
         # §5 — an application can be described by showing as well as by
         # telling. Resolved per call rather than threaded through `run`,
         # because the references belong to the application and `svc` is the

@@ -392,6 +392,12 @@ class VercelDeployProvider:
                 else:
                     r = await self.neon.create_project(name=snapshot.project_slug)
                     neon_project_id = r["project_id"]
+                    # THE PROJECT IS ON THE ROW BEFORE ANYTHING ELSE IS ASKED OF
+                    # IT: a failure in the next step must leave a row that names
+                    # it, so the retry reuses it instead of making another.
+                    row.neon_project_id = neon_project_id
+                    row.neon_branch_id = r.get("branch_id")
+                    await self._flush()
                 if snapshot.reset_test_data:
                     yield DeployEvent("provision_db", "Starting the test data again from demo data…")
                     await self.neon.drop_database(neon_project_id, envs.TEST_DATABASE)

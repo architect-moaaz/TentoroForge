@@ -44,6 +44,12 @@ class DnsRefused(ValueError):
     """Records cannot be written; the message says why, in the owner's words."""
 
 
+class DnsAccessDenied(DnsRefused):
+    """The provider refuses this account its DNS API altogether, for every
+    domain: not "the domain is not here", which sends the owner looking for
+    another account."""
+
+
 @dataclass(frozen=True)
 class Record:
     host: str           # fully qualified, no trailing dot: app.acme.com
@@ -124,6 +130,14 @@ def _candidates(name: str) -> list[str]:
     return [".".join(labels[i:]) for i in range(len(labels) - 1)]
 
 
+def _code(r: httpx.Response) -> str:
+    try:
+        body = r.json()
+    except ValueError:
+        return ""
+    return str(body.get("code") or "") if isinstance(body, dict) else ""
+
+
 def _raise(r: httpx.Response, what: str) -> None:
     if r.status_code >= 400:
         # Never the request (it carries the key); the provider's own words.
@@ -194,6 +208,13 @@ class GoDaddy:
     async def zone_for(self, name: str) -> str | None:
         for cand in _candidates(name):
             r = await self._c.get(f"/domains/{cand}")
+            # GODADDY OPENS ITS API ONLY TO SOME ACCOUNTS (larger ones, or
+            # certain plans); the rest get 403 ACCESS_DENIED on every call.
+            # That is not "the domain is not in this account".
+            if r.status_code == 403 and _code(r) == "ACCESS_DENIED":
+                raise DnsAccessDenied(
+                    "GoDaddy does not let Forge use its DNS API with this account: GoDaddy offers its API only "
+                    "to some accounts (larger accounts or certain plans), so Forge cannot add the records there.")
             if r.status_code in (403, 404, 422):
                 continue
             _raise(r, "GoDaddy domain")
@@ -343,5 +364,5 @@ async def dns_host(name: str, transport: httpx.AsyncBaseTransport | None = None)
     return ""
 
 
-__all__ = ["Cloudflare", "DnsProvider", "DnsRefused", "GoDaddy", "NEVER_REPLACED", "Plan", "Record", "Route53",
+__all__ = ["Cloudflare", "DnsAccessDenied", "DnsProvider", "DnsRefused", "GoDaddy", "NEVER_REPLACED", "Plan", "Record", "Route53",
            "dns_host", "plan", "said_conflicts"]

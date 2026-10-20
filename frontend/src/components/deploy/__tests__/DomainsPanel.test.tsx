@@ -268,5 +268,43 @@ describe("DomainsPanel", () => {
     expect(text).not.toMatch(/\b1 (second|minute|hour|day)s ago/);
     apiGet.mockImplementation(async () => waiting);
   });
+
+  it("says the app is being updated while it is republished, then that it is done", async () => {
+    const now = new Date().toISOString();
+    apiGet.mockImplementation(async () => ({ ...live, updating: { to: "https://app.acme.com", since: now, state: "building" } }));
+    await render();
+    expect(host.textContent).toContain("Updating the app.");
+    expect(host.textContent).toContain("moving to app.acme.com");
+
+    act(() => root.unmount());
+    root = createRoot(host);
+    apiGet.mockImplementation(async () => ({ ...live, updating: { to: "https://app.acme.com", since: now, state: "done", finishedAt: now } }));
+    await render();
+    expect(host.textContent).toContain("Done. The app now uses app.acme.com");
+
+    act(() => root.unmount());
+    root = createRoot(host);
+    apiGet.mockImplementation(async () => ({ ...live, updating: { to: "https://app.acme.com", since: now, state: "failed", reason: "Vercel could not build the app.", finishedAt: now } }));
+    await render();
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain("The app was not updated.");
+    apiGet.mockImplementation(async () => waiting);
+  });
+
+  it("shows the address being added while it is added", async () => {
+    await render();
+    let finish: (v: unknown) => void = () => {};
+    apiPost.mockImplementationOnce(() => new Promise((r) => { finish = r; }));
+    const input = host.querySelector("input") as HTMLInputElement;
+    await act(async () => {
+      const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+      set.call(input, "shop.acme.com");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => { button("Add domain").click(); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(apiPost).toHaveBeenCalledWith("/api/projects/p1/domains", { name: "shop.acme.com" });
+    expect(host.textContent).toContain("Adding — attaching it to the app");
+    await act(async () => { finish(live); });
+  });
 });
 

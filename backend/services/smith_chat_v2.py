@@ -65,6 +65,10 @@ class ChatV2Request:
     #: True when the caller posts the answer itself and runs the after-change
     #: check afterwards (`app_check.check_change`) as a second message.
     defer_check: bool = False
+    #: The files attached to this message, as `chat_attachments.locate`
+    #: records: the pictures are shown to the model, and verbs (`set_logo`)
+    #: take theirs from here.
+    attachments: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -117,6 +121,7 @@ def handle_chat_v2(req: ChatV2Request) -> ChatV2Response:
         guards=overrides.get("guards_fn"),
         reasoning=req.reasoning_fn,
         evidence=list(req.evidence or []),
+        attachments=list(req.attachments or []),
         app_name=req.app_name,
         check_after=not req.defer_check,
     )

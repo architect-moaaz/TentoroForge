@@ -199,6 +199,13 @@ class RunLedger:
                      "section": section, "reason": str(reason)[:600],
                      "at": _now()})
 
+    def node_settled(self, key: str, subject: str, settled: list[str]) -> None:
+        """The author's attempts ran out on a check that had a safe way
+        through, and the build took it (`AuthorRefusal.settle`) instead of
+        stopping. What was settled for, a line each."""
+        self._write({"event": "node:settled", "node": key, "subject": subject,
+                     "settled": [str(s)[:300] for s in settled][:20], "at": _now()})
+
     def node_failed(self, key: str, reason: str) -> None:
         self._write({"event": "node:failed", "node": key,
                      "reason": str(reason)[:600], "at": _now()})

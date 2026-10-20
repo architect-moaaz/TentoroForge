@@ -195,6 +195,11 @@ async def publish(
             raise HTTPException(400, "There is no live test version to promote. Publish to Test first.")
         side, promote_from = envs.PRODUCTION, str(tested.id)
     integrations = await _collect_integrations(project.org_id, db)
+    # The app's own switches go with it (`app_settings`): a publish is when a
+    # deployment's environment is set, so turning one on or off reaches the
+    # live app here.
+    from services import app_settings
+    integrations.update(app_settings.env_for(project.output_dir))
     snapshot = DeploySnapshot(
         project_id=str(project.id),
         project_slug=project.short_id,

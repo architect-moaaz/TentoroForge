@@ -185,6 +185,79 @@ async def enable_person(
     return _person(user, await _memberships_of(db, user.id))
 
 
+class DeletePersonBody(BaseModel):
+    confirm_email: str
+
+
+async def _heir(db: AsyncSession, org_id: uuid.UUID, leaving: uuid.UUID) -> uuid.UUID | None:
+    """Who an app passes to when its owner's login is removed: another owner
+    of its organisation, else an admin of it; None when there is nobody."""
+    members = [m for m in await _members(db, org_id, InviteStatus.accepted) if m.user_id and m.user_id != leaving]
+    for role in (OrgMemberRole.owner, OrgMemberRole.admin):
+        found = next((m for m in members if m.role == role), None)
+        if found:
+            return found.user_id
+    return None
+
+
+@router.post("/people/{user_id}/delete")
+async def delete_person(
+    user_id: uuid.UUID, body: DeletePersonBody, request: Request,
+    admin: PlatformUser = Depends(require_super_admin), db: AsyncSession = Depends(get_db),
+):
+    """Remove a login for good, with its email typed back.
+
+    THE APPS STAY WITH THEIR ORGANISATION. `projects.owner_id` cascades, so
+    deleting the row as it stands would delete every app the person made; each
+    is handed first to another owner (else an admin) of its organisation. An
+    organisation whose only owner this is refuses the delete — transfer its
+    ownership or purge it first — so no organisation is left without anyone in
+    charge. What they did stays on the record: audit rows, deployments and the
+    rest keep their entries with the person shown as removed."""
+    if user_id == admin.id:
+        raise HTTPException(status_code=400, detail="You cannot remove your own login")
+    user = await _user_or_404(db, user_id)
+    if body.confirm_email.strip().lower() != (user.email or "").lower():
+        raise HTTPException(status_code=400, detail="Type the login's email to confirm")
+    if user.platform_role == SUPER_ADMIN:
+        raise HTTPException(status_code=409, detail="This login is a super admin: revoke the role first")
+
+    memberships = await _memberships_of(db, user.id)
+    sole: list[str] = []
+    for m in memberships:
+        if m.invite_status != InviteStatus.accepted or m.role != OrgMemberRole.owner or m.organization is None:
+            continue
+        others = [o for o in await _owners(db, m.org_id) if o.user_id != user.id]
+        if not others:
+            sole.append(m.organization.name)
+    if sole:
+        raise HTTPException(status_code=409, detail=(
+            f"{user.email} is the only owner of {', '.join(sole)}. Transfer ownership or purge "
+            f"{'that organisation' if len(sole) == 1 else 'those organisations'} first, then remove the login."))
+
+    owned = (await db.execute(select(Project).where(Project.owner_id == user.id))).scalars().all()
+    handed: list[dict[str, Any]] = []
+    for project in owned:
+        heir = await _heir(db, project.org_id, user.id)
+        if heir is None:
+            raise HTTPException(status_code=409, detail=(
+                f"The app {project.name} ({project.short_id}) has nobody else in its organisation to hand it to. "
+                "Add an owner or admin there, or delete the app, first."))
+        project.owner_id = heir
+        handed.append({"short_id": project.short_id, "to": str(heir)})
+
+    email = user.email
+    await audit_request(request, db, "person.delete", "platform_user", str(user.id),
+                        changes={"email": email, "apps_handed_on": handed,
+                                 "organisations_left": [str(m.org_id) for m in memberships]})
+    from sqlalchemy import delete as sql_delete
+    await db.execute(sql_delete(OrgMember).where(OrgMember.user_id == user.id))
+    await db.execute(sql_delete(PlatformUser).where(PlatformUser.id == user.id))
+    await db.commit()
+    return {"deleted": True, "email": email, "apps_handed_on": len(handed),
+            "organisations_left": len(memberships)}
+
+
 @router.post("/people/{user_id}/super-admin")
 async def grant_super_admin(
     user_id: uuid.UUID, request: Request,

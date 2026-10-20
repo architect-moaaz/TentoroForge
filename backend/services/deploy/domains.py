@@ -504,7 +504,7 @@ class DomainService:
         `www.` companion's with it). `{written, conflicts, message, provider}`.
         Nothing is written when anything is in the way, unless `replace`; mail
         and proof records are never replaced."""
-        from services.deploy.dns_providers import DnsRefused, Record, plan, said_conflicts
+        from services.deploy.dns_providers import DnsAccessDenied, DnsRefused, Record, plan, said_conflicts
         name = _canon(raw)
         entry = next((e for e in self.entries() if e["name"] == name), None)
         if entry is None:
@@ -532,9 +532,13 @@ class DomainService:
             return {"written": False, "conflicts": False, "provider": "",
                     "message": f"{name} needs no records now: " + _said_state(self.view_of(name))}
         provider = zone = None
+        denied: list[str] = []
         for p in self.dns:
             try:
                 zone = await p.zone_for(name)
+            except DnsAccessDenied as exc:
+                denied.append(str(exc))
+                zone = None
             except RuntimeError:
                 logger.warning("[domains] %s could not look for %s", getattr(p, "label", p), name, exc_info=True)
                 zone = None
@@ -542,6 +546,9 @@ class DomainService:
                 provider = p
                 break
         if provider is None or not zone:
+            if denied:
+                raise DomainRefused(" ".join(denied) + " Add the records yourself: the steps are shown under "
+                                    f"{name}.")
             raise DomainRefused(f"None of your connected DNS accounts ({', '.join(p.label for p in self.dns)}) "
                                 f"holds {name}. Connect the account that does, or add the records yourself.")
         plans = {}
@@ -980,8 +987,13 @@ class DomainService:
         if changed:
             latest = await self.client.latest_production_deployment(pid)
             if latest and (latest.get("uid") or latest.get("id")):
-                await self.client.redeploy(self.project_name, str(latest.get("uid") or latest.get("id")))
+                built = await self.client.redeploy(self.project_name, str(latest.get("uid") or latest.get("id")))
                 redeployed = True
+                # WHAT THE OWNER IS WAITING FOR: the app republished so sign-in
+                # and links use the new address. Shown and followed until done.
+                self._set_updating({"to": main or f"https://{self.project_name}.vercel.app",
+                                    "since": _iso(self.now()), "state": "building",
+                                    "deployment": str((built or {}).get("id") or (built or {}).get("uid") or "")})
         old = f"{self.project_name}.vercel.app"
         redirect = main.removeprefix("https://") if main and self.old_address() == "redirect" else None
         try:
@@ -990,6 +1002,54 @@ class DomainService:
             logger.warning("[domains] %s: could not set what %s does", self.project_name, old, exc_info=True)
             redirect = None
         return {"pinned": wanted, "redeployed": redeployed, "redirect": redirect}
+
+    # ── the republish a change of main address starts ──────────────
+
+    def _set_updating(self, value: dict | None) -> None:
+        led = read_ledger(self.output_dir)
+        if value is None:
+            led.pop("updating", None)
+        else:
+            led["updating"] = value
+        _write_ledger(self.output_dir, led)
+
+    def updating(self) -> dict | None:
+        """The republish that makes the app use its main address: `{to, since,
+        state: building|done|failed, reason?, finishedAt?}`. A finished one is
+        shown for ten minutes, then not at all."""
+        u = read_ledger(self.output_dir).get("updating")
+        if not isinstance(u, dict):
+            return None
+        if u.get("state") != "building":
+            done_at = _parse(u.get("finishedAt"))
+            if done_at is None or self.now() - done_at > timedelta(minutes=10):
+                return None
+        return {k: v for k, v in u.items() if k != "deployment"}
+
+    async def check_updating(self) -> dict | None:
+        """Ask Vercel how the republish is going and keep what it says."""
+        u = read_ledger(self.output_dir).get("updating")
+        if not isinstance(u, dict) or u.get("state") != "building":
+            return self.updating()
+        dep = str(u.get("deployment") or "")
+        if not dep:
+            # Started without an id to follow: say it is done once it has had time.
+            if self.now() - (_parse(u.get("since")) or self.now()) > timedelta(minutes=3):
+                self._set_updating({**u, "state": "done", "finishedAt": _iso(self.now())})
+            return self.updating()
+        try:
+            got = await self.client.get_deployment(dep)
+        except RuntimeError:
+            logger.warning("[domains] %s: could not read deployment %s", self.project_name, dep, exc_info=True)
+            return self.updating()
+        ready = str(got.get("readyState") or got.get("status") or "").upper()
+        if ready == "READY":
+            self._set_updating({**u, "state": "done", "finishedAt": _iso(self.now())})
+        elif ready in ("ERROR", "CANCELED"):
+            reason = str(got.get("errorMessage") or ("Vercel cancelled the build." if ready == "CANCELED"
+                                                     else "Vercel could not build the app."))
+            self._set_updating({**u, "state": "failed", "reason": reason[:300], "finishedAt": _iso(self.now())})
+        return self.updating()
 
     # ── what is shown ───────────────────────────────────────────────
 
@@ -1031,7 +1091,7 @@ class DomainService:
         elsewhere = [{"what": f"Company sign-in callback ({s})", "address": a}
                      for s, a in zip(sso, callback_addresses(main, sso))]
         elsewhere += [{"what": f"Incoming webhook ({h})", "address": f"{main}/api/webhooks/{h}"} for h in hooks]
-        return {"domains": entries, "oldAddress": self.old_address(),
+        return {"domains": entries, "oldAddress": self.old_address(), "updating": self.updating(),
                 "vercelAddress": f"https://{self.project_name}.vercel.app",
                 "mainAddress": main, "elsewhere": elsewhere,
                 "appsDomain": apps_domain(), "dnsAccounts": list(self.dns_labels),

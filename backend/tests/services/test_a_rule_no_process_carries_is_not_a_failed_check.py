@@ -37,6 +37,8 @@ def test_a_rule_a_trial_could_reach_is_still_counted_and_a_down_bench_is_still_u
     _write_logic(svc, {"passed": [], "fixed": [], "left": [], "untried": []}, rules)
     v = sc.read(svc.doc)["criteria"]["logic"]
     assert v["total"] == 2 and len(v["untried"]) == 1 and len(v["skipped"]) == 1
-    assert _logic_line(svc) == ("Ran the processes and tried the rules: 1 of 2 hold, 1 I couldn't try; "
+    # The first untried reason is the headline, not just the count (7df66754).
+    assert _logic_line(svc) == ("Ran the processes and tried the rules: 1 of 2 hold, 1 I couldn't try "
+                                "(the app could not be started to try it: boom); "
                                 "1 rule gates no process, so there is nothing to try it in.")
     assert "1 I could not try" in sc.closing(svc.doc)

@@ -220,7 +220,12 @@ def closing(doc: dict) -> str:
         v = (card.get("criteria") or {}).get(c) or {}
         total, green = int(v.get("total") or 0), int(v.get("green") or 0)
         if total:
-            parts.append(f"{LABELS[c].lower()} {green} of {total}")
+            # WHAT WAS NOT TRIED IS SAID BESIDE THE COUNT. "Pages built and
+            # working 0 of 20" read as twenty broken pages when nineteen could
+            # not be opened by the check (qpqhdugb, 2026-10-19).
+            not_tried = len([u for u in v.get("untried") or []
+                             if isinstance(u, dict) and "not checked" not in str(u.get("why") or "")])
+            parts.append(f"{LABELS[c].lower()} {green} of {total}" + (f" ({not_tried} not tried)" if not_tried else ""))
         if c != "smith":                      # its reds are the others', said once
             left += [str(r.get("label") or r.get("id")) for r in v.get("red") or []
                      if isinstance(r, dict) and not r.get("platform")]

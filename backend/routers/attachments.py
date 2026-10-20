@@ -13,6 +13,7 @@ the composer can show a chip immediately and the turn carries only ids.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 
@@ -44,16 +45,22 @@ async def upload_attachment(
     The returned ``id`` is what the client sends back in
     ``ChatRequest.attachment_ids``.
     """
-    await get_project_with_auth(project_id, user, db)
+    project = await get_project_with_auth(project_id, user, db)
 
     data = await file.read()
     try:
-        rec = chat_attachments.save_attachment(
+        # IN A THREAD: a scanned PDF is transcribed by a model call that can
+        # take a minute, and the event loop serves everyone else meanwhile.
+        rec = await asyncio.to_thread(
+            chat_attachments.save_attachment,
             chat_attachments.attachments_root(),
             str(project_id),
             file.filename or "attachment",
             file.content_type or "",
             data,
+            spender={"project": getattr(project, "short_id", "") or str(project_id),
+                     "user": getattr(user, "email", "") or "",
+                     "org": str(getattr(project, "org_id", "") or "")},
         )
     except AttachmentError as exc:
         # 400, not 500 — this is a user-correctable problem (wrong file type,

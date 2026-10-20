@@ -169,6 +169,12 @@ async def write_env_local_from_platform(
     mcp_rows = mcp_res.scalars().all()
     desired.update(mcp_env(mcp_rows, skipped))
     mcp_count = len(mcp_rows)
+    # THE APP'S OWN SWITCHES (`app_settings`): whether assistants may connect
+    # to it. Managed here too, or this rewrite would drop the line the switch
+    # wrote whenever it sat below the marker.
+    from services import app_settings
+    switches = app_settings.env_for(output_dir)
+    desired.update(switches)
 
     # Read existing .env.local, filter out managed keys, keep everything else.
     existing_lines: list[str] = []
@@ -183,7 +189,7 @@ async def write_env_local_from_platform(
             # block — drop it; we're about to rewrite.
             break
         m = key_re.match(line)
-        if m and (m.group(1) in known or m.group(1).startswith(_MCP_ENV_PREFIX)):
+        if m and (m.group(1) in known or m.group(1).startswith(_MCP_ENV_PREFIX) or m.group(1) in switches):
             # Managed key found ABOVE the marker (or marker absent). Drop —
             # the writer will re-append (or omit if cleared / server removed).
             continue

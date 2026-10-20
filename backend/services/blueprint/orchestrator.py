@@ -41,6 +41,7 @@ import copy
 import json
 import re
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
@@ -1212,6 +1213,9 @@ class TaskSpec:
     #: An observer repair — a targeted fix against named findings, run one
     #: effort notch below the node's own (see ``executors.for_repair``).
     repair: bool = False
+    #: The last try at a reply a check refused the same way twice, or until
+    #: its attempts ran out: on the strongest model (``executors.escalated``).
+    escalate: bool = False
 
 
 @dataclass
@@ -1229,6 +1233,17 @@ class RunReport:
     #: nothing in the output to tell a transport fault from a content one.
     failed_because: dict[str, str] = field(default_factory=dict)
     failed: list[str] = field(default_factory=list)
+    #: Failed node -> the refusal it could not get past. A check refused the
+    #: author's work and the attempts ran out — or the same refusal came back
+    #: twice, which no further asking changes. Kept apart from `failed`
+    #: because it is the one failure that may be the platform's own: Refund
+    #: And Chargeback's writer named every page's roles and the platform
+    #: removed them before the check read them (2026-10-20). Recorded as an
+    #: incident the cockpit shows, and said to the person as that.
+    stuck: dict[str, str] = field(default_factory=dict)
+    #: Node -> what the build settled for when a check's safe way through was
+    #: taken on the last attempt (`AuthorRefusal.settle`), a line each.
+    settled: dict[str, list[str]] = field(default_factory=dict)
     blocked: list[str] = field(default_factory=list)
     #: Blocked node -> what it is waiting to be told. A node that STOPS TO ASK
     #: recorded only its name, and the question went into `change_requests`
@@ -1623,6 +1638,7 @@ def _execute(
                 subject=subject,
                 feedback=state.feedback.get(subject, ""),
                 current=state.current.get(subject, ()),
+                escalate=subject in state.escalated,
             )
             leads = state.warm is not None and subject == state.leader and attempt == 1
             # After an outage, the re-send waits — on its worker, not here.
@@ -2539,6 +2555,100 @@ OBSERVER_ROUNDS_BY_NODE: dict[str, int] = {
 }
 
 
+#: Safe ways through taken in a row on one reply before giving up: a reply
+#: refused by several checks settles each in turn.
+SETTLE_ROUNDS = 6
+#: Where a build keeps what it settled for, beside the Blueprint.
+SETTLED_FILE = Path(".forge") / "settled.json"
+
+
+def _settle(svc: BlueprintService, outcome: Any, exc: Exception, *, commit: bool,
+            user_request: str) -> "tuple[Any, list[str]] | None":
+    """Take the refusal's safe way through and apply the reply again; a second
+    check refusing it may have its own. `(application, what was settled for)`,
+    or None when some refusal on the way has no safe way through — the build
+    then fails as it did, on that refusal."""
+    said: list[str] = []
+    for _ in range(SETTLE_ROUNDS):
+        settle = getattr(exc, "settle", None)
+        if not callable(settle):
+            return None
+        try:
+            said += [str(s) for s in settle() or []]
+            return apply_agent_result(svc, outcome, commit=commit, user_request=user_request), said
+        except (BlueprintInvalid, AuthorRefusal, ContractViolation) as again:
+            exc = again
+        except Exception:  # noqa: BLE001 — a fallback that breaks is no way through
+            logger.warning("[orchestrator] a safe way through failed", exc_info=True)
+            return None
+    return None
+
+
+def _keep_settled(output_dir: Any, key: str, said: list[str]) -> None:
+    """What this node settled for, kept beside the Blueprint (newest per node),
+    so the hand-over can say it and every Smith turn hears it until it is dealt
+    with. Never raises."""
+    if not output_dir or not said:
+        return
+    path = Path(output_dir) / SETTLED_FILE
+    try:
+        held = json.loads(path.read_text("utf-8")) if path.is_file() else {}
+        if not isinstance(held, dict):
+            held = {}
+        held[key] = {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                     "settled": list(dict.fromkeys([*((held.get(key) or {}).get("settled") or []), *said]))[:40]}
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(held, indent=1, ensure_ascii=False), "utf-8")
+    except (OSError, ValueError):
+        logger.debug("[orchestrator] settled record not kept", exc_info=True)
+
+
+def settled_rows(output_dir: Any) -> dict[str, list[str]]:
+    """Node -> what its builds settled for and nobody has fixed yet."""
+    path = Path(output_dir or "") / SETTLED_FILE
+    try:
+        held = json.loads(path.read_text("utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return {str(k): [str(s) for s in (v or {}).get("settled") or []]
+            for k, v in (held.items() if isinstance(held, dict) else []) if isinstance(v, dict)}
+
+
+def clear_settled(output_dir: Any, key: str) -> None:
+    """A node's settlements, dealt with: the after-build fixing changed the
+    application for them (`fix_to_green`). Never raises."""
+    path = Path(output_dir or "") / SETTLED_FILE
+    try:
+        held = json.loads(path.read_text("utf-8"))
+        if isinstance(held, dict) and held.pop(key, None) is not None:
+            path.write_text(json.dumps(held, indent=1, ensure_ascii=False), "utf-8")
+    except (OSError, ValueError):
+        pass
+
+
+def settled_for(output_dir: Any) -> list[str]:
+    """Everything the builds of this application settled for, a line each."""
+    path = Path(output_dir or "") / SETTLED_FILE
+    try:
+        held = json.loads(path.read_text("utf-8"))
+    except (OSError, ValueError):
+        return []
+    return [str(s) for row in (held.values() if isinstance(held, dict) else [])
+            if isinstance(row, dict) for s in row.get("settled") or []]
+
+
+def _record_stuck(svc: BlueprintService, key: str, label: str, reason: str) -> None:
+    """A build that could not get past a check, on the cockpit's record — with
+    the fault's signature, so the same refusal in a second application is
+    marked as recurring there (`services.incidents.record`)."""
+    try:
+        from services import incidents
+        incidents.record("build_stuck", app=Path(svc.output_dir).name, detail=f"{label}: {reason}",
+                         node=key, signature=incidents.signature("build_stuck", key, reason))
+    except Exception:  # noqa: BLE001 — the record is a bonus to the run, never its end
+        logger.debug("[orchestrator] stuck build not recorded", exc_info=True)
+
+
 def _same_refusal(previous: str, reason: str) -> bool:
     """Whether `reason` is what the last attempt was already told.
 
@@ -2633,6 +2743,12 @@ class _NodeRun:
     in_flight: set[str] = field(default_factory=set)
     #: Subject -> attempts made so far.
     attempts: dict[str, int] = field(default_factory=dict)
+    #: Subjects given their last try on the strongest model (`escalate`).
+    escalated: set[str] = field(default_factory=set)
+    #: Subject -> the latest refused reply that HAD a safe way through, and its
+    #: refusal: what the build settles for when a later try ends on a refusal
+    #: with none, so the last try can never leave it worse off.
+    settleable: dict[str, tuple] = field(default_factory=dict)
     #: Subject -> the identities its accepted proposals wrote (see
     #: :func:`_proposed_identities`). What a repair of that subject is
     #: measured against: anything here the repair does not re-propose is
@@ -2718,6 +2834,9 @@ def _apply_subject(
             # The report's line is for reading; the retry above got the whole reason.
             report.failed_because[label] = reason[:400]
             state.failed.append(subject)
+            if deterministic:
+                report.stuck[label] = reason[:400]
+                _record_stuck(svc, key, label, reason)
             _note(ledger, "node_subject", key, subject, _at(), total, False)
             return "failed"
         _note(ledger, "node_retry", key, subject, attempt + 1, max_attempts, reason)
@@ -2775,9 +2894,47 @@ def _apply_subject(
         state.current[subject] = () if isinstance(exc, ContractViolation) else tuple(
             {"section": p.section, "natural_key": p.natural_key, "body": p.body}
             for p in proposals if isinstance(getattr(p, "body", None), dict))
-        # A validator's verdict on a proposal: deterministic, so the same
-        # words twice mean the same words a third time.
-        return _rejected(_reason(exc), deterministic=True)
+        # THE LAST ATTEMPT TAKES THE SAFE WAY THROUGH, when the check has one,
+        # instead of stopping the build. The author was asked first (every
+        # attempt before this one was refused as before); what ships is still
+        # correct, only less complete, and what was settled for is said.
+        if callable(getattr(exc, "settle", None)):
+            state.settleable[subject] = (outcome, exc)
+        final = attempt >= max_attempts or _same_refusal(state.feedback.get(subject, ""), _reason(exc))
+        # FIRST, ASKED HARDER. A refusal the author could not get past is put
+        # once more to the strongest model, with every refusal so far and the
+        # refused reply to edit (`executors.escalated`), before anything is
+        # settled for: what it writes is what was meant, and a settlement is
+        # only the safe version of it.
+        if final and subject not in state.escalated and DAG[key].kind == "agent":
+            state.escalated.add(subject)
+            state.feedback[subject] = accumulate_refusals(state.feedback.get(subject, ""), attempt, _reason(exc))
+            _note(ledger, "node_retry", key, subject, attempt + 1, attempt + 1,
+                  f"refused again; one last try on the strongest model — {_reason(exc)}")
+            return "retry"
+        took = _settle(svc, outcome, exc, commit=commit, user_request=user_request) if final else None
+        if took is None and final and subject in state.settleable and state.settleable[subject][0] is not outcome:
+            # THE LAST TRY NEVER ENDS WORSE. f7kxusg6's access step was nearly
+            # right on its second try, and the strongest model's third ended
+            # on nine format errors with no safe way through (2026-10-20): the
+            # earlier reply, settled, is what ships.
+            earlier, earlier_exc = state.settleable[subject]
+            took = _settle(svc, earlier, earlier_exc, commit=commit, user_request=user_request)
+        if took is None:
+            # A validator's verdict on a proposal: deterministic, so the same
+            # words twice mean the same words a third time.
+            return _rejected(_reason(exc), deterministic=True)
+        application, said = took
+        report.settled.setdefault(label, []).extend(said)
+        _note(ledger, "node_settled", key, subject, said)
+        _keep_settled(svc.output_dir, key, said)
+        if not application.applied and not application.needs_clarification:
+            # WHAT WAS HELD BACK WAS THE WHOLE REPLY (a screen's only layout, a
+            # reply of journeys): the subject is settled with nothing to write,
+            # and what follows the build writes it.
+            state.current.pop(subject, None)
+            _note(ledger, "node_subject", key, subject, _at(), total, True)
+            return "applied"
 
     if application.applied:
         state.current.pop(subject, None)
@@ -3146,6 +3303,9 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
     project_middleware(view, app_root)
     # The data route needs the same list the matcher was built from.
     project_public_resources(view, app_root)
+    # The tools the app offers an assistant, from the same gates (`app_mcp`).
+    from services.blueprint.app_mcp import project_app_mcp
+    project_app_mcp(view, app_root)
     # …and a page the matcher lets through needs a door that is not inside
     # `(dashboard)`, whose layout redirects anyone without a session. After
     # the middleware, because the two are one statement about the same pages.

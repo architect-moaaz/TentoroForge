@@ -300,12 +300,14 @@ def _with_done(step: str, said: list[str]) -> str:
 
 
 def _image_paths(attachments: list[dict] | None) -> list[str]:
-    """The pictures attached to this turn, by path — what the person sees."""
+    """The pictures attached to this turn, by path — what the person sees — and
+    a design PDF, which the builder chat passes only when it was marked as one."""
     out = []
     for a in attachments or []:
-        kind = str(a.get("mime") or a.get("content_type") or "")
+        kind = str(a.get("mime") or a.get("content_type") or a.get("media_type") or "")
         name = str(a.get("filename") or a.get("path") or "").lower()
-        if (kind.startswith("image/") or name.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp"))) and a.get("path"):
+        if (kind.startswith("image/") or kind == "application/pdf"
+                or name.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf"))) and a.get("path"):
             out.append(str(a["path"]))
     return out
 

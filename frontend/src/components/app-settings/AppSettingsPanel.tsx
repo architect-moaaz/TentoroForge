@@ -4,8 +4,9 @@
  * App settings — the app's own settings, one section per concern. Domains is
  * the first: the same panel the Publish dialog's Custom domain card shows.
  */
-import { Globe, Rocket } from "lucide-react";
+import { Bot, Globe, Rocket } from "lucide-react";
 
+import { AssistantsSection } from "@/components/app-settings/AssistantsSection";
 import { DomainsPanel } from "@/components/deploy/DomainsPanel";
 import { PublishTargetSwitch, SidesSummary, usePublishStatus } from "@/components/deploy/PublishSides";
 import { useAppSettingsStore, type AppSettingsSection } from "@/stores/appSettings";
@@ -13,6 +14,7 @@ import { useAppSettingsStore, type AppSettingsSection } from "@/stores/appSettin
 const SECTIONS: { id: AppSettingsSection; label: string; icon: typeof Globe }[] = [
   { id: "publishing", label: "Publishing", icon: Rocket },
   { id: "domains", label: "Domains", icon: Globe },
+  { id: "assistants", label: "AI assistants", icon: Bot },
 ];
 
 /** Test and Production: where Publish sends the app, and what each side runs. */
@@ -72,6 +74,15 @@ export function AppSettingsPanel({ projectId }: { projectId: string }) {
               <p className="text-sm text-slate-500">Where Publish sends the app: its test version, or the live app.</p>
             </header>
             <PublishingSection projectId={projectId} />
+          </section>
+        )}
+        {section === "assistants" && (
+          <section className="mx-auto max-w-2xl space-y-4">
+            <header>
+              <h3 className="text-base font-semibold">AI assistants</h3>
+              <p className="text-sm text-slate-500">Whether Claude, or any MCP client, may use this app for its people.</p>
+            </header>
+            <AssistantsSection projectId={projectId} />
           </section>
         )}
         {section === "domains" && (

@@ -168,13 +168,21 @@ from routers.blueprint_generate import _is_built, _definition_edit
 
 
 def test_is_built_is_the_emitted_app_not_the_definition(tmp_path):
+    """Built means ASSEMBLED, not scaffolded (6c77a108): the opening's install
+    writes app/package.json before a screen exists, so the scaffold alone is
+    not built — the assembly's `runtime.build` stamp in the Blueprint is."""
+    import json
     # A defined-but-unbuilt project: Blueprint on disk, no emitted app.
     (tmp_path / ".forge" / "blueprint").mkdir(parents=True)
     (tmp_path / ".forge" / "blueprint" / "current.json").write_text("{}")
     assert _is_built(str(tmp_path)) is False
-    # After a build, app_emitter has written the Next app's package.json.
+    # The install has scaffolded the Next app; nothing is assembled yet.
     (tmp_path / "app").mkdir()
     (tmp_path / "app" / "package.json").write_text("{}")
+    assert _is_built(str(tmp_path)) is False
+    # The assembly stamps runtime.build: now it is built.
+    (tmp_path / ".forge" / "blueprint" / "current.json").write_text(
+        json.dumps({"runtime": {"build": {"at": "2026-10-11T00:00:00Z"}}}))
     assert _is_built(str(tmp_path)) is True
 
 
