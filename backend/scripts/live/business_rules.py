@@ -169,16 +169,35 @@ def main() -> None:
     check(det.status_code == 200 and key not in {n["id"] for n in graph["definition"]["nodes"]}, "W  taken out again, the workflow is as it was")
 
     # Approve carries the record as one variable (expense.amount): the rule reads it there.
-    att = B.post(f"/api/projects/{EXPENSE_DESK}/business-rules/{gate_id}/workflows", json={"workflow": "FLOW-002"})
-    check(att.status_code == 200, "W  the gate is a step of Approve too")
+    att = B.post(f"/api/projects/{EXPENSE_DESK}/business-rules/{gate_id}/workflows",
+                 json={"workflow": "FLOW-002", "after": "check_rejected", "path": "else"})
+    check(att.status_code == 200, "W  the gate is a step of Approve, on its not-rejected path")
     time.sleep(1.5)
     desk = {"id": lunch, "title": f"Desk {TAG}", "amount": 3600, "category": "office", "status": "submitted"}
     r = S.post(f"{APP}/api/workflows/approve/execute", json={"input": {"expense": desk}})
     check(r.status_code == 422 and r.json().get("error") == msg,
           f"W  approving expense.amount 3600 of office is refused by the rule ({r.status_code})")
     r = S.post(f"{APP}/api/workflows/approve/execute", json={"input": {"expense": {**desk, "category": "travel"}}})
-    check(r.status_code == 200 and key in [s["nodeId"] for s in r.json().get("log") or []],
-          f"W  a travel one is approved through the step ({r.status_code})")
+    path2 = [s["nodeId"] for s in r.json().get("log") or []]
+    check(r.status_code == 200 and path2[:3] == ["trigger", "check_rejected", key],
+          f"W  a travel one is approved through the step after the rejected check ({' > '.join(path2)})")
+    r = S.post(f"{APP}/api/workflows/approve/execute", json={"input": {"expense": {**desk, "status": "rejected"}}})
+    check(r.status_code == 422 and key not in [s["nodeId"] for s in r.json().get("log") or []],
+          "W  a rejected one stops at its own check, before the rule's step")
+
+    # Values first, judgement last: a table that fills in the category satisfies "category must be one of".
+    cat_table = {"kind": "decision_table", "name": f"Category by amount {TAG}", "entity": EXPENSE,
+                 "table": {"hitPolicy": "F", "inputs": [{"name": "amount"}], "outputs": [{"name": "category"}],
+                           "rules": [{"inputEntries": ["> 1000"], "outputEntries": ["office"]},
+                                     {"inputEntries": ["-"], "outputEntries": ["meals"]}]}}
+    made2 = B.post(f"/api/projects/{EXPENSE_DESK}/business-rules", json=cat_table)
+    check(made2.status_code == 201, "V  a table that fills in the category is saved")
+    time.sleep(2.5)
+    r = S.post(f"{APP}/api/data/expenses", json={"title": f"Screen {TAG}", "amount": 1200, "managerNote": "n"})
+    check(r.status_code == 201 and r.json().get("category") == "office",
+          f"V  no category given: the table's 'office' satisfies the category rule ({r.status_code})")
+    S.delete(f"{APP}/api/data/expenses/{r.json().get('id')}") if r.status_code == 201 else None
+    B.delete(f"/api/projects/{EXPENSE_DESK}/business-rules/{made2.json()['rule']['rule']['id']}")
 
     # ---- off, and away --------------------------------------------------------------
     v = next(x for x in B.get(f"/api/projects/{EXPENSE_DESK}/business-rules").json()["rules"] if x["rule"]["id"] == gate_id)

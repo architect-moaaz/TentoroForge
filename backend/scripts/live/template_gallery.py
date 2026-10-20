@@ -93,6 +93,22 @@ def journey() -> None:
     ids = [x["id"] for x in V.get("/api/template-gallery").json()["templates"]]
     check(t2["id"] in ids and tid not in ids, "5  the Gallery shows the new version only")
     check(B.get(f"/api/project-templates/{tid}").json()["status"] == "superseded", "5  the old version is superseded")
+    check(A.put(f"/api/project-templates/{t2['id']}/reviews/mine", json={"rating": 5}).status_code == 403,
+          "8  Tentoro's admins judge the Gallery and do not rate it")
+    # One request per app: a newer version takes an older request's place; an older one is not sent.
+    t3 = B.post(f"/api/projects/{TASK_BOARD}/templates", json={"name": "Task Board", "description": DESC, "category": "Productivity"}).json()
+    t4 = B.post(f"/api/projects/{TASK_BOARD}/templates", json={"name": "Task Board", "description": DESC, "category": "Productivity"}).json()
+    for x in (t3, t4):
+        B.post(f"/api/project-templates/{x['id']}/screenshots/from-app")
+    check(B.post(f"/api/project-templates/{t3['id']}/submit", json={}).status_code == 200, "1  v-next submitted")
+    check(B.post(f"/api/project-templates/{t4['id']}/submit", json={}).status_code == 200
+          and B.get(f"/api/project-templates/{t3['id']}").json()["status"] == "draft",
+          "1  a newer version takes the older request's place")
+    r = B.post(f"/api/project-templates/{t3['id']}/submit", json={})
+    check(r.status_code == 409 and "older version" in r.text, "1  an older version is not sent while a newer one waits")
+    A.post(f"/api/admin/template-requests/{t4['id']}/decision", json={"decision": "approve"})
+    for x in (t3,):
+        B.delete(f"/api/project-templates/{x['id']}")
 
 
 async def races(tok: str) -> None:
