@@ -521,6 +521,20 @@ export function analyzeTable(table: DecisionTableDef): TableFinding[] {
       }
     }
   }
+  if (policy === "A") {
+    // Any: rows that can match together must say the same thing.
+    const same = (i: number, j: number) => JSON.stringify((rows[i].outputEntries || []).map((v) => String(v ?? "").trim()))
+      === JSON.stringify((rows[j].outputEntries || []).map((v) => String(v ?? "").trim()));
+    for (let i = 0; i < rows.length; i++) {
+      for (let j = i + 1; j < rows.length; j++) {
+        if (!complete(i) || !complete(j) || same(i, j)) continue;
+        if (parsed[i].every((c, k) => intersects(c!, parsed[j][k]!) === true)) {
+          out.push({ severity: "error", kind: "overlap", row: j + 1,
+                     message: `Rows ${i + 1} and ${j + 1} can both match the same record but give different values — an Any table needs them to agree. Make them agree, or use First or Priority.` });
+        }
+      }
+    }
+  }
   if (policy === "F" || policy === "U" || policy === "A" || policy === "P") {
     for (let j = 1; j < rows.length; j++) {
       if (!complete(j)) continue;

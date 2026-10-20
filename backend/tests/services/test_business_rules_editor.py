@@ -514,3 +514,22 @@ def test_patterns_that_can_hang_are_refused(pattern):
 def test_inline_options_are_said_as_options():
     said = br._pattern_problem("(?i)^senior") or ""
     assert "options" in said and "named" not in said
+
+
+def test_collect_totals_fill_numbers_and_any_rows_agree(app):
+    t = json.loads(json.dumps(TABLE))
+    t["table"].update(hitPolicy="C", aggregation="COUNT")       # location is text
+    assert any("Collect totals fill number fields" in p for p in _said(app, t))
+    t = json.loads(json.dumps(TABLE))
+    t["table"]["outputs"] = [{"name": "openingsCount"}]
+    t["table"].update(hitPolicy="C", aggregation="SUM")
+    t["table"]["rules"] = [{"inputEntries": ["-", "-"], "outputEntries": ["1"]},
+                           {"inputEntries": ["> 1", "-"], "outputEntries": ["2"]}]
+    assert _said(app, t) == []
+    t = json.loads(json.dumps(TABLE))
+    t["table"]["hitPolicy"] = "A"
+    t["table"]["rules"] = [{"inputEntries": ["-", "-"], "outputEntries": ["office"]},
+                           {"inputEntries": ["> 1", "-"], "outputEntries": ["remote"]}]
+    assert any("must agree" in p or "needs them to agree" in p for p in _said(app, t))
+    t["table"]["rules"][1]["outputEntries"] = ["office"]
+    assert _said(app, t) == []

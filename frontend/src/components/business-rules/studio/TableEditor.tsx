@@ -154,12 +154,17 @@ export function TableEditor({
         {t.hitPolicy === "C" && (
           <div className="flex items-center gap-2 text-xs">
             <span className="text-muted-foreground">Combine the matches by</span>
-            {(["SUM", "COUNT", "MIN", "MAX"] as Aggregation[]).map((a) => (
-              <button key={a} type="button" disabled={disabled} onClick={() => set({ aggregation: a })}
-                      className={cn("rounded border px-2 py-0.5", t.aggregation === a ? "border-primary bg-primary/10 font-medium" : "hover:bg-muted")}>
+            {(["SUM", "COUNT", "MIN", "MAX"] as Aggregation[]).map((a) => {
+              // A total fills number fields (smallest/largest: dates too).
+              const fits = t.outputs.every((c) => c.type === "number" || ((a === "MIN" || a === "MAX") && c.type === "date"));
+              return (
+              <button key={a} type="button" disabled={disabled || !fits} onClick={() => set({ aggregation: a })}
+                      title={fits ? undefined : "Only for fields that hold a number"}
+                      className={cn("rounded border px-2 py-0.5 disabled:opacity-40", t.aggregation === a ? "border-primary bg-primary/10 font-medium" : "hover:bg-muted")}>
                 {{ SUM: "adding up", COUNT: "counting", MIN: "the smallest", MAX: "the largest" }[a]}
               </button>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

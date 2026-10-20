@@ -222,6 +222,14 @@ t("Unique: overlapping rows are an error, naming both", () => {
   assert.ok(f.every((x) => x.severity === "error"));
 });
 
+t("Any: rows that can match together must agree", () => {
+  const two = (b: string, out2: string) => ({ hitPolicy: "A", inputs: [{ name: "x" }], outputs: [{ name: "y" }],
+    rules: [{ inputEntries: ["> 1"], outputEntries: ["office"] }, { inputEntries: [b], outputEntries: [out2] }] });
+  assert.equal(analyzeTable(two("-", "meals")).filter((f) => f.kind === "overlap").length, 1);
+  assert.equal(analyzeTable(two("-", "office")).filter((f) => f.kind === "overlap").length, 0, "they agree");
+  assert.equal(analyzeTable(two("< 0", "meals")).filter((f) => f.kind === "overlap").length, 0, "they never meet");
+});
+
 t("Unique: touching ranges overlap only when both ends are included", () => {
   const two = (a: string, b: string) => ({ hitPolicy: "U", inputs: [{ name: "x" }], outputs: [{ name: "y" }],
     rules: [{ inputEntries: [a], outputEntries: ["1"] }, { inputEntries: [b], outputEntries: ["2"] }] });

@@ -893,6 +893,21 @@ def check(doc: dict, rule: dict) -> list[str]:
             problems.append("A table that sets a record's fields needs one value per field: use First, Unique, "
                             "Priority or Any — or Collect with a sum, count, minimum or maximum. Rule order and "
                             "plain Collect give a list, which only a workflow step can use.")
+        agg = str(table.get("aggregation") or "").upper()
+        if policy == "C" and agg and ent is not None:
+            # A total is a number (smallest/largest may be a date): adding up or
+            # counting categories would write a number into a list of words.
+            by_field = {str(f.get("name")): f for f in ent.get("fields") or [] if isinstance(f, dict)}
+            for col in table.get("outputs") or []:
+                f = by_field.get(str(col.get("variableBinding") or col.get("name") or ""))
+                kind = _field_type(f) if f else str(col.get("type") or "")
+                fits = kind == "number" or (agg in ("MIN", "MAX") and kind == "date")
+                if f is not None and not fits:
+                    word = {"SUM": "adding up", "COUNT": "counting", "MIN": "taking the smallest",
+                            "MAX": "taking the largest"}[agg]
+                    problems.append(f"{_human(str(f.get('name'))).capitalize()} is "
+                                    f"{'one of a list' if kind == 'enum' else kind}, so {word} the matches "
+                                    "cannot fill it. Collect totals fill number fields; use First or Priority here.")
         outs = [str(c.get("variableBinding") or c.get("name") or "") for c in table.get("outputs") or []]
         if len(set(outs)) != len(outs):
             problems.append("Each output column sets a different field.")

@@ -431,6 +431,23 @@ function RuleSheet({ projectId, draft, setDraft, views, catalogue, model, buildi
 
   return (
     <>
+    <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Remove “{nameOf || "this rule"}”?</DialogTitle>
+          <DialogDescription>
+            The app stops applying it at once{saved?.usages?.steps?.length ? `, and it leaves the ${saved.usages.steps.length === 1 ? "workflow" : `${saved.usages.steps.length} workflows`} it runs in` : ""}.
+            It stays in the app's history.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => setConfirmDelete(false)}>Keep it</Button>
+          <Button variant="destructive" onClick={() => remove.mutate()} disabled={remove.isPending || building}>
+            {remove.isPending && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}Remove it
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
     <Dialog open={confirmClose} onOpenChange={setConfirmClose}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
@@ -465,11 +482,9 @@ function RuleSheet({ projectId, draft, setDraft, views, catalogue, model, buildi
             <Switch checked={enabled} onCheckedChange={setEnabled} disabled={building} aria-label="On or off" /> {enabled ? "On" : "Off"}
           </label>
           {draft.id && draft.kind !== "prerequisite" && (
-            confirmDelete ? (
-              <Button variant="destructive" size="sm" onClick={() => remove.mutate()} disabled={remove.isPending || building}>Remove it</Button>
-            ) : (
-              <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(true)} disabled={building} aria-label="Remove rule"><Trash2 className="h-4 w-4" /></Button>
-            )
+            // Asked in a dialog, not by turning this button into "Remove it" in
+            // place — a double-click removed a live rule.
+            <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(true)} disabled={building} aria-label="Remove rule"><Trash2 className="h-4 w-4" /></Button>
           )}
           <Button variant="ghost" size="sm" onClick={requestClose}><X className="mr-1 h-4 w-4" /> Close</Button>
           <Button size="sm" onClick={() => (canSave ? save.mutate() : (setTouched(true), setSaveProblems(check?.problems?.length ? check.problems : ["Give the rule a name."])))}
