@@ -1,0 +1,33 @@
+# Key login only, for one user, for one purpose: reverse port forwards.
+Port 22
+HostKey /hostkeys/ssh_host_ed25519_key
+
+PermitRootLogin no
+AllowUsers tunnel
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
+
+# The key list is written by the platform. Each line carries its own limits (restrict, one permitlisten port, no command).
+AuthorizedKeysFile none
+AuthorizedKeysCommand /usr/local/bin/ttf-authkeys %u %k
+AuthorizedKeysCommandUser root
+
+# Remote forwards only; the listener is bound on the service's network address so the platform backend can reach it by name.
+AllowTcpForwarding remote
+GatewayPorts clientspecified
+PermitTunnel no
+PermitTTY no
+X11Forwarding no
+AllowAgentForwarding no
+PermitUserEnvironment no
+
+# A dead connection is noticed within about 45 seconds and its port is freed, so a returning builder is never locked out.
+ClientAliveInterval 15
+ClientAliveCountMax 3
+TCPKeepAlive yes
+
+MaxAuthTries 3
+LoginGraceTime 20
+MaxStartups 10:30:30
+LogLevel VERBOSE

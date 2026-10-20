@@ -1,0 +1,33 @@
+{
+	auto_https off
+	admin off
+}
+
+:80 {
+	encode zstd gzip
+
+	# the platform API (streams, e.g. a blast or a live watch, must not be buffered)
+	handle /api/* {
+		reverse_proxy backend:6500 {
+			flush_interval -1
+			transport http {
+				read_timeout 600s
+				write_timeout 600s
+			}
+		}
+	}
+	handle /health {
+		reverse_proxy backend:6500
+	}
+
+	# everything else is the website
+	handle {
+		reverse_proxy frontend:3000 {
+			flush_interval -1
+		}
+	}
+
+	request_body {
+		max_size 25MB
+	}
+}
