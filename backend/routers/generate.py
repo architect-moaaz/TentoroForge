@@ -8396,7 +8396,9 @@ async def _handle_smith_turn(project: Project, message: str, deferred: dict | No
         if attachment_ids:
             try:
                 from routers.blueprint_generate import _attached_documents, _document_note
-                _doc_note = _document_note(str(output_dir), _attached_documents(project.id, list(attachment_ids)))
+                # In a thread: a document may refresh an API reference, a model call.
+                _doc_note = await asyncio.to_thread(
+                    _document_note, str(output_dir), _attached_documents(project.id, list(attachment_ids)))
             except Exception as _e:  # noqa: BLE001 — never lose the turn
                 logger.warning("attached documents could not be read: %s", _e)
         from services.smith4.platform import smith_result as _smith_turn

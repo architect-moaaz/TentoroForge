@@ -25,10 +25,13 @@ DOCUMENT_DIR = Path(".forge") / "documents"
 
 #: The nodes shown the documents. The requirements agent turns them into
 #: requirements with `document N` evidence; the application model names the
-#: product from them. A page or a schema agent works from the requirements
-#: those two produced, and a forty-page specification on every call would be
-#: paid for on every call.
-READS_DOCUMENTS = frozenset({"requirements", "application_model"})
+#: product from them; the integrations agent declares each outside system as
+#: its documentation names it, which is how `api_reference` later finds that
+#: documentation again (it matches a document to a system by name). A page or
+#: a schema agent works from what those produced, and a forty-page
+#: specification on every call would be paid for on every call. Each of these
+#: runs once a build.
+READS_DOCUMENTS = frozenset({"requirements", "application_model", "integrations"})
 _NAME = re.compile(r"^document-(\d+)\.md$")
 
 

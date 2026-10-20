@@ -1742,6 +1742,18 @@ def _attached_documents(project_id: Any, attachment_ids: list[str]) -> list[dict
         return []
 
 
+def _keep_documents(output_dir: str, attached: list[dict], evidence: list[str] | None) -> tuple[list[dict], list[str]]:
+    """Store this turn's readable documents beside the Blueprint at once, and
+    return them with the turn's evidence: every document on record, first
+    arrived first, then whatever else the request carried."""
+    from services.blueprint import documents as documents_mod
+    readable = [d for d in attached if d.get("text")]
+    if readable:
+        documents_mod.store(output_dir, [_document_evidence(d) for d in readable])
+    kept = documents_mod.texts(output_dir)
+    return readable, kept + [e for e in (evidence or []) if e not in kept]
+
+
 def _turn_attachments(project_id: Any, attachment_ids: list[str]) -> tuple[list[dict], str]:
     """What Smith is SHOWN this turn, and the line that says what each is for.
 
@@ -1791,22 +1803,52 @@ def _document_evidence(doc: dict) -> str:
     return f"# {doc['filename']}{_document_about(doc)}\n\n{doc['text']}"
 
 
-def _document_note(output_dir: str, docs: list[dict]) -> str:
+def _document_note(output_dir: str, docs: list[dict], *, late: bool = False) -> str:
     """For a turn on an application that exists: keep each readable document
     beside the Blueprint and tell Smith where it is, rather than putting forty
-    pages into every step of the turn. Smith opens it with `read_file`."""
+    pages into every step of the turn. Smith opens it with `read_file`.
+
+    `late`: the requirements were written before the document arrived. The
+    agents that read documents have already run and will not run again, so
+    nothing in it reaches the application unless Smith carries it there — and
+    whether to change agreed requirements is the person's call. Smith compares
+    and offers; it does not rewrite unasked."""
     from services.blueprint import documents as documents_mod
     readable = [d for d in docs if d.get("text")]
     if not readable:
         return ""
     documents_mod.store(output_dir, [_document_evidence(d) for d in readable])
+    _refresh_api_reference(output_dir)
     lines = []
     for d in readable:
         path = documents_mod.path_of(output_dir, _document_evidence(d))
         rel = f".forge/documents/{path.name}" if path else ".forge/documents/"
         lines.append(f"- {d['filename']}{_document_about(d)}: its text is at `{rel}`")
-    return ("\n\nThe person attached these documents with this message. Read the parts that bear on the "
+    note = ("\n\nThe person attached these documents with this message. Read the parts that bear on the "
             "ask with read_file before acting, and follow what they say:\n" + "\n".join(lines))
+    if late:
+        note += ("\n\nTHESE ARRIVED AFTER THE REQUIREMENTS WERE WRITTEN, so nothing in them is in the "
+                 "application yet. Unless the message already says what to do with them, read them against "
+                 "the requirements and the outside systems on record, and tell the person what they add "
+                 "(requirements, outside systems or APIs, rules) and what they contradict, each in a line. "
+                 "Then offer, as options, to bring them in — all of it, or the parts they choose — and "
+                 "change nothing until they say.")
+    return note
+
+
+def _refresh_api_reference(output_dir: str) -> None:
+    """A document that arrives after the build may be the manual for an outside
+    system the application already calls; `api_reference` is written during
+    the build, so without this the step author never sees it. Rewrites only a
+    system whose material changed (`api_reference.write` keeps the rest)."""
+    from services.blueprint import api_reference
+    from services.blueprint.service import BlueprintService
+    try:
+        doc = BlueprintService.load(output_dir=output_dir).doc
+        if any(api_reference.called_by_http(i) for i in api_reference._live(doc.get("integrations"))):
+            api_reference.write(output_dir, doc)
+    except Exception:  # noqa: BLE001 — the reference is help for the author, never the turn
+        logger.warning("[api-reference] not refreshed for %s", output_dir, exc_info=True)
 
 
 @router.post("/api/projects/{project_id}/smith/chat")
@@ -1852,8 +1894,13 @@ async def smith_chat(
     # the new-app page takes — so the requirements cite it as `document N`.
     attached_docs = _attached_documents(project_id, list(getattr(req, "attachment_ids", None) or []))
     shown_files, shown_note = _turn_attachments(project_id, list(getattr(req, "attachment_ids", None) or []))
-    if attached_docs:
-        req.evidence = list(req.evidence or []) + [_document_evidence(d) for d in attached_docs if d.get("text")]
+    # KEPT FROM THE MOMENT THEY ARRIVE. A document used to be stored only by
+    # the turn that wrote the definition, so one attached to a turn Smith
+    # answered with a question — the usual first turn — was gone by the next:
+    # an API manual sent first and a BRD after defined the app from the BRD
+    # alone (2026-10-20). Every document on record goes with every turn's
+    # evidence until the definition exists.
+    readable_docs, req.evidence = _keep_documents(str(output_dir), attached_docs, req.evidence)
 
     queue: asyncio.Queue = asyncio.Queue()
     loop = asyncio.get_running_loop()
@@ -2318,8 +2365,12 @@ async def smith_chat(
                 if handled is not None:
                     return handled
 
+            # A DOCUMENT IS NOT A DEFINITION EDIT. Re-running the definition
+            # skips the requirements already written, so "here is the BRD" took
+            # this path, stored the file and changed nothing. With a document
+            # attached the turn goes to Smith, who is told it came late.
             if svc is not None and not _is_built(output_dir) \
-                    and _definition_edit(req.message):
+                    and not readable_docs and _definition_edit(req.message):
                 return _run_dag(str(output_dir), app_root, req.message,
                                 approved=False, emit=emit,
                                 app_name=getattr(project, "name", "") or "",
@@ -2343,7 +2394,9 @@ async def smith_chat(
             # This is the conversation, and it is where the user asked for it.
             turn_result = handle_chat_v2(ChatV2Request(
                 project_id=str(project_id), output_dir=str(output_dir),
-                message=req.message + _document_note(str(output_dir), attached_docs) + shown_note,
+                message=req.message + _document_note(
+                    str(output_dir), attached_docs,
+                    late=bool(svc is not None and (svc.doc.get("requirements") or svc.doc.get("pages")))) + shown_note,
                 attachments=shown_files,
                 # The recent exchange only — Smith reads the last few turns.
                 history=[(t.role, t.text) for t in req.history if t.text][-10:],

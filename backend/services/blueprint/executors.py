@@ -2091,7 +2091,9 @@ NODE_TASKS: dict[str, str] = {
     ),
     "integrations": (
         "Declare each outside system this application talks to, from the "
-        "requirements and the domain reference: `name`, `kind` (email, "
+        "requirements, the domain reference and any documents the person "
+        "supplied — name a documented system as its documentation names it: "
+        "`name`, `kind` (email, "
         "storage, payment, auth, webhook, mcp, other), `provider` (the product, "
         "in lower case) and `secretRefs` — the NAMES of the variables its "
         "credentials live in, UPPER_SNAKE (`XERO_API_KEY`), never a value. "
