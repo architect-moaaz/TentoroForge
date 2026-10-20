@@ -9,16 +9,22 @@
  * reply that was handed back.
  *
  * It only watches. It cannot stop or change a chat, and it works only against a development app.
+ *
+ * Where the app runs: if TentoroForge is on the builder's own computer, the app is a localhost address to type. If it is on a
+ * server, the server cannot see the builder's localhost, so the panel shows "Your computer": a one-time code and one command to
+ * run where the app is (it opens a reverse SSH tunnel, see lib/watch-tunnel.ts), and the live state of that tunnel.
  */
 import { useEffect, useRef, useState } from "react";
-import { Check, Circle, Loader2, PauseCircle, Radio, Unplug, XCircle } from "lucide-react";
+import { Check, Circle, Copy, Laptop, Loader2, PauseCircle, Radio, Unplug, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
 import { checklist, stageOf, type CheckStatus, type WatchRun, type WatchState, type WatchWho } from "@/lib/agent-watch";
 import type { ModelStep } from "@/lib/agent-live";
+import { clock, connectorCommands, secondsLeft, summarise, validPort } from "@/lib/watch-tunnel";
 import { ModelCard, ToolCard, num, secs } from "./AgentRunCards";
 import type { Link } from "./useAgentWatch";
+import { useWatchTunnel } from "./useWatchTunnel";
 
 interface Props {
   state: WatchState;
@@ -68,6 +74,12 @@ export function AgentWatchPanel({ state, link, reason, suggestedUrl, projectId, 
   const [options, setOptions] = useState<WhoOptions>({ roles: [], people: [] });
   const [optionsNote, setOptionsNote] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const tun = useWatchTunnel(projectId);
+  // Where the app runs: a localhost address to type, or (platform on a server) the builder's own computer through a tunnel.
+  const viaTunnel = tun.tunnel.enabled;
+  const [portText, setPortText] = useState("3000");
+  const [copied, setCopied] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const run = state.selected ? state.runs[state.selected] : undefined;
   const connected = link === "connected" || link === "reconnecting";
   const working = link === "checking" || link === "connecting";
@@ -104,16 +116,60 @@ export function AgentWatchPanel({ state, link, reason, suggestedUrl, projectId, 
   }, [projectId]);
 
   const connect = (address?: string, chosen: WatchWho = who) => {
-    const where = address ?? appUrl;
-    if (address) setAppUrl(address);
+    const where = viaTunnel ? "tunnel" : address ?? appUrl;
+    if (address && !viaTunnel) setAppUrl(address);
     try {
-      window.localStorage.setItem(`forge.liveRun.app.${projectId}`, where);
+      if (!viaTunnel) window.localStorage.setItem(`forge.liveRun.app.${projectId}`, where);
       window.localStorage.setItem(`forge.watch.who.${projectId}`, whoValue(chosen));
     } catch {
       /* a convenience only */
     }
     onConnect(where, chosen);
   };
+
+  // The port the app runs on is remembered, and the code's countdown ticks only while there is a code to count down.
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(`forge.watch.appPort.${projectId}`);
+      if (saved && validPort(saved)) setPortText(saved);
+    } catch {
+      /* a convenience only */
+    }
+  }, [projectId]);
+  useEffect(() => {
+    if (tun.tunnel.appPort && validPort(String(tun.tunnel.appPort))) setPortText(String(tun.tunnel.appPort));
+  }, [tun.tunnel.appPort]);
+  useEffect(() => {
+    if (!tun.pairing) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [tun.pairing]);
+  // Once the computer has connected, the setup box has done its job.
+  useEffect(() => {
+    if (tun.tunnel.connected && tun.pairing) tun.dismissPairing();
+  }, [tun.tunnel.connected]); // eslint-disable-line react-hooks/exhaustive-deps
+  const choosePort = (text: string) => {
+    setPortText(text);
+    try {
+      if (validPort(text)) window.localStorage.setItem(`forge.watch.appPort.${projectId}`, text);
+    } catch {
+      /* a convenience only */
+    }
+  };
+  const copy = async (what: string, text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(what);
+      setTimeout(() => setCopied((c) => (c === what ? null : c)), 2000);
+    } catch {
+      setCopied(null); // the command is on screen to select by hand
+    }
+  };
+  const port = validPort(portText);
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  const commands = tun.pairing && port ? connectorCommands(origin, tun.pairing.code, port) : null;
+  const left = tun.pairing ? secondsLeft(tun.pairing, now) : 0;
+  const summary = summarise(tun.tunnel);
 
   // Changing whom to watch takes effect at once: while connected it reconnects to the new choice.
   const chooseWho = (value: string) => {
@@ -142,25 +198,107 @@ export function AgentWatchPanel({ state, link, reason, suggestedUrl, projectId, 
             {LINK_TEXT[link]}
           </span>
         </div>
+        {viaTunnel && (
+          <div className="space-y-1.5 rounded border p-2" data-testid="watch-tunnel">
+            <div className="flex items-start gap-1.5 text-[11px]">
+              <Laptop className="mt-0.5 h-3.5 w-3.5 shrink-0 text-sky-600" />
+              <div className="min-w-0 flex-1">
+                <span className="font-semibold">Your computer</span>
+                <p
+                  className={`text-[11px] ${summary.tone === "good" ? "text-green-700" : summary.tone === "warn" ? "text-amber-800" : "text-muted-foreground"}`}
+                  data-testid="tunnel-state"
+                  data-tone={summary.tone}
+                >
+                  {summary.text}
+                </p>
+              </div>
+            </div>
+            {!tun.tunnel.registered && tun.tunnel.hosted?.vercel && (
+              <p className="text-[10px] text-muted-foreground" data-testid="tunnel-vercel">
+                This app is also hosted on Vercel{tun.tunnel.hosted.vercel.url ? ` (${tun.tunnel.hosted.vercel.url})` : ""}. Watching a Vercel-hosted app is not available yet: this connects the copy you run on your own computer.
+              </p>
+            )}
+            <div className="flex flex-wrap items-center gap-2">
+              <Button size="sm" variant={tun.tunnel.connected ? "outline" : "default"} className="h-7 text-xs" onClick={() => void tun.pair()} disabled={tun.asking}>
+                {tun.asking ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
+                {tun.pairing ? "New code" : tun.tunnel.registered ? "Connect again" : "Connect your computer"}
+              </Button>
+              {tun.tunnel.registered && (
+                <button type="button" className="text-[10px] text-muted-foreground underline" onClick={() => void tun.forget()} data-testid="tunnel-forget">
+                  Disconnect this computer
+                </button>
+              )}
+            </div>
+            {tun.pairing && (
+              <div className="space-y-1.5 rounded bg-slate-50 p-2 text-[10px]" data-testid="tunnel-setup">
+                <label className="block text-muted-foreground">
+                  The port your app runs on (on your computer)
+                  <Input aria-label="App port" className="mt-0.5 h-6 w-24 text-xs" value={portText} onChange={(e) => choosePort(e.target.value)} inputMode="numeric" />
+                </label>
+                {!port && (
+                  <p className="text-red-700" role="alert">
+                    That is not a port: use a number from 1 to 65535, like 3000.
+                  </p>
+                )}
+                <p className="text-muted-foreground">
+                  In your app&apos;s folder (the one with package.json) run this. It checks your app and the server, connects, and reconnects by itself if the network drops. Leave it running.
+                </p>
+                {commands && (
+                  <>
+                    {([["unix", "Mac / Linux", commands.unix], ["windows", "Windows PowerShell", commands.windows]] as const).map(([key, title, text]) => (
+                      <div key={key}>
+                        <div className="flex items-center justify-between">
+                          <span className="font-medium">{title}</span>
+                          <button type="button" className="flex items-center gap-1 text-sky-700 underline" onClick={() => void copy(key, text)} data-testid={`copy-${key}`}>
+                            <Copy className="h-3 w-3" />
+                            {copied === key ? "Copied" : "Copy"}
+                          </button>
+                        </div>
+                        <pre className="mt-0.5 overflow-x-auto whitespace-pre-wrap break-all rounded border bg-white p-1.5 font-mono text-[10px]" data-testid={`command-${key}`}>{text}</pre>
+                      </div>
+                    ))}
+                  </>
+                )}
+                <p className={left > 0 ? "text-muted-foreground" : "text-red-700"} data-testid="tunnel-code-clock">
+                  Code {tun.pairing.code}: {left > 0 ? `works once, for ${clock(left)} more.` : "expired. Press New code."}
+                </p>
+              </div>
+            )}
+            {tun.problem && (
+              <p className="text-[10px] text-red-700" role="alert" data-testid="tunnel-problem">
+                {tun.problem}
+              </p>
+            )}
+          </div>
+        )}
         <div className="flex items-end gap-2">
-          <label className="flex-1 text-[10px] text-muted-foreground">
-            The running app
-            <Input
-              aria-label="App address"
-              className="mt-0.5 h-7 text-xs"
-              value={appUrl}
-              disabled={connected || working}
-              onChange={(e) => setAppUrl(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && !connected && !working && connect()}
-            />
-          </label>
+          {!viaTunnel && (
+            <label className="flex-1 text-[10px] text-muted-foreground">
+              The running app
+              <Input
+                aria-label="App address"
+                className="mt-0.5 h-7 text-xs"
+                value={appUrl}
+                disabled={connected || working}
+                onChange={(e) => setAppUrl(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && !connected && !working && connect()}
+              />
+            </label>
+          )}
+          {viaTunnel && <span className="flex-1 text-[10px] text-muted-foreground">Then watch the chats on it:</span>}
           {connected || working ? (
             <Button size="sm" variant="outline" className="h-7 text-xs" onClick={onDisconnect}>
               <Unplug className="mr-1 h-3 w-3" />
               Disconnect
             </Button>
           ) : (
-            <Button size="sm" className="h-7 text-xs" onClick={() => connect()}>
+            <Button
+              size="sm"
+              className="h-7 text-xs"
+              onClick={() => connect()}
+              disabled={viaTunnel && !tun.tunnel.connected}
+              title={viaTunnel && !tun.tunnel.connected ? "Connect your computer first (above)" : undefined}
+            >
               Connect
             </Button>
           )}
