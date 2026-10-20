@@ -322,6 +322,33 @@ await (async () => {
   assert.deepEqual(r2.errors, [], "a broken Unique table never refuses the person's save");
   assert.ok(warned.some((w) => w.includes("More than one row")));
   n++; console.log("ok - engine: a Unique violation is logged, the save goes on");
+
+  // Values first, judgement last: a refusal sees what a table worked out.
+  const needsApprover = {
+    id: "RULE-012", name: "An approver is needed", rule_type: "condition_action", model_name: "Expense",
+    field_name: null, is_active: true,
+    config: { whenFeel: "approver = null", then: [{ type: "show_error", message: "No approver." }], otherwise: [],
+              scope: "entity", salience: 10 },
+  };
+  setRules([needsApprover as any, tableRule() as any]);
+  let j = await evaluateRuleSet("Expense", "create", { amount: 300 });
+  assert.deepEqual([j.errors, j.patches.approver], [[], "manager"], "the table's approver satisfies the check");
+  j = await evaluateRuleSet("Expense", "create", { amount: -5 });
+  assert.deepEqual(j.errors, ["No approver."], "no row, no approver: refused");
+  const form = await evaluateFormRules("Expense", { amount: 300 });
+  assert.deepEqual([form.errors, form.patches.approver], [[], "manager"], "the form shows the table's value and no refusal");
+  // A rule that sets a value keeps the answer it acted on.
+  const defaultAndHint = {
+    id: "RULE-013", name: "Default status", rule_type: "condition_action", model_name: "Expense",
+    field_name: null, is_active: true,
+    config: { whenFeel: "status = null", then: [{ type: "set_default", field: "status", value: "submitted", valueMode: "literal" },
+                                               { type: "show_error", message: "Status was blank." }],
+              otherwise: [], scope: "entity", salience: 0 },
+  };
+  setRules([defaultAndHint as any]);
+  j = await evaluateRuleSet("Expense", "create", {});
+  assert.deepEqual([j.patches.status, j.errors], ["submitted", ["Status was blank."]]);
+  n++; console.log("ok - engine: values first, then tables, then refusals on the final record");
 })();
 
 console.log(`\n${n} decision-table tests passed`);

@@ -1131,28 +1131,55 @@ export async function evaluateRuleSet(
   // about a change reads ("a done task cannot go back to todo"). On a create
   // there is no previous record: every `previous.x` is null.
   const before = previous ?? {};
+  void ctx;
+  // VALUES FIRST, JUDGEMENT LAST. A refusal used to be decided before a
+  // decision table filled in the field it checks ("category must be one of…"
+  // refused a record the table had just given a category). Now:
+  //   1. condition rules set their values, highest priority first;
+  //   2. decision tables, computed fields and typed validations run over that;
+  //   3. condition rules refuse, hint and start things — read on the final record.
+  const decided = new Map<string, boolean>();
   for (const rule of rules) {
     const config = rule.config as ConditionActionConfig;
-    const whenFeel = normalizeBlankChecks((config.whenFeel ?? "true").trim() || "true");
-    let matched = false;
-    try {
-      matched = Boolean(evaluateExpression(whenFeel, { ...working, user, previous: before } as any));
-    } catch (err) {
-      // A broken condition must not silently pass — skip the rule, keep going.
-      console.error(`[rules] condition of "${rule.name}" failed:`, err);
-      continue;
-    }
-    void ctx;
-    dispatchActions(
-      matched ? config.then : config.otherwise,
-      working, out, true, claims, config.salience ?? 0,
-    );
+    const matched = holds(rule, config, working, user, before);
+    if (matched === null) continue;
+    const acts = (matched ? config.then : config.otherwise) ?? [];
+    if (acts.some(isValueAction)) decided.set(String(rule.id), matched);
+    dispatchActions(acts.filter(isValueAction), working, out, true, claims, config.salience ?? 0);
   }
 
   // Also run the AI-authored rule types (computed/validation/business).
   await applyTypedRules(modelName, event, working, out, claims);
 
+  for (const rule of rules) {
+    const config = rule.config as ConditionActionConfig;
+    // A rule that set a value keeps the answer it acted on (its own value
+    // must not flip it); the others are asked about the record as it now is.
+    const matched = decided.has(String(rule.id)) ? decided.get(String(rule.id))! : holds(rule, config, working, user, before);
+    if (matched === null) continue;
+    const acts = ((matched ? config.then : config.otherwise) ?? []).filter((a) => !isValueAction(a));
+    dispatchActions(acts, working, out, true, claims, config.salience ?? 0);
+  }
+
   return out;
+}
+
+const VALUE_ACTIONS = new Set(["set_field", "set_default", "clear_field"]);
+function isValueAction(a: { type?: string } | null | undefined): boolean {
+  return !!a && VALUE_ACTIONS.has(String(a.type));
+}
+
+/** Does the rule's condition hold — or null when it cannot be read (logged, the rule skipped). */
+function holds(rule: ProjectRule, config: ConditionActionConfig, working: Record<string, unknown>,
+               user: unknown, before: Record<string, unknown>): boolean | null {
+  const whenFeel = normalizeBlankChecks((config.whenFeel ?? "true").trim() || "true");
+  try {
+    return Boolean(evaluateExpression(whenFeel, { ...working, user, previous: before } as any));
+  } catch (err) {
+    // A broken condition must not silently pass — skip the rule, keep going.
+    console.error(`[rules] condition of "${rule.name}" failed:`, err);
+    return null;
+  }
 }
 
 /**
@@ -1188,19 +1215,30 @@ export async function evaluateFormRules(
     .sort(byFiringOrder);
   const working: Record<string, unknown> = { ...entity };
   const before = previous ?? {};
+  // In the save's order (values, then tables, then judgement), so the form
+  // shows a table's value as it is typed and says only what the save would refuse.
+  const decided = new Map<string, boolean>();
   for (const rule of rules) {
     const config = rule.config as ConditionActionConfig;
-    const whenFeel = normalizeBlankChecks((config.whenFeel ?? "true").trim() || "true");
-    let matched = false;
-    try {
-      matched = Boolean(evaluateExpression(whenFeel, { ...working, user, previous: before } as any));
-    } catch {
-      continue;
-    }
-    const acts = matched ? config.then : config.otherwise;
+    const matched = holds(rule, config, working, user, before);
+    if (matched === null) continue;
+    const acts = (matched ? config.then : config.otherwise) ?? [];
+    if (acts.some(isValueAction)) decided.set(String(rule.id), matched);
+    dispatchActions(acts.filter(isValueAction), working, out, false);
+  }
+  try {
+    await evaluateDecisionTables(modelName, working, out, new Map(), event);
+  } catch (err) {
+    console.error(`[rules] form decision tables failed for ${modelName}:`, err);
+  }
+  for (const rule of rules) {
+    const config = rule.config as ConditionActionConfig;
+    const matched = decided.has(String(rule.id)) ? decided.get(String(rule.id))! : holds(rule, config, working, user, before);
+    if (matched === null) continue;
+    const acts = ((matched ? config.then : config.otherwise) ?? []).filter((a) => !isValueAction(a));
     dispatchActions(acts, working, out, false);
     // The form says, while the person types, what the save would refuse.
-    for (const a of acts ?? []) {
+    for (const a of acts) {
       if (a?.type === "show_error" && a.message && !out.errors.includes(a.message)) out.errors.push(a.message);
     }
   }

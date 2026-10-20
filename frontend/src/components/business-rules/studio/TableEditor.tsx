@@ -5,7 +5,7 @@
 // app's own engine (the server's findings mark the very cell); the rows the
 // last test matched are lit, the one used most of all.
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, Copy, HelpCircle, Plus, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -262,19 +262,29 @@ export function TableEditor({
 function FieldPicker({ label, fields, onPick, disabled, tone }: {
   label: string; fields: CatalogueField[]; onPick: (f: string) => void; disabled?: boolean; tone: "in" | "out";
 }) {
+  // Picked: closed, and the new column's first cell takes the typing — focus
+  // used to go back to this button after the person had clicked into a cell,
+  // so what they typed went nowhere.
+  const [open, setOpen] = useState(false);
+  const pick = (name: string) => {
+    onPick(name);
+    setOpen(false);
+    setTimeout(() => document.querySelector<HTMLInputElement>(
+      `[data-testid=table-editor] input[aria-label="Row 1, ${name}"]`)?.focus(), 60);
+  };
   return (
-    <Popover>
+    <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button variant="outline" size="sm" disabled={disabled || !fields.length}
                 className={cn("h-8 gap-1 text-xs", tone === "in" ? "border-sky-300 text-sky-800 dark:text-sky-300" : "border-emerald-300 text-emerald-800 dark:text-emerald-300")}>
           <Plus className="h-3.5 w-3.5" /> {label}
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-64 p-1">
+      <PopoverContent className="w-64 p-1" onCloseAutoFocus={(e) => e.preventDefault()}>
         <ul className="max-h-72 overflow-y-auto">
           {fields.map((f) => (
             <li key={f.name}>
-              <button type="button" onClick={() => onPick(f.name)}
+              <button type="button" onClick={() => pick(f.name)}
                       className="flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-sm hover:bg-muted">
                 <span>{humanField(f.name)}</span>
                 <span className="text-[10px] text-muted-foreground">{f.type === "enum" ? `${f.enumValues.length} choices` : f.type}</span>

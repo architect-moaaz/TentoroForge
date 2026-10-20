@@ -27,6 +27,7 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -344,7 +345,8 @@ function RuleSheet({ projectId, draft, setDraft, views, catalogue, model, buildi
   // tries to save; an existing rule is checked from the start.
   const opened = useRef<string | null>(null);
   const [touched, setTouched] = useState(false);
-  useEffect(() => { opened.current = null; setTouched(false); }, [draft?.id, draft?.kind]);
+  const [confirmClose, setConfirmClose] = useState(false);
+  useEffect(() => { opened.current = null; setTouched(false); setConfirmClose(false); }, [draft?.id, draft?.kind]);
   useEffect(() => {
     const now = JSON.stringify(payload);
     if (opened.current === null) opened.current = now;
@@ -423,9 +425,28 @@ function RuleSheet({ projectId, draft, setDraft, views, catalogue, model, buildi
   // Save stays pressable on an untouched new rule: pressing it says what is missing.
   const saveDisabled = !canSave && (touched || !!draft.id || building || stale || gone);
   const Icon = KIND_ICON[draft.kind] ?? Scale;
+  // Escape, a click outside or Close on unsaved work asks first: a table of
+  // twenty rows was one keypress from gone.
+  const requestClose = () => (touched && !save.isPending ? setConfirmClose(true) : setDraft(null));
 
   return (
-    <Sheet open={!!draft} onOpenChange={(o) => !o && setDraft(null)}>
+    <>
+    <Dialog open={confirmClose} onOpenChange={setConfirmClose}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Leave without saving?</DialogTitle>
+          <DialogDescription>
+            {draft.id ? <>What you changed in “{nameOf || "this rule"}” is not saved; the app still has the rule as it was.</>
+                      : <>This new rule is not saved yet; leaving drops it.</>}
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => setConfirmClose(false)}>Keep editing</Button>
+          <Button variant="destructive" onClick={() => { setConfirmClose(false); setDraft(null); }}>Discard changes</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    <Sheet open={!!draft} onOpenChange={(o) => !o && requestClose()}>
       <SheetContent side="right" className="w-full gap-0 p-0 sm:max-w-[1180px]" data-testid="rule-sheet">
         <div className="flex items-center gap-3 border-b px-5 py-3">
           <Icon className="h-5 w-5 text-violet-600" />
@@ -450,7 +471,7 @@ function RuleSheet({ projectId, draft, setDraft, views, catalogue, model, buildi
               <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(true)} disabled={building} aria-label="Remove rule"><Trash2 className="h-4 w-4" /></Button>
             )
           )}
-          <Button variant="ghost" size="sm" onClick={() => setDraft(null)}><X className="mr-1 h-4 w-4" /> Close</Button>
+          <Button variant="ghost" size="sm" onClick={requestClose}><X className="mr-1 h-4 w-4" /> Close</Button>
           <Button size="sm" onClick={() => (canSave ? save.mutate() : (setTouched(true), setSaveProblems(check?.problems?.length ? check.problems : ["Give the rule a name."])))}
                   disabled={saveDisabled} data-testid="save-rule">
             {save.isPending ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Save className="mr-1.5 h-4 w-4" />} Save
@@ -576,5 +597,6 @@ function RuleSheet({ projectId, draft, setDraft, views, catalogue, model, buildi
         </div>
       </SheetContent>
     </Sheet>
+    </>
   );
 }
