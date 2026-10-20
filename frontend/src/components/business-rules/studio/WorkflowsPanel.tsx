@@ -37,7 +37,7 @@ export function WorkflowsPanel({ projectId, view, catalogue, onChanged, unsaved 
     }),
     onSuccess: () => {
       toast.success("It runs in that workflow now — in your app at once.");
-      setFlow(""); setAfter("__start"); onChanged();
+      setFlow(""); setAfter("__start"); setOnRefusal("stop"); onChanged();
     },
     onError: (e) => toast.error(problemsOf(e)[0]),
   });
@@ -90,7 +90,7 @@ export function WorkflowsPanel({ projectId, view, catalogue, onChanged, unsaved 
 
       <div className="space-y-2 rounded-lg border bg-muted/30 p-2.5">
         <p className="font-medium">Run it in a workflow</p>
-        <select aria-label="Workflow" value={flow} onChange={(e) => { setFlow(e.target.value); setAfter("__start"); }}
+        <select aria-label="Workflow" value={flow} onChange={(e) => { setFlow(e.target.value); setAfter("__start"); setOnRefusal("stop"); }}
                 className="h-8 w-full rounded-md border bg-background px-2">
           <option value="">Choose a workflow…</option>
           {(catalogue?.workflows ?? []).map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
