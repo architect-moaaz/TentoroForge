@@ -225,9 +225,12 @@ async def debug_status(
 ):
     """Whether the running app can be watched live: it is running, it accepts this project's key, and it is in
     development. If the address is another project's, says where this project's app is."""
-    from services.agent_debug import DebugError, read_debug_secret, status
+    from services.agent_debug import DebugError, read_debug_secret, status, tunnel_status
 
     project = await get_project_with_auth(project_id, user, db)
+    if app_url.strip().lower() == "tunnel":
+        # the app is on the builder's own computer, behind its reverse SSH tunnel: the platform chose that address itself
+        return await tunnel_status(str(project.id))
     app_root = _debug_roots(project)
     try:
         return await status(app_url, read_debug_secret(app_root))
@@ -249,15 +252,24 @@ async def debug_watch(
 
     from fastapi.responses import StreamingResponse
 
-    from services.agent_debug import flow_map, read_debug_secret, watch_stream
+    from services import agent_tunnel
+    from services.agent_debug import NOT_PAIRED, flow_map, read_debug_secret, watch_stream
 
     project = await get_project_with_auth(project_id, user, db)
-    app_root = _debug_roots(project)
+    via_tunnel = req.app_url.strip().lower() == "tunnel"
+    if via_tunnel:
+        reg = agent_tunnel.get(str(project.id))
+        target, secret = (agent_tunnel.target_url(str(project.id)), (reg or {}).get("secret")) if reg else (None, None)
+    else:
+        target, secret = req.app_url, read_debug_secret(_debug_roots(project))
 
     async def events():
         if req.graph is not None:
             yield f"data: {_json.dumps({'type': 'platform_map', **flow_map(req.graph.model_dump())})}\n\n".encode()
-        async for chunk in watch_stream(req.app_url, read_debug_secret(app_root), role=req.role, user_id=req.user_id):
+        if not target:
+            yield f"data: {_json.dumps({'type': 'error', 'message': NOT_PAIRED})}\n\n".encode()
+            return
+        async for chunk in watch_stream(target, secret, role=req.role, user_id=req.user_id, trusted=via_tunnel):
             yield chunk
 
     return StreamingResponse(events(), media_type="text/event-stream",

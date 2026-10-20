@@ -74,6 +74,7 @@ from routers.open_decisions import router as open_decisions_router
 from routers.pages import router as pages_router
 from routers.navigation import router as navigation_router
 from routers.agent_builder import router as agent_builder_router
+from routers.agent_tunnel import router as agent_tunnel_router
 from routers.ai_features import router as ai_features_router
 from routers.portal import router as portal_router
 from routers.health import router as health_router
@@ -226,6 +227,7 @@ app.include_router(open_decisions_router)
 app.include_router(pages_router)
 app.include_router(navigation_router)
 app.include_router(agent_builder_router)
+app.include_router(agent_tunnel_router)
 app.include_router(ai_features_router)
 app.include_router(portal_router)
 app.include_router(notifications_router)
