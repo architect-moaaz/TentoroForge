@@ -126,8 +126,11 @@ def test_what_still_fails_is_recorded_and_said(tmp_path, monkeypatch):
                              run_turn=lambda *a, **k: {"answer": "tried"})
     assert [t["name"] for t in out["left"]] == ["Mark Order Fulfilled"]
     issues = json.loads(svc.path.read_text())["runtime"]["issues"]
+    # The repair changed nothing and the second run failed the same way, so
+    # it is not repaired again (b715ed86): it is left with that said and the
+    # app's own error, not the run's whole transcript.
     assert issues == [{"kind": "process", "workflow": "FLOW-005", "name": "Mark Order Fulfilled",
-                       "detail": issues[0]["detail"]}] and "HTTP 422" in issues[0]["detail"]
+                       "detail": "the same failure after a repair that changed nothing — no status field"}]
     from routers.blueprint_generate import _failing_processes_line
     assert "Mark Order Fulfilled" in _failing_processes_line(json.loads(svc.path.read_text()))
     assert next((tmp_path / ".forge/runs").glob("*-process-trials.jsonl"))

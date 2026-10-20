@@ -238,8 +238,10 @@ def test_a_requirements_change_is_redrafted_by_its_owner_and_reported(svc, tmp_p
     assert out["diff"]["changed"][0]["id"] == "REQ-002"
     assert len(out["diff"]["added"]) == 1
     assert "should be dropped" not in json.dumps(svc.doc.get("product") or {})
+    # A change names the requirements it touched (b715ed86): "Done. v3 added 2"
+    # named nothing, so the removed one is quoted by its description.
     said = gates.say_requirements_change(out["diff"], out["version"])
-    assert "v2 added 1, removed 1, changed 1" in said and "lock these in" in said
+    assert "v2 added 1, removed 1 (An admin manages doctors.), changed 1." in said and "lock these in" in said
 
 
 def test_a_model_change_retires_moves_renames_and_records_new_behaviour(svc, tmp_path):
@@ -508,7 +510,10 @@ def test_a_change_at_the_requirements_review_is_made_and_reported(svc, tmp_path,
     out = router._gate_turn(svc, gates.REQUIREMENTS, str(tmp_path), "", _req("12 hours, and no admin"),
                             emit=lambda kind, data: said.append((kind, data)))
     assert asked["brief"] == "cutoff is 12 hours" and asked["remove"] == ["REQ-003"]
-    assert out["status"] == "resolved" and "v2 removed 1, changed 1" in said[0][1]["text"]
+    # The reply names what each change touched (b715ed86), read off the
+    # requirements as they were before the change.
+    assert out["status"] == "resolved" and ("v2 removed 1 (An admin manages doctors.), "
+                                            "changed 1 (A parent cancels up to 24 hours before.).") in said[0][1]["text"]
 
 
 def test_typed_yes_at_the_requirements_review_is_not_a_build():
