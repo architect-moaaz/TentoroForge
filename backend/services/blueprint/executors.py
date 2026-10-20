@@ -470,16 +470,23 @@ def image_block(path: str | Path) -> dict[str, Any]:
     import base64
 
     p = Path(path)
+    data = base64.standard_b64encode(p.read_bytes()).decode()
+    # A DESIGN SHOWN AS A PDF — a Figma export, a designer's deck — goes as a
+    # document block: Claude reads each page as a picture as well as its text,
+    # so the pages arrive as the design they are, not as the words on them.
+    if p.suffix.lower() == ".pdf":
+        return {"type": "document",
+                "source": {"type": "base64", "media_type": "application/pdf", "data": data},
+                "cache_control": _CACHE_CONTROL}
     media = IMAGE_MEDIA_TYPES.get(p.suffix.lower())
     if media is None:
         raise ValueError(
             f"{p.name}: not an image Anthropic accepts "
-            f"({', '.join(sorted(IMAGE_MEDIA_TYPES))})"
+            f"({', '.join(sorted(IMAGE_MEDIA_TYPES))}) nor a PDF"
         )
     return {
         "type": "image",
-        "source": {"type": "base64", "media_type": media,
-                   "data": base64.standard_b64encode(p.read_bytes()).decode()},
+        "source": {"type": "base64", "media_type": media, "data": data},
         "cache_control": _CACHE_CONTROL,
     }
 
@@ -487,6 +494,10 @@ def image_block(path: str | Path) -> dict[str, Any]:
 def _content(shown: Sequence[str | Path], user: str) -> Any:
     """Images first (the stable half of the prefix), then the user text."""
     text = _user_blocks(user)
+    # A PDF is read only by Anthropic's own endpoint; an Anthropic-compatible
+    # host (`ANTHROPIC_BASE_URL`) is shown the pictures alone.
+    if not _endpoint_enforces_schema():
+        shown = [p for p in shown if Path(p).suffix.lower() != ".pdf"]
     if not shown:
         return text
     return [*image_blocks(shown), *(text if isinstance(text, list) else [{"type": "text", "text": text}])]

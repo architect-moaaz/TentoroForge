@@ -95,17 +95,20 @@ def test_adopting_copies_rather_than_points(tmp_path):
     assert references.paths(out)[0].read_bytes() == _PNG
 
 
-def test_what_is_not_an_image_is_skipped_not_fatal(tmp_path):
-    """A user who attached a PDF to a chat has not made a design reference, and
-    failing the intake over it would lose the three that were."""
+def test_what_is_not_an_image_or_pdf_is_skipped_not_fatal(tmp_path):
+    """A file the transport cannot show is skipped, and failing the intake over
+    it would lose the three that were. A PDF is kept: only one the person
+    marked as a design is ever designated (2026-10-20)."""
     good = tmp_path / "in" / "shot.png"
-    bad = tmp_path / "in" / "spec.pdf"
+    design = tmp_path / "in" / "mockups.pdf"
+    bad = tmp_path / "in" / "notes.docx"
     good.parent.mkdir()
     good.write_bytes(_PNG)
-    bad.write_bytes(b"%PDF-1.4")
+    design.write_bytes(b"%PDF-1.4")
+    bad.write_bytes(b"PK")
 
-    adopted = references.adopt(tmp_path / "app", [bad, good])
-    assert [p.name for p in adopted] == ["shot.png"]
+    adopted = references.adopt(tmp_path / "app", [bad, good, design])
+    assert [p.name for p in adopted] == ["mockups.pdf", "shot.png"]
 
 
 def test_bytes_are_stored_under_the_suffix_the_media_type_implies(tmp_path):
@@ -119,9 +122,11 @@ def test_bytes_are_stored_under_the_suffix_the_media_type_implies(tmp_path):
 
 def test_a_name_claiming_png_over_bytes_that_are_not_is_stored_by_type(tmp_path):
     """A `.png` that is really a PDF must not be handed to the transport as an
-    image."""
-    assert references.adopt_bytes(
-        tmp_path, "spec.png", b"%PDF", media_type="application/pdf") is None
+    image: it is stored as the PDF it is, and one of no type we send is not
+    stored at all."""
+    stored = references.adopt_bytes(tmp_path, "spec.png", b"%PDF", media_type="application/pdf")
+    assert stored is not None and stored.name == "spec.pdf"
+    assert references.adopt_bytes(tmp_path, "spec.png", b"PK", media_type="application/zip") is None
 
 
 def test_an_upload_name_cannot_become_a_path(tmp_path):

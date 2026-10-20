@@ -3,7 +3,13 @@
  * and sent with the next message.
  */
 import { describe, expect, it } from "vitest";
-import { documentChipLabel, isDocumentFile } from "@/components/smith/attachedDocuments";
+import {
+  defaultPicturePurpose,
+  documentChipLabel,
+  isDocumentFile,
+  nextDesignation,
+  purposeLabel,
+} from "@/components/smith/attachedDocuments";
 
 describe("an attached requirements document", () => {
   it("says the file and how much was read", () => {
@@ -21,5 +27,27 @@ describe("an attached requirements document", () => {
     expect(isDocumentFile("BRD.PDF")).toBe(true);
     expect(isDocumentFile("spec.docx")).toBe(true);
     expect(isDocumentFile("screen.png")).toBe(false);
+  });
+});
+
+describe("what an attachment is for", () => {
+  it("defaults a picture to a design before the app exists and to a problem after", () => {
+    expect(defaultPicturePurpose(false)).toBe("design");
+    expect(defaultPicturePurpose(true)).toBe("problem");
+  });
+
+  it("keeps the project's earlier references and follows each chip's purpose", () => {
+    const now = ["old-ref", "mock", "bug"];
+    expect(nextDesignation(now, [{ id: "mock", purpose: "design" }, { id: "bug", purpose: "problem" },
+                                 { id: "new-pdf", purpose: "design" }, { id: "brd", purpose: "requirements" }]))
+      .toEqual(["old-ref", "mock", "new-pdf"]);
+    // A removed chip (no purpose) is no longer a reference.
+    expect(nextDesignation(["a", "b"], [{ id: "a" }])).toEqual(["b"]);
+  });
+
+  it("says a design PDF is a design, not pages read", () => {
+    expect(documentChipLabel({ id: "e", name: "Mockups.pdf", pages: 12, truncated: false, purpose: "design" })).toBe("Mockups.pdf");
+    expect(purposeLabel("design")).toBe("design to follow");
+    expect(purposeLabel("problem")).toBe("shows a problem");
   });
 });

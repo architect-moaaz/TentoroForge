@@ -55,7 +55,15 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
-import { documentChipLabel, isDocumentFile, type AttachedDocument } from "./attachedDocuments";
+import {
+  defaultPicturePurpose,
+  documentChipLabel,
+  isDocumentFile,
+  nextDesignation,
+  purposeLabel,
+  type AttachedDocument,
+  type AttachedPicture,
+} from "./attachedDocuments";
 import ReactMarkdown from "react-markdown";
 import { MarkdownLink } from "@/components/chat/MarkdownLink";
 import remarkGfm from "remark-gfm";
@@ -607,20 +615,48 @@ export function SmithPanel({
   // changed by talking, so the button brings the cursor here.
   const composerRef = useRef<HTMLTextAreaElement>(null);
 
-  const [shown, setShown] = useState<{ id: string; name: string }[]>([]);
+  // PICTURES — screenshots, reference designs — sent with the next message.
+  // Each says whether it is a design to follow or a picture of a problem.
+  const [pictures, setPictures] = useState<AttachedPicture[]>([]);
   // REQUIREMENTS DOCUMENTS — a BRD, a PRD — read on upload and sent with the
   // next message, where their text joins what the definition reads.
   const [docs, setDocs] = useState<AttachedDocument[]>([]);
   const [listening, setListening] = useState(false);
 
+  const authHeaders = (): Record<string, string> => {
+    const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  };
+
+  // DESIGNATED, not merely uploaded. Designation is how someone says a file
+  // is direction rather than a bug report, and it is what the build's design
+  // agents read. Merged into what the project already holds, so a reload or a
+  // second message does not drop the references chosen before.
+  const syncDesignation = async (changed: { id: string; purpose?: string }[]) => {
+    if (!projectId || changed.length === 0) return;
+    const url = `${API_BASE}/api/projects/${projectId}/design-references`;
+    try {
+      const now = await authFetch(url, { headers: authHeaders(), credentials: "include" })
+        .then((r) => (r.ok ? r.json() : { attachment_ids: [] }))
+        .catch(() => ({ attachment_ids: [] }));
+      await authFetch(url, {
+        method: "PUT",
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ attachment_ids: nextDesignation(now.attachment_ids ?? [], changed) }),
+      });
+    } catch {
+      /* the upload survived; changing the chip's purpose tries again */
+    }
+  };
+
   const attach = async (files: File[]) => {
     if (!projectId || files.length === 0) return;
-    const token =
-      typeof window !== "undefined" ? localStorage.getItem("token") : null;
-    const headers: Record<string, string> = token
-      ? { Authorization: `Bearer ${token}` }
-      : {};
-    const added: { id: string; name: string }[] = [];
+    const headers = authHeaders();
+    const appBuilt = Boolean(
+      ((blueprint ?? {}) as { runtime?: { build?: unknown } }).runtime?.build,
+    );
+    const added: AttachedPicture[] = [];
     const read: AttachedDocument[] = [];
     for (const f of files) {
       const body = new FormData();
@@ -643,12 +679,17 @@ export function SmithPanel({
         const rec = await r.json();
         if (!rec?.id) continue;
         if (rec.document) {
+          const pdf = rec.kind === "pdf";
           if (rec.unreadable) toast.warning(String(rec.unreadable));
-          else read.push({ id: String(rec.id), name: f.name, pages: rec.pages ?? null, truncated: !!rec.truncated,
-                          transcribed: !!rec.transcribed });
+          if (rec.unreadable && !pdf) continue;
+          read.push({ id: String(rec.id), name: f.name, pages: rec.pages ?? null, truncated: !!rec.truncated,
+                      transcribed: !!rec.transcribed, canBeDesign: pdf, unreadable: !!rec.unreadable,
+                      purpose: rec.looks_like_design ? "design" : "requirements" });
           continue;
         }
-        added.push({ id: String(rec.id), name: f.name });
+        if (rec.kind === "image") {
+          added.push({ id: String(rec.id), name: f.name, purpose: defaultPicturePurpose(appBuilt) });
+        }
       } catch {
         toast.error(`${f.name} could not be attached.`);
       } finally {
@@ -656,22 +697,17 @@ export function SmithPanel({
       }
     }
     if (read.length) setDocs((d) => [...d, ...read]);
-    if (added.length === 0) return;
-    const next = [...shown, ...added];
-    setShown(next);
-    // DESIGNATED, not merely uploaded. Most attachments are bug reports;
-    // designation is how someone says this one is direction, and it is what
-    // the generation reads.
-    try {
-      await authFetch(`${API_BASE}/api/projects/${projectId}/design-references`, {
-        method: "PUT",
-        headers: { ...headers, "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ attachment_ids: next.map((a) => a.id) }),
-      });
-    } catch {
-      /* the upload survived; the designation can be retried by re-attaching */
-    }
+    if (added.length) setPictures((p) => [...p, ...added]);
+    await syncDesignation([...added, ...read]);
+  };
+
+  const setPicturePurpose = (id: string, purpose: AttachedPicture["purpose"]) => {
+    setPictures((all) => all.map((p) => (p.id === id ? { ...p, purpose } : p)));
+    void syncDesignation([{ id, purpose }]);
+  };
+  const setDocumentPurpose = (id: string, purpose: "requirements" | "design") => {
+    setDocs((all) => all.map((d) => (d.id === id ? { ...d, purpose } : d)));
+    void syncDesignation([{ id, purpose }]);
   };
 
   /**
@@ -776,12 +812,14 @@ export function SmithPanel({
       // with every message and was dropped there.
       const prior = messages.slice(-SENT_HISTORY).map((m) => ({ role: m.role, text: m.text }));
       setMessages((m) => [...m, { role: "user", text, at: Date.now() }]);
-      const attachmentIds = docs.map((d) => d.id);
+      const attachmentIds = [...docs.map((d) => d.id), ...pictures.map((p) => p.id)];
       void start({ description: text, evidence, history: prior, attachmentIds });
-      // Sent: the server keeps the documents beside the app from here on.
-      if (attachmentIds.length) setDocs([]);
+      // Sent: the server keeps the documents beside the app, and the designs
+      // among the references, from here on.
+      if (docs.length) setDocs([]);
+      if (pictures.length) setPictures([]);
     },
-    [projectId, messages, evidence, start, docs],
+    [projectId, messages, evidence, start, docs, pictures],
   );
 
   const send = () => {
@@ -1187,28 +1225,53 @@ export function SmithPanel({
               <span
                 key={d.id}
                 className="flex items-center gap-1 rounded bg-muted px-2 py-0.5 text-xs"
-                title="Read — goes with your next message"
+                title={d.purpose === "design" ? "A design — its pages are shown to Smith and the design agents"
+                                              : "Read — goes with your next message"}
               >
-                <FileText className="h-3 w-3" />
+                {d.purpose === "design" ? <ImageIcon className="h-3 w-3" /> : <FileText className="h-3 w-3" />}
                 {documentChipLabel(d)}
+                {d.canBeDesign && (
+                  <button type="button" data-purpose={d.purpose}
+                          className="rounded border px-1 text-[10px] text-muted-foreground hover:bg-background"
+                          title="Is this PDF requirements to read, or a design to follow? Click to change."
+                          onClick={() => setDocumentPurpose(d.id, d.purpose === "design" ? "requirements" : "design")}>
+                    {purposeLabel(d.purpose ?? "requirements")}
+                  </button>
+                )}
                 <button type="button" aria-label={`Remove ${d.name}`} className="ml-0.5 opacity-60 hover:opacity-100"
-                        onClick={() => setDocs((all) => all.filter((x) => x.id !== d.id))}>
+                        onClick={() => {
+                          setDocs((all) => all.filter((x) => x.id !== d.id));
+                          void syncDesignation([{ id: d.id }]);
+                        }}>
                   <X className="h-3 w-3" />
                 </button>
               </span>
             ))}
           </div>
         )}
-        {shown.length > 0 && (
-          <div className="mb-2 flex flex-wrap gap-1">
-            {shown.map((a) => (
+        {pictures.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-1" data-attached-pictures="">
+            {pictures.map((a) => (
               <span
                 key={a.id}
                 className="flex items-center gap-1 rounded bg-muted px-2 py-0.5 text-xs"
-                title="Read as design direction by the next generation"
+                title="Shown to Smith with your next message"
               >
                 <ImageIcon className="h-3 w-3" />
                 {a.name}
+                <button type="button" data-purpose={a.purpose}
+                        className="rounded border px-1 text-[10px] text-muted-foreground hover:bg-background"
+                        title="A design to follow (the app is built to look like it), or a picture of a problem? Click to change."
+                        onClick={() => setPicturePurpose(a.id, a.purpose === "design" ? "problem" : "design")}>
+                  {purposeLabel(a.purpose)}
+                </button>
+                <button type="button" aria-label={`Remove ${a.name}`} className="ml-0.5 opacity-60 hover:opacity-100"
+                        onClick={() => {
+                          setPictures((all) => all.filter((x) => x.id !== a.id));
+                          void syncDesignation([{ id: a.id }]);
+                        }}>
+                  <X className="h-3 w-3" />
+                </button>
               </span>
             ))}
           </div>

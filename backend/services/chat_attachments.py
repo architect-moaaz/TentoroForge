@@ -260,6 +260,8 @@ def save_attachment(root: str | Path, project_id: str, filename: str,
                     "truncated": read["truncated"]})
         if read.get("transcribed"):
             rec["transcribed"] = True
+        if read.get("looks_like_design"):
+            rec["looks_like_design"] = True
     elif unreadable:
         rec.update({"document": True, "unreadable": unreadable})
     (d / f"{att_id}.meta.json").write_text(json.dumps(rec), encoding="utf-8")
@@ -280,7 +282,8 @@ def _transcribed(filename: str, data: bytes, scan, spender: dict) -> tuple[dict 
         return None, f"I cannot read the text of {filename}: {exc}"
     text, cut = document_text._cap(document_text._wrap(got["text"]))
     return {"text": text, "pages": scan.pages, "chars": len(text),
-            "truncated": got["truncated"] or cut, "transcribed": True}, ""
+            "truncated": got["truncated"] or cut, "transcribed": True,
+            "looks_like_design": bool(got.get("design"))}, ""
 
 
 def _load_record(d: Path, att_id: str) -> dict | None:

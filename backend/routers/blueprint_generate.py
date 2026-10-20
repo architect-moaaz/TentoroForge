@@ -1717,17 +1717,64 @@ async def _adopt_mcp_servers(output_dir: Path, project: Any, db: AsyncSession) -
             logger.warning("[smith-chat] app settings not written for %s: %s", output_dir.name, exc)
 
 
+def _designated(project_id: Any) -> set[str]:
+    """The attachments the person marked as design references."""
+    from services import chat_attachments, design_reference
+    try:
+        return set(design_reference.read_design_references(chat_attachments.attachments_root(), str(project_id)))
+    except Exception:  # noqa: BLE001 — no designation readable is none
+        return set()
+
+
 def _attached_documents(project_id: Any, attachment_ids: list[str]) -> list[dict]:
-    """The requirements documents attached to a turn, as read at upload."""
+    """The requirements documents attached to a turn, as read at upload. A PDF
+    the person marked as a DESIGN is not one: its pages go to the design agents
+    as pictures (`_turn_attachments`), not its words to the requirements."""
     if not attachment_ids:
         return []
     from services import chat_attachments
+    designs = _designated(project_id)
     try:
         return chat_attachments.document_texts(chat_attachments.attachments_root(), str(project_id),
-                                               list(attachment_ids))
+                                               [a for a in attachment_ids if a not in designs])
     except Exception:  # noqa: BLE001 — a document that cannot be found is said below, never a lost turn
         logger.warning("[smith] attached documents could not be read", exc_info=True)
         return []
+
+
+def _turn_attachments(project_id: Any, attachment_ids: list[str]) -> tuple[list[dict], str]:
+    """What Smith is SHOWN this turn, and the line that says what each is for.
+
+    The pictures attached to the message — and a PDF marked as a design — as
+    `chat_attachments.locate` records (with their paths), so the turn puts them
+    in front of the model and verbs like `set_logo` can take one. The builder
+    chat stored and designated them and passed none on: Smith answered
+    "make it look like this" without having seen "this" (2026-10-20).
+
+    Each is said to be a design to follow or a picture of a problem, as the
+    person marked it, because the same screenshot is direction in one message
+    and a bug report in the next."""
+    if not attachment_ids:
+        return [], ""
+    from services import chat_attachments
+    try:
+        found = chat_attachments.locate(chat_attachments.attachments_root(), str(project_id),
+                                        list(attachment_ids))
+    except Exception:  # noqa: BLE001 — a picture not found is a turn without it
+        logger.warning("[smith] attached pictures could not be found", exc_info=True)
+        return [], ""
+    designs = _designated(project_id)
+    shown, lines = [], []
+    for rec in found:
+        design = rec.get("id") in designs
+        if rec.get("kind") == chat_attachments.KIND_IMAGE or (rec.get("kind") == chat_attachments.KIND_PDF and design):
+            shown.append(rec)
+            name = rec.get("filename") or "an attachment"
+            lines.append(f"- {name}: " + ("a DESIGN REFERENCE — what the person wants the app to look like"
+                                          if design else "a picture of what they mean — read it as evidence, "
+                                          "not as a design to copy"))
+    note = ("\n\nAttached with this message, and shown to you:\n" + "\n".join(lines)) if lines else ""
+    return shown, note
 
 
 def _document_about(doc: dict) -> str:
@@ -1804,6 +1851,7 @@ async def smith_chat(
     # the evidence the definition reads — the same path a document supplied on
     # the new-app page takes — so the requirements cite it as `document N`.
     attached_docs = _attached_documents(project_id, list(getattr(req, "attachment_ids", None) or []))
+    shown_files, shown_note = _turn_attachments(project_id, list(getattr(req, "attachment_ids", None) or []))
     if attached_docs:
         req.evidence = list(req.evidence or []) + [_document_evidence(d) for d in attached_docs if d.get("text")]
 
@@ -2216,7 +2264,8 @@ async def smith_chat(
                 named_design = _figma_in(_the_brief) or _uxpilot_in(_the_brief)
                 turn_result = handle_chat_v2(ChatV2Request(
                     project_id=str(project_id), output_dir=str(output_dir),
-                    message=req.message,
+                    message=req.message + shown_note,
+                    attachments=shown_files,
                     history=[(t.role, t.text) for t in req.history if t.text][-10:],
                     evidence=list(req.evidence or []),
                     app_name=getattr(project, "name", "") or "",
@@ -2294,7 +2343,8 @@ async def smith_chat(
             # This is the conversation, and it is where the user asked for it.
             turn_result = handle_chat_v2(ChatV2Request(
                 project_id=str(project_id), output_dir=str(output_dir),
-                message=req.message + _document_note(str(output_dir), attached_docs),
+                message=req.message + _document_note(str(output_dir), attached_docs) + shown_note,
+                attachments=shown_files,
                 # The recent exchange only — Smith reads the last few turns.
                 history=[(t.role, t.text) for t in req.history if t.text][-10:],
                 reasoning_fn=lambda text, kind="reasoning", node="": emit(

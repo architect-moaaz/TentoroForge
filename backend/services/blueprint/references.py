@@ -39,11 +39,13 @@ from typing import Iterable, Sequence
 #: Relative to the application's ``output_dir``.
 REFERENCE_DIR = Path(".forge") / "references"
 
-#: What Anthropic accepts, mirrored from ``executors.IMAGE_MEDIA_TYPES``.
+#: What Anthropic accepts, mirrored from ``executors.IMAGE_MEDIA_TYPES`` — and
+#: PDF, which the person marks as a design (a Figma export); `image_block`
+#: sends one as a document block, whose pages Claude reads as pictures.
 #: Stated rather than imported: this module is read by callers that have no
 #: business importing the model clients, and the set is a fact about the
 #: transport rather than about the executor.
-SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp"})
+SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf"})
 
 #: What each node is being shown references *for*.
 #:
@@ -134,9 +136,10 @@ def adopt(output_dir: str | Path, sources: Iterable[str | Path]) -> list[Path]:
     somebody's upload directory is an application that cannot be rebuilt
     anywhere else (§83).
 
-    Silently skips what is not an image this transport accepts. A user who
-    attached a PDF to a chat has not made a design reference, and failing the
-    whole intake over one of them would lose the three that were.
+    Silently skips what is not an image (or PDF) this transport accepts, and
+    failing the whole intake over one file would lose the three that were.
+    Only what the person designated reaches here: a requirements PDF is read
+    as text (`services.document_text`) and is never a reference.
     """
     root = directory(output_dir)
     root.mkdir(parents=True, exist_ok=True)
@@ -158,6 +161,7 @@ MEDIA_SUFFIXES: dict[str, str] = {
     "image/jpeg": ".jpg",
     "image/gif": ".gif",
     "image/webp": ".webp",
+    "application/pdf": ".pdf",
 }
 
 _SAFE = re.compile(r"[^A-Za-z0-9._-]+")

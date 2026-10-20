@@ -257,3 +257,25 @@ async def test_uploading_a_scan_answers_with_its_transcript_and_charges_the_app(
     assert r.status_code == 200, r.text
     assert r.json()["transcribed"] is True and r.json()["pages"] == 1
     assert spent[0]["project"] == project["short_id"] and spent[0]["org"] == str(org_id) and spent[0]["user"]
+
+
+def test_a_scan_of_screens_is_said_to_be_a_design(tmp_path, claude):
+    pytest.importorskip("pypdf")
+    claude(_Reply("DESIGN-PAGES\n[page 1]\nSign in\nEmail\nPassword"))
+    rec = ca.save_attachment(tmp_path, "proj1", "Mockups.pdf", "application/pdf", _pdf([""]))
+    assert rec["looks_like_design"] is True
+    assert ca.document_texts(tmp_path, "proj1", [rec["id"]])[0]["text"].startswith("[page 1]")
+
+
+def test_a_design_pdf_reaches_the_agents_as_a_document_block(tmp_path, monkeypatch):
+    from services.blueprint import executors
+    pdf = tmp_path / "mock.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    block = executors.image_block(pdf)
+    assert block["type"] == "document" and block["source"]["media_type"] == "application/pdf"
+    # An Anthropic-compatible host that cannot read PDFs is shown the pictures alone.
+    png = tmp_path / "shot.png"
+    png.write_bytes(b"\x89PNG\r\n")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://api.moonshot.ai/anthropic")
+    content = executors._content([pdf, png], "the brief")
+    assert [b["type"] for b in content][:1] == ["image"] and all(b["type"] != "document" for b in content)

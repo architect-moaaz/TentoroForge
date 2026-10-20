@@ -45,12 +45,17 @@ MODEL = os.environ.get("FORGE_TRANSCRIBE_MODEL", "claude-opus-5-5")
 MAX_TOKENS = 128_000
 
 INSTRUCTION = (
-    "These pages are a scanned document. Transcribe them as plain text, faithfully and completely: "
+    "These pages have no text layer (a scan, or pictures of pages). Transcribe them as plain text, faithfully and completely: "
     "every heading, paragraph, list item and table, in reading order. Do not summarise, correct, "
     "or add anything. Mark headings with # (## for sub-headings), list items with '- ', and write "
     "tables as rows of cells separated by ' | '. Begin each page with a line '[page N]'. Where a "
-    "word cannot be read, write [illegible]. Reply with the transcript only."
+    "word cannot be read, write [illegible]. Reply with the transcript only.\n\n"
+    "If the pages are screen designs, mockups or wireframes of an application rather than a written "
+    "document, make the first line of your reply exactly DESIGN-PAGES and then transcribe "
+    "the words on them as above."
 )
+#: The first line a reply starts with when the pages are designs, not a document.
+DESIGN_MARK = "DESIGN-PAGES"
 
 
 def _client() -> Any:
@@ -67,7 +72,8 @@ def _client() -> Any:
 
 def transcribe(data: bytes, pages: int, *, filename: str = "", project: str = "",
                user: str = "", org: str = "") -> dict:
-    """`{"text", "truncated"}` for a scanned PDF, or `Unreadable` with the reason."""
+    """`{"text", "truncated", "design"}` for a scanned PDF, or `Unreadable` with the
+    reason. `design` says the pages are screens rather than a written document."""
     if pages > MAX_PAGES:
         raise Unreadable(f"it looks like scanned pages, and at {pages} pages it is longer than the "
                          f"{MAX_PAGES} Forge transcribes. Attach the original Word document, a PDF with "
@@ -113,10 +119,16 @@ def transcribe(data: bytes, pages: int, *, filename: str = "", project: str = ""
     if not text:
         raise Unreadable("it looks like scanned pages, and no text could be read from them. Attach the "
                          "original Word document, or a PDF with selectable text.")
+    # SCREENS, NOT A DOCUMENT. A PDF of mockups has almost no text layer either,
+    # and only something that looks at the pages can tell the two apart. Said
+    # so the composer offers it as a design rather than as requirements.
+    design = text.startswith(DESIGN_MARK)
+    if design:
+        text = text[len(DESIGN_MARK):].lstrip()
     truncated = getattr(msg, "stop_reason", None) == "max_tokens"
     if truncated:
         text += "\n\n[The transcript stops here; the rest of the scan was not transcribed.]"
-    return {"text": text, "truncated": truncated}
+    return {"text": text, "truncated": truncated, "design": design}
 
 
-__all__ = ["MAX_PAGES", "MODEL", "transcribe"]
+__all__ = ["DESIGN_MARK", "MAX_PAGES", "MODEL", "transcribe"]
