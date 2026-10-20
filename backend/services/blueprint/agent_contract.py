@@ -33,12 +33,15 @@ threshold is refused rather than applied with a warning.
 from __future__ import annotations
 
 import copy
+import logging
 import re
 
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable
 
 from services.blueprint.service import ARTIFACT_SECTIONS, BlueprintService
+
+logger = logging.getLogger(__name__)
 
 #: §17 decision policy. Mirrors AUTONOMY_BANDS in packages/schema/src/blueprint/ids.ts.
 AUTO_DECIDE = 0.90
@@ -89,6 +92,24 @@ class AuthorRefusal(ValueError):
     def __init__(self, *args: Any, settle: "Callable[[], list[str]] | None" = None) -> None:
         super().__init__(*args)
         self.settle = settle
+
+
+class SeveralRefusals(AuthorRefusal):
+    """More than one check refused the same reply: all of them, together, so
+    the author mends every fault in one attempt. Its safe way through is
+    every check's own, taken in turn — offered only when each has one."""
+
+    def __init__(self, refusals: list[AuthorRefusal]) -> None:
+        settles = [getattr(r, "settle", None) for r in refusals]
+
+        def settle() -> list[str]:
+            said: list[str] = []
+            for fn in settles:
+                said += list(fn() or [])
+            return said
+        super().__init__("\n".join(f"{type(r).__name__}: {r}" for r in refusals),
+                         settle=settle if all(callable(f) for f in settles) else None)
+        self.refusals = refusals
 
 
 def settle_check(result: "AgentResult", check: str) -> None:
@@ -1841,6 +1862,14 @@ def check_sign_in(result: "AgentResult", doc: dict | None) -> None:
     role or a map; domains are domains."""
     doc = doc or {}
     problems: list[str] = []
+    if _settled(result, "check_sign_in"):
+        return
+    # THE SAFE WAY THROUGH, ONE PER FAULT (`AuthorRefusal.settle`): never a
+    # way in that should not be there — a provider whose names exist under
+    # another id takes that id; one that cannot be reached is left out with
+    # password sign-in kept on; a person made on first sign-in with no role
+    # is invited instead.
+    fixes: list = []
     roles = known_roles(result, doc)
     rows = {str(r.get("id")): r for r in doc.get("integrations") or [] if isinstance(r, dict)
             and str(r.get("status") or "").upper() not in ("DEPRECATED", "REMOVED")}
@@ -1852,15 +1881,29 @@ def check_sign_in(result: "AgentResult", doc: dict | None) -> None:
             continue
         si = p.body["signIn"]
         sso = [e for e in si.get("sso") or [] if isinstance(e, dict)]
+
+        def drop(entry, si=si, why=""):
+            def fix():
+                si["sso"] = [x for x in si.get("sso") or [] if x is not entry]
+                if not si.get("sso") and not si.get("magicLink"):
+                    si["password"] = True
+            return (fix, f"sign-in through {entry.get('name') or entry.get('id')} is not offered yet — {why}; "
+                         "people sign in with email and password meanwhile")
         if si.get("password") is False and not si.get("magicLink") and not sso:
             problems.append("security.signIn: password off with no magic link and no identity provider — nobody could sign in")
+            fixes.append((lambda si=si: si.__setitem__("password", True),
+                          "people sign in with email and password: no other way in was settled"))
         seen: set[str] = set()
         for e in sso:
             eid = str(e.get("id") or "")
             if not _SSO_ID.match(eid):
                 problems.append(f"security.signIn.sso: `id` is a short lower_snake name (entra, okta_saml); got {eid!r}")
+                slug = (re.sub(r"[^a-z0-9_]+", "_", eid.lower()).strip("_") or "sso")[:24]
+                slug = slug if slug[:1].isalpha() else f"sso_{slug}"[:24]
+                fixes.append((lambda e=e, slug=slug: e.__setitem__("id", slug), f"a sign-in provider's id is {slug}"))
             if eid in seen:
                 problems.append(f"security.signIn.sso: two entries share the id {eid!r}")
+                fixes.append(drop(e, why="it repeated another provider's id"))
             seen.add(eid)
             ref = str(e.get("integration") or "")
             row = rows.get(ref) or next((b for k, b in proposed.items() if ref and (k == ref or str(b.get("id") or "") == ref)), None)
@@ -1871,6 +1914,7 @@ def check_sign_in(result: "AgentResult", doc: dict | None) -> None:
             if row is None:
                 problems.append(f"security.signIn.sso[{eid}]: `integration` names an `auth` integration row (serves `sign_in`) "
                                 "that holds the provider's secret NAMES; none found")
+                fixes.append(drop(e, why="no integration holds its keys"))
             else:
                 names = set(sso_secret_names(eid).values())
                 refs = {str(r) for r in row.get("secretRefs") or []}
@@ -1878,22 +1922,49 @@ def check_sign_in(result: "AgentResult", doc: dict | None) -> None:
                 if missing:
                     problems.append(f"security.signIn.sso[{eid}]: its integration row lists {', '.join(sorted(refs)) or 'no names'}; "
                                     f"add {', '.join(missing)} to its `secretRefs`")
-            for d in e.get("domains") or []:
-                if not _DOMAIN.match(str(d)):
-                    problems.append(f"security.signIn.sso[{eid}]: `domains` holds domains (acme.com); got {str(d)[:40]!r}")
+                    # THE NAMES ARE THERE UNDER ANOTHER ID (`SSO_ENTRA_*` for an
+                    # entry called `entra_criterion`): the entry takes that id, as
+                    # the strongest model did by hand (f7kxusg6, 2026-10-20).
+                    ids = [m.group(1).lower() for r in refs for m in [re.match(r"^SSO_([A-Z0-9_]+)_CLIENT_ID$", r)] if m]
+                    match = next((c for c in ids if set(sso_secret_names(c).values()) <= refs and _SSO_ID.match(c)), None)
+                    if match:
+                        fixes.append((lambda e=e, c=match: e.__setitem__("id", c),
+                                      f"the {e.get('name') or eid} sign-in uses the keys its integration holds ({match})"))
+                    else:
+                        fixes.append(drop(e, why=f"its keys ({', '.join(missing)}) are not declared"))
+            bad_domains = [d for d in e.get("domains") or [] if not _DOMAIN.match(str(d))]
+            for d in bad_domains:
+                problems.append(f"security.signIn.sso[{eid}]: `domains` holds domains (acme.com); got {str(d)[:40]!r}")
+            if bad_domains:
+                fixes.append((lambda e=e, bad=list(bad_domains): e.__setitem__(
+                    "domains", [d for d in e.get("domains") or [] if d not in bad]),
+                    f"{', '.join(map(str, bad_domains))} are not domains and were left out"))
             rf = e.get("roleFrom") if isinstance(e.get("roleFrom"), dict) else None
             if rf:
-                for group, role in (rf.get("map") or {}).items():
-                    if str(role) not in roles:
-                        problems.append(f"security.signIn.sso[{eid}]: roleFrom.map[{group!r}] names an unknown role {role!r}")
+                unknown = [g for g, role in (rf.get("map") or {}).items() if str(role) not in roles]
+                for group in unknown:
+                    problems.append(f"security.signIn.sso[{eid}]: roleFrom.map[{group!r}] names an unknown role "
+                                    f"{(rf.get('map') or {}).get(group)!r}")
+                if unknown:
+                    fixes.append((lambda rf=rf, bad=list(unknown): rf.__setitem__(
+                        "map", {g: r for g, r in (rf.get("map") or {}).items() if g not in bad}),
+                        f"groups {', '.join(unknown)} map to no role yet"))
                 if rf.get("default") and str(rf["default"]) not in roles:
                     problems.append(f"security.signIn.sso[{eid}]: roleFrom.default names an unknown role {rf['default']!r}")
+                    fixes.append((lambda rf=rf: rf.pop("default", None), f"{eid}: no default role for people outside the mapped groups"))
             if str(e.get("provisioning") or "just_in_time") == "just_in_time" and not (rf and (rf.get("map") or rf.get("default"))) \
                     and not p.body.get("signupRole") and not (doc.get("security") or {}).get("signupRole"):
                 problems.append(f"security.signIn.sso[{eid}]: a person made on first sign-in needs a role — set `roleFrom` "
                                 "(a group map or a default) or `signupRole`")
+                fixes.append((lambda e=e: e.__setitem__("provisioning", "invite_only"),
+                              f"people signing in through {e.get('name') or eid} must be invited first: no role was settled for them"))
     if problems:
-        raise InvalidSignIn(_all_of(problems))
+        def settle() -> list[str]:
+            for fix, _said in fixes:
+                fix()
+            settle_check(result, "check_sign_in")
+            return list(dict.fromkeys(said for _fix, said in fixes))
+        raise InvalidSignIn(_all_of(problems), settle=settle if fixes else None)
 
 
 class InvalidAudit(AuthorRefusal):
@@ -1968,7 +2039,13 @@ def check_audit(result: "AgentResult", doc: dict | None) -> None:
     # administrator reads a trail nobody was named for, a name that is not a
     # role is dropped, a screen is for the reviewers and nobody else.
     fixes: list = []
-    admin, admin_id = _admin_of(doc)
+    # The administrator among the roles saved AND the roles this reply makes:
+    # the access step writes both at once, and its new roles have names before
+    # they have ids — a reviewer may be either.
+    admin, admin_id = _admin_of({**doc, "roles": [*(doc.get("roles") or []),
+                                                  *(p.body for p in result.proposals
+                                                    if p.section == "roles" and isinstance(p.body, dict))]})
+    admin_id = admin_id or admin or ""
     audit = ((doc.get("security") or {}).get("audit") or {}) if isinstance(doc.get("security"), dict) else {}
     for p in result.proposals:
         if p.section == "security" and isinstance(p.body, dict) and isinstance(p.body.get("audit"), dict):
@@ -1991,10 +2068,19 @@ def check_audit(result: "AgentResult", doc: dict | None) -> None:
                 problems.append(f"security.audit.reasonRequired names RECORD TYPES by entity id, not actions: "
                                 f"{e!r} is none of {named}")
             if stray:
-                def drop_stray(a=audit, bad=frozenset(str(e) for e in stray)):
-                    a["reasonRequired"] = [e for e in a.get("reasonRequired") or [] if str(e) not in bad]
-                fixes.append((drop_stray, "a reason is not asked for on changes to "
-                                          + ", ".join(str(e) for e in stray) + " (not record types the app has)"))
+                # A RECORD TYPE NAMED BY ITS NAME IS THAT RECORD TYPE: its id goes
+                # in (f7kxusg6 wrote `ApprovalDecision` for ENTITY-008). Only a
+                # name that is no record type is dropped.
+                by_name = {_norm_name(v): k for k, v in entities.items()}
+                def mend_stray(a=audit, bad=frozenset(str(e) for e in stray), by_name=by_name):
+                    mended = [str(e) if str(e) not in bad else by_name.get(_norm_name(e), "")
+                              for e in a.get("reasonRequired") or []]
+                    a["reasonRequired"] = [x for x in dict.fromkeys(mended) if x]
+                named_here = [str(e) for e in stray if _norm_name(e) in by_name]
+                lost = [str(e) for e in stray if _norm_name(e) not in by_name]
+                fixes.append((mend_stray, "a reason is asked for on changes to " + ", ".join(named_here)
+                              if not lost else "a reason is not asked for on changes to " + ", ".join(lost)
+                              + " (not record types the app has)"))
             planned = _audit_pages(doc)
             if level == "none" and planned:
                 problems.append(f"security.audit: the screens include an audit trail ({planned[0].get('name')}); "
@@ -2160,6 +2246,81 @@ def prerequisite_findings(rule: dict, doc: dict) -> list[str]:
 
 class InvalidPatternTemplate(AuthorRefusal):
     """A2UI proposed a template the component registry cannot render."""
+
+
+#: An id the contract asks for, by its prefix: `^ROLE-\d{3,}$` -> ROLE.
+_ID_PATTERN = re.compile(r"^\^([A-Z]+)-\\d")
+
+
+def _norm_name(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(value or "").lower())
+
+
+def _names_to_ids(doc: dict) -> dict[str, dict[str, str]]:
+    """Prefix -> every spelling of an artifact's name (name, route, table,
+    natural key; case and spacing ignored) -> its id."""
+    from services.blueprint.service import ARTIFACT_SECTIONS
+    out: dict[str, dict[str, str]] = {}
+    rows = [("ENTITY", e) for e in (doc.get("data") or {}).get("entities") or []]
+    rows += [(prefix, a) for section, prefix in ARTIFACT_SECTIONS.items() for a in doc.get(section) or []]
+    for prefix, a in rows:
+        if not isinstance(a, dict) or not a.get("id"):
+            continue
+        for k in ("name", "route", "table", "naturalKey", "title"):
+            if a.get(k):
+                out.setdefault(prefix, {}).setdefault(_norm_name(a[k]), str(a["id"]))
+    return out
+
+
+def tidy_for_contract(doc: dict, sections: set[str]) -> list[str]:
+    """Mend, in the sections a reply wrote, what is the platform's to mend
+    rather than the author's to be asked again about:
+
+    - A FIELD THE CONTRACT DOES NOT HAVE is taken off. `confidence` and
+      `status` on the security section, `issues` on a requirement: bookkeeping
+      the author added, which nothing reads, and which refused a whole reply
+      each time (f7kxusg6: five minutes of requirements, then the access step,
+      2026-10-20).
+    - AN ID ASKED FOR BY NAME is the id of the artifact with that name. A
+      reply that creates the roles cannot name them by id — ids are given
+      when the reply is filed — so its sign-in role map named them, and was
+      refused for it on the strongest model's last try.
+
+    Never anything else: a value that matches no artifact is left as it was,
+    and the contract refuses it as before. Returns what was mended."""
+    from services.blueprint.service import _load_validator
+    validator = _load_validator()
+    said: list[str] = []
+    for _ in range(3):
+        names = _names_to_ids(doc)
+        changed = False
+        for e in list(validator.iter_errors(doc)):
+            path = list(e.path)
+            if not path or str(path[0]) not in sections:
+                continue
+            where = "/".join(str(x) for x in path) or "<root>"
+            if e.validator == "additionalProperties" and isinstance(e.instance, dict):
+                props = set((e.schema or {}).get("properties") or {})
+                pats = list(((e.schema or {}).get("patternProperties") or {}).keys())
+                extra = [k for k in list(e.instance) if k not in props and not any(re.search(pt, k) for pt in pats)]
+                for k in extra:
+                    e.instance.pop(k, None)
+                if extra:
+                    said.append(f"{where}: left out {', '.join(extra)}")
+                    changed = True
+            elif e.validator == "pattern" and isinstance(e.instance, str):
+                m = _ID_PATTERN.match(str(e.validator_value))
+                found = names.get(m.group(1), {}).get(_norm_name(e.instance)) if m else None
+                if found:
+                    parent: Any = doc
+                    for step in path[:-1]:
+                        parent = parent[step]
+                    parent[path[-1]] = found
+                    said.append(f"{where}: {e.instance!r} is {found}")
+                    changed = True
+        if not changed:
+            break
+    return said
 
 
 def _blamed(exc: Exception, svc: Any) -> Exception:
@@ -2420,27 +2581,31 @@ def apply_agent_result(
     # THE COMPOSERS' WORDS INTO THE CONTRACT'S, BEFORE THE CONTRACT READS THEM.
     from services.blueprint.layout_vocabulary import translate_layout_vocabulary
     translate_layout_vocabulary(result, svc.doc)
-    check_pattern_templates(result, svc.doc)
+    # EVERY CHECK, EVERY TIME, AND EVERY REFUSAL AT ONCE. The first refusal
+    # used to end the checking, so the author heard one fault per attempt,
+    # fixed it, and met the next: the access step of f7kxusg6 was refused for
+    # its audit, then its sign-in, then its format — three attempts, three
+    # different faults, a stopped build (2026-10-20).
+    refusals: list[AuthorRefusal] = []
+
+    def run(check: Callable[..., None], *args: Any) -> None:
+        try:
+            check(*args)
+        except AuthorRefusal as exc:
+            refusals.append(exc)
+
     from services.blueprint.mcp_catalog import load as _mcp_servers
     from services.blueprint.api_reference import load as _api_refs
-    check_workflow_steps(result, svc.doc, _mcp_servers(getattr(svc, "output_dir", None)),
-                         _api_refs(getattr(svc, "output_dir", None)))
-    check_workflow_triggers(result, svc.doc)
-    check_integrations(result, svc.doc)
-    check_audit(result, svc.doc)
-    check_tenancy(result, svc.doc)
-    check_sign_in(result, svc.doc)
-    check_mobile(result, svc.doc)
-    check_requirements(result, svc.doc)
-    check_business_rules(result, svc.doc)
-    check_entity_fields(result, svc.doc)
-    check_page_content(result, svc.doc)
-    check_page_access(result, svc.doc)
-    check_role_doors(result, svc.doc)
-    check_navigation(result, svc.doc)
-    check_analytics(result, svc.doc)
-    check_flows(result, svc.doc)
-    check_security(result, svc.doc)
+    run(check_pattern_templates, result, svc.doc)
+    run(check_workflow_steps, result, svc.doc, _mcp_servers(getattr(svc, "output_dir", None)),
+        _api_refs(getattr(svc, "output_dir", None)))
+    for check in (check_workflow_triggers, check_integrations, check_audit, check_tenancy, check_sign_in,
+                  check_mobile, check_requirements, check_business_rules, check_entity_fields,
+                  check_page_content, check_page_access, check_role_doors, check_navigation,
+                  check_analytics, check_flows, check_security):
+        run(check, result, svc.doc)
+    if refusals:
+        raise refusals[0] if len(refusals) == 1 else SeveralRefusals(refusals)
 
     # WHO DESIGNED THIS SCREEN, RECORDED WHERE EVERY LAYOUT PASSES.
     #
@@ -2629,6 +2794,9 @@ def apply_agent_result(
         if result.confidence < AUTO_DECIDE and result.assumptions:
             recorded = list(result.assumptions)
 
+        tidied = tidy_for_contract(svc.doc, {p.section.split(".", 1)[0] for p in result.proposals})
+        if tidied:
+            logger.info("[contract] tidied before validation: %s", "; ".join(tidied[:12]))
         svc.validate()
     except Exception as exc:
         # Restored in place: callers and the orchestrator hold this dict, so

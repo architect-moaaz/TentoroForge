@@ -100,8 +100,11 @@ def test_a_genuinely_bad_proposal_is_still_blamed_on_the_proposal(tmp_path):
         task_id="TASK-2", agent="page_design", confidence=1.0,
         proposals=[ArtifactProposal(
             section="pages", natural_key="/x",
+            # Not an unknown field: those are now left out, not refused
+            # (`tidy_for_contract`, 2026-10-20). A value the contract forbids is
+            # still the proposal's fault.
             body={"route": "/x", "name": "X", "pattern": "dashboard",
-                  "purpose": "p", "notAField": True},
+                  "purpose": "p", "access": "everyone_and_nobody"},
         )],
     )
     with pytest.raises(BlueprintInvalid) as exc:

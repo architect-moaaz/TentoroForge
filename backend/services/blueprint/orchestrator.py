@@ -2745,6 +2745,10 @@ class _NodeRun:
     attempts: dict[str, int] = field(default_factory=dict)
     #: Subjects given their last try on the strongest model (`escalate`).
     escalated: set[str] = field(default_factory=set)
+    #: Subject -> the latest refused reply that HAD a safe way through, and its
+    #: refusal: what the build settles for when a later try ends on a refusal
+    #: with none, so the last try can never leave it worse off.
+    settleable: dict[str, tuple] = field(default_factory=dict)
     #: Subject -> the identities its accepted proposals wrote (see
     #: :func:`_proposed_identities`). What a repair of that subject is
     #: measured against: anything here the repair does not re-propose is
@@ -2894,6 +2898,8 @@ def _apply_subject(
         # instead of stopping the build. The author was asked first (every
         # attempt before this one was refused as before); what ships is still
         # correct, only less complete, and what was settled for is said.
+        if callable(getattr(exc, "settle", None)):
+            state.settleable[subject] = (outcome, exc)
         final = attempt >= max_attempts or _same_refusal(state.feedback.get(subject, ""), _reason(exc))
         # FIRST, ASKED HARDER. A refusal the author could not get past is put
         # once more to the strongest model, with every refusal so far and the
@@ -2907,6 +2913,13 @@ def _apply_subject(
                   f"refused again; one last try on the strongest model — {_reason(exc)}")
             return "retry"
         took = _settle(svc, outcome, exc, commit=commit, user_request=user_request) if final else None
+        if took is None and final and subject in state.settleable and state.settleable[subject][0] is not outcome:
+            # THE LAST TRY NEVER ENDS WORSE. f7kxusg6's access step was nearly
+            # right on its second try, and the strongest model's third ended
+            # on nine format errors with no safe way through (2026-10-20): the
+            # earlier reply, settled, is what ships.
+            earlier, earlier_exc = state.settleable[subject]
+            took = _settle(svc, earlier, earlier_exc, commit=commit, user_request=user_request)
         if took is None:
             # A validator's verdict on a proposal: deterministic, so the same
             # words twice mean the same words a third time.
