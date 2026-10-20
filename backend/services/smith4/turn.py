@@ -562,6 +562,22 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
             + "\n- ".join(faults[:8])
             + "\nFix any that bear on what they asked as part of this turn, and try the fix. "
               "Leave the rest unchanged and name them in your answer as found, not fixed.")))
+    if not observations:
+        # WHAT THE BUILD SETTLED FOR TO FINISH (`AuthorRefusal.settle`): each
+        # the safe choice where a check refused the author's work twice — a
+        # screen the administrator alone may open, charts short of the house
+        # standard. Not faults: the person's decisions, waiting to be made.
+        try:
+            from services.blueprint.orchestrator import settled_for
+            settled = settled_for(ctx.out)
+        except Exception:  # noqa: BLE001
+            settled = []
+        if settled:
+            observations.append(Observation(tool="settled_in_build", status="read", said=(
+                "To finish the build, Forge settled for these where a check kept refusing the work — each "
+                "the safe choice, none of them a fault:\n- " + "\n- ".join(settled[:10])
+                + "\nWhen what they ask touches one, say what was settled and change it as they ask; "
+                  "otherwise leave them unmentioned. One the application already does differently is done.")))
     landed: list[str] = []
     touched: list[str] = []
     last: Outcome | None = None

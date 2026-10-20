@@ -3079,6 +3079,10 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
         elif announce_completion and not getattr(report, "paused_because", ""):
             _announce_build_complete(svc.doc, emit, offer_verify=approved and not checks,
                                      where=Path(output_dir).name)
+    if getattr(report, "settled", None):
+        _announce_settled(report.settled, emit)
+    if getattr(report, "stuck", None):
+        _announce_stuck(report.stuck, emit)
     counts = forecast(svc.doc)
     emit("forecast", counts)
     emit("usage", usage.summary())
@@ -3087,6 +3091,46 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
             "state": state, "phase": phase,
             "report": _report_payload(report, svc.doc),
             **({"checks": checks} if checks else {})}
+
+
+def _announce_settled(settled: dict[str, list[str]], emit) -> None:
+    """What the build settled for instead of stopping (`AuthorRefusal.settle`),
+    said once, at the end of the run that did it: each was the safe choice,
+    and each is the person's to change."""
+    try:
+        lines = [f"- {s}" for said in settled.values() for s in said][:12]
+        if not lines:
+            return
+        emit("message", {"text": (
+            "To finish the build I settled for these where one of my checks kept refusing the work — each "
+            "is the safe choice, and each is yours to change:\n" + "\n".join(lines) +
+            "\n\nTell me how you want any of them and I will change it."), "status": "reported"})
+    except Exception:  # noqa: BLE001 — never let the announcement fail the run
+        logger.warning("[blueprint] could not announce what was settled", exc_info=True)
+
+
+def _announce_stuck(stuck: dict[str, str], emit) -> None:
+    """A step the build could not get past, said as what it is: Forge's own
+    check refused the work the same way twice, or until the attempts ran out.
+    That is most often a fault in Forge — the Refund And Chargeback build met
+    one (2026-10-20) — so it is not put to the person as theirs; it is on the
+    cockpit's record (`orchestrator._record_stuck`), and Build carries on from
+    the step once it is fixed."""
+    try:
+        from services.office_events import NODE_LABEL
+        lines = []
+        for label, why in stuck.items():
+            node = label.split(":", 1)[0]
+            step = NODE_LABEL.get(node, node.replace("_", " "))
+            lines.append(f"- {step}: {why[:240]}")
+        emit("message", {"text": (
+            "I could not finish the build. One of Forge's own checks refused the work at a step and kept "
+            "refusing it after I asked again:\n" + "\n".join(lines) +
+            "\n\nThat is a fault in Forge rather than in what you asked for, and it has been reported to the "
+            "Forge team. Everything built up to that step is kept: press Build to carry on from there "
+            "once it is fixed."), "status": "reported"})
+    except Exception:  # noqa: BLE001 — never let the announcement fail the run
+        logger.warning("[blueprint] could not announce a stuck step", exc_info=True)
 
 
 def _booted(doc: dict) -> bool:

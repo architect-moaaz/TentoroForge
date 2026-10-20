@@ -539,7 +539,8 @@ def _fix(batch: list[dict], output_dir: str, *, run_turn: Callable, say: Callabl
                 "from inside the app. Recorded for the platform team; moving on.")
             from services import incidents
             incidents.record("platform_fault", app=Path(output_dir).name, detail=f"{label}: {why}",
-                             path=where, cause=str(group["cause"]))
+                             path=where, cause=str(group["cause"]),
+                             signature=incidents.signature("platform_fault", where, ""))
     if len(batch) > 1 and all(g["kind"] == "page" for g in batch):
         with ThreadPoolExecutor(max_workers=min(PAGE_PARALLEL, len(batch)), thread_name_prefix="forge-fix") as pool:
             list(pool.map(carrying(one), batch))

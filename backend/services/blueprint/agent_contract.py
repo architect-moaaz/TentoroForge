@@ -36,7 +36,7 @@ import copy
 import re
 
 from dataclasses import dataclass, field
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 from services.blueprint.service import ARTIFACT_SECTIONS, BlueprintService
 
@@ -71,7 +71,39 @@ class AuthorRefusal(ValueError):
     subclass, so a caller catching this cannot miss a new one: the entity-field
     and page-content checks were added on 2026-09-19 and neither was in the
     orchestrator's retry list, which is how InvalidBusinessRule once took a
-    whole build down."""
+    whole build down.
+
+    `settle`, when a check gives one, is the SAFE WAY THROUGH: what the build
+    does instead of stopping when the author's attempts run out. Called with
+    no arguments, it changes the refused reply so that what ships is still
+    correct and secure, only less complete — a restricted page nobody was
+    named for becomes the administrator's, a chart nobody could cite is kept
+    uncited — marks its check as settled on the reply (`settle_check`), and
+    returns what it settled for, in a line each, for the person and for Smith.
+    A check offers one only when EVERY fault it is raising has one; a fault
+    that would ship something wrong or open stays a refusal. Earlier attempts
+    are refused as before: the author is asked first, and only the last
+    attempt is settled (`orchestrator._apply_subject`). Four builds died on a
+    refusal whose own message stated the safe answer (2026-10-20)."""
+
+    def __init__(self, *args: Any, settle: "Callable[[], list[str]] | None" = None) -> None:
+        super().__init__(*args)
+        self.settle = settle
+
+
+def settle_check(result: "AgentResult", check: str) -> None:
+    """Mark `check` as settled on this reply: its safe way through was taken,
+    so the reply is applied without it."""
+    done = set(getattr(result, "settled_checks", None) or ())
+    done.add(check)
+    try:
+        result.settled_checks = done
+    except AttributeError:  # pragma: no cover — a frozen result has no room for it
+        pass
+
+
+def _settled(result: "AgentResult", check: str) -> bool:
+    return check in (getattr(result, "settled_checks", None) or ())
 
 
 class ContractViolation(ValueError):
@@ -391,6 +423,8 @@ class AgentResult:
     confidence: float = 1.0
     #: Populated by apply_agent_result — the IDs actually allocated.
     artifacts: list[str] = field(default_factory=list)
+    #: Checks whose safe way through was taken on this reply (`AuthorRefusal.settle`).
+    settled_checks: set[str] = field(default_factory=set)
 
     def validate(self) -> None:
         if self.status not in ("completed", "blocked", "failed"):
@@ -777,6 +811,14 @@ def check_entity_fields(result: "AgentResult", doc: dict | None = None) -> None:
     retry was told only "'' should be non-empty" — ConditionEvidence ended with
     no columns at all. Refused here instead, naming the fields it could be."""
     problems: list[str] = []
+    if _settled(result, "check_entity_fields"):
+        return
+    # THE SAFE WAY THROUGH, ONE PER FAULT (`AuthorRefusal.settle`). This node
+    # is whole: one record's refusal fails every record, so each fault here
+    # carries what the build does instead — a field that cannot work is taken
+    # off, a flag that contradicts the data model is dropped, a label is one
+    # of the record's own fields. None of them ships a record that is wrong.
+    fixes: list = []
     for proposal in (p for p in result.proposals if p.section == "data.entities"):
         body = proposal.body if isinstance(proposal.body, dict) else {}
         fields = [f for f in body.get("fields") or [] if isinstance(f, dict)]
@@ -794,6 +836,14 @@ def check_entity_fields(result: "AgentResult", doc: dict | None = None) -> None:
                    else "this entity has no image or text field to embed — remove the vector field, "
                         "or add the image field it should be taken of")
             problems.append(f"{body.get('name') or proposal.natural_key}.{f.get('name')}: a vector field {said}; {fix}")
+            where = f"{body.get('name') or proposal.natural_key}.{f.get('name')}"
+            if len(sources) == 1:
+                fixes.append((lambda f=f, src=sources[0]: f.__setitem__("embedding", {**(f.get("embedding") or {}), "of": src}),
+                              f"{where} is taken of {sources[0]}, the record's only image or text field"))
+            else:
+                fixes.append((lambda b=body, f=f: b.__setitem__("fields", [x for x in b.get("fields") or [] if x is not f]),
+                              f"{where} was left out: it named no field to be taken of"
+                              + (f" (it could be one of {', '.join(sources)})" if sources else "")))
     # AN ENTITY'S LABEL IS ONE OF ITS OWN FIELDS. `labelField: "brandName"` on
     # an entity with no `brandName` is a contradiction a reader can see in the
     # proposal itself — checked here, at the author, in the same attempt,
@@ -812,7 +862,15 @@ def check_entity_fields(result: "AgentResult", doc: dict | None = None) -> None:
         if label and label not in names:
             problems.append(f"{ename}: `labelField` is {label!r}, which is not one of its fields "
                             f"({', '.join(names)}) — add that field, or set `labelField` to one of these")
-    problems.extend(_unique_many_side(result, doc))
+            texty = [str(f.get("name")) for f in body.get("fields") or [] if isinstance(f, dict)
+                     and str(f.get("type") or "").lower() in ("string", "text") and not f.get("primaryKey")]
+            pick = (texty or names)[0]
+            fixes.append((lambda b=body, pick=pick: b.__setitem__("labelField", pick),
+                          f"{ename} is labelled by {pick} ({label} is not one of its fields)"))
+    for said, field_ in _unique_many_side(result, doc):
+        problems.append(said)
+        fixes.append((lambda f=field_: f.pop("unique", None),
+                      f"{said.split(':', 1)[0]} is not unique: many rows point at one record"))
     # THE ACCOUNT ENTITY: at most one, and signup must be able to create it —
     # a required reference to another record is a field no one can fill when
     # the account is made.
@@ -846,10 +904,14 @@ def check_entity_fields(result: "AgentResult", doc: dict | None = None) -> None:
                                 f"person behind a login. Drop `account` here: a {name} is a login "
                                 f"({login.get('name')}) with its own role, and this entity holds what that "
                                 "person has beyond the login, referencing it by a field")
+                fixes.append((lambda b=body: b.pop("account", None),
+                              f"{name} is not the login record; {login.get('name')} is"))
             elif login is None and claimed_here and str(name) not in claimed_here:
                 problems.append(f"{name}: `account: true` is already on {claimed_here[0]} in this reply — one "
                                 f"entity is the person behind a login. Keep it on {claimed_here[0]} and drop it "
                                 f"here; a {name} is a login with its own role plus this record of what they have")
+                fixes.append((lambda b=body: b.pop("account", None),
+                              f"{name} is not the login record; {claimed_here[0]} is"))
             elif login is None and str(name) not in claimed_here:
                 claimed_here.append(str(name))
         from services.blueprint.projection import _is_credential_field
@@ -859,14 +921,24 @@ def check_entity_fields(result: "AgentResult", doc: dict | None = None) -> None:
             # signup would have been refused by the database.
             if isinstance(f, dict) and _is_credential_field(f.get("name")):
                 problems.append(f"{name}.{f.get('name')}: remove this field. {CREDENTIAL_RULE}")
+                fixes.append((lambda b=body, f=f: b.__setitem__("fields", [x for x in b.get("fields") or [] if x is not f]),
+                              f"{name}.{f.get('name')} was removed: the login keeps the password, not the record"))
             if isinstance(f, dict) and f.get("references") and f.get("required"):
                 problems.append(f"{name}.{f.get('name')}: the account entity's row is created at signup, when no "
                                 "other record exists to point at — make this reference optional")
+                fixes.append((lambda f=f: f.__setitem__("required", False),
+                              f"{name}.{f.get('name')} is optional: the record is made at sign-up, before "
+                              "there is anything for it to point at"))
     if problems:
-        raise InvalidEntityFields(_all_of(problems))
+        def settle() -> list[str]:
+            for fix, _said in fixes:
+                fix()
+            settle_check(result, "check_entity_fields")
+            return [said for _fix, said in fixes]
+        raise InvalidEntityFields(_all_of(problems), settle=settle)
 
 
-def _unique_many_side(result: "AgentResult", doc: dict | None) -> list[str]:
+def _unique_many_side(result: "AgentResult", doc: dict | None) -> list[tuple[str, dict]]:
     """A reference on the MANY side of a one-to-many is never unique by itself.
 
     HippieKit (2026-09-22) marked `ProductIngredient.productId` and
@@ -893,7 +965,7 @@ def _unique_many_side(result: "AgentResult", doc: dict | None) -> list[str]:
             continue
         one = name_of.get(str(r.get("from")), str(r.get("from")))
         many.setdefault(name_of.get(str(r.get("to")), str(r.get("to"))), {})[fk] = one
-    out: list[str] = []
+    out: list[tuple[str, dict]] = []
     for proposal in (p for p in result.proposals if p.section == "data.entities"):
         body = proposal.body if isinstance(proposal.body, dict) else {}
         ename = str(body.get("name") or name_of.get(str(proposal.natural_key), proposal.natural_key))
@@ -902,10 +974,10 @@ def _unique_many_side(result: "AgentResult", doc: dict | None) -> list[str]:
                 continue
             one = many.get(ename, {}).get(str(f.get("name")))
             if one:
-                out.append(f"{ename}.{f.get('name')}: marked `unique`, but the data model says one {one} "
-                           f"has many {ename} rows — unique, each {one} could have only one. Remove "
-                           f"`unique`; if one {ename} per pair is meant, add a `unique` constraint over "
-                           f"both columns")
+                out.append((f"{ename}.{f.get('name')}: marked `unique`, but the data model says one {one} "
+                            f"has many {ename} rows — unique, each {one} could have only one. Remove "
+                            f"`unique`; if one {ename} per pair is meant, add a `unique` constraint over "
+                            f"both columns", f))
     return out
 
 
@@ -972,8 +1044,17 @@ def check_flows(result: "AgentResult", doc: dict | None) -> None:
     step rather than the page writer being told a hand-off to nowhere."""
     from services.blueprint.app_flows import flow_findings
     proposals = [p for p in result.proposals if p.section == "flows" and isinstance(p.body, dict)]
-    if not proposals or not doc:
+    if not proposals or not doc or _settled(result, "check_flows"):
         return
+
+    def leave_out(why: str) -> "Callable[[], list[str]]":
+        # JOURNEYS ARE GUIDANCE, not structure: the screens and processes they
+        # walk through stand without them. Left out, and said.
+        def settle() -> list[str]:
+            result.proposals = [p for p in result.proposals if p.section != "flows"]
+            settle_check(result, "check_flows")
+            return [f"the journeys through the app were left out ({len(proposals)}) — {why}"]
+        return settle
     # JOURNEYS THROUGH SCREENS THIS SAME REPLY PROPOSES are premature: the
     # screens have no ids yet, and journeys are the journeys step's, once
     # they do. Said as that, not as "not a screen" (60v142ju, 2026-10-12).
@@ -983,11 +1064,14 @@ def check_flows(result: "AgentResult", doc: dict | None) -> None:
                  and str(p.body.get("route") or "") not in saved and str(p.body.get("id") or "") not in saved]
     if new_pages:
         raise InvalidAppFlow("Leave `flows` out of this reply: journeys are planned by their own step once the "
-                             "screens you are proposing exist and have ids. Return the screens without them.")
+                             "screens you are proposing exist and have ids. Return the screens without them.",
+                             settle=leave_out("they were written before their screens existed"))
     problems = flow_findings({**doc, "flows": [p.body for p in proposals]})
     if problems:
         raise InvalidAppFlow("These flows name what the application does not have — mend each step:\n- "
-                             + "\n- ".join(problems[:30]))
+                             + "\n- ".join(problems[:30]),
+                             settle=leave_out("they named screens or processes the app does not have: "
+                                              + "; ".join(problems[:3])))
 
 
 def check_analytics(result: "AgentResult", doc: dict | None) -> None:
@@ -1000,7 +1084,7 @@ def check_analytics(result: "AgentResult", doc: dict | None) -> None:
     at the author, naming each page and the fields it could chart, so the
     reply is edited rather than shipped bare."""
     proposals = [p for p in result.proposals if p.section == "widgets"]
-    if not proposals or not doc:
+    if not proposals or not doc or _settled(result, "check_analytics"):
         return
     ents = {str(e.get("id")): e for e in (doc.get("data") or {}).get("entities") or []
             if isinstance(e, dict) and e.get("status") != "DEPRECATED"}
@@ -1070,10 +1154,20 @@ def check_analytics(result: "AgentResult", doc: dict | None) -> None:
                 problems.append(f"{pid} {page.get('route')} (dashboard): no chart over time, though the data has "
                                 f"dates — add a line or area with a `bucket` by week or month")
     if problems:
+        def settle() -> list[str]:
+            # THE CHARTS THAT WERE WRITTEN SHIP AS THEY ARE. Every fault here is
+            # one of richness — fewer charts than a page should have, a widget
+            # whose citation cannot be checked — and none makes a chart wrong.
+            # A citation that names nothing is taken off rather than kept.
+            for p in proposals:
+                if isinstance(p.body, dict) and known:
+                    p.body["requirements"] = [r for r in p.body.get("requirements") or [] if str(r) in known]
+            settle_check(result, "check_analytics")
+            return [f"charts kept as written, short of the house standard: {f}" for f in problems[:8]]
         raise InvalidAnalytics(
             "Charts show up on every relevant page, dashboards are rich, and every widget is about this "
             "application. " + _all_of(problems)
-            + " Add or amend `kind: chart` widgets for these pages (keep the metrics you have).")
+            + " Add or amend `kind: chart` widgets for these pages (keep the metrics you have).", settle=settle)
 
 
 class InvalidPageContent(AuthorRefusal):
@@ -1136,12 +1230,13 @@ def check_page_access(result: "AgentResult", doc: dict | None) -> None:
     settled, and refusing it would hold that edit hostage to another page."""
     proposed = [p.body for p in result.proposals
                 if p.section == "pages" and isinstance(p.body, dict)]
-    if not proposed:
+    if not proposed or _settled(result, "check_page_access"):
         return
     merged: dict[str, dict] = {}
     for page in (doc or {}).get("pages") or []:
         if isinstance(page, dict) and str(page.get("status") or "").upper() != "REMOVED":
             merged[str(page.get("id") or page.get("route"))] = page
+    nameless: list[dict] = []
     touched: set[str] = set()
     for body in proposed:
         key = str(body.get("id") or "") or next(
@@ -1170,11 +1265,43 @@ def check_page_access(result: "AgentResult", doc: dict | None) -> None:
             if from_sections:
                 body["users"] = from_sections
                 continue
+            nameless.append(body)
             problems.append(f"{page.get('route') or page.get('name')}: `access: \"role_restricted\"` names no "
                             "role — put the roles that may open it in `users` (the people this screen is "
                             "for); a restricted page nobody is named for is the administrator's alone")
     if problems:
-        raise InconsistentPageAccess(_all_of(problems))
+        raise InconsistentPageAccess(_all_of(problems), settle=_admin_only(result, doc, nameless, problems))
+
+
+def _admin_of(doc: dict | None) -> tuple[str, str]:
+    """The administrator role's name and id, or ("", "") when there is none."""
+    from services.blueprint.account_model import admin_role
+    admin = admin_role(doc or {})
+    admin_id = next((str(r.get("id")) for r in (doc or {}).get("roles") or []
+                     if isinstance(r, dict) and r.get("name") == admin and r.get("id")), "")
+    return admin, admin_id
+
+
+def _admin_only(result: "AgentResult", doc: dict | None, nameless: list[dict],
+                problems: list[str]) -> "Callable[[], list[str]] | None":
+    """The safe way through for restricted pages that name nobody: the
+    administrator's, which is what the projection serves for them anyway —
+    written down, so the page says so and Smith can say who else should open
+    it. Only when nameless pages are ALL that is wrong: pages of one module
+    that disagree on who may open them are not settled by a guess."""
+    if not nameless or len(nameless) != len(problems):
+        return None
+    admin, admin_id = _admin_of(doc)
+    if not admin_id:
+        return None
+
+    def settle() -> list[str]:
+        for body in nameless:
+            body["users"] = [admin_id]
+        settle_check(result, "check_page_access")
+        return [f"{b.get('route') or b.get('name')} opens for the administrator ({admin}) only — the page "
+                "writer named no other role for it; say who else should open it" for b in nameless]
+    return settle
 
 
 class RoleWithoutADoor(AuthorRefusal):
@@ -1628,6 +1755,14 @@ def check_audit(result: "AgentResult", doc: dict | None) -> None:
                 if isinstance(e, dict)}
     named = ", ".join(f"{k} ({v})" for k, v in sorted(entities.items())) or "none yet"
     problems: list[str] = []
+    if _settled(result, "check_audit"):
+        return
+    # THE SAFE WAY THROUGH, ONE PER FAULT (`AuthorRefusal.settle`): every fault
+    # here has one that leaves the trail at least as closed as asked — the
+    # administrator reads a trail nobody was named for, a name that is not a
+    # role is dropped, a screen is for the reviewers and nobody else.
+    fixes: list = []
+    admin, admin_id = _admin_of(doc)
     audit = ((doc.get("security") or {}).get("audit") or {}) if isinstance(doc.get("security"), dict) else {}
     for p in result.proposals:
         if p.section == "security" and isinstance(p.body, dict) and isinstance(p.body.get("audit"), dict):
@@ -1636,17 +1771,33 @@ def check_audit(result: "AgentResult", doc: dict | None) -> None:
             reviewers = [str(r) for r in audit.get("reviewers") or []]
             if level != "none" and not reviewers:
                 problems.append("security.audit: a trail nobody may read is write-only — name the `reviewers` (roles)")
-            for r in reviewers:
-                if r not in roles:
-                    problems.append(f"security.audit.reviewers: {r!r} is not a declared role")
-            for e in audit.get("reasonRequired") or []:
-                if str(e) not in entities:
-                    problems.append(f"security.audit.reasonRequired names RECORD TYPES by entity id, not actions: "
-                                    f"{e!r} is none of {named}")
+                fixes.append((lambda a=audit: a.__setitem__("reviewers", [admin_id]),
+                              f"the audit trail is read by the administrator ({admin}) only — no reviewers were named"))
+            unknown = [r for r in reviewers if r not in roles]
+            for r in unknown:
+                problems.append(f"security.audit.reviewers: {r!r} is not a declared role")
+            if unknown:
+                def drop_unknown(a=audit, bad=frozenset(unknown)):
+                    a["reviewers"] = [r for r in a.get("reviewers") or [] if str(r) not in bad] or [admin_id]
+                fixes.append((drop_unknown, f"audit reviewers that are not roles were dropped: {', '.join(unknown)}"))
+            stray = [e for e in audit.get("reasonRequired") or [] if str(e) not in entities]
+            for e in stray:
+                problems.append(f"security.audit.reasonRequired names RECORD TYPES by entity id, not actions: "
+                                f"{e!r} is none of {named}")
+            if stray:
+                def drop_stray(a=audit, bad=frozenset(str(e) for e in stray)):
+                    a["reasonRequired"] = [e for e in a.get("reasonRequired") or [] if str(e) not in bad]
+                fixes.append((drop_stray, "a reason is not asked for on changes to "
+                                          + ", ".join(str(e) for e in stray) + " (not record types the app has)"))
             planned = _audit_pages(doc)
             if level == "none" and planned:
                 problems.append(f"security.audit: the screens include an audit trail ({planned[0].get('name')}); "
                                 "declare the trail (`level`, `reviewers`) it shows")
+                def keep_trail(a=audit):
+                    a["level"] = "writes"
+                    a["reviewers"] = a.get("reviewers") or [admin_id]
+                fixes.append((keep_trail, f"an audit trail of every change is kept for the planned "
+                                          f"{planned[0].get('name')} screen"))
     level = str(audit.get("level") or "none")
     alias = role_aliases(result, doc)
     reviewers = {alias.get(str(r), str(r)) for r in audit.get("reviewers") or []}
@@ -1660,6 +1811,9 @@ def check_audit(result: "AgentResult", doc: dict | None) -> None:
             name = p.body.get("name") or p.natural_key
             if level == "none":
                 problems.append(f"{name}: an `audit_trail` page needs a trail — `security.audit.level` is none")
+                fixes.append((lambda prop=p: result.proposals.remove(prop) if prop in result.proposals else None,
+                              f"the {name} screen was left out: the app keeps no audit trail for it to show"))
+                continue
             users = [alias.get(str(u), str(u)) for u in p.body.get("users") or []]
             if not users:
                 # THE TRAIL'S SCREEN IS THE REVIEWERS', AND THE POLICY ALREADY SAYS WHO
@@ -1673,8 +1827,18 @@ def check_audit(result: "AgentResult", doc: dict | None) -> None:
             elif any(u not in reviewers for u in users):
                 problems.append(f"{name}: an `audit_trail` page is for the reviewers the audit policy names; "
                                 f"`users` must be among {reviewer_names or ['(none declared)']}")
+                fixes.append((lambda b=p.body: b.__setitem__(
+                    "users", [alias.get(str(r), str(r)) for r in audit.get("reviewers") or []] or [admin_id]),
+                    f"the {name} screen is for the audit reviewers only"))
     if problems:
-        raise InvalidAudit(_all_of(problems))
+        def settle() -> list[str]:
+            for fix, _said in fixes:
+                fix()
+            settle_check(result, "check_audit")
+            return [said for _fix, said in fixes]
+        # Every fault above has its fix; without an administrator to fall back
+        # to, a trail nobody may read has no safe answer, and stays refused.
+        raise InvalidAudit(_all_of(problems), settle=settle if admin_id else None)
 
 
 class InvalidBusinessRule(AuthorRefusal):
