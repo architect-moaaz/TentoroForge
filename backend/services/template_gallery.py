@@ -195,6 +195,16 @@ async def _locked(db: AsyncSession, template_id: str) -> TemplateListing | None:
         .with_for_update().execution_options(populate_existing=True))).scalar_one_or_none()
 
 
+async def _lock_lineage(db: AsyncSession, lineage: str) -> None:
+    """One app's versions are decided one request at a time. Row locks cover
+    the rows that exist; two first submits of two versions each insert their
+    own row, so both passed "one request per app". A transaction-scoped lock
+    on the lineage itself closes that (Postgres; tests on SQLite run serially)."""
+    if db.get_bind().dialect.name == "postgresql":
+        from sqlalchemy import text
+        await db.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:l, 0))"), {"l": lineage})
+
+
 async def _ensure_listing(db: AsyncSession, meta: dict) -> TemplateListing:
     """The template's listing, locked — made first if it has none. Two first
     submits at once both try to make it: the loser's insert is undone on its
@@ -389,6 +399,7 @@ async def submit(db: AsyncSession, meta: dict, who: Viewer, *, pricing_model: st
         raise GalleryError("Only the template's builder or an admin of its organisation can submit it.", 403)
     # Every version of the app, locked in the order a decision locks them, so
     # a submit and a decision on two versions never wait on each other.
+    await _lock_lineage(db, templates.lineage_of(meta))
     lineage_rows = (await db.execute(
         select(TemplateListing).where(TemplateListing.lineage == templates.lineage_of(meta))
         .order_by(TemplateListing.template_id)
@@ -480,6 +491,7 @@ async def decide(db: AsyncSession, meta: dict, admin: PlatformUser, decision: st
     # v3 retires v2, so two admins approving v2 and v3 at once must not each
     # see the other still pending (both would stay in the Gallery) — and
     # locking only one's own row first would let them wait on each other.
+    await _lock_lineage(db, templates.lineage_of(meta))
     lineage_rows = (await db.execute(
         select(TemplateListing).where(TemplateListing.lineage == templates.lineage_of(meta))
         .order_by(TemplateListing.template_id)

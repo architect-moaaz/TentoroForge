@@ -372,8 +372,10 @@ def _clean_action(a: Any) -> dict:
     for k in ("field", "workflow", "valueMode"):
         if k in out and not isinstance(out[k], str):
             raise RuleError(f"An action's {k} is a name, not {type(out[k]).__name__}.")
+    if "valueMode" in out and out["valueMode"] not in ("literal", "field", "formula"):
+        raise RuleError("A value is written as it is, copied from a field, or worked out by a formula.")
     if "message" in out:
-        if not isinstance(out["message"], (str, int, float)):
+        if not isinstance(out["message"], str):
             raise RuleError("An action's message must be text.")
         out["message"] = str(out["message"]).strip()
         if len(out["message"]) > MESSAGE_MAX:
@@ -413,9 +415,6 @@ def _condition_fields(feel: str) -> set[str]:
 #: Fields every record has and no rule may write.
 _SYSTEM_FIELDS = frozenset({"id", "createdAt", "updatedAt", "created_at", "updated_at"})
 _NUM = r"-?\d+(?:\.\d+)?"
-#: A group repeated inside a repetition — (a+)+, (\w*)*, (x|y+){2,} — can take
-#: exponential time on some text, and the app's engine has no time limit.
-_NESTED_QUANTIFIER = re.compile(r"\((?:[^()\\]|\\.)*[+*}](?:[^()\\]|\\.)*\)\s*[+*{]")
 
 
 def _human(field: str) -> str:
@@ -439,49 +438,238 @@ def _condition_problems(when: str, ent: dict | None) -> list[str]:
             out.append(f"The condition “{when[:80]}” is not a yes-or-no question — compare something, "
                        "like amount > 5000 or status = \"open\".")
             return out
-    # A value of a fixed list that is not one of its choices never matches.
-    for m in re.finditer(r'(?<![\w.])([A-Za-z_]\w*)\s*(!=|=)\s*"((?:[^"\\]|\\.)*)"', when):
-        name, val = m.group(1), m.group(3)
-        if kinds.get(name) == "enum":
-            choices = [str(v) for v in _enum_values(fields[name])]
-            if val not in choices:
-                out.append(f"“{val}” is not one of {_human(name)}’s choices ({', '.join(choices)}).")
-    for m in re.finditer(r'(?<![\w.])([A-Za-z_]\w*)\s+in\s*\[([^\]]*)\]', when):
-        name = m.group(1)
+    # Every comparison, whichever way round it is written: A op B.
+    for left, op, right in _comparisons(when):
+        lk, rk = _operand_kind(left, kinds), _operand_kind(right, kinds)
+        if lk[0] == "literal" and rk[0] == "field":
+            left, right, lk, rk = right, left, rk, lk          # "archived" = status reads as status = "archived"
+            op = {"<": ">", ">": "<", "<=": ">=", ">=": "<="}.get(op, op)
+        if lk[0] != "field":
+            continue
+        name, k = lk[1], lk[2]
+        said = _comparison_problem(name, k, op, right, rk, fields)
+        if said:
+            out.append(said)
+    for m in re.finditer(r'(?<![\w])((?:previous\.)?[A-Za-z_]\w*)\s+in\s*\[([^\]]*)\]', when):
+        name = m.group(1).removeprefix("previous.")
         if kinds.get(name) == "enum":
             choices = [str(v) for v in _enum_values(fields[name])]
             for val in re.findall(r'"((?:[^"\\]|\\.)*)"', m.group(2)):
                 if val not in choices:
                     out.append(f"“{val}” is not one of {_human(name)}’s choices ({', '.join(choices)}).")
-    # More/less than: numbers and dates, compared with their own kind.
-    for m in re.finditer(r'(?<![\w.])([A-Za-z_]\w*)\s*(<=|>=|<|>)\s*("(?:[^"\\]|\\.)*"|' + _NUM +
-                         r'|[A-Za-z_]\w*(?:\([^)]*\))?)', when):
-        name, rhs = m.group(1), m.group(3)
-        k = kinds.get(name)
-        if k is None:
+    # Patterns: written in the rule, valid in the app's engine, never one that can take forever.
+    for m in re.finditer(r'\bmatches\s*\(\s*[^,()]+,\s*("(?:[^"\\]|\\.)*"|[^)]*)\s*\)', when):
+        arg = m.group(1).strip()
+        lit = re.fullmatch(r'"((?:[^"\\]|\\.)*)"', arg)
+        if not lit:
+            out.append("A pattern is written in the rule, in quotes — not taken from a field, where anyone "
+                       "saving a record could put a pattern that freezes the app.")
             continue
-        if k in ("string", "enum", "boolean"):
-            out.append(f"{_human(name).capitalize()} is {'text' if k != 'boolean' else 'a yes/no'} — it cannot be "
-                       f"more or less than something. Compare it with = or !=.")
-            continue
-        rk = ("number" if re.fullmatch(_NUM, rhs) else "date" if rhs.startswith(("date(", "today(", "now("))
-              else "text" if rhs.startswith('"') else kinds.get(rhs))
-        if k == "number" and rk in ("text", "date", "string", "enum", "boolean"):
-            out.append(f"{_human(name).capitalize()} is a number; it is compared with {rhs[:40]}, which is not.")
-        if k == "date" and rk in ("number", "string", "enum", "boolean"):
-            out.append(f"{_human(name).capitalize()} is a date; it is compared with {rhs[:40]}, which is not.")
-    # Patterns: valid, and never one that can take forever.
-    for m in re.finditer(r'\bmatches\s*\(\s*[^,]+,\s*"((?:[^"\\]|\\.)*)"', when):
-        pattern = m.group(1).encode().decode("unicode_escape", errors="ignore")
-        try:
-            re.compile(pattern)
-        except re.error as exc:
-            out.append(f"The pattern “{pattern[:60]}” is not a valid pattern: {exc}.")
-            continue
-        if _NESTED_QUANTIFIER.search(pattern) or len(pattern) > 500:
-            out.append(f"The pattern “{pattern[:60]}” repeats a repetition, which can freeze the app on some "
-                       "text. Write it without a group that repeats inside a repeat — (a+)+ is a+.")
+        said = _pattern_problem(lit.group(1).encode().decode("unicode_escape", errors="ignore"))
+        if said:
+            out.append(said)
     return out
+
+
+_OPERAND = (r'(?:"(?:[^"\\]|\\.)*"|' + _NUM + r'|(?:date|time|date and time|today|now|duration)\s*\([^)]*\)'
+            r'|(?:previous\.|user\.)?[A-Za-z_]\w*)')
+_COMPARISON = re.compile(r'(?<![\w."])(' + _OPERAND + r')\s*(<=|>=|!=|=|<|>)\s*(' + _OPERAND + r')')
+
+
+def _comparisons(when: str) -> list[tuple[str, str, str]]:
+    return [(m.group(1), m.group(2), m.group(3)) for m in _COMPARISON.finditer(when)]
+
+
+def _operand_kind(tok: str, kinds: dict[str, str]) -> tuple:
+    """("field", name, kind) | ("literal", kind) | ("other",)."""
+    tok = tok.strip()
+    if tok.startswith('"'):
+        inner = tok[1:-1]
+        return ("literal", "date-text" if re.fullmatch(r"\d{4}-\d{2}-\d{2}(?:[T ][\d:.]+Z?)?", inner) else "text", inner)
+    if re.fullmatch(_NUM, tok):
+        return ("literal", "number", tok)
+    if tok in ("true", "false"):
+        return ("literal", "boolean", tok)
+    if tok == "null":
+        return ("literal", "null", tok)
+    if re.match(r"(date|today|now|date and time)\s*\(", tok):
+        return ("literal", "date", tok)
+    if tok.startswith("user."):
+        return ("other",)
+    name = tok.removeprefix("previous.")
+    if name in kinds:
+        return ("field", name, kinds[name])
+    return ("other",)
+
+
+def _comparison_problem(name: str, k: str, op: str, right: str, rk: tuple, fields: dict) -> str | None:
+    """`name op right`, where `name` is a field of kind `k`."""
+    what = _human(name).capitalize()
+    if rk[0] == "literal" and rk[1] == "null":
+        return None
+    ordered = op in ("<", ">", "<=", ">=")
+    if ordered and k in ("string", "enum", "boolean"):
+        return (f"{what} is {'text' if k != 'boolean' else 'a yes/no'} — it cannot be more or less than "
+                "something. Compare it with = or !=.")
+    other = rk[1] if rk[0] == "literal" else rk[2] if rk[0] == "field" else None
+    if other is None:
+        return None
+    same = {"number": {"number"}, "date": {"date", "date-text"}, "boolean": {"boolean"},
+            "string": {"text", "string", "enum", "date-text"}, "enum": {"text", "string", "enum"}}
+    if other not in same.get(k, {other}):
+        shown = right if rk[0] == "literal" else _human(rk[1])
+        kind_word = {"number": "a number", "date": "a date", "boolean": "yes/no (true or false)",
+                     "string": "text", "enum": "one of a list"}[k]
+        return f"{what} is {kind_word}; it is compared with {shown[:40]}, which is not."
+    if k == "enum" and rk[0] == "literal" and op in ("=", "!="):
+        choices = [str(v) for v in _enum_values(fields[name])]
+        if rk[2] not in choices:
+            return f"“{rk[2]}” is not one of {_human(name)}’s choices ({', '.join(choices)})."
+    return None
+
+
+def _pattern_problem(pattern: str) -> str | None:
+    """A pattern the app's engine (JavaScript) runs safely, or why not."""
+    if len(pattern) > 500:
+        return "A pattern is at most 500 characters."
+    if re.search(r"\(\?P[<=]|\(\?#|\(\?[aiLmsux]+\)", pattern):
+        return f"The pattern “{pattern[:60]}” uses a form the app's engine does not read (named groups are (?<name>…))."
+    try:
+        re.compile(pattern.replace("(?<", "(?P<").replace("(?P<=", "(?<=").replace("(?P<!", "(?<!"))
+    except re.error as exc:
+        return f"The pattern “{pattern[:60]}” is not a valid pattern: {exc}."
+    for body, quantified in _groups(pattern):
+        if quantified and _ambiguous(body):
+            return (f"The pattern “{pattern[:60]}” repeats a group that can match the same text in more than one "
+                    "way, which can freeze the app on some text. Repeat a single class instead — (a|aa)+ is a+, "
+                    "(a+)+ is a+ — or start each repeat with its own character, like (-[a-z]+)*.")
+    return None
+
+
+def _groups(p: str) -> list[tuple[str, bool]]:
+    """Each group's body, and whether the group is repeated (*, +, {n,} or {n,m} with m > 1)."""
+    out, stack, i, in_class = [], [], 0, False
+    while i < len(p):
+        c = p[i]
+        if c == "\\":
+            i += 2
+            continue
+        if in_class:
+            in_class = c != "]"
+        elif c == "[":
+            in_class = True
+        elif c == "(":
+            stack.append(i)
+        elif c == ")" and stack:
+            start = stack.pop()
+            body = re.sub(r"^\(\?(?::|<?[=!]|<[A-Za-z_]\w*>)", "(", p[start:i + 1])[1:-1]
+            rest = p[i + 1:]
+            q = re.match(r"[*+]|\{(\d+)(,(\d*))?\}", rest)
+            repeated = bool(q) and (q.group(0) in "*+" or (q.group(2) is not None and (q.group(3) in ("", None)
+                                    or int(q.group(3)) > 1)) or (q.group(1) and int(q.group(1)) > 1 and not q.group(2)))
+            out.append((body, repeated))
+        i += 1
+    return out
+
+
+def _top_level_split(body: str) -> list[str]:
+    parts, depth, cur, i, in_class = [], 0, "", 0, False
+    while i < len(body):
+        c = body[i]
+        if c == "\\":
+            cur += body[i:i + 2]
+            i += 2
+            continue
+        if in_class:
+            in_class = c != "]"
+        elif c == "[":
+            in_class = True
+        elif c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+        elif c == "|" and depth == 0:
+            parts.append(cur)
+            cur = ""
+            i += 1
+            continue
+        cur += c
+        i += 1
+    return parts + [cur]
+
+
+def _ambiguous(body: str) -> bool:
+    """Can one repeat of `body` match a varying stretch that the next repeat could also take?"""
+    varies = bool(re.search(r"(?<!\\)[*+?|]|(?<!\\)\{\d+,", body))
+    if not varies:
+        return False
+    alternatives = _top_level_split(body)
+    if len(alternatives) > 1:
+        # (a|b)+ is safe; (a|ab)+, (a|a?)+ are not: distinct single characters only.
+        singles = [a for a in alternatives if re.fullmatch(r"[^\\\[\](){}.*+?|^$]|\\[^wWsSdDbB]", a)]
+        return len(singles) != len(alternatives) or len(set(singles)) != len(singles)
+    # A fixed character at the start or the end of each repeat, which the rest
+    # can never match, keeps the repeats apart: (-[a-z]+)*, ([a-z0-9]+\.)+.
+    return not (_fixed_edge_separates(body, first=True) or _fixed_edge_separates(body, first=False))
+
+
+_LIT = r"(?:\\[^wWsSdDbB0-9]|[^\\\[\](){}.*+?|^$])"
+
+
+def _fixed_edge_separates(body: str, *, first: bool) -> bool:
+    m = re.match(_LIT + r"(?![*+?{])", body) if first else re.search(r"(?<![\\])(" + _LIT + r")$", body)
+    if not m:
+        return False
+    tok = m.group(0)
+    c = tok[-1]
+    rest = body[len(tok):] if first else body[:m.start()]
+    if re.search(r"(?<![\\\[])\.(?![^\[]*\])", rest):
+        return False                                   # a wildcard matches anything
+    shorthand = {"w": c.isalnum() or c == "_", "d": c.isdigit(), "s": c.isspace()}
+    for code in re.findall(r"\\([wWsSdD])", rest):
+        if shorthand[code.lower()] != code.isupper():  # \w holds it, or \W (everything else) does
+            return False
+    plain = re.sub(r"\[[^\]]*\]", "", rest)
+    if c in re.sub(r"\\.", "", plain) or ("\\" + c) in plain:
+        return False
+    for neg, members in re.findall(r"\[(\^?)([^\]]*)\]", rest):
+        inside = any(lo <= c <= hi for lo, hi in re.findall(r"(.)-(.)", members)) or c in re.sub(r".-.", "", members)
+        if inside != bool(neg):
+            return False
+    return True
+
+
+def _write_problem(t: str, field: str, a: dict, by_name: dict) -> str | None:
+    """What a set/default/clear action would write, against the field it writes."""
+    where = f"“{t.replace('_', ' ')}”"
+    f = by_name.get(field)
+    mode = str(a.get("valueMode") or "literal")
+    if t == "clear_field" or mode == "literal":
+        return _value_problem(field, f, a.get("value") if t != "clear_field" else None, where)
+    said = _value_problem(field, f, None, where)            # identity fields, whatever the value
+    if said or f is None:
+        return said
+    value = str(a.get("value") or "").strip()
+    if not value:
+        return f"{where}: say which {'field' if mode == 'field' else 'formula'} the value comes from."
+    if mode == "field":
+        src = by_name.get(value.removeprefix("previous."))
+        if src is None:
+            return f"{where}: {value[:40]} is not a field of this record."
+        k_to, k_from = _field_type(f), _field_type(src)
+        if k_to != k_from and not (k_to == "string" and k_from in ("enum", "number")):
+            return f"{where}: {_human(field)} cannot take {_human(value)}’s value — they are different kinds of thing."
+        return None
+    from services.blueprint.feel_check import check_expressions
+    bad = check_expressions([("v", value)]).get("v")
+    if bad:
+        return f"{where}: the formula “{value[:60]}” cannot be read: {bad}."
+    # A formula that is one value or one field is checked like one.
+    if re.fullmatch(r'"(?:[^"\\]|\\.)*"|' + _NUM + r"|true|false", value):
+        return _value_problem(field, f, value, where)
+    if value in by_name:
+        return _write_problem(t, field, {**a, "valueMode": "field"}, by_name)
+    return None
 
 
 def _value_problem(field: str, f: dict | None, value: Any, where: str) -> str | None:
@@ -610,9 +798,7 @@ def check(doc: dict, rule: dict) -> list[str]:
                      "set_readonly", "set_options", "recommendation") and not a.get("field"):
                 problems.append(f"“{t.replace('_', ' ')}” needs a field.")
             if t in ("set_field", "set_default", "clear_field") and a.get("field"):
-                literal = t != "clear_field" and str(a.get("valueMode") or "literal") == "literal"
-                said = _value_problem(str(a["field"]), by_name.get(str(a["field"])),
-                                      a.get("value") if literal else None, f"“{t.replace('_', ' ')}”")
+                said = _write_problem(t, str(a["field"]), a, by_name)
                 if said:
                     problems.append(said)
             if t == "show_error" and not str(a.get("message") or "").strip():
@@ -662,6 +848,15 @@ def check(doc: dict, rule: dict) -> list[str]:
                     problems.append(said)
         for ci, name in enumerate(ins):
             f = by_name.get(name)
+            if f is not None and _field_type(f) in ("number", "date"):
+                for ri, row in enumerate(table.get("rules") or [], 1):
+                    entries = row.get("inputEntries") or []
+                    cell = str(entries[ci]).strip() if ci < len(entries) else ""
+                    other = re.match(r"^(?:<=|>=|<|>|=|!=)\s*([A-Za-z_]\w*)$", cell)
+                    if other and other.group(1) in by_name and _field_type(by_name[other.group(1)]) != _field_type(f):
+                        problems.append(f"Row {ri}, {_human(name)}: it is compared with {_human(other.group(1))}, "
+                                        "which is a different kind of thing.")
+                continue
             if f is None or _field_type(f) not in ("string", "enum", "boolean"):
                 continue
             for ri, row in enumerate(table.get("rules") or [], 1):
@@ -1290,6 +1485,10 @@ def test_rule(output_dir: str | Path, payload: dict | None, *, rule_id: str | No
     ent = _entities(doc).get(ent_id)
     if ent is None:
         return {"ok": False, "problems": problems or ["Choose the record to test it on."], "advice": []}
+    # A pattern that could hang the engine is not run, even here.
+    unsafe = [p for p in problems if "pattern" in p]
+    if unsafe:
+        return {"ok": False, "problems": problems, "advice": []}
     rows = [r for r in business_rule_rows(doc) if str(r.get("model_name")) == str(ent.get("name"))]
     try:
         result = rule_lab.simulate(model=str(ent.get("name")), rules=rows, record=dict(record or {}),
@@ -1355,12 +1554,15 @@ def usages(doc: dict, rule: dict) -> dict:
 def _flow_concerns(flow: dict, ent: dict) -> bool:
     """Does the workflow work with this record at all — name it, its table, or
     carry it as a variable (`expense.amount`)?"""
+    # Names, not text: a page path that mentions /roles/ is not a Role.
     text = json.dumps(flow).lower()
     name = str(ent.get("name") or "")
-    keys = [str(ent.get("id") or "").lower(), str(ent.get("table") or "").lower(),
-            (name[:1].lower() + name[1:]).lower() + ".",
-            re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", name).lower() + "."]
-    return any(k and k not in (".",) and k in text for k in keys)
+    camel, snake = name[:1].lower() + name[1:], re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", name).lower()
+    whole = [f'"{str(ent.get("id") or "").lower()}"', f'"{str(ent.get("table") or "").lower()}"',
+             f'"{camel.lower()}"', f'"{snake}"']
+    if any(w != '""' and w in text for w in whole):
+        return True
+    return bool(re.search(r"(?<![\w/.])(?:" + re.escape(camel.lower()) + "|" + re.escape(snake) + r")\.\w", text))
 
 
 def _refusal_message(rule: dict) -> str:

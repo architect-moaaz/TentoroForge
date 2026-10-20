@@ -417,3 +417,72 @@ def test_a_template_is_used_under_a_real_name():
     with pytest.raises(ValidationError, match="name"):
         UseTemplateRequest(template_id="t", name="   ")
     assert UseTemplateRequest(template_id="t", name="  Desk  ").name == "Desk"
+
+
+# ---- round 2 of the adversarial API run (Oct 21) ---------------------------- #
+
+@pytest.mark.parametrize("when, word", [
+    ("5 < title", "cannot be more or less"),
+    ('"archived" = status', "not one of"),
+    ("openingsCount = title", "is a number"),
+    ("openingsCount = true", "is a number"),
+    ('closedAt > "yesterday"', "is a date"),
+    ('previous.status = "archived"', "not one of"),
+    ('matches(title, "(a|aa)+$")', "freeze"),
+    ('matches(title, "((a+))+$")', "freeze"),
+    ("matches(title, description)", "written in the rule"),
+    ('matches(title, "(?P<n>a)")', "does not read"),
+])
+def test_round_two_conditions_are_refused(app, when, word):
+    said = _said(app, {**GATE, "when": when})
+    assert any(word in p for p in said), (when, said)
+
+
+@pytest.mark.parametrize("when", [
+    'not(matches(location, "^[a-z]+(-[a-z]+)*$"))', 'matches(title, "^([a-z0-9]+\\\\.)+[a-z]{2,}$")',
+    'closedAt > "2026-01-01"', "openingsCount = 3", 'status = "open"', '"open" = status',
+    "closedAt > createdAt", "user.role = \"admin\"",
+])
+def test_round_two_fine_conditions_stay_fine(app, when):
+    assert _said(app, {**GATE, "when": when}) == [], when
+
+
+@pytest.mark.parametrize("act, word", [
+    ({"type": "set_field", "field": "openingsCount", "valueMode": "formula", "value": '"lots"'}, "is a number"),
+    ({"type": "set_field", "field": "openingsCount", "valueMode": "field", "value": "title"}, "different kinds"),
+    ({"type": "set_field", "field": "openingsCount", "valueMode": "field", "value": "nope"}, "not a field"),
+    ({"type": "set_field", "field": "openingsCount", "valueMode": "formula", "value": "((("}, "cannot be read"),
+    ({"type": "set_field", "field": "status", "valueMode": "formula", "value": '"deleted"'}, "not one of"),
+])
+def test_a_copied_or_worked_out_value_fits_its_field_too(app, act, word):
+    said = _said(app, {**GATE, "then": [act]})
+    assert any(word in p for p in said), said
+
+
+def test_formulas_and_copies_that_fit_are_fine(app):
+    for act in ({"type": "set_field", "field": "openingsCount", "valueMode": "formula", "value": "openingsCount + 1"},
+                {"type": "set_field", "field": "location", "valueMode": "field", "value": "clientOrDepartment"}):
+        assert _said(app, {**GATE, "then": [act]}) == [], act
+
+
+def test_round_two_payloads(app):
+    with pytest.raises(br.RuleError, match="must be text"):
+        br.create(app, {**GATE, "then": [{"type": "show_error", "message": 5}]})
+    with pytest.raises(br.RuleError, match="formula"):
+        br.create(app, {**GATE, "then": [{"type": "set_field", "field": "title", "valueMode": "magic", "value": "x"}]})
+    t = json.loads(json.dumps(TABLE))
+    t["table"]["rules"][1]["inputEntries"][0] = "> title"
+    assert any("different kind" in p for p in _said(app, t))
+
+
+def test_a_pattern_that_could_hang_the_engine_is_not_run_by_test_it(app):
+    import time
+    t0 = time.monotonic()
+    r = br.test_rule(app, {**GATE, "when": 'matches(title, "(a+)+$")'}, record={"title": "a" * 34 + "!"})
+    assert not r["ok"] and time.monotonic() - t0 < 5
+
+
+def test_a_page_path_is_not_a_record(app):
+    rid = br.create(app, GATE)["rule"]["rule"]["id"]
+    with pytest.raises(br.RuleError, match="does not work with a Role"):
+        br.attach(app, rid, workflow="FLOW-009", after=None)       # Reject Application: /roles/[id]/pipeline
