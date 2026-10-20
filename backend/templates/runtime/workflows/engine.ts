@@ -881,8 +881,9 @@ async function executeNode(
         const decisionConfig = (node.data.config || {}) as { rule?: string };
         let ruleRow = null;
         if (decisionConfig.rule) {
-          const { loadRules } = await import("../rules/engine");
-          ruleRow = (await loadRules()).find((r) => String(r.id) === String(decisionConfig.rule)) ?? null;
+          const { loadRules, isRuleSwitchedOff } = await import("../rules/engine");
+          ruleRow = (await loadRules()).find((r) => String(r.id) === String(decisionConfig.rule))
+            ?? (isRuleSwitchedOff(decisionConfig.rule) ? { id: decisionConfig.rule, is_active: false } : null);
         }
         const decisionOut = evaluateDecision(node.data.config || {}, ctx, ruleRow as any);
         logEntry.output = { ...decisionOut, branch: decisionOut.matched ? "then" : "else" };
@@ -892,7 +893,7 @@ async function executeNode(
         // No else-path drawn: a table used to compute values carries on as
         // it always did, whatever matched.
         nextEdges = hasElse ? branchEdges(outgoing, decisionOut.matched) : outgoing;
-        if (decisionOut.skipped && decisionConfig.rule) {
+        if (decisionOut.skipped && decisionConfig.rule && !ruleRow) {
           logEntry.error = `Decision step skipped: ${decisionOut.reason}`;
         }
         break;

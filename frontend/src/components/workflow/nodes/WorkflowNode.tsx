@@ -238,6 +238,8 @@ function getSubtitle(
       // actually an array — otherwise .length throws and blank-screens the editor.
       const dt = config.decisionTable as { hitPolicy?: unknown; rules?: unknown } | undefined;
       if (dt && Array.isArray(dt.rules)) return `${asText(dt.hitPolicy, "F")} · ${dt.rules.length} rules`;
+      // A step running one of the app's business rules, by id.
+      if (typeof config.rule === "string" && config.rule) return `Business rule ${config.rule}`;
       return "Decision table";
     }
     case "wait":

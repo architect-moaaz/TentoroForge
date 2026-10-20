@@ -222,7 +222,7 @@ export function RulesStudio({ projectId, initial }: { projectId: string; initial
       </div>
 
       <RuleSheet projectId={projectId} draft={draft} setDraft={setDraft} views={views} catalogue={catalogue}
-                 model={model} building={building} onSaved={refresh} />
+                 model={model} building={building} onSaved={refresh} onCreated={open} />
     </div>
   );
 }
@@ -307,15 +307,18 @@ function RuleCard({ view, catalogue, onOpen, onToggle, busy }: {
 // The editor
 // ---------------------------------------------------------------------------
 
-function RuleSheet({ projectId, draft, setDraft, views, catalogue, model, building, onSaved }: {
+function RuleSheet({ projectId, draft, setDraft, views, catalogue, model, building, onSaved, onCreated }: {
   projectId: string; draft: Draft | null; setDraft: (d: Draft | null) => void; views: StudioView[];
   catalogue: StudioCatalogue | null; model: ReturnType<typeof editorModel>; building: boolean; onSaved: () => void;
+  onCreated: (v: StudioView) => void;
 }) {
   const [check, setCheck] = useState<CheckAnswer | null>(null);
   const [saveProblems, setSaveProblems] = useState<string[]>([]);
   const [test, setTest] = useState<TestAnswer | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const saved = draft?.id ? views.find((v) => v.rule.id === draft.id) ?? null : null;
+  // Just made: the list is refetching, so the rule is the save's answer until it arrives.
+  const [made, setMade] = useState<StudioView | null>(null);
+  const saved = draft?.id ? views.find((v) => v.rule.id === draft.id) ?? (made?.rule.id === draft.id ? made : null) : null;
   const stale = !!(draft?.id && draft.revision && saved && saved.revision !== draft.revision);
   const gone = !!(draft?.id && !saved);
 
@@ -336,6 +339,19 @@ function RuleSheet({ projectId, draft, setDraft, views, catalogue, model, buildi
     return { enabled: draft.view.enabled };
   }, [draft, model]);
 
+  // A NEW RULE IS NOT SCOLDED BEFORE IT IS WRITTEN. What is missing is said
+  // once the person has started (the draft differs from how it opened) or
+  // tries to save; an existing rule is checked from the start.
+  const opened = useRef<string | null>(null);
+  const [touched, setTouched] = useState(false);
+  useEffect(() => { opened.current = null; setTouched(false); }, [draft?.id, draft?.kind]);
+  useEffect(() => {
+    const now = JSON.stringify(payload);
+    if (opened.current === null) opened.current = now;
+    else if (now !== opened.current) setTouched(true);
+    setSaveProblems([]);   // what a save said is about the draft it was given, not this one
+  }, [payload]);
+
   // Live: checked as the person edits — by the server, with the app's engine.
   const seq = useRef(0);
   useEffect(() => {
@@ -352,8 +368,14 @@ function RuleSheet({ projectId, draft, setDraft, views, catalogue, model, buildi
   const save = useMutation({
     mutationFn: () => draft?.id
       ? api.put(`/api/projects/${projectId}/business-rules/${draft.id}`, { ...payload, revision: draft.revision })
-      : api.post(`/api/projects/${projectId}/business-rules`, payload),
-    onSuccess: () => { toast.success("Saved — in force in your app now."); onSaved(); setDraft(null); },
+      : api.post<{ rule: StudioView }>(`/api/projects/${projectId}/business-rules`, payload),
+    // A new rule stays open, saved: what is next for it is often a workflow.
+    onSuccess: (r) => {
+      onSaved();
+      const made = !draft?.id && (r as { rule?: StudioView } | undefined)?.rule;
+      if (made) { toast.success("Saved — in force in your app now. Run it in a workflow on the right, or close."); setMade(made); onCreated(made); }
+      else { toast.success("Saved — in force in your app now."); setDraft(null); }
+    },
     onError: (e) => {
       setSaveProblems(problemsOf(e));
       toast.error(problemsOf(e)[0] ?? "The rule could not be saved.");
@@ -378,12 +400,17 @@ function RuleSheet({ projectId, draft, setDraft, views, catalogue, model, buildi
     else if (draft.kind === "prerequisite") setDraft({ ...draft, view: { ...draft.view, enabled: on } });
     else setDraft({ ...draft, enabled: on } as Draft);
   };
-  const problems = saveProblems.length ? saveProblems : check?.problems ?? [];
+  const showProblems = !!draft.id || touched || saveProblems.length > 0;
+  const problems = saveProblems.length ? saveProblems : showProblems ? check?.problems ?? [] : [];
   const entityName = draft.kind === "condition_action" ? draft.ca.model_name : draft.kind === "decision_table" ? draft.model : null;
   const fields = (catalogue?.entities.find((e) => e.name === entityName)?.fields) ?? [];
   const asView = { ...(saved ?? {}), kind: draft.kind, entityName, rule: { ...(saved?.rule ?? {}), ...(payload ?? {}) } } as StudioView;
-  const sentence = draft.kind === "condition_action" || draft.kind === "decision_table" ? ruleSentence(asView, catalogue) : null;
+  const sentence = draft.kind === "condition_action" ? ruleSentence(asView, catalogue)
+    : draft.kind === "decision_table" && draft.table.inputs.length + draft.table.outputs.length > 0 ? ruleSentence(asView, catalogue)
+    : null;
   const canSave = !building && !stale && !gone && nameOf.trim().length > 0 && (check ? check.ok : true) && !save.isPending;
+  // Save stays pressable on an untouched new rule: pressing it says what is missing.
+  const saveDisabled = !canSave && (touched || !!draft.id || building || stale || gone);
   const Icon = KIND_ICON[draft.kind] ?? Scale;
 
   return (
@@ -413,7 +440,8 @@ function RuleSheet({ projectId, draft, setDraft, views, catalogue, model, buildi
             )
           )}
           <Button variant="ghost" size="sm" onClick={() => setDraft(null)}><X className="mr-1 h-4 w-4" /> Close</Button>
-          <Button size="sm" onClick={() => save.mutate()} disabled={!canSave} data-testid="save-rule">
+          <Button size="sm" onClick={() => (canSave ? save.mutate() : (setTouched(true), setSaveProblems(check?.problems?.length ? check.problems : ["Give the rule a name."])))}
+                  disabled={saveDisabled} data-testid="save-rule">
             {save.isPending ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Save className="mr-1.5 h-4 w-4" />} Save
           </Button>
         </div>

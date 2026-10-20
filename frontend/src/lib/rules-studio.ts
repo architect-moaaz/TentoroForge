@@ -154,7 +154,7 @@ function actionWords(a: Record<string, any>, cat: StudioCatalogue | null): strin
     case "set_field": return `set ${field} to ${a.valueMode === "formula" ? a.value : quote(a.value)}`;
     case "set_default": return `default ${field} to ${quote(a.value)}`;
     case "clear_field": return `clear ${field}`;
-    case "set_required": return `require ${field}`;
+    case "set_required": return a.required === false ? `stop requiring ${field}` : `require ${field}`;
     case "set_visibility": return `${a.visible === false ? "hide" : "show"} ${field}`;
     case "set_readonly": return `${a.readonly === false ? "unlock" : "lock"} ${field}`;
     case "set_options": return `limit ${field} to ${(a.options ?? []).map((o: any) => o.label ?? o.value).join(", ")}`;
@@ -197,7 +197,8 @@ export function ruleSentence(view: StudioView, cat: StudioCatalogue | null): str
     s += cond === "always" ? ", " : ` and ${cond}, `;
     s += then.length ? then.join(", then ") : "nothing";
     if (otherwise.length) s += `; otherwise ${otherwise.join(", then ")}`;
-    return s + ".";
+    // A quoted message already ends the sentence: “… a note.” — not “… a note.”.
+    return /[.!?]”$/.test(s) ? s : s + ".";
   }
   if (view.kind === "prerequisite") return r.statement || r.name;
   return r.statement || r.name;

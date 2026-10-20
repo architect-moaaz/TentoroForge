@@ -137,6 +137,30 @@ def test_when_it_fires_is_kept_and_projected(app):
     assert any("previous" in a for a in br.advice(_doc(app), {"on": ["create"], "when": "previous.status = 1"}))
 
 
+def test_two_tables_setting_the_same_field_are_two_rules(app):
+    a = br.create(app, TABLE)["rule"]["rule"]
+    other = json.loads(json.dumps(TABLE))
+    other["name"] = "Location by type"
+    other["table"]["inputs"] = [{"name": "employmentType"}]
+    other["table"]["rules"] = [{"inputEntries": ["permanent"], "outputEntries": ["office"]}]
+    b = br.create(app, other)["rule"]["rule"]
+    assert a["id"] != b["id"] and a["statement"] != b["statement"]
+    assert "Location by type" in b["statement"] and "employmentType" in b["statement"]
+
+
+def test_a_rule_made_again_after_removal_keeps_nothing_of_the_removed_one(app):
+    # Same wording -> same id; the removed record's `on` and scope must not come back.
+    first = br.create(app, {**GATE, "statement": "Closed roles take no openings.", "on": ["create"],
+                            "scope": "server"})["rule"]["rule"]
+    br.remove(app, first["id"], expected=None)
+    again = br.create(app, {**GATE, "statement": "Closed roles take no openings."})["rule"]["rule"]
+    assert again["id"] == first["id"]
+    assert "on" not in again and again.get("scope") != "server"
+    assert again["status"] == "PROPOSED"
+    rows = json.loads((app / "app" / "rules" / "blueprint-rules.json").read_text())
+    assert "on" not in next(r for r in rows if r["id"] == again["id"])["config"]
+
+
 # ---- test it -------------------------------------------------------------- #
 
 def test_test_it_runs_the_draft_among_the_records_rules(app):
@@ -197,6 +221,18 @@ def test_a_gate_runs_as_a_step_and_its_refusal_stops_the_workflow(app):
     assert kinds[(key, "create_role")] == "then" and kinds[(key, f"{key}_refused")] == "else"
 
 
+def test_removing_a_rule_takes_it_out_of_every_workflow(app):
+    rid = br.create(app, GATE)["rule"]["rule"]["id"]
+    post, close = _flow(app, POST_ROLE)["steps"], _flow(app, CLOSE_ROLE)["steps"]
+    br.attach(app, rid, workflow=POST_ROLE, after="validate_role_input")
+    br.attach(app, rid, workflow=CLOSE_ROLE, after=None)
+    out = br.remove(app, rid, expected=None)
+    assert sorted(out["workflows"]) == sorted([POST_ROLE, CLOSE_ROLE])
+    assert _flow(app, POST_ROLE)["steps"] == post and _flow(app, CLOSE_ROLE)["steps"] == close
+    for f in (app / "app" / "src" / "lib" / "workflows" / "definitions").glob("*.json"):
+        assert rid not in f.read_text(), f"{f.name} still runs the removed rule"
+
+
 def test_placing_it_again_moves_it_and_detaching_restores_the_workflow(app):
     rid = br.create(app, GATE)["rule"]["rule"]["id"]
     original = _flow(app, POST_ROLE)["steps"]
@@ -251,3 +287,18 @@ def test_the_catalogue_lists_each_workflows_steps(app):
     flows = br.read(app)["catalogue"]["workflows"]
     post = next(w for w in flows if w["id"] == POST_ROLE)
     assert [s["key"] for s in post["steps"]][:3] == ["validate_role_input", "show_role_validation_errors", "create_role"]
+
+
+def test_a_second_rule_setting_the_same_field_is_warned_about(app):
+    first = br.create(app, TABLE)["rule"]["rule"]
+    other = {"name": "Remote when many", "kind": "condition_action", "entity": ROLE, "when": "openingsCount > 5",
+             "then": [{"type": "set_field", "field": "location", "value": "remote"}]}
+    said = br.try_rule(app, other)["advice"]
+    assert any(first["id"] in a and "location" in a for a in said)
+    # Not about itself, once saved.
+    assert not any(first["id"] in a for a in br.try_rule(app, TABLE, rule_id=first["id"])["advice"])
+
+
+def test_every_fault_is_said_at_once(app):
+    said = br.try_rule(app, {**GATE, "when": "openingsCount >", "then": []})["problems"]
+    assert any("Add at least one thing" in p for p in said) and any("cannot be read" in p for p in said)

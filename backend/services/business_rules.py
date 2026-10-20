@@ -422,7 +422,28 @@ def advice(doc: dict, rule: dict) -> list[str]:
     if on == ["create"] and "previous." in str(rule.get("when") or ""):
         out.append("It fires only when a record is created, when there is no previous value — "
                    "a condition on “previous” never holds then.")
+    # Two rules setting one field: on a save where both act, one value is lost.
+    mine = _sets(rule)
+    if mine and rule.get("entity"):
+        for other in _live(doc.get("businessRules")):
+            if (str(other.get("id")) == str(rule.get("id")) or other.get("enabled") is False
+                    or str(other.get("entity") or "") != str(rule["entity"])):
+                continue
+            both = sorted(mine & _sets(other))
+            if both:
+                fields = ", ".join(re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", f).lower() for f in both)
+                out.append(f"{other.get('id')} “{other.get('name')}” also sets {fields}: on a save where both act, "
+                           "only one value is kept. Merge them, or give them conditions that never hold together.")
     return out
+
+
+def _sets(rule: dict) -> set[str]:
+    """The fields a rule writes: a table's outputs, or the values its actions set."""
+    if (rule.get("kind") or "") == "decision_table":
+        return {str(c.get("name")) for c in (rule.get("table") or {}).get("outputs") or [] if c.get("name")}
+    return {str(a.get("field")) for a in list(rule.get("then") or []) + list(rule.get("otherwise") or [])
+            if isinstance(a, dict) and a.get("field")
+            and a.get("type") in ("set_field", "set_default", "clear_field")}
 
 
 def check(doc: dict, rule: dict) -> list[str]:
@@ -456,6 +477,15 @@ def check(doc: dict, rule: dict) -> list[str]:
         # something on one side.
         if not acts:
             problems.append("Add at least one thing the rule does — when its condition holds, or otherwise.")
+        # Read by the engine's own parser now, beside whatever else is wrong —
+        # not only once the rest is right.
+        when = str(rule.get("when") or "").strip()
+        if when and when != "true":
+            from services.blueprint.feel_check import check_expressions
+            bad = check_expressions([("when", when)]).get("when")
+            if bad:
+                problems.append(f"The condition “{when[:160]}” cannot be read: {bad}. Conditions are written like "
+                                "amount > 5000 and category = \"travel\" (= not ==, and/or/not).")
         if ent is not None:
             unknown = sorted(n for n in _condition_fields(str(rule.get("when") or "")) if n not in readable)
             if unknown:
@@ -527,8 +557,14 @@ def _describe(rule: dict, doc: dict) -> str:
     back, by a person or by Smith."""
     ent = (_entities(doc).get(str(rule.get("entity") or "")) or {}).get("name") or "the record"
     if rule.get("kind") == "decision_table":
-        outs = ", ".join(str(c.get("name")) for c in (rule.get("table") or {}).get("outputs") or [])
-        return f"{ent}: {outs or 'values'} decided by a table of conditions."
+        # The sentence is the rule's identity too (its id is keyed on it): two
+        # tables setting the same field are told apart by what they read and
+        # by their name, or the second would be refused as the first.
+        t = rule.get("table") or {}
+        outs = ", ".join(str(c.get("name")) for c in t.get("outputs") or [])
+        ins = ", ".join(str(c.get("name")) for c in t.get("inputs") or [])
+        named = f" (“{rule['name']}”)" if rule.get("name") else ""
+        return f"{ent}: {outs or 'values'} decided from {ins or 'nothing'} by a table{named}."
     effects = []
     for a in rule.get("then") or []:
         t, f = a.get("type"), a.get("field")
@@ -761,8 +797,10 @@ def create(output_dir: str | Path, payload: dict, *, actor: str = "") -> dict:
         _ensure_registry(svc)
         stored = svc.upsert("businessRules", rule, natural_key=prose_key("RULE", rule["statement"]))
         # The same wording as a rule removed before is the same id, merged
-        # onto that record — not onto why it was removed.
-        stored.pop("syncNote", None)
+        # onto that record. A new rule is what was sent: nothing of the
+        # removed one survives (its `on`, `when`, scope, why it was removed).
+        for k in [k for k in stored if k not in rule and k != "id"]:
+            stored.pop(k)
         version = _commit(svc, before, f"Business Rules tab: add “{rule['name']}”"
                           + (f" (by {actor})" if actor else ""),
                           f"Added {stored['id']} in the Business Rules tab", [str(stored["id"])])
@@ -845,12 +883,23 @@ def remove(output_dir: str | Path, rule_id: str, *, expected: str | None, actor:
                 r["status"] = "DEPRECATED"
                 r["syncNote"] = "removed in the Business Rules tab"
                 retire_asks(svc.doc, r, f"its rule {rule_id} was removed in the Business Rules tab")
+        # A step running a rule that is gone never passes (it takes the
+        # refusal path), so the rule leaves every workflow it was a step of —
+        # whoever put it there, under whatever key.
+        flows = []
+        for flow in _live(svc.doc.get("workflows")):
+            keys = [s.get("key") for s in flow.get("steps") or [] if isinstance(s, dict)
+                    and s.get("type") == "decision" and str((s.get("config") or {}).get("rule") or "") == str(rule_id)]
+            if [k for k in keys if _detach_in(flow, k)]:
+                flows.append(str(flow.get("id")))
+        if flows:
+            svc.validate()
         version = _commit(svc, before, f"Business Rules tab: remove “{current.get('name')}”"
                           + (f" (by {actor})" if actor else ""),
-                          f"Removed {rule_id} in the Business Rules tab", [str(rule_id)])
-        files = _project(svc, prerequisites=current.get("kind") == "prerequisite")
+                          f"Removed {rule_id} in the Business Rules tab", [str(rule_id), *flows])
+        files = _project(svc, prerequisites=current.get("kind") == "prerequisite" or bool(flows))
         logger.info("[rules] %s: removed %s in the tab", Path(output_dir).name, rule_id)
-        return {"removed": rule_id, "version": version, "files": files}
+        return {"removed": rule_id, "version": version, "files": files, "workflows": flows}
 
 
 def try_rule(output_dir: str | Path, payload: dict, *, rule_id: str | None = None) -> dict:

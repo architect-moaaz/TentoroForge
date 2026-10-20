@@ -48,7 +48,16 @@ const RULES_RECHECK_MS = 1000;
  * Load rules from a directory or in-memory array.
  * Generated apps typically read from /rules/index.json at boot.
  */
+/** Rules switched off, by id: a workflow step running one carries on (it
+ * does not apply), where a step naming a rule the app does not have at all
+ * never passes. */
+let rulesOff = new Set<string>();
+export function isRuleSwitchedOff(id: unknown): boolean {
+  return rulesOff.has(String(id));
+}
+
 export function setRules(rules: ProjectRule[]): void {
+  rulesOff = new Set(rules.filter((r) => !isRuleActive(r)).map((r) => String(r.id)));
   ruleCache = rules;
   rulesLoaded = true;
   rulesPinned = true;
@@ -146,10 +155,12 @@ export async function loadRules(rulesDir?: string): Promise<ProjectRule[]> {
         }
         if (loadedAny) break;
       }
+      rulesOff = new Set(rules.filter((r) => !isRuleActive(r)).map((r) => String(r.id)));
       ruleCache = rules.filter(isRuleActive);
       rulesStamp = stamp;
     } catch {
       ruleCache = [];
+      rulesOff = new Set();
     }
   }
 

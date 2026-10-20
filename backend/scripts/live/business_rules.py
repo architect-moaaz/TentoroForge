@@ -13,6 +13,7 @@ Everything made here is removed at the end.
 from __future__ import annotations
 
 import json
+import re
 import sys
 import time
 import uuid
@@ -49,9 +50,17 @@ def calculator(B, org: str) -> str:
     return p["id"]
 
 
+def sweep(B) -> None:
+    """Rules an interrupted run left behind (named "… <6 hex>"), so this run starts clean."""
+    for v in B.get(f"/api/projects/{EXPENSE_DESK}/business-rules").json()["rules"]:
+        if v["origin"] == "editor" and re.search(r" [0-9a-f]{6}$", v["rule"]["name"]):
+            B.delete(f"/api/projects/{EXPENSE_DESK}/business-rules/{v['rule']['id']}")
+
+
 def main() -> None:
     tok, org = builder_token()
     B = client(tok)
+    sweep(B)
 
     # ---- an app with no records -------------------------------------------
     calc = calculator(B, org)
@@ -159,6 +168,18 @@ def main() -> None:
     graph = json.loads((out / "src" / "lib" / "workflows" / "definitions" / "log-an-expense.json").read_text())
     check(det.status_code == 200 and key not in {n["id"] for n in graph["definition"]["nodes"]}, "W  taken out again, the workflow is as it was")
 
+    # Approve carries the record as one variable (expense.amount): the rule reads it there.
+    att = B.post(f"/api/projects/{EXPENSE_DESK}/business-rules/{gate_id}/workflows", json={"workflow": "FLOW-002"})
+    check(att.status_code == 200, "W  the gate is a step of Approve too")
+    time.sleep(1.5)
+    desk = {"id": lunch, "title": f"Desk {TAG}", "amount": 3600, "category": "office", "status": "submitted"}
+    r = S.post(f"{APP}/api/workflows/approve/execute", json={"input": {"expense": desk}})
+    check(r.status_code == 422 and r.json().get("error") == msg,
+          f"W  approving expense.amount 3600 of office is refused by the rule ({r.status_code})")
+    r = S.post(f"{APP}/api/workflows/approve/execute", json={"input": {"expense": {**desk, "category": "travel"}}})
+    check(r.status_code == 200 and key in [s["nodeId"] for s in r.json().get("log") or []],
+          f"W  a travel one is approved through the step ({r.status_code})")
+
     # ---- off, and away --------------------------------------------------------------
     v = next(x for x in B.get(f"/api/projects/{EXPENSE_DESK}/business-rules").json()["rules"] if x["rule"]["id"] == gate_id)
     check(B.patch(f"/api/projects/{EXPENSE_DESK}/business-rules/{gate_id}/enabled",
@@ -166,8 +187,12 @@ def main() -> None:
     time.sleep(2.5)
     r = S.post(f"{APP}/api/data/expenses", json={"title": f"Chair {TAG}", "amount": 3500, "category": "office"})
     check(r.status_code == 201, "O  off, the app saves what it refused")
+    a = S.post(f"{APP}/api/workflows/approve/execute", json={"input": {"expense": desk}})
+    check(a.status_code == 200, f"O  off, its step in Approve lets the run through ({a.status_code})")
     for rid in (gate_id, table_id):
         B.delete(f"/api/projects/{EXPENSE_DESK}/business-rules/{rid}")
+    approve = (out / "src" / "lib" / "workflows" / "definitions" / "approve.json").read_text()
+    check(gate_id not in approve and key not in approve, "O  removed, it is out of Approve too")
     for rec in (lunch, r.json().get("id")):
         if rec:
             S.delete(f"{APP}/api/data/expenses/{rec}")

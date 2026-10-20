@@ -76,7 +76,7 @@ export function WorkflowsPanel({ projectId, view, catalogue, onChanged, unsaved 
 
       {u.saves.length > 0 && (
         <div className="space-y-1">
-          <p className="flex items-center gap-1.5 font-medium"><ShieldCheck className="h-3.5 w-3.5 text-emerald-600" /> Also checked whenever these save {view.entityName ? `a ${view.entityName}` : "the record"}</p>
+          <p className="flex items-center gap-1.5 font-medium"><ShieldCheck className="h-3.5 w-3.5 text-emerald-600" /> Also checked whenever these save {view.entityName ? `${/^[aeiou]/i.test(view.entityName) ? "an" : "a"} ${view.entityName}` : "the record"}</p>
           <p className="text-muted-foreground">{u.saves.map((s) => s.name).join(" · ")}</p>
         </div>
       )}

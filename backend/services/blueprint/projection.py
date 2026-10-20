@@ -5290,15 +5290,17 @@ def project_business_rules(doc: dict, app_root: str | Path) -> dict[str, Any]:
     bound to its entity by NAME (what the engine matches; it also accepts the
     table/URL spelling). Prose rules (`statement`) constrain people, not
     records, and prerequisites are written into the workflows they gate.
-    Retired (DEPRECATED) and switched-off (`enabled: false`) rules are left
-    out — a rule off in the Business Rules tab is off in the app.
+    Retired (DEPRECATED) rules are left out; a switched-off (`enabled:
+    false`) rule is written by name only, inactive — off in the app, and
+    known there as off (see `switched_off_rule_rows`).
 
     Mirrored into ``src/rules/`` beside the editor's ``index.json``: a
     serverless deployment reads that copy (the root ``rules/`` is not traced),
     and the loader reads ONE directory, so both must hold every file. Always
     written, so an empty file and a never-run projection stay distinguishable.
     """
-    rows = business_rule_rows(doc)
+    active = business_rule_rows(doc)
+    rows = active + switched_off_rule_rows(doc)
     text = json.dumps(rows, indent=2)
     files = []
     for rel in ("rules", "src/rules"):
@@ -5306,7 +5308,26 @@ def project_business_rules(doc: dict, app_root: str | Path) -> dict[str, Any]:
         out.mkdir(parents=True, exist_ok=True)
         (out / "blueprint-rules.json").write_text(text, "utf-8")
         files.append(f"{rel}/blueprint-rules.json")
-    return {"files": files, "rules": len(rows)}
+    return {"files": files, "rules": len(active)}
+
+
+def switched_off_rule_rows(doc: dict) -> list[dict]:
+    """A rule switched off, by name only (`is_active: false`, no condition):
+    every check of the engine passes it by, and a workflow step that runs it
+    can tell "off — it does not apply, carry on" from "gone — a broken
+    definition, never a yes"."""
+    entities = {str(e.get("id")): e for e in (doc.get("data") or {}).get("entities") or []}
+    rows = []
+    for rule in doc.get("businessRules") or []:
+        if (not isinstance(rule, dict) or rule.get("status") in ("DEPRECATED", "SUPERSEDED", "REJECTED")
+                or rule.get("enabled") is not False or not rule.get("entity")
+                or rule.get("kind") not in ("condition_action", "decision_table")):
+            continue
+        model = (entities.get(str(rule["entity"])) or {}).get("name") or str(rule["entity"])
+        rows.append({"id": rule.get("id"), "name": rule.get("name") or rule.get("id"), "model_name": model,
+                     "field_name": None, "is_active": False, "source": "blueprint",
+                     "rule_type": rule.get("kind"), "config": {"source": "blueprint"}})
+    return rows
 
 
 def business_rule_rows(doc: dict) -> list[dict]:

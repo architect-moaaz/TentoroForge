@@ -152,10 +152,11 @@ def test_switched_off_a_rule_is_kept_but_out_of_the_app(app):
     rid = made["rule"]["id"]
     off = br.set_enabled(app, rid, False, expected=made["revision"])["rule"]
     assert off["runs"] == "nowhere" and off["enabled"] is False
-    assert all(r["id"] != rid for r in _app_rules(app))
+    # In the app by name only, inactive: never applied, known to be off.
+    assert [(r["is_active"], r["config"]) for r in _app_rules(app) if r["id"] == rid] == [(False, {"source": "blueprint"})]
     assert any(v["rule"]["id"] == rid for v in br.read(app)["rules"]), "still listed"
     on = br.set_enabled(app, rid, True, expected=off["revision"])["rule"]
-    assert on["runs"] == "everywhere" and any(r["id"] == rid for r in _app_rules(app))
+    assert on["runs"] == "everywhere" and any(r["id"] == rid and r["is_active"] for r in _app_rules(app))
 
 
 def test_removed_a_rule_is_retired_in_history_and_gone_from_the_app(app):
@@ -508,7 +509,9 @@ def test_the_projection_leaves_out_what_is_off_or_retired_and_mirrors_for_server
     ]
     out = project_business_rules(doc, app / "app")
     assert out["rules"] == 1 and out["files"] == ["rules/blueprint-rules.json", "src/rules/blueprint-rules.json"]
-    assert [r["id"] for r in _app_rules(app)] == ["RULE-901"] == [r["id"] for r in _app_rules(app, "src/rules")]
+    rows = [(r["id"], r["is_active"]) for r in _app_rules(app)]
+    assert rows == [("RULE-901", True), ("RULE-902", False)] == [(r["id"], r["is_active"]) for r in _app_rules(app, "src/rules")]
+    assert "whenFeel" not in _app_rules(app)[1]["config"], "an off rule carries no condition"
 
 
 def test_the_contract_accepts_every_field_the_tab_writes(app):

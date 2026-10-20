@@ -105,13 +105,33 @@ recorded.length = 0;
 r = await engine.executeWorkflow(flow("RULE-020", false), { amount: -5 }, { id: "u" });
 eqJson([outcome(r), recorded.length], ["completed", 1], "computes nothing, and the workflow goes on");
 
-console.log("a rule that is gone or off never passes as a yes");
+console.log("the record carried as one variable (expense.amount) is what the rule reads");
+recorded.length = 0;
+engine.registerActionHandler("db_insert", async (cfg: any, ctx: any) => {
+  const e = ctx.variables.expense as any;
+  recorded.push({ approver: ctx.variables.approver, recordApprover: e?.approver, flagged: e?.flagged });
+  return { id: "x-1" };
+});
+r = await engine.executeWorkflow(flow("RULE-023"), { expense: { amount: 9000 } }, { id: "u" });
+eqJson([outcome(r), recorded.length], ["refused", 0], "a gate on expense.amount refuses 9000 without a note");
+r = await engine.executeWorkflow(flow("RULE-023"), { expense: { amount: 9000, managerNote: "ok" } }, { id: "u" });
+eqJson([outcome(r), recorded.length], ["completed", 1], "and lets it through with one");
+r = await engine.executeWorkflow(flow("RULE-020"), { expense: { amount: 7000 } }, { id: "u" });
+eqJson([recorded[1]?.approver, recorded[1]?.recordApprover], ["cfo", "cfo"], "a table's value is the run's and the record's");
+r = await engine.executeWorkflow(flow("RULE-024"), { record: { amount: 2000 } }, { id: "u" });
+eqJson([outcome(r)], ["completed"], "`record` is the record too");
+eqJson((await import("../workflows/decision.ts") as any).recordIn({ expense_item: { a: 1 } }, "ExpenseItem"), { a: 1 },
+       "a two-word record is found by its snake name");
+
+console.log("a rule that is gone never passes as a yes; one switched off does not apply");
 recorded.length = 0;
 r = await engine.executeWorkflow(flow("RULE-404"), { amount: 1 }, { id: "u" });
 eqJson([outcome(r), recorded.length], ["refused", 0], "a missing rule takes the else-path");
 const step = (r.log || []).find((l: any) => l.nodeId === "check");
 eqJson(String(step?.error || "").includes("RULE-404"), true, "and the log names it");
 r = await engine.executeWorkflow(flow("RULE-022"), { amount: 1 }, { id: "u" });
-eqJson([outcome(r), recorded.length], ["refused", 0], "a switched-off rule too");
+eqJson([outcome(r), recorded.length], ["completed", 1], "a switched-off rule lets the run through");
+const off = (r.log || []).find((l: any) => l.nodeId === "check");
+eqJson([off?.output?.skipped, Boolean(off?.error)], [true, false], "logged as skipped, not as an error");
 
 done("workflow-runs-a-business-rule");

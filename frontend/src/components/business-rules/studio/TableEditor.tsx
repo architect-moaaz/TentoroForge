@@ -98,7 +98,7 @@ export function TableEditor({
                                   side === "inputs" ? "bg-sky-50/70 dark:bg-sky-950/30" : "bg-emerald-50/70 dark:bg-emerald-950/30")}>
       <div className="flex items-center gap-1">
         <span className="truncate text-xs" title={c.field}>{humanField(c.field)}</span>
-        <span className="rounded bg-background/70 px-1 text-[10px] text-muted-foreground">{c.values?.length ? "list" : c.type}</span>
+        <span className="rounded bg-background/70 px-1 text-[10px] text-muted-foreground">{c.values?.length ? `${c.values.length} choices` : c.type}</span>
         {!disabled && (
           <button type="button" onClick={() => removeColumn(side, i)} aria-label={`Remove ${c.field}`}
                   className="ml-auto text-muted-foreground hover:text-destructive"><X className="h-3 w-3" /></button>
@@ -117,6 +117,7 @@ export function TableEditor({
           value={v}
           disabled={disabled}
           onChange={(e) => setCell(ri, side, ci, e.target.value)}
+          onFocus={(e) => { if (e.target.value === "-") e.target.select(); }}
           list={listId}
           placeholder={side === "inputs" ? "-" : c.values?.[0] ?? "value"}
           aria-label={`Row ${ri + 1}, ${c.field}`}
@@ -223,7 +224,7 @@ export function TableEditor({
                     {t.inputs.map((c, ci) => cell(ri, "inputs", ci, c))}
                     {t.outputs.map((c, ci) => cell(ri, "outputs", ci, c))}
                     <td className="border-b border-r p-0">
-                      <input value={r.note ?? ""} disabled={disabled} placeholder="why"
+                      <input value={r.note ?? ""} disabled={disabled} placeholder="why" aria-label={`Row ${n}, note`}
                              onChange={(e) => set({ rows: t.rows.map((x, i) => (i === ri ? { ...x, note: e.target.value } : x)) })}
                              className="h-9 w-full min-w-[120px] bg-transparent px-2 text-xs outline-none focus:bg-background" />
                     </td>

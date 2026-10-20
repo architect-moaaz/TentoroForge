@@ -28,6 +28,11 @@ describe("a rule read as a sentence", () => {
       .toBe("When an Expense is created, default status to “submitted”.");
     expect(ruleSentence(view({ on: ["update"], when: "true", then: [] }), cat)).toContain("is updated");
   });
+  it("says a requirement released as released", () => {
+    expect(ruleSentence(view({ when: "amount > 5000", then: [{ type: "set_required", field: "managerNote", required: true }],
+                               otherwise: [{ type: "set_required", field: "managerNote", required: false }] }), cat))
+      .toBe("When an Expense is saved and amount is more than 5000, require manager note; otherwise stop requiring manager note.");
+  });
   it("keeps a condition it cannot put in words as written", () => {
     expect(whenWords("string length(title) > 3")).toBe("“string length(title) > 3”");
     expect(whenWords("")).toBe("always");
@@ -71,5 +76,16 @@ describe("small words", () => {
     expect(coerceSample("true", "boolean")).toBe(true);
     expect(coerceSample("  ", "string")).toBeNull();
     expect(coerceSample("travel", "string")).toBe("travel");
+  });
+});
+
+describe("a condition row with no field chosen", () => {
+  it("says nothing, so it cannot make a rule that never fires", async () => {
+    const { conditionToFeel } = await import("@/lib/condition-to-feel");
+    const blank = { id: "b", field: "", operator: "equals" as const, value: "" };
+    const amount = { id: "a", field: "amount", operator: "gt" as const, value: "200" };
+    expect(conditionToFeel({ id: "g", logic: "AND", conditions: [amount, blank] } as any, { amount: "number" } as any)).toBe("amount > 200");
+    expect(conditionToFeel({ id: "g", logic: "AND", conditions: [blank, blank] } as any)).toBe("true");
+    expect(conditionToFeel(blank as any)).toBe("true");
   });
 });

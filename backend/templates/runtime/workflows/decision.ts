@@ -40,6 +40,8 @@ export interface RuleRow {
   id?: string;
   name?: string;
   rule_type?: string;
+  /** The record it is about (Expense): where its fields are found in a run. */
+  model_name?: string | null;
   is_active?: boolean;
   config?: Record<string, unknown>;
 }
@@ -71,23 +73,54 @@ function write(ctx: DecisionContext, outputs: Record<string, unknown>, mapping: 
   }
 }
 
-function runTable(table: DecisionTableDef, ctx: DecisionContext, mapping: Record<string, string>): DecisionResult {
+/**
+ * The rule's record inside a run. A rule reads its record's fields by name
+ * (`amount`); a workflow often carries the record as one variable
+ * (`expense.amount`, after a load step or from the screen that started it).
+ * The record is the variable named for it — expense, Expense, expense_item —
+ * or `record`; with none, the fields are the run's own variables.
+ */
+export function recordIn(vars: Record<string, unknown>, model?: string | null): Record<string, unknown> | null {
+  const m = String(model || "").trim();
+  const names = m ? [m.charAt(0).toLowerCase() + m.slice(1), m, m.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase()] : [];
+  for (const n of [...names, "record"]) {
+    const v = vars[n];
+    if (v && typeof v === "object" && !Array.isArray(v)) return v as Record<string, unknown>;
+  }
+  return null;
+}
+
+/** What a rule sees: the run's variables, with its record's fields by name on top. */
+function scopeFor(ctx: DecisionContext, record: Record<string, unknown> | null): Record<string, unknown> {
+  return record ? { ...ctx.variables, ...record } : ctx.variables;
+}
+
+/** A value a rule sets is the record's too, so the steps after it see `expense.managerNote`. */
+function writeRecord(record: Record<string, unknown> | null, outputs: Record<string, unknown>) {
+  if (!record) return;
+  for (const [name, val] of Object.entries(outputs)) if (val !== undefined) record[name] = val;
+}
+
+function runTable(table: DecisionTableDef, ctx: DecisionContext, mapping: Record<string, string>,
+                  record: Record<string, unknown> | null = null): DecisionResult {
   const policy = normalizeHitPolicy(table.hitPolicy);
-  const r = evaluateTable(table, ctx.variables);
+  const vars = scopeFor(ctx, record);
+  const r = evaluateTable(table, vars);
   let outputs: DecisionResult["outputs"] = r.outputs;
   // Collect without an aggregation: one outcome per matched row, as before.
   if (policy === "C" && !table.aggregation) {
     outputs = r.used.map((ri) => {
       const o: Record<string, unknown> = {};
       (table.outputs || []).forEach((col, ci) => {
-        const v = outputValue((table.rules || [])[ri]?.outputEntries?.[ci], ctx.variables);
+        const v = outputValue((table.rules || [])[ri]?.outputEntries?.[ci], vars);
         if (v !== undefined) o[String(col.variableBinding || col.name)] = v;
       });
       return o;
     });
-    if (outputs.length) write(ctx, outputs[0], mapping);
+    if (outputs.length) { write(ctx, outputs[0], mapping); writeRecord(record, outputs[0]); }
   } else {
     write(ctx, r.outputs, mapping);
+    writeRecord(record, r.outputs);
   }
   return {
     fired: r.used.length,
@@ -101,9 +134,9 @@ function runTable(table: DecisionTableDef, ctx: DecisionContext, mapping: Record
 
 /**
  * Run the step. `rule` is the app's rule named by `config.rule`, looked up by
- * the caller (the engine reads the app's rules files); a step that names a
- * rule which is gone or switched off is skipped and says so — it never
- * silently passes as if the rule had said yes.
+ * the caller (the engine reads the app's rules files). A step naming a rule
+ * that is gone is skipped and takes the else-path — it never passes as if the
+ * rule had said yes; a rule switched off does not apply, so the run goes on.
  */
 export function evaluateDecision(
   config: DecisionNodeConfig,
@@ -116,19 +149,24 @@ export function evaluateDecision(
       return { fired: 0, hitPolicy: "first", outputs: {}, matched: false, skipped: true, rule: config.rule,
                reason: `the business rule ${config.rule} is not in this app` };
     }
+    // Switched off is "the rule does not apply" — on a save and here alike:
+    // the step lets the run through. (Gone is different: a broken
+    // definition, which never passes as a yes.)
     if (rule.is_active === false) {
-      return { fired: 0, hitPolicy: "first", outputs: {}, matched: false, skipped: true, rule: config.rule,
+      return { fired: 0, hitPolicy: "first", outputs: {}, matched: true, skipped: true, rule: config.rule,
                reason: `the business rule ${rule.name || config.rule} is switched off` };
     }
     const cfg = (rule.config || {}) as Record<string, any>;
+    const record = recordIn(ctx.variables, rule.model_name);
     if (rule.rule_type === "decision_table" && cfg.table) {
-      return { ...runTable(cfg.table as DecisionTableDef, ctx, mapping), rule: config.rule };
+      return { ...runTable(cfg.table as DecisionTableDef, ctx, mapping, record), rule: config.rule };
     }
+    const vars = scopeFor(ctx, record);
     // A condition rule: its condition is the branch; a value it sets is
     // written for the steps after; its refusal message travels with the run.
     let held = false;
     try {
-      held = Boolean(evaluateExpression(String(cfg.whenFeel || "true"), ctx.variables as any));
+      held = Boolean(evaluateExpression(String(cfg.whenFeel || "true"), vars as any));
     } catch (err) {
       throw new Error(`[decision] the condition of ${rule.name || config.rule} could not be read: ${(err as Error).message}`);
     }
@@ -145,14 +183,15 @@ export function evaluateDecision(
     let message: string | undefined;
     for (const a of acts || []) {
       if ((a.type === "set_field" || a.type === "set_default") && a.field) {
-        if (a.type === "set_default" && ctx.variables[a.field as string] != null && ctx.variables[a.field as string] !== "") continue;
+        if (a.type === "set_default" && vars[a.field as string] != null && vars[a.field as string] !== "") continue;
         outputs[a.field as string] = a.valueMode === "formula" || a.valueMode === "field"
-          ? evaluateExpression(String(a.value ?? ""), ctx.variables as any)
+          ? evaluateExpression(String(a.value ?? ""), vars as any)
           : outputValue(a.value, {});
       }
       if (a.type === "show_error" && a.message) message = String(a.message);
     }
     write(ctx, outputs, mapping);
+    writeRecord(record, outputs);
     const passes = isGate ? !refusedNow : held;
     return { fired: held ? 1 : 0, hitPolicy: "first", outputs, matched: passes, rule: config.rule,
              ...(message && refusedNow ? { message } : {}) };
