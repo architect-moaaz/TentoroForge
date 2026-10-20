@@ -96,6 +96,8 @@ class AttachPayload(BaseModel):
     #: The step it comes after; omitted, at the start.
     after: str | None = Field(default=None, max_length=120)
     on_refusal: str = Field(default="stop", pattern="^(stop|continue)$")
+    #: After a yes/no step: its yes path (then) or its no path (else).
+    path: str = Field(default="then", pattern="^(then|else)$")
 
 
 class EnabledPayload(BaseModel):
@@ -239,7 +241,7 @@ async def attach_business_rule(project_id: uuid.UUID, rule_id: str, req: AttachP
     """Run the rule as a step of a workflow, after a step of it."""
     project = await get_project_with_auth(project_id, user, db)
     try:
-        return await asyncio.to_thread(rules.attach, _dir(project), rule_id, workflow=req.workflow,
+        return await asyncio.to_thread(rules.attach, _dir(project), rule_id, workflow=req.workflow, path=req.path,
                                        after=req.after, on_refusal=req.on_refusal, actor=user.name or "")
     except Exception as exc:  # noqa: BLE001
         raise _fail(exc) from exc

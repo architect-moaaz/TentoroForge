@@ -32,7 +32,8 @@ export function WorkflowsPanel({ projectId, view, catalogue, onChanged, unsaved 
 
   const attach = useMutation({
     mutationFn: () => api.post(`/api/projects/${projectId}/business-rules/${rule!.id}/workflows`, {
-      workflow: flow, after: after === "__start" ? null : after, on_refusal: onRefusal,
+      workflow: flow, after: after === "__start" ? null : after.split("|")[0],
+      path: after.endsWith("|else") ? "else" : "then", on_refusal: onRefusal,
     }),
     onSuccess: () => {
       toast.success("It runs in that workflow now — in your app at once.");
@@ -101,7 +102,11 @@ export function WorkflowsPanel({ projectId, view, catalogue, onChanged, unsaved 
               <select aria-label="After step" value={after} onChange={(e) => setAfter(e.target.value)}
                       className="h-8 w-full rounded-md border bg-background px-2">
                 <option value="__start">at the start</option>
-                {steps.map((s) => <option key={s.key} value={s.key}>after “{s.name}”</option>)}
+                {steps.flatMap((s) => ["condition", "decision", "exclusive_gateway"].includes(String(s.type))
+                  // A yes/no step has two ways on: the check goes on one of them.
+                  ? [<option key={`${s.key}|then`} value={`${s.key}|then`}>after “{s.name}” — when yes</option>,
+                     <option key={`${s.key}|else`} value={`${s.key}|else`}>after “{s.name}” — when no</option>]
+                  : [<option key={s.key} value={s.key}>after “{s.name}”</option>])}
               </select>
             </label>
             {isGate ? (

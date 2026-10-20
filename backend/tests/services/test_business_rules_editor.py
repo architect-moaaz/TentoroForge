@@ -533,3 +533,14 @@ def test_collect_totals_fill_numbers_and_any_rows_agree(app):
     assert any("must agree" in p or "needs them to agree" in p for p in _said(app, t))
     t["table"]["rules"][1]["outputEntries"] = ["office"]
     assert _said(app, t) == []
+
+
+def test_after_a_yes_no_step_the_check_goes_on_the_path_chosen(app):
+    rid = br.create(app, GATE)["rule"]["rule"]["id"]
+    key = br._step_key(rid)
+    br.attach(app, rid, workflow=POST_ROLE, after="validate_role_input", path="else")
+    steps = {s["key"]: s for s in _flow(app, POST_ROLE)["steps"]}
+    assert steps["validate_role_input"]["next"] == ["create_role", key]
+    assert steps[key]["next"][0] == "show_role_validation_errors"
+    with pytest.raises(br.RuleError, match="yes or its no"):
+        br.attach(app, rid, workflow=POST_ROLE, after="validate_role_input", path="maybe")

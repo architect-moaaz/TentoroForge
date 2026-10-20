@@ -1660,7 +1660,7 @@ def _refusal_message(rule: dict) -> str:
 
 
 def attach(output_dir: str | Path, rule_id: str, *, workflow: str, after: str | None,
-           on_refusal: str = "stop", actor: str = "") -> dict:
+           on_refusal: str = "stop", actor: str = "", path: str = "then") -> dict:
     """Run a rule as a step of a workflow, after the step `after` (None: at
     the start). A rule that can refuse becomes a gate: with ``on_refusal ==
     "stop"`` its else-path ends the workflow, refused, with the rule's own
@@ -1671,6 +1671,8 @@ def attach(output_dir: str | Path, rule_id: str, *, workflow: str, after: str | 
     from services.blueprint.service import BlueprintService
     if on_refusal not in ("stop", "continue"):
         raise RuleError("Say whether a refusal stops the workflow or it carries on.")
+    if path not in ("then", "else"):
+        raise RuleError("After a yes/no step, say whether the check goes on its yes or its no path.")
     _guard_writable(output_dir)
     with write_lock(output_dir, timeout=TAB_LOCK_WAIT):
         _refuse_if_building(output_dir)
@@ -1719,10 +1721,18 @@ def attach(output_dir: str | Path, rule_id: str, *, workflow: str, after: str | 
             follow = first
             steps.insert(at, step)
         else:
+            # After a yes/no step, on the path chosen: its yes (first) or no (second) way out.
             prev = by_key[after]
             pnext = list(prev.get("next") or [])
-            follow = pnext[0] if pnext else None
-            prev["next"] = [key] + pnext[1:]
+            idx = 1 if path == "else" else 0
+            if idx == 1 and len(pnext) < 2:
+                raise RuleError(f"“{prev.get('name') or after}” has no “no” path to put the check on.")
+            follow = pnext[idx] if len(pnext) > idx else None
+            if pnext:
+                pnext[idx] = key
+            else:
+                pnext = [key]
+            prev["next"] = pnext
             steps.insert(steps.index(prev) + 1, step)
         if follow is None:
             # The step handed to the workflow's end; make that end explicit.
