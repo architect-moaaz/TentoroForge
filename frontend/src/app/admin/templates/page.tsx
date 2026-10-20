@@ -6,7 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { formatDate, STATUS_LABEL, type TemplateCardData, type TemplateStatus } from "@/lib/templateGallery";
+import { countsLine, formatDate, STATUS_LABEL, type TemplateCardData, type TemplateStatus } from "@/lib/templateGallery";
 import { PersonAvatar, Shot, Stars, StatusBadge } from "@/components/templates/TemplateBits";
 import { TemplateDetailDialog } from "@/components/templates/TemplateDetailDialog";
 
@@ -110,8 +110,8 @@ function TemplateRequests() {
                     </div>
                   </td>
                   <td className="hidden px-3 py-2.5 text-xs text-muted-foreground md:table-cell">
-                    {t.summary.counts?.pages ?? 0} screens · {t.summary.counts?.entities ?? 0} data models ·{" "}
-                    {t.summary.counts?.workflows ?? 0} workflows · {t.screenshots.length} pictures
+                    {[countsLine(t.summary.counts), `${t.screenshots.length} ${t.screenshots.length === 1 ? "picture" : "pictures"}`]
+                      .filter(Boolean).join(" · ")}
                   </td>
                   <td className="px-3 py-2.5 text-xs text-muted-foreground">{formatDate(t.submitted_at) || "—"}</td>
                   <td className="px-3 py-2.5">

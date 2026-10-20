@@ -79,7 +79,7 @@ export interface TemplatePreview {
   records: {
     name: string;
     description: string;
-    fields: { name: string; type: string; required: boolean; description: string }[];
+    fields: { name: string; type: string; required: boolean; description: string; choices?: string[] }[];
   }[];
   workflows: { name: string; purpose: string; trigger: string; steps: string[] }[];
   roles: { name: string; description: string }[];

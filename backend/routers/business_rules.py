@@ -14,7 +14,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -68,6 +68,27 @@ class TestPayload(BaseModel):
     record: dict[str, Any] = Field(default_factory=dict)
     previous: dict[str, Any] | None = None
     event: str = Field(default="create", pattern="^(create|update)$")
+
+    @field_validator("record", "previous", mode="before")
+    @classmethod
+    def _a_record_is_a_record(cls, v: Any) -> Any:
+        """A sample record is a record: a few levels deep, finite numbers.
+        Walked without recursion, so the check cannot be the thing that breaks."""
+        if v is None:
+            return v
+        stack, seen = [(v, 1)], 0
+        while stack:
+            node, depth = stack.pop()
+            seen += 1
+            if depth > 8 or seen > 5000:
+                raise ValueError("a sample record is at most 8 levels deep and 5000 values")
+            if isinstance(node, float) and (node != node or node in (float("inf"), float("-inf"))):
+                raise ValueError("numbers in a sample record must be finite")
+            if isinstance(node, dict):
+                stack.extend((x, depth + 1) for x in node.values())
+            elif isinstance(node, list):
+                stack.extend((x, depth + 1) for x in node)
+        return v
 
 
 class AttachPayload(BaseModel):

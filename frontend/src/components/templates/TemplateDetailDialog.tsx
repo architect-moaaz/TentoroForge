@@ -130,13 +130,13 @@ export function TemplateDetailDialog({
               <div className="min-w-0 space-y-4">
                 <Carousel tpl={tpl} index={shot} onIndex={setShot} />
                 <Tabs defaultValue="overview">
-                  <TabsList className="flex-wrap">
-                    <TabsTrigger value="overview">Overview</TabsTrigger>
-                    <TabsTrigger value="screens">Screens ({tpl.preview?.screens.length ?? 0})</TabsTrigger>
-                    <TabsTrigger value="data">Data models ({tpl.preview?.records.length ?? 0})</TabsTrigger>
-                    <TabsTrigger value="workflows">Workflows ({tpl.preview?.workflows.length ?? 0})</TabsTrigger>
-                    <TabsTrigger value="rules">Rules ({tpl.preview?.rules.length ?? 0})</TabsTrigger>
-                    <TabsTrigger value="reviews">Reviews ({tpl.ratings})</TabsTrigger>
+                  <TabsList className="w-full justify-start overflow-x-auto [scrollbar-width:none]">
+                    <TabsTrigger className="px-2 text-xs" value="overview">Overview</TabsTrigger>
+                    <TabsTrigger className="px-2 text-xs" value="screens">Screens ({tpl.preview?.screens.length ?? 0})</TabsTrigger>
+                    <TabsTrigger className="px-2 text-xs" value="data" title="Data models">Data ({tpl.preview?.records.length ?? 0})</TabsTrigger>
+                    <TabsTrigger className="px-2 text-xs" value="workflows">Workflows ({tpl.preview?.workflows.length ?? 0})</TabsTrigger>
+                    <TabsTrigger className="px-2 text-xs" value="rules">Rules ({tpl.preview?.rules.length ?? 0})</TabsTrigger>
+                    <TabsTrigger className="px-2 text-xs" value="reviews">Reviews ({tpl.ratings})</TabsTrigger>
                   </TabsList>
                   <TabsContent value="overview" className="space-y-4 pt-2">
                     <p className="whitespace-pre-wrap text-sm leading-relaxed">{tpl.description || "No description."}</p>
@@ -191,7 +191,9 @@ export function TemplateDetailDialog({
                             {r.fields.map((f) => (
                               <tr key={f.name} className="border-b last:border-0">
                                 <td className="px-3 py-1.5 font-mono">{f.name}{f.required && <span className="text-rose-600">*</span>}</td>
-                                <td className="px-3 py-1.5 text-muted-foreground">{f.type}</td>
+                                <td className="px-3 py-1.5 text-muted-foreground">
+                                  {f.choices?.length ? <>one of <span className="text-foreground">{f.choices.join(", ")}</span></> : f.type}
+                                </td>
                                 <td className="hidden px-3 py-1.5 text-muted-foreground sm:table-cell">{f.description}</td>
                               </tr>
                             ))}

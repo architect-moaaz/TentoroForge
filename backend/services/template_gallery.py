@@ -387,6 +387,12 @@ async def submit(db: AsyncSession, meta: dict, who: Viewer, *, pricing_model: st
     a blocking one fails."""
     if not may_manage(meta, who):
         raise GalleryError("Only the template's builder or an admin of its organisation can submit it.", 403)
+    # Every version of the app, locked in the order a decision locks them, so
+    # a submit and a decision on two versions never wait on each other.
+    lineage_rows = (await db.execute(
+        select(TemplateListing).where(TemplateListing.lineage == templates.lineage_of(meta))
+        .order_by(TemplateListing.template_id)
+        .with_for_update().execution_options(populate_existing=True))).scalars().all()
     row = await _ensure_listing(db, meta)
     if row.status not in SUBMITTABLE:
         raise GalleryError({PENDING: "It is already waiting for review.",
@@ -394,11 +400,24 @@ async def submit(db: AsyncSession, meta: dict, who: Viewer, *, pricing_model: st
                                       "to send a change for review.",
                             SUPERSEDED: "A newer version of it is in the Gallery."}
                            .get(row.status, "It cannot be submitted now."), 409)
+    # ONE REQUEST PER APP. An older version cannot be sent while a newer one
+    # waits or is live (approving it would change nothing); a newer one takes
+    # the place of an older request still waiting.
+    others = [r for r in lineage_rows if r.template_id != row.template_id]
+    newer = sorted((r for r in others if r.version > row.version and r.status in (PENDING, APPROVED)),
+                   key=lambda r: -r.version)
+    if newer:
+        n = newer[0]
+        raise GalleryError(f"Version {n.version} of it is {'waiting for review' if n.status == PENDING else 'in the Gallery'} "
+                           f"already — this is an older version (v{row.version}). Send the newest one instead.", 409)
     model, cents, cur = _check_pricing(pricing_model, price_cents, currency)
     results = checks(meta)
     failed = blocking_failures(results)
     if failed:
         raise GalleryError("It is not ready to submit: " + " ".join(c["detail"] for c in failed), 422)
+    for old in (r for r in others if r.version < row.version and r.status == PENDING):
+        old.status, old.review_note = DRAFT, None
+        _event(db, old.template_id, DRAFT, who.user, f"Replaced in the review queue by version {row.version}")
     row.status, row.pricing_model, row.price_cents, row.currency = PENDING, model, cents, cur
     row.submitted_at, row.submitted_by, row.review_note = _now(), who.user.id, None
     resubmitted = await db.scalar(select(func.count()).select_from(TemplateEvent).where(

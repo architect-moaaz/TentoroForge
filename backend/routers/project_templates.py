@@ -29,7 +29,7 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -61,6 +61,15 @@ class UpdateTemplateRequest(BaseModel):
 class UseTemplateRequest(BaseModel):
     template_id: str
     name: str = Field(min_length=1, max_length=255)
+
+    @field_validator("name", mode="after")
+    @classmethod
+    def _a_name_is_words(cls, v: str) -> str:
+        # Spaces are not a name: the length was checked before they were trimmed.
+        v = v.strip()
+        if not v:
+            raise ValueError("give the new app a name")
+        return v
 
 
 class SubmitRequest(BaseModel):

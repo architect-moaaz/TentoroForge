@@ -92,7 +92,7 @@ t("nothing and yes/no", () => {
 t("cells the engine cannot read say why", () => {
   for (const [cell, word] of [
     ["[10..1]", "starts after"], ['"open', "not closed"], ["> ", "needs"], ["[a..b]", "numbers or dates"],
-    ["travel,,meals", "empty"], ["[1..\"2026-01-01\"]", "both"],
+    ["travel,,meals", "empty"], ["[1..\"2026-01-01\"]", "both"], ["not()", "leaves out"], ["not( - )", "leaves out"],
   ] as const) {
     const p = parseCell(cell);
     assert.equal(p.ok, false, cell);

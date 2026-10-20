@@ -634,3 +634,30 @@ async def test_oversized_words_are_refused_not_cut(auth_client, org_id, super_ad
                                       json={"decision": "publish-everything"})
     assert r.status_code == 422
     assert (await auth_client.get(f"/api/project-templates/{tpl['id']}")).json()["status"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_one_request_per_app_the_newest_version(auth_client, org_id, super_admin_client):
+    builder, admin = auth_client, super_admin_client
+    src, v1 = await _ready_template(builder, org_id)
+
+    async def new_version() -> dict:
+        v = (await builder.post(f"/api/projects/{src['id']}/templates",
+                                json={"name": "Hiring desk", "description": GOOD_DESCRIPTION})).json()
+        await builder.post(f"/api/project-templates/{v['id']}/screenshots", files={"file": ("s.png", _png(), "image/png")})
+        return v
+
+    v2 = await new_version()
+    assert (await builder.post(f"/api/project-templates/{v1['id']}/submit", json={})).status_code == 200
+    # The newer one takes the older request's place: one request in the queue.
+    assert (await builder.post(f"/api/project-templates/{v2['id']}/submit", json={})).status_code == 200
+    assert (await builder.get(f"/api/project-templates/{v1['id']}")).json()["status"] == "draft"
+    queue = (await admin.get("/api/admin/template-requests?status=pending")).json()
+    queue = queue.get("requests", queue.get("templates", queue)) if isinstance(queue, dict) else queue
+    assert [t["id"] for t in queue if t["id"] in (v1["id"], v2["id"])] == [v2["id"]]
+    # An older version cannot be sent while a newer one waits, or once it is live.
+    r = await builder.post(f"/api/project-templates/{v1['id']}/submit", json={})
+    assert r.status_code == 409 and "Version 2" in r.text and "waiting for review" in r.text
+    await admin.post(f"/api/admin/template-requests/{v2['id']}/decision", json={"decision": "approve"})
+    r = await builder.post(f"/api/project-templates/{v1['id']}/submit", json={})
+    assert r.status_code == 409 and "in the Gallery" in r.text

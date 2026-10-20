@@ -163,7 +163,14 @@ export function SubmitTemplateDialog({
   async function upload(files: FileList | File[]) {
     const list = Array.from(files);
     const room = SHOT_MAX - (tpl?.screenshots.length ?? 0);
-    if (list.length > room) toast.message(`Only ${room} more fit — the first ${room} are added.`);
+    if (room <= 0) {
+      toast.message(`All ${SHOT_MAX} places are taken — remove a picture to add another.`);
+      return;
+    }
+    if (list.length > room) {
+      toast.message(room === 1 ? "Only 1 more fits — the first picture is added."
+                                : `Only ${room} more fit — the first ${room} are added.`);
+    }
     for (const file of list.slice(0, Math.max(0, room))) {
       setUploading((n) => n + 1);
       try {
@@ -468,7 +475,9 @@ export function SubmitTemplateDialog({
             ) : (
               <Button
                 onClick={() => submit.mutate()}
-                disabled={submit.isPending || !checksQuery.data?.ready || tpl.status === "pending"}
+                // Fresh checks only: coming back after removing pictures must not
+                // submit on what the last visit found (nor on a double-click of Next).
+                disabled={submit.isPending || checksQuery.isFetching || !checksQuery.data?.ready || tpl.status === "pending"}
               >
                 {submit.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
                 {tpl.status === "pending" ? "Waiting for review" : "Submit for review"}

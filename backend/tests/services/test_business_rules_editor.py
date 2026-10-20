@@ -302,3 +302,118 @@ def test_a_second_rule_setting_the_same_field_is_warned_about(app):
 def test_every_fault_is_said_at_once(app):
     said = br.try_rule(app, {**GATE, "when": "openingsCount >", "then": []})["problems"]
     assert any("Add at least one thing" in p for p in said) and any("cannot be read" in p for p in said)
+
+
+# ---- what an attacker's requests found (adversarial API round, Oct 21) ---- #
+
+def _said(app, rule) -> list[str]:
+    return br.try_rule(app, rule)["problems"]
+
+
+@pytest.mark.parametrize("when", ['"hello"', "42", "title", '"); process.exit(1); ("'])
+def test_a_condition_is_a_yes_or_no_question(app, when):
+    assert any("yes-or-no" in p for p in _said(app, {**GATE, "when": when})), when
+
+
+@pytest.mark.parametrize("when, word", [
+    ('status = "archived"', "not one of"),
+    ('status in ["open", "archived"]', "not one of"),
+    ("title > 5", "cannot be more or less"),
+    ('openingsCount > "lots"', "is a number"),
+    ("openingsCount > closedAt", "is a number"),
+    ('matches(title, "(a+)+$")', "freeze"),
+    ('matches(title, "([")', "not a valid pattern"),
+])
+def test_a_condition_the_engine_would_read_wrongly_is_refused(app, when, word):
+    assert any(word in p for p in _said(app, {**GATE, "when": when})), (when, _said(app, {**GATE, "when": when}))
+
+
+def test_conditions_that_are_fine_stay_fine(app):
+    for when in ['status = "closed" and openingsCount > 0', "openingsCount >= 2", 'matches(title, "^[A-Z]")',
+                 'employmentType in ["contract", "temporary"]', "previous.openingsCount > openingsCount",
+                 'closedAt > date("2026-01-01")']:
+        assert _said(app, {**GATE, "when": when}) == [], when
+
+
+@pytest.mark.parametrize("act, word", [
+    ({"type": "set_field", "field": "id", "value": "x"}, "identity"),
+    ({"type": "set_field", "field": "openingsCount", "value": "lots"}, "is a number"),
+    ({"type": "set_field", "field": "status", "value": "deleted"}, "not one of"),
+    ({"type": "set_default", "field": "closedAt", "value": "soon"}, "is a date"),
+    ({"type": "clear_field", "field": "createdAt"}, "identity"),
+])
+def test_a_value_a_rule_writes_fits_its_field(app, act, word):
+    said = _said(app, {**GATE, "then": [act]})
+    assert any(word in p for p in said), said
+    assert _said(app, {**GATE, "then": [{"type": "set_field", "field": "openingsCount", "value": "0"}]}) == []
+
+
+def test_a_table_writes_values_that_fit_and_reads_each_field_once(app):
+    t = json.loads(json.dumps(TABLE))
+    t["table"]["outputs"] = [{"name": "openingsCount"}]
+    t["table"]["rules"] = [{"inputEntries": ["[1..2]", "permanent"], "outputEntries": ["lots"]}]
+    assert any("is a number" in p for p in _said(app, t))
+    t["table"]["outputs"] = [{"name": "id"}]
+    assert any("identity" in p for p in _said(app, t))
+    t = json.loads(json.dumps(TABLE))
+    t["table"]["inputs"] = [{"name": "openingsCount"}, {"name": "openingsCount"}]
+    assert any("one column" in p for p in _said(app, t))
+    t = json.loads(json.dumps(TABLE))
+    t["table"]["rules"][0]["inputEntries"][1] = "> permanent"
+    assert any("cannot be more or less" in p for p in _said(app, t))
+
+
+def test_what_a_payload_cannot_say(app):
+    with pytest.raises(br.RuleError, match="created, changed"):
+        br.create(app, {**GATE, "on": ["delete"]})
+    with pytest.raises(br.RuleError, match="at most 1000"):
+        br.create(app, {**GATE, "then": [{"type": "show_error", "message": "x" * 1001}]})
+    with pytest.raises(br.RuleError, match="name, not"):
+        br.create(app, {**GATE, "then": [{"type": "set_field", "field": ["a"], "value": "1"}]})
+    with pytest.raises(br.RuleError, match="Priority"):
+        br.create(app, {**GATE, "salience": 10 ** 30})
+    with pytest.raises(br.RuleError, match="name"):     # invisible characters are no name
+        br.create(app, {**GATE, "name": "​​\x00"})
+
+
+def test_enabled_null_leaves_it_as_it_is(app):
+    made = br.create(app, GATE)["rule"]["rule"]
+    again = br.update(app, made["id"], {"enabled": None, "name": "Renamed"}, expected=None)["rule"]["rule"]
+    assert again.get("enabled") is not False and again["name"] == "Renamed"
+
+
+def test_a_generated_rule_without_a_kind_can_be_switched_off_and_renamed(app):
+    rid = next(r["id"] for r in _doc(app)["businessRules"] if not r.get("kind"))
+    br.set_enabled(app, rid, False, expected=None)
+    renamed = br.update(app, rid, {"name": "Kept, renamed"}, expected=None)["rule"]["rule"]
+    assert renamed["enabled"] is False and renamed["name"] == "Kept, renamed"
+
+
+def test_a_rule_runs_only_in_a_workflow_that_works_with_its_record(app):
+    rid = br.create(app, GATE)["rule"]["rule"]["id"]
+    with pytest.raises(br.RuleError, match="does not work with a Role"):
+        br.attach(app, rid, workflow="FLOW-004", after=None)     # Add a Candidate
+    br.attach(app, rid, workflow="FLOW-002", after=None)          # Edit Role Details
+
+
+def test_a_sample_record_is_a_record():
+    from pydantic import ValidationError
+    from routers.business_rules import TestPayload
+    deep: dict = {}
+    node = deep
+    for _ in range(3000):
+        node["a"] = {}
+        node = node["a"]
+    with pytest.raises(ValidationError, match="8 levels"):
+        TestPayload(record=deep)
+    with pytest.raises(ValidationError, match="finite"):
+        TestPayload(record={"openingsCount": float("nan")})
+    assert TestPayload(record={"title": "x", "tags": ["a"], "meta": {"k": 1}}).record["meta"] == {"k": 1}
+
+
+def test_a_template_is_used_under_a_real_name():
+    from pydantic import ValidationError
+    from routers.project_templates import UseTemplateRequest
+    with pytest.raises(ValidationError, match="name"):
+        UseTemplateRequest(template_id="t", name="   ")
+    assert UseTemplateRequest(template_id="t", name="  Desk  ").name == "Desk"

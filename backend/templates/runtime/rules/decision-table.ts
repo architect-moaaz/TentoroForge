@@ -162,6 +162,10 @@ function parsePart(part: string): CellParse {
   if (s === "" || s === "-" || s === "*" || s.toLowerCase() === "any") return { ok: true, constraint: { kind: "any" } };
   const neg = s.match(/^not\s*\((.*)\)$/is);
   if (neg) {
+    // not() / not(-) would exclude everything: a row that can never match.
+    if (/^\s*(-|\*|any)?\s*$/i.test(neg[1])) {
+      return { ok: false, error: "not( ) needs what it leaves out, like not(travel, meals)" };
+    }
     const inner = parseCell(neg[1]);
     return inner.ok ? { ok: true, constraint: { kind: "not", inner: inner.constraint! } } : inner;
   }

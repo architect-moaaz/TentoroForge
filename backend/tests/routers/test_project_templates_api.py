@@ -117,3 +117,12 @@ async def test_a_bad_template_id_is_a_404(auth_client, org_id):
     res = await auth_client.post(f"/api/orgs/{org_id}/projects/from-project-template",
                                  json={"template_id": "../x", "name": "X"})
     assert res.status_code == 404
+
+
+def test_a_fixed_list_is_shown_with_its_choices():
+    from services import project_templates as templates
+    doc = {"data": {"entities": [{"id": "ENTITY-001", "name": "Expense", "fields": [
+        {"name": "category", "type": "string", "enumValues": ["travel", "meals", "office"]},
+        {"name": "title", "type": "string"}]}]}}
+    fields = templates.preview(doc)["records"][0]["fields"]
+    assert [(f["name"], f["choices"]) for f in fields] == [("category", ["travel", "meals", "office"]), ("title", [])]

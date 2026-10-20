@@ -357,6 +357,10 @@ def read(output_dir: str | Path) -> dict:
 # Checking a rule as the build would
 # ---------------------------------------------------------------------------
 
+_INVISIBLE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\u200b-\u200f\u202a-\u202e\u2060-\u2064\ufeff]")
+MESSAGE_MAX = 1000
+
+
 def _clean_action(a: Any) -> dict:
     """An action as the contract stores it: its own keys only (the editor's
     `id` is the editor's), and nothing empty."""
@@ -365,6 +369,15 @@ def _clean_action(a: Any) -> dict:
     out = {k: a[k] for k in _ACTION_KEYS if k in a and a[k] not in (None, "")}
     if out.get("type") not in ACTION_TYPES:
         raise RuleError(f"“{a.get('type')}” is not something a rule can do.")
+    for k in ("field", "workflow", "valueMode"):
+        if k in out and not isinstance(out[k], str):
+            raise RuleError(f"An action's {k} is a name, not {type(out[k]).__name__}.")
+    if "message" in out:
+        if not isinstance(out["message"], (str, int, float)):
+            raise RuleError("An action's message must be text.")
+        out["message"] = str(out["message"]).strip()
+        if len(out["message"]) > MESSAGE_MAX:
+            raise RuleError(f"A message is at most {MESSAGE_MAX} characters.")
     if "value" in out and not isinstance(out["value"], str):
         out["value"] = json.dumps(out["value"]) if isinstance(out["value"], (dict, list)) else str(out["value"])
     if out.get("options"):
@@ -395,6 +408,103 @@ def _condition_fields(feel: str) -> set[str]:
             continue
         names.add(head)
     return names
+
+
+#: Fields every record has and no rule may write.
+_SYSTEM_FIELDS = frozenset({"id", "createdAt", "updatedAt", "created_at", "updated_at"})
+_NUM = r"-?\d+(?:\.\d+)?"
+#: A group repeated inside a repetition — (a+)+, (\w*)*, (x|y+){2,} — can take
+#: exponential time on some text, and the app's engine has no time limit.
+_NESTED_QUANTIFIER = re.compile(r"\((?:[^()\\]|\\.)*[+*}](?:[^()\\]|\\.)*\)\s*[+*{]")
+
+
+def _human(field: str) -> str:
+    return re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", field).lower()
+
+
+def _condition_problems(when: str, ent: dict | None) -> list[str]:
+    """What the engine would read wrongly in a condition that parses: one that
+    is not a yes/no, a value no record can have, a comparison of different
+    kinds of thing, a pattern that can hang the app."""
+    out: list[str] = []
+    when = (when or "").strip()
+    if not when or when in ("true", "false"):
+        return out
+    fields = {str(f.get("name")): f for f in (ent or {}).get("fields") or [] if isinstance(f, dict)}
+    kinds = {n: _field_type(f) for n, f in fields.items()}
+    bare = re.sub(r'"(?:[^"\\]|\\.)*"', '""', when)
+    # A yes/no: a comparison, and/or/not, a function, or a yes/no field.
+    if not re.search(r"[=<>!(]|\b(and|or|not|in|between)\b", bare):
+        if not (bare in kinds and kinds[bare] == "boolean"):
+            out.append(f"The condition “{when[:80]}” is not a yes-or-no question — compare something, "
+                       "like amount > 5000 or status = \"open\".")
+            return out
+    # A value of a fixed list that is not one of its choices never matches.
+    for m in re.finditer(r'(?<![\w.])([A-Za-z_]\w*)\s*(!=|=)\s*"((?:[^"\\]|\\.)*)"', when):
+        name, val = m.group(1), m.group(3)
+        if kinds.get(name) == "enum":
+            choices = [str(v) for v in _enum_values(fields[name])]
+            if val not in choices:
+                out.append(f"“{val}” is not one of {_human(name)}’s choices ({', '.join(choices)}).")
+    for m in re.finditer(r'(?<![\w.])([A-Za-z_]\w*)\s+in\s*\[([^\]]*)\]', when):
+        name = m.group(1)
+        if kinds.get(name) == "enum":
+            choices = [str(v) for v in _enum_values(fields[name])]
+            for val in re.findall(r'"((?:[^"\\]|\\.)*)"', m.group(2)):
+                if val not in choices:
+                    out.append(f"“{val}” is not one of {_human(name)}’s choices ({', '.join(choices)}).")
+    # More/less than: numbers and dates, compared with their own kind.
+    for m in re.finditer(r'(?<![\w.])([A-Za-z_]\w*)\s*(<=|>=|<|>)\s*("(?:[^"\\]|\\.)*"|' + _NUM +
+                         r'|[A-Za-z_]\w*(?:\([^)]*\))?)', when):
+        name, rhs = m.group(1), m.group(3)
+        k = kinds.get(name)
+        if k is None:
+            continue
+        if k in ("string", "enum", "boolean"):
+            out.append(f"{_human(name).capitalize()} is {'text' if k != 'boolean' else 'a yes/no'} — it cannot be "
+                       f"more or less than something. Compare it with = or !=.")
+            continue
+        rk = ("number" if re.fullmatch(_NUM, rhs) else "date" if rhs.startswith(("date(", "today(", "now("))
+              else "text" if rhs.startswith('"') else kinds.get(rhs))
+        if k == "number" and rk in ("text", "date", "string", "enum", "boolean"):
+            out.append(f"{_human(name).capitalize()} is a number; it is compared with {rhs[:40]}, which is not.")
+        if k == "date" and rk in ("number", "string", "enum", "boolean"):
+            out.append(f"{_human(name).capitalize()} is a date; it is compared with {rhs[:40]}, which is not.")
+    # Patterns: valid, and never one that can take forever.
+    for m in re.finditer(r'\bmatches\s*\(\s*[^,]+,\s*"((?:[^"\\]|\\.)*)"', when):
+        pattern = m.group(1).encode().decode("unicode_escape", errors="ignore")
+        try:
+            re.compile(pattern)
+        except re.error as exc:
+            out.append(f"The pattern “{pattern[:60]}” is not a valid pattern: {exc}.")
+            continue
+        if _NESTED_QUANTIFIER.search(pattern) or len(pattern) > 500:
+            out.append(f"The pattern “{pattern[:60]}” repeats a repetition, which can freeze the app on some "
+                       "text. Write it without a group that repeats inside a repeat — (a+)+ is a+.")
+    return out
+
+
+def _value_problem(field: str, f: dict | None, value: Any, where: str) -> str | None:
+    """A literal value a rule writes into a field, against that field's kind."""
+    if field in _SYSTEM_FIELDS or (f or {}).get("primaryKey"):
+        return f"{where}: {_human(field)} is the record's own identity — a rule cannot set it."
+    if f is None or value in (None, ""):
+        return None
+    v = str(value).strip()
+    if v.startswith('"') and v.endswith('"') and len(v) >= 2:
+        v = v[1:-1]
+    k = _field_type(f)
+    if k == "number" and not re.fullmatch(_NUM, v):
+        return f"{where}: {_human(field)} is a number, and “{v[:40]}” is not."
+    if k == "boolean" and v.lower() not in ("true", "false"):
+        return f"{where}: {_human(field)} is yes/no (true or false), not “{v[:40]}”."
+    if k == "enum":
+        choices = [str(c) for c in _enum_values(f)]
+        if v not in choices:
+            return f"{where}: “{v[:40]}” is not one of {_human(field)}’s choices ({', '.join(choices)})."
+    if k == "date" and not re.fullmatch(r"\d{4}-\d{2}-\d{2}(?:[T ][\d:.]+Z?)?", v) and not v.startswith(("today", "now")):
+        return f"{where}: {_human(field)} is a date (like 2026-10-21), not “{v[:40]}”."
+    return None
 
 
 def table_findings(rule: dict) -> list[dict]:
@@ -486,16 +596,25 @@ def check(doc: dict, rule: dict) -> list[str]:
             if bad:
                 problems.append(f"The condition “{when[:160]}” cannot be read: {bad}. Conditions are written like "
                                 "amount > 5000 and category = \"travel\" (= not ==, and/or/not).")
+            else:
+                problems += _condition_problems(when, ent)
         if ent is not None:
             unknown = sorted(n for n in _condition_fields(str(rule.get("when") or "")) if n not in readable)
             if unknown:
                 problems.append(f"The condition reads {', '.join(unknown)}, which {ent.get('name')} does not have "
                                 f"(fields: {', '.join(sorted(fields))}).")
+        by_name = {str(f.get("name")): f for f in (ent or {}).get("fields") or [] if isinstance(f, dict)}
         for a in acts:
             t = a.get("type")
             if t in ("set_field", "set_default", "clear_field", "set_visibility", "set_required",
                      "set_readonly", "set_options", "recommendation") and not a.get("field"):
                 problems.append(f"“{t.replace('_', ' ')}” needs a field.")
+            if t in ("set_field", "set_default", "clear_field") and a.get("field"):
+                literal = t != "clear_field" and str(a.get("valueMode") or "literal") == "literal"
+                said = _value_problem(str(a["field"]), by_name.get(str(a["field"])),
+                                      a.get("value") if literal else None, f"“{t.replace('_', ' ')}”")
+                if said:
+                    problems.append(said)
             if t == "show_error" and not str(a.get("message") or "").strip():
                 problems.append("A refusal needs the message the person is shown.")
             if t == "send_notification" and not str(a.get("message") or "").strip():
@@ -521,6 +640,36 @@ def check(doc: dict, rule: dict) -> list[str]:
         outs = [str(c.get("variableBinding") or c.get("name") or "") for c in table.get("outputs") or []]
         if len(set(outs)) != len(outs):
             problems.append("Each output column sets a different field.")
+        ins = [str(c.get("variableBinding") or c.get("name") or "") for c in table.get("inputs") or []]
+        if len(set(ins)) != len(ins):
+            problems.append("Each field it reads is one column — put the conditions on it in one cell.")
+        by_name = {str(f.get("name")): f for f in (ent or {}).get("fields") or [] if isinstance(f, dict)}
+        for ci, name in enumerate(outs):
+            if name in _SYSTEM_FIELDS or (by_name.get(name) or {}).get("primaryKey"):
+                problems.append(f"{_human(name).capitalize()} is the record's own identity — a table cannot set it.")
+                continue
+            f = by_name.get(name)
+            if f is None or _field_type(f) not in ("number", "boolean", "date"):
+                continue
+            for ri, row in enumerate(table.get("rules") or [], 1):
+                entries = row.get("outputEntries") or []
+                cell = str(entries[ci]).strip() if ci < len(entries) else ""
+                # A field's name or a formula is worked out when the row is used.
+                if cell in ("", "-", "null") or cell in by_name or re.search(r"[()+*/]|\s[-+]\s", cell):
+                    continue
+                said = _value_problem(name, f, cell, f"Row {ri}")
+                if said:
+                    problems.append(said)
+        for ci, name in enumerate(ins):
+            f = by_name.get(name)
+            if f is None or _field_type(f) not in ("string", "enum", "boolean"):
+                continue
+            for ri, row in enumerate(table.get("rules") or [], 1):
+                entries = row.get("inputEntries") or []
+                cell = str(entries[ci]).strip() if ci < len(entries) else ""
+                if re.match(r"^(<=|>=|<|>)", cell):
+                    problems.append(f"Row {ri}, {_human(name)}: it is text, so it cannot be more or less than "
+                                    "something — list the values it may be.")
         if ent is not None:
             for col in list(table.get("inputs") or []) + list(table.get("outputs") or []):
                 name = str(col.get("variableBinding") or col.get("name") or "")
@@ -597,7 +746,11 @@ def normalise(payload: dict, doc: dict, *, existing: dict | None = None) -> dict
     if not isinstance(payload, dict):
         raise RuleError("A rule must be an object.")
     base = dict(existing or {})
-    kind = str(payload.get("kind") or base.get("kind") or "condition_action")
+    # A rule written by the build may carry no `kind`: it is what it holds.
+    stored_kind = base.get("kind") or (None if existing is None else
+                                       "decision_table" if base.get("table") else
+                                       "condition_action" if base.get("when") or base.get("then") else "statement")
+    kind = str(payload.get("kind") or stored_kind or "condition_action")
     if kind not in KINDS:
         raise RuleError(f"“{kind}” is not a kind of rule.")
     if kind == "prerequisite" and (existing is None or existing.get("kind") != "prerequisite"):
@@ -607,10 +760,14 @@ def normalise(payload: dict, doc: dict, *, existing: dict | None = None) -> dict
     for key in ("name", "statement", "entity", "when", "message"):
         if key in payload:
             val = payload[key]
-            if val is None or (isinstance(val, str) and not val.strip()):
+            if val is not None and not isinstance(val, (str, int, float)):
+                raise RuleError(f"The rule's {key} must be text.")
+            # Control and invisible characters are not part of a name a person reads.
+            text = _INVISIBLE.sub("", str(val)).strip() if val is not None else ""
+            if not text:
                 rule.pop(key, None)
             else:
-                rule[key] = str(val).strip()
+                rule[key] = text
     if "scope" in payload:
         if payload["scope"] not in SCOPES:
             raise RuleError("Where a rule runs is one of: everywhere, form only, on save only.")
@@ -618,12 +775,17 @@ def normalise(payload: dict, doc: dict, *, existing: dict | None = None) -> dict
     if "salience" in payload:
         try:
             rule["salience"] = int(payload.get("salience") or 0)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             raise RuleError("Priority must be a whole number.") from None
-    if "enabled" in payload:
+        if abs(rule["salience"]) > 1_000_000:
+            raise RuleError("Priority is a whole number between -1000000 and 1000000.")
+    if payload.get("enabled") is not None:              # null says nothing: kept as it is
         rule["enabled"] = bool(payload["enabled"])
     if "on" in payload:
-        on = [str(x) for x in (payload.get("on") or []) if str(x) in ("create", "update")]
+        raw_on = payload.get("on") or []
+        if not isinstance(raw_on, list) or any(str(x) not in ("create", "update") for x in raw_on):
+            raise RuleError("A rule fires when a record is created, changed, or both.")
+        on = [str(x) for x in raw_on]
         on = [x for x in ("create", "update") if x in on]   # in order, once each
         if on and on != ["create", "update"]:
             rule["on"] = on
@@ -1190,6 +1352,17 @@ def usages(doc: dict, rule: dict) -> dict:
     return {"steps": steps, "starts": started, "saves": saves}
 
 
+def _flow_concerns(flow: dict, ent: dict) -> bool:
+    """Does the workflow work with this record at all — name it, its table, or
+    carry it as a variable (`expense.amount`)?"""
+    text = json.dumps(flow).lower()
+    name = str(ent.get("name") or "")
+    keys = [str(ent.get("id") or "").lower(), str(ent.get("table") or "").lower(),
+            (name[:1].lower() + name[1:]).lower() + ".",
+            re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", name).lower() + "."]
+    return any(k and k not in (".",) and k in text for k in keys)
+
+
 def _refusal_message(rule: dict) -> str:
     for side in ("then", "otherwise"):
         for a in rule.get(side) or []:
@@ -1223,6 +1396,10 @@ def attach(output_dir: str | Path, rule_id: str, *, workflow: str, after: str | 
         flow = next((w for w in _live(svc.doc.get("workflows")) if str(w.get("id")) == str(workflow)), None)
         if flow is None:
             raise RuleError(f"{workflow} is not a workflow of this application.", status=404)
+        ent = _entities(svc.doc).get(str(rule.get("entity") or "")) or {}
+        if ent and not _flow_concerns(flow, ent):
+            raise RuleError(f"{flow.get('name')} does not work with a {ent.get('name')}, so this rule has nothing "
+                            f"to read there. Choose a workflow that creates, changes or loads a {ent.get('name')}.")
         before = svc.snapshot()
         key = _step_key(rule_id)
         _detach_in(flow, key)

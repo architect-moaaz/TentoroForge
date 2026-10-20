@@ -640,6 +640,9 @@ def preview(doc: dict) -> dict:
                 "type": str(f.get("type") or ""),
                 "required": bool(f.get("required")),
                 "description": str(f.get("description") or "")[:200],
+                # A fixed list is part of what the record is: "one of travel, meals, office".
+                "choices": [str(v) for v in (f.get("enumValues") or f.get("values") or f.get("enum") or [])
+                            if not isinstance(v, (dict, list))][:30],
             } for f in (e.get("fields") or []) if isinstance(f, dict)][:60],
         } for e in entities[:40]],
         "workflows": [{

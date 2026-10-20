@@ -124,6 +124,9 @@ export function OrgTemplates({
             const notable = group.slice(1).filter((t) => ["pending", "rejected", "approved"].includes(t.status));
             const open = expanded.has(head.family);
             const shown = open ? group : [head];
+            // A newer version waiting or live: an older one is not sent (one request per app).
+            const newerLive = (t: TemplateCardData) =>
+              group.find((o) => o.version > t.version && (o.status === "pending" || o.status === "approved"));
             return shown.map((t, i) => (
             <div key={t.id} className="flex flex-col gap-2" data-org-template={t.id} data-status={t.status}>
               {i === 0 && !open && notable.length > 0 && (
@@ -149,7 +152,12 @@ export function OrgTemplates({
               </p>
               {t.can_manage && (
                 <div className="flex items-center gap-2 px-1">
-                  {(t.status === "draft" || t.status === "rejected" || t.status === "removed") && (
+                  {(t.status === "draft" || t.status === "rejected" || t.status === "removed") && newerLive(t) && (
+                    <span className="text-[11px] text-muted-foreground">
+                      Older version — v{newerLive(t)!.version} is {newerLive(t)!.status === "pending" ? "in review" : "in the Gallery"}
+                    </span>
+                  )}
+                  {(t.status === "draft" || t.status === "rejected" || t.status === "removed") && !newerLive(t) && (
                     <Button size="sm" className="h-7 text-xs" onClick={() => onSubmit(t.id)}>
                       <Send className="mr-1 h-3 w-3" />
                       {t.status === "draft" ? "Submit for review" : "Resubmit"}
