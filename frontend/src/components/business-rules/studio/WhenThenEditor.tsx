@@ -184,7 +184,7 @@ export function WhenThenEditor({
               <p className="text-xs font-medium">Where it runs</p>
               {SCOPES.map((s) => (
                 <label key={s.id} className="flex items-start gap-2 text-xs">
-                  <input type="radio" name="scope" className="mt-0.5" checked={draft.config.scope === s.id} disabled={disabled}
+                  <input type="radio" name="scope" aria-label={s.label} className="mt-0.5" checked={draft.config.scope === s.id} disabled={disabled}
                          onChange={() => patch({ scope: s.id })} />
                   <span><span className="font-medium">{s.label}</span> — <span className="text-muted-foreground">{s.says}</span></span>
                 </label>

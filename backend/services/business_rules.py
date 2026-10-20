@@ -532,8 +532,11 @@ def _pattern_problem(pattern: str) -> str | None:
     """A pattern the app's engine (JavaScript) runs safely, or why not."""
     if len(pattern) > 500:
         return "A pattern is at most 500 characters."
-    if re.search(r"\(\?P[<=]|\(\?#|\(\?[aiLmsux]+\)", pattern):
-        return f"The pattern “{pattern[:60]}” uses a form the app's engine does not read (named groups are (?<name>…))."
+    if re.search(r"\(\?P[<=]", pattern):
+        return f"The pattern “{pattern[:60]}” uses a form the app's engine does not read — named groups are (?<name>…)."
+    if re.search(r"\(\?[aiLmsux-]+[:)]|\(\?#", pattern):
+        return (f"The pattern “{pattern[:60]}” sets its options inside it, which the app's engine does not read. "
+                "To match any case, list both: [Ss]enior.")
     try:
         re.compile(pattern.replace("(?<", "(?P<").replace("(?P<=", "(?<=").replace("(?P<!", "(?<!"))
     except re.error as exc:
@@ -598,43 +601,110 @@ def _top_level_split(body: str) -> list[str]:
     return parts + [cur]
 
 
+#: The characters a set is judged over: printable ASCII, whitespace, a few beyond.
+_ALPHABET = frozenset([chr(c) for c in range(32, 127)] + ["\t", "\n", "é", "ß", "٣", "\u00a0"])
+_ALL = _ALPHABET
+
+
+def _shorthand(code: str) -> frozenset:
+    base = {"w": {c for c in _ALPHABET if c.isalnum() or c == "_"}, "d": {c for c in _ALPHABET if c.isdigit()},
+            "s": {c for c in _ALPHABET if c.isspace()}}[code.lower()]
+    return frozenset(_ALPHABET - base) if code.isupper() else frozenset(base)
+
+
+def _class_set(inner: str) -> frozenset:
+    neg = inner.startswith("^")
+    inner = inner[1:] if neg else inner
+    out, i = set(), 0
+    while i < len(inner):
+        c = inner[i]
+        if c == "\\" and i + 1 < len(inner):
+            nxt = inner[i + 1]
+            out |= _shorthand(nxt) if nxt in "wWdDsS" else {nxt}
+            i += 2
+            continue
+        if i + 2 < len(inner) and inner[i + 1] == "-":
+            lo, hi = c, inner[i + 2]
+            out |= {x for x in _ALPHABET if lo <= x <= hi}
+            i += 3
+            continue
+        out.add(c)
+        i += 1
+    return frozenset(_ALPHABET - out) if neg else frozenset(out)
+
+
+def _units(seq: str) -> list[tuple[frozenset, bool]] | None:
+    """A sequence as (the characters a unit can match, whether it repeats or is optional).
+    None when the sequence has alternatives or groups beyond what is judged here."""
+    units, i = [], 0
+    while i < len(seq):
+        c = seq[i]
+        if c in "^$":
+            i += 1
+            continue
+        if c == "\\":
+            nxt = seq[i + 1:i + 2]
+            if nxt in ("b", "B"):
+                i += 2
+                continue
+            chars, i = (_shorthand(nxt) if nxt in "wWdDsS" else frozenset({nxt})), i + 2
+        elif c == "[":
+            j = i + 1
+            while j < len(seq) and (seq[j] != "]" or j == i + 1):
+                j += 2 if seq[j] == "\\" else 1
+            chars, i = _class_set(seq[i + 1:j]), j + 1
+        elif c == ".":
+            chars, i = _ALL, i + 1
+        elif c == "(":
+            depth, j = 1, i + 1
+            while j < len(seq) and depth:
+                if seq[j] == "\\":
+                    j += 2
+                    continue
+                depth += {"(": 1, ")": -1}.get(seq[j], 0)
+                j += 1
+            inner = re.sub(r"^\?(?::|<?[=!]|<[A-Za-z_]\w*>)", "", seq[i + 1:j - 1])
+            if seq[i + 1:i + 3] in ("?=", "?!") or seq[i + 1:i + 4] in ("?<=", "?<!"):
+                i = j                                        # a lookaround matches no characters
+                continue
+            sub = _units(inner) if len(_top_level_split(inner)) == 1 else None
+            chars = frozenset().union(*(u[0] for u in sub)) if sub else _ALL
+            inner_varies = sub is None or any(v for _, v in sub)  # ((a+))+ repeats a repeat
+            i = j
+        elif c in "|":
+            return None
+        else:
+            chars, i = frozenset({c}), i + 1
+        if c != "(":
+            inner_varies = False
+        q = re.match(r"[*+?]\??|\{\d+(,\d*)?\}\??", seq[i:])
+        varies = bool(q) and not re.fullmatch(r"\{(\d+)\}\??", q.group(0))
+        if q:
+            i += len(q.group(0))
+        units.append((chars, varies or inner_varies))
+    return units
+
+
 def _ambiguous(body: str) -> bool:
-    """Can one repeat of `body` match a varying stretch that the next repeat could also take?"""
-    varies = bool(re.search(r"(?<!\\)[*+?|]|(?<!\\)\{\d+,", body))
-    if not varies:
-        return False
+    """Can one repeat of `body` match a stretch the next repeat could also take?"""
     alternatives = _top_level_split(body)
     if len(alternatives) > 1:
-        # (a|b)+ is safe; (a|ab)+, (a|a?)+ are not: distinct single characters only.
-        singles = [a for a in alternatives if re.fullmatch(r"[^\\\[\](){}.*+?|^$]|\\[^wWsSdDbB]", a)]
-        return len(singles) != len(alternatives) or len(set(singles)) != len(singles)
-    # A fixed character at the start or the end of each repeat, which the rest
-    # can never match, keeps the repeats apart: (-[a-z]+)*, ([a-z0-9]+\.)+.
-    return not (_fixed_edge_separates(body, first=True) or _fixed_edge_separates(body, first=False))
-
-
-_LIT = r"(?:\\[^wWsSdDbB0-9]|[^\\\[\](){}.*+?|^$])"
-
-
-def _fixed_edge_separates(body: str, *, first: bool) -> bool:
-    m = re.match(_LIT + r"(?![*+?{])", body) if first else re.search(r"(?<![\\])(" + _LIT + r")$", body)
-    if not m:
-        return False
-    tok = m.group(0)
-    c = tok[-1]
-    rest = body[len(tok):] if first else body[:m.start()]
-    if re.search(r"(?<![\\\[])\.(?![^\[]*\])", rest):
-        return False                                   # a wildcard matches anything
-    shorthand = {"w": c.isalnum() or c == "_", "d": c.isdigit(), "s": c.isspace()}
-    for code in re.findall(r"\\([wWsSdD])", rest):
-        if shorthand[code.lower()] != code.isupper():  # \w holds it, or \W (everything else) does
-            return False
-    plain = re.sub(r"\[[^\]]*\]", "", rest)
-    if c in re.sub(r"\\.", "", plain) or ("\\" + c) in plain:
-        return False
-    for neg, members in re.findall(r"\[(\^?)([^\]]*)\]", rest):
-        inside = any(lo <= c <= hi for lo, hi in re.findall(r"(.)-(.)", members)) or c in re.sub(r".-.", "", members)
-        if inside != bool(neg):
+        # Safe when each alternative is a fixed length and they start apart: (ab|cd)*, (\w|-)+.
+        parsed = [_units(a) for a in alternatives]
+        if any(u is None or not u or any(v for _, v in u) for u in parsed):
+            return True
+        firsts = [u[0][0] for u in parsed]
+        return any(firsts[x] & firsts[y] for x in range(len(firsts)) for y in range(x + 1, len(firsts)))
+    units = _units(body)
+    if units is None:
+        return True
+    if not any(v for _, v in units):
+        return False                                         # a fixed stretch, every time
+    # A first (or last) unit that is fixed and that nothing else in the repeat can
+    # match keeps the repeats apart: ([A-Z][a-z]*)+, (-[a-z]+)*, ([a-z0-9]+\.)+.
+    for edge, rest in ((units[0], units[1:]), (units[-1], units[:-1])):
+        chars, varies = edge
+        if not varies and rest and not any(chars & other for other, _ in rest):
             return False
     return True
 
@@ -877,6 +947,7 @@ def check(doc: dict, rule: dict) -> list[str]:
     if kind == "decision_table" and not problems:
         # The cells, overlaps and typos — read by the app's own engine.
         problems += [f["message"] for f in table_findings(rule) if f.get("severity") == "error"]
+    problems = list(dict.fromkeys(problems))      # the same fault twice (then and otherwise) is said once
     if problems:
         return problems
     # The build's own checks, exactly as an agent's rule meets them.

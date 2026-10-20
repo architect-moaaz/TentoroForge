@@ -124,7 +124,7 @@ export function TestPanel({
           {result.unavailable && <p className="rounded-md bg-amber-50 p-2 text-xs text-amber-900">{result.unavailable}</p>}
           {!result.refused && result.problems?.length > 0 && !result.trace && (
             <ul className="space-y-1 rounded-md bg-rose-50 p-2 text-xs text-rose-900 dark:bg-rose-950/40 dark:text-rose-200">
-              {result.problems.map((p) => <li key={p}>{p}</li>)}
+              {result.problems.map((p, i) => <li key={i}>{p}</li>)}
             </ul>
           )}
           {result.trace && (

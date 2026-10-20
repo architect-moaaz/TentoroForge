@@ -96,7 +96,7 @@ export function ActionEditor({ branch, value, onChange, fields, fieldMeta, workf
                 value={action.type}
                 onValueChange={(v) => update(i, { type: v as RuleActionType })}
               >
-                <SelectTrigger className="h-7 flex-1 text-xs">
+                <SelectTrigger className="h-7 flex-1 text-xs" aria-label="What it does">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -137,7 +137,7 @@ export function ActionEditor({ branch, value, onChange, fields, fieldMeta, workf
                   value={action.valueMode ?? "literal"}
                   onValueChange={(v) => update(i, { valueMode: v as ValueMode })}
                 >
-                  <SelectTrigger className="h-7 w-[110px] text-xs">
+                  <SelectTrigger className="h-7 w-[110px] text-xs" aria-label="Where the value comes from">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -160,7 +160,7 @@ export function ActionEditor({ branch, value, onChange, fields, fieldMeta, workf
                     value={action.value || undefined}
                     onValueChange={(v) => update(i, { value: v })}
                   >
-                    <SelectTrigger className="h-7 flex-1 text-xs">
+                    <SelectTrigger className="h-7 flex-1 text-xs" aria-label="Value">
                       <SelectValue placeholder="value" />
                     </SelectTrigger>
                     <SelectContent>
@@ -206,7 +206,7 @@ export function ActionEditor({ branch, value, onChange, fields, fieldMeta, workf
                   value={action.workflow || undefined}
                   onValueChange={(workflow) => update(i, { workflow })}
                 >
-                  <SelectTrigger className="h-7 text-xs">
+                  <SelectTrigger className="h-7 text-xs" aria-label="Workflow to start">
                     <SelectValue placeholder="Choose the workflow to start" />
                   </SelectTrigger>
                   <SelectContent>
@@ -279,7 +279,7 @@ function FieldSelect({
   }
   return (
     <Select value={value || undefined} onValueChange={onChange}>
-      <SelectTrigger className="h-7 text-xs">
+      <SelectTrigger className="h-7 text-xs" aria-label="Field">
         <SelectValue placeholder="Select field" />
       </SelectTrigger>
       <SelectContent>
@@ -314,7 +314,7 @@ function ToggleRow({
 }) {
   return (
     <div className="flex items-center gap-2">
-      <Switch checked={checked} onCheckedChange={onChange} />
+      <Switch checked={checked} onCheckedChange={onChange} aria-label={label} />
       <Label className="text-xs">{label}</Label>
     </div>
   );

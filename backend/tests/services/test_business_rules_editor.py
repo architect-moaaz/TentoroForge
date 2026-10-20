@@ -486,3 +486,31 @@ def test_a_page_path_is_not_a_record(app):
     rid = br.create(app, GATE)["rule"]["rule"]["id"]
     with pytest.raises(br.RuleError, match="does not work with a Role"):
         br.attach(app, rid, workflow="FLOW-009", after=None)       # Reject Application: /roles/[id]/pipeline
+
+
+# ---- round 3: the pattern check judges overlap, not shape ------------------- #
+
+SAFE_PATTERNS = [
+    "^[a-z0-9]+(-[a-z0-9]+)*$", "^([a-z0-9]+\\.)+[a-z]{2,}$", "^(ab|cd)*$", "^(\\w|-)+$", "^([a-z]|[0-9])+$",
+    "^(\\s|\\w)+$", "^([A-Z][a-z]*)+$", "^\\d+(\\.\\d{2})?$", "^\\$?\\d{1,3}(,\\d{3})*(\\.\\d{2})?$",
+    "^(draft|open|closed)$", "\\b(urgent|asap)\\b", "^(Mr|Mrs|Ms|Dr)\\.? [A-Z]", "^(?=.*[A-Z])(?=.*\\d).{8,}$",
+    "^(?!test).*$", "^(\\d+,)*\\d+$", "^(\\d{1,3}\\.){3}\\d{1,3}$", "^#([0-9a-fA-F]{3}){1,2}$",
+    "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", "^[^@\\s]+@[^@\\s]+\\.[a-z]{2,}$",
+]
+HANGING_PATTERNS = ["(a+)+$", "(a|aa)+$", "(a|a?)+$", "((a+))+$", "(\\w+\\s?)*$", "(.*a){12}", "^(\\d|\\d\\d)+$",
+                    "^(x+x+)+y$", "^(.*?,){11}P", "(a*)*", "(([a-z])+)*"]
+
+
+@pytest.mark.parametrize("pattern", SAFE_PATTERNS)
+def test_patterns_people_use_are_accepted(pattern):
+    assert br._pattern_problem(pattern) is None, pattern
+
+
+@pytest.mark.parametrize("pattern", HANGING_PATTERNS)
+def test_patterns_that_can_hang_are_refused(pattern):
+    assert "freeze" in (br._pattern_problem(pattern) or ""), pattern
+
+
+def test_inline_options_are_said_as_options():
+    said = br._pattern_problem("(?i)^senior") or ""
+    assert "options" in said and "named" not in said

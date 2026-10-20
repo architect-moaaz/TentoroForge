@@ -269,7 +269,7 @@ function RuleCard({ view, catalogue, onOpen, onToggle, busy }: {
   return (
     <div className={cn("group flex items-start gap-3 rounded-xl border bg-card p-3.5 transition-shadow hover:shadow-sm", !view.enabled && "opacity-70")}
          data-rule={view.rule.id}>
-      <button type="button" onClick={onOpen} className="flex min-w-0 flex-1 items-start gap-3 text-left">
+      <button type="button" onClick={onOpen} aria-label={`Open ${view.rule.name}`} className="flex min-w-0 flex-1 items-start gap-3 text-left">
         <span className={cn("mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg",
                             view.kind === "decision_table" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
                               : view.kind === "statement" ? "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300"
@@ -373,8 +373,19 @@ function RuleSheet({ projectId, draft, setDraft, views, catalogue, model, buildi
     onSuccess: (r) => {
       onSaved();
       const made = !draft?.id && (r as { rule?: StudioView } | undefined)?.rule;
-      if (made) { toast.success("Saved — in force in your app now. Run it in a workflow on the right, or close."); setMade(made); onCreated(made); }
-      else { toast.success("Saved — in force in your app now."); setDraft(null); }
+      // Said as it is: a written rule is kept, not enforced; it runs in no workflow.
+      const written = draft?.kind === "statement";
+      const off = !!draft && (draft.kind === "condition_action" ? draft.ca.is_active === false
+                              : draft.kind !== "prerequisite" && (draft as { enabled?: boolean }).enabled === false);
+      if (made) {
+        toast.success(written ? "Saved — written down. Smith follows it; the app checks it once it is a when → then rule."
+                      : off ? "Saved, switched off — the app does not apply it until you switch it on."
+                              : "Saved — in force in your app now. Run it in a workflow on the right, or close.");
+        setMade(made); onCreated(made);
+      } else {
+        toast.success(written ? "Saved — written down." : off ? "Saved, switched off." : "Saved — in force in your app now.");
+        setDraft(null);
+      }
     },
     onError: (e) => {
       setSaveProblems(problemsOf(e));
@@ -463,12 +474,12 @@ function RuleSheet({ projectId, draft, setDraft, views, catalogue, model, buildi
             )}
             {problems.length > 0 && (
               <ul className="space-y-1 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-900 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-200" data-testid="problems">
-                {problems.map((p) => <li key={p} className="flex gap-1.5"><AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />{p}</li>)}
+                {problems.map((p, i) => <li key={i} className="flex gap-1.5"><AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />{p}</li>)}
               </ul>
             )}
             {(check?.advice ?? []).length > 0 && (
               <ul className="space-y-1 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-                {check!.advice!.map((a) => <li key={a} className="flex gap-1.5"><Lightbulb className="mt-0.5 h-3.5 w-3.5 shrink-0" />{a}</li>)}
+                {check!.advice!.map((a, i) => <li key={i} className="flex gap-1.5"><Lightbulb className="mt-0.5 h-3.5 w-3.5 shrink-0" />{a}</li>)}
               </ul>
             )}
 
@@ -550,7 +561,7 @@ function RuleSheet({ projectId, draft, setDraft, views, catalogue, model, buildi
                            disabledReason={!entityName ? "Choose the record the rule is about." : undefined} />
                 <div className="border-t pt-4">
                   <p className="mb-2 flex items-center gap-1.5 text-sm font-semibold"><GitBranch className="h-4 w-4 text-violet-600" /> Workflows</p>
-                  <WorkflowsPanel projectId={projectId} view={saved} catalogue={catalogue} onChanged={onSaved} unsaved={!draft.id} />
+                  <WorkflowsPanel projectId={projectId} view={saved} catalogue={catalogue} onChanged={onSaved} unsaved={!draft.id || (!!saved && saved.kind !== draft.kind)} />
                 </div>
               </>
             )}
