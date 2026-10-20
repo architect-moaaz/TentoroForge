@@ -31,8 +31,9 @@ THREE THINGS THAT MUST NOT GO WRONG
    it, which for a spreadsheet is "save a copy as CSV". A requirements
    document (`.docx`, `.pdf`, `.md`, `.txt`) is READ at upload
    (`services.document_text`): its text is kept beside it, and a Word file
-   that cannot be read is refused with the reason, a PDF with no text layer
-   is kept with a warning the composer shows.
+   that cannot be read is refused with the reason, and a PDF with no text
+   layer — a scan — is transcribed by Claude (`services.scan_transcript`),
+   or kept with a warning the composer shows when it cannot be.
 
    `.xlsx` IS accepted, and is the one kind that is never read into a
    prompt: an owner attaches a workbook to have its rows LOADED
@@ -186,12 +187,17 @@ def _project_dir(root: str | Path, project_id: str) -> Path:
 
 
 def save_attachment(root: str | Path, project_id: str, filename: str,
-                    content_type: str, data: bytes) -> dict:
+                    content_type: str, data: bytes, *, spender: dict | None = None) -> dict:
     """Persist one attachment; return its record.
 
     Raises ``AttachmentError`` for anything we will not be able to send —
     refusing here means the user finds out while they are still looking at
     the composer, not silently at answer time.
+
+    A scanned PDF is transcribed here by a model call
+    (`services.scan_transcript`), so this can take a minute and must not run on
+    the event loop. ``spender`` (`project`, `user`, `org`) is whom its cost is
+    recorded against.
     """
     if len(data) > MAX_BYTES:
         raise AttachmentError(
@@ -226,6 +232,8 @@ def save_attachment(root: str | Path, project_id: str, filename: str,
         name = filename if Path(filename or "").suffix else f"{filename}.pdf" if kind == KIND_PDF else filename
         try:
             read = document_text.extract(name, data)
+        except document_text.Scanned as exc:
+            read, unreadable = _transcribed(filename, data, exc, spender or {})
         except document_text.Unreadable as exc:
             if kind == KIND_DOCUMENT:
                 raise AttachmentError(f"I cannot read {filename}: {exc}") from exc
@@ -250,10 +258,29 @@ def save_attachment(root: str | Path, project_id: str, filename: str,
         (d / f"{att_id}.txt").write_text(read["text"], encoding="utf-8")
         rec.update({"document": True, "pages": read["pages"], "chars": read["chars"],
                     "truncated": read["truncated"]})
+        if read.get("transcribed"):
+            rec["transcribed"] = True
     elif unreadable:
         rec.update({"document": True, "unreadable": unreadable})
     (d / f"{att_id}.meta.json").write_text(json.dumps(rec), encoding="utf-8")
     return rec
+
+
+def _transcribed(filename: str, data: bytes, scan, spender: dict) -> tuple[dict | None, str]:
+    """`(read, "")` for a scan Claude transcribed, or `(None, reason)` when it could not be."""
+    from services import document_text, scan_transcript
+    if not scan.pages:
+        return None, f"I cannot read the text of {filename}: it has no pages."
+    try:
+        got = scan_transcript.transcribe(data, scan.pages, filename=filename,
+                                         project=str(spender.get("project") or ""),
+                                         user=str(spender.get("user") or ""),
+                                         org=str(spender.get("org") or ""))
+    except document_text.Unreadable as exc:
+        return None, f"I cannot read the text of {filename}: {exc}"
+    text, cut = document_text._cap(document_text._wrap(got["text"]))
+    return {"text": text, "pages": scan.pages, "chars": len(text),
+            "truncated": got["truncated"] or cut, "transcribed": True}, ""
 
 
 def _load_record(d: Path, att_id: str) -> dict | None:
@@ -440,7 +467,8 @@ def document_texts(root: str | Path, project_id: str, attachment_ids: list[str])
         if not rec or not rec.get("document"):
             continue
         entry = {"id": rec["id"], "filename": rec.get("filename") or "document",
-                 "pages": rec.get("pages"), "truncated": bool(rec.get("truncated"))}
+                 "pages": rec.get("pages"), "truncated": bool(rec.get("truncated")),
+                 "transcribed": bool(rec.get("transcribed"))}
         txt = d / f"{rec['id']}.txt"
         if txt.is_file():
             entry["text"] = txt.read_text(encoding="utf-8")

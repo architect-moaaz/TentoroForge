@@ -10,8 +10,9 @@ to be read at all. This turns either into the text the definition reads
   become `- ` lines, and tables become `|`-separated rows, because a
   requirements table read as one run-on paragraph loses which cell said what.
 - **PDF** is read with pypdf, page by page, each page marked so a reader can
-  say "page 7". A PDF with no text layer — a scan — is said to be one, with
-  the way round it, rather than accepted as an empty document.
+  say "page 7". A PDF with no text layer — a scan — raises `Scanned` rather
+  than passing as an empty document; the upload has it transcribed
+  (`services.scan_transcript`).
 
 Lines are wrapped at `WRAP` characters: Smith's file reader cuts lines longer
 than 240, and a paragraph cut there would lose its second half without anyone
@@ -40,6 +41,15 @@ _W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 
 class Unreadable(ValueError):
     """The document cannot be read as text. The message says why and what to do."""
+
+
+class Scanned(Unreadable):
+    """A PDF with no text layer. `pages` says how many, so a caller that can read
+    scans (`services.scan_transcript`) knows what it is taking on."""
+
+    def __init__(self, message: str, pages: int):
+        super().__init__(message)
+        self.pages = pages
 
 
 def _wrap(text: str) -> str:
@@ -160,8 +170,8 @@ def _pdf(data: bytes) -> tuple[str, int | None]:
                          "it as .docx.") from exc
     total = sum(len(t) for _, t in pages)
     if not pages or total < SCANNED_BELOW * len(pages):
-        raise Unreadable("it has no text Forge can read — it looks like scanned pages. Attach the original "
-                         "Word document, or export a PDF with selectable text.")
+        raise Scanned("it has no text Forge can read — it looks like scanned pages. Attach the original "
+                      "Word document, or export a PDF with selectable text.", len(pages))
     blocks = [f"[page {i}]\n{t}" for i, t in pages if t]
     return "\n\n".join(blocks), len(pages)
 
@@ -191,4 +201,4 @@ def extract(filename: str, data: bytes) -> dict:
     return {"text": text, "pages": pages, "chars": len(text), "truncated": truncated}
 
 
-__all__ = ["DOCUMENT_EXT", "MAX_CHARS", "Unreadable", "WRAP", "extract", "is_document"]
+__all__ = ["DOCUMENT_EXT", "MAX_CHARS", "Scanned", "Unreadable", "WRAP", "extract", "is_document"]

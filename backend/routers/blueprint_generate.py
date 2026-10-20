@@ -1587,12 +1587,10 @@ class SmithChatRequest(BaseModel):
     source: str = "user"
     #: §25 — the definition has been seen and accepted, so build the rest.
     approved: bool = False
-    #: §14 — the text of documents the person supplied rather than typed (the
-    #: requirements file attached on /blueprint/new). It lived only on the
-    #: legacy generate request, and the panel posts here: an attached
-    #: specification was read in the browser, carried to the project page,
-    #: and dropped at this door — the requirements were written from the
-    #: one-line brief alone and cited no document.
+    #: §14 — the text of documents the person supplied rather than typed. It
+    #: lived only on the legacy generate request, and the panel posts here: an
+    #: attached specification was dropped at this door and the requirements
+    #: were written from the one-line brief alone.
     #: Files attached to this turn (`/api/projects/{id}/attachments`). The
     #: requirements documents among them — a BRD, a PRD, as .docx, .pdf, .md
     #: or .txt — are read at upload; their text joins `evidence` here.
@@ -1732,10 +1730,18 @@ def _attached_documents(project_id: Any, attachment_ids: list[str]) -> list[dict
         return []
 
 
+def _document_about(doc: dict) -> str:
+    """" (12 pages, transcribed from a scan)" — what a reader should know about
+    where the text came from; a transcript may say [illegible]."""
+    bits = [f"{doc['pages']} pages"] if doc.get("pages") else []
+    if doc.get("transcribed"):
+        bits.append("transcribed from a scan")
+    return f" ({', '.join(bits)})" if bits else ""
+
+
 def _document_evidence(doc: dict) -> str:
     """One attached document as the evidence block the definition reads."""
-    pages = f" ({doc['pages']} pages)" if doc.get("pages") else ""
-    return f"# {doc['filename']}{pages}\n\n{doc['text']}"
+    return f"# {doc['filename']}{_document_about(doc)}\n\n{doc['text']}"
 
 
 def _document_note(output_dir: str, docs: list[dict]) -> str:
@@ -1751,8 +1757,7 @@ def _document_note(output_dir: str, docs: list[dict]) -> str:
     for d in readable:
         path = documents_mod.path_of(output_dir, _document_evidence(d))
         rel = f".forge/documents/{path.name}" if path else ".forge/documents/"
-        pages = f", {d['pages']} pages" if d.get("pages") else ""
-        lines.append(f"- {d['filename']}{pages}: its text is at `{rel}`")
+        lines.append(f"- {d['filename']}{_document_about(d)}: its text is at `{rel}`")
     return ("\n\nThe person attached these documents with this message. Read the parts that bear on the "
             "ask with read_file before acting, and follow what they say:\n" + "\n".join(lines))
 
@@ -1858,7 +1863,7 @@ async def smith_chat(
     _remember(loop, project_id, "user", req.message, lock=memory_lock)
     for _d in attached_docs:
         if _d.get("text"):
-            emit("thought", {"text": f"Read {_d['filename']}" + (f" ({_d['pages']} pages)" if _d.get("pages") else "")
+            emit("thought", {"text": f"Read {_d['filename']}{_document_about(_d)}"
                              + (" — long, so only its first part was kept" if _d.get("truncated") else "") + ".",
                              "kind": "reasoning", "node": ""})
         else:

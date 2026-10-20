@@ -55,7 +55,7 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
-import { documentChipLabel, type AttachedDocument } from "./attachedDocuments";
+import { documentChipLabel, isDocumentFile, type AttachedDocument } from "./attachedDocuments";
 import ReactMarkdown from "react-markdown";
 import { MarkdownLink } from "@/components/chat/MarkdownLink";
 import remarkGfm from "remark-gfm";
@@ -625,6 +625,9 @@ export function SmithPanel({
     for (const f of files) {
       const body = new FormData();
       body.append("file", f);
+      // A document is read before the upload answers; a scanned PDF is
+      // transcribed, which can take a minute, so the wait is said.
+      const reading = isDocumentFile(f.name) ? toast.loading(`Reading ${f.name}…`) : undefined;
       try {
         const r = await fetch(
           `${API_BASE}/api/projects/${projectId}/attachments`,
@@ -641,12 +644,15 @@ export function SmithPanel({
         if (!rec?.id) continue;
         if (rec.document) {
           if (rec.unreadable) toast.warning(String(rec.unreadable));
-          else read.push({ id: String(rec.id), name: f.name, pages: rec.pages ?? null, truncated: !!rec.truncated });
+          else read.push({ id: String(rec.id), name: f.name, pages: rec.pages ?? null, truncated: !!rec.truncated,
+                          transcribed: !!rec.transcribed });
           continue;
         }
         added.push({ id: String(rec.id), name: f.name });
       } catch {
         toast.error(`${f.name} could not be attached.`);
+      } finally {
+        if (reading !== undefined) toast.dismiss(reading);
       }
     }
     if (read.length) setDocs((d) => [...d, ...read]);

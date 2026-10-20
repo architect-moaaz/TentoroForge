@@ -106,10 +106,101 @@ def test_the_chat_accepts_a_word_document_and_keeps_its_text(tmp_path):
     assert "save a copy as .docx" in str(old.value)
 
 
-def test_a_pdf_without_text_is_kept_and_said_unreadable(tmp_path):
+class _Reply:
+    def __init__(self, text: str, stop_reason: str = "end_turn"):
+        self.content = [type("B", (), {"type": "text", "text": text})()] if text else []
+        self.stop_reason = stop_reason
+        self.model = "claude-opus-5-5"
+        self.usage = type("U", (), {"input_tokens": 3000, "output_tokens": 800,
+                                    "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0})()
+
+
+class _Claude:
+    """Stands in for `anthropic.Anthropic()`: records each request, answers with `reply`
+    (or raises it, when it is an exception)."""
+
+    def __init__(self, reply):
+        self.reply, self.requests = reply, []
+        self.beta = self
+        self.messages = self
+
+    def stream(self, **kw):
+        self.requests.append(kw)
+        claude = self
+
+        class _S:
+            def __enter__(self):
+                if isinstance(claude.reply, Exception):
+                    raise claude.reply
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def get_final_message(self):
+                return claude.reply
+        return _S()
+
+
+@pytest.fixture
+def claude(monkeypatch):
+    from services import scan_transcript
+    holder = {}
+
+    def use(reply):
+        holder["c"] = _Claude(reply)
+        monkeypatch.setattr(scan_transcript, "_client", lambda: holder["c"])
+        return holder["c"]
+    return use
+
+
+def test_a_scanned_pdf_is_transcribed_once_and_kept_as_its_text(tmp_path, claude, monkeypatch):
     pytest.importorskip("pypdf")
+    spent = []
+    monkeypatch.setattr("services.build_usage.record_usage", lambda **kw: spent.append(kw))
+    fake = claude(_Reply("[page 1]\n# Members\n- A member books a class\n\n[page 2]\n| Plan | Price |"))
+    rec = ca.save_attachment(tmp_path, "proj1", "Signed-BRD.pdf", "application/pdf", _pdf(["", ""]),
+                             spender={"project": "ab12cd34", "user": "yoge@example.com", "org": "org-1"})
+    assert rec["transcribed"] is True and rec["pages"] == 2 and "unreadable" not in rec
+    doc = ca.document_texts(tmp_path, "proj1", [rec["id"]])[0]
+    assert doc["transcribed"] is True and "# Members" in doc["text"] and "| Plan | Price |" in doc["text"]
+    # The pages went to Claude as a PDF document, with the instruction to transcribe.
+    content = fake.requests[0]["messages"][0]["content"]
+    assert content[0]["type"] == "document" and content[0]["source"]["media_type"] == "application/pdf"
+    assert "Transcribe" in content[1]["text"] and len(fake.requests) == 1
+    # And what it cost is on the ledger, against the app, the person and the organisation.
+    assert spent[0]["agent"] == "scan_transcript" and spent[0]["project"] == "ab12cd34"
+    assert spent[0]["user"] == "yoge@example.com" and spent[0]["org"] == "org-1"
+    assert spent[0]["usage"]["output_tokens"] == 800
+
+
+def test_a_scan_longer_than_the_limit_is_refused_with_the_reason(tmp_path, claude, monkeypatch):
+    pytest.importorskip("pypdf")
+    from services import scan_transcript
+    monkeypatch.setattr(scan_transcript, "MAX_PAGES", 2)
+    fake = claude(_Reply("never asked"))
+    rec = ca.save_attachment(tmp_path, "proj1", "Long-scan.pdf", "application/pdf", _pdf(["", "", ""]))
+    assert "3 pages" in rec["unreadable"] and "2 pages or fewer" in rec["unreadable"]
+    assert fake.requests == []
+
+
+def test_a_transcript_cut_off_by_the_output_cap_says_so(tmp_path, claude):
+    pytest.importorskip("pypdf")
+    claude(_Reply("[page 1]\nMembers book classes.", stop_reason="max_tokens"))
     rec = ca.save_attachment(tmp_path, "proj1", "scan.pdf", "application/pdf", _pdf([""]))
-    assert rec["kind"] == ca.KIND_PDF and "scanned" in rec["unreadable"]
+    assert rec["transcribed"] is True and rec["truncated"] is True
+    assert "rest of the scan was not transcribed" in ca.document_texts(tmp_path, "proj1", [rec["id"]])[0]["text"]
+
+
+def test_a_pdf_without_text_is_kept_and_said_unreadable(tmp_path, claude):
+    pytest.importorskip("pypdf")
+    # When the transcription fails, the scan is kept with the reason, as before.
+    claude(RuntimeError("connection reset"))
+    rec = ca.save_attachment(tmp_path, "proj1", "scan.pdf", "application/pdf", _pdf([""]))
+    assert rec["kind"] == ca.KIND_PDF and "scanned" in rec["unreadable"] and "failed" in rec["unreadable"]
+    claude(_Reply("", stop_reason="refusal"))
+    refused = ca.save_attachment(tmp_path, "proj1", "scan.pdf", "application/pdf", _pdf([""]))
+    assert "could not be transcribed" in refused["unreadable"]
     docs = ca.document_texts(tmp_path, "proj1", [rec["id"]])
     assert "text" not in docs[0] and "scanned" in docs[0]["unreadable"]
     # An image is not a document.
@@ -124,8 +215,12 @@ def test_a_built_app_turn_stores_the_document_and_tells_smith_where_it_is(tmp_pa
     docs = [{"filename": "PRD.docx", "pages": 4, "text": "## Payments\nDues are monthly.", "truncated": False},
             {"filename": "scan.pdf", "unreadable": "no text"}]
     note = _document_note(str(out), docs)
-    assert "PRD.docx, 4 pages: its text is at `.forge/documents/document-1.md`" in note and "read_file" in note
+    assert "PRD.docx (4 pages): its text is at `.forge/documents/document-1.md`" in note and "read_file" in note
     assert "scan.pdf" not in note
+    scanned = {"filename": "Signed.pdf", "pages": 2, "text": "[page 1]\nDues.", "transcribed": True}
+    other = tmp_path / "app2"
+    other.mkdir()
+    assert "Signed.pdf (2 pages, transcribed from a scan)" in _document_note(str(other), [scanned])
     stored = (out / ".forge" / "documents" / "document-1.md").read_text()
     assert stored == _document_evidence(docs[0]) and "Dues are monthly." in stored
     # Sending it again does not store a second copy.
@@ -146,3 +241,19 @@ async def test_uploading_a_word_brd_answers_with_what_was_read(auth_client, org_
     r = await auth_client.post(f"/api/projects/{project['id']}/attachments",
                                files={"file": ("old.doc", b"\\xd0\\xcf", "application/msword")})
     assert r.status_code == 400 and "save a copy as .docx" in r.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_uploading_a_scan_answers_with_its_transcript_and_charges_the_app(
+        auth_client, org_id, monkeypatch, tmp_path, claude):
+    pytest.importorskip("pypdf")
+    monkeypatch.setattr("services.chat_attachments.attachments_root", lambda: tmp_path)
+    spent = []
+    monkeypatch.setattr("services.build_usage.record_usage", lambda **kw: spent.append(kw))
+    claude(_Reply("[page 1]\n# Members\nA member books a class."))
+    project = (await auth_client.post(f"/api/orgs/{org_id}/projects", json={"name": "FitTrackr"})).json()
+    r = await auth_client.post(f"/api/projects/{project['id']}/attachments",
+                               files={"file": ("Signed-BRD.pdf", _pdf([""]), "application/pdf")})
+    assert r.status_code == 200, r.text
+    assert r.json()["transcribed"] is True and r.json()["pages"] == 1
+    assert spent[0]["project"] == project["short_id"] and spent[0]["org"] == str(org_id) and spent[0]["user"]
