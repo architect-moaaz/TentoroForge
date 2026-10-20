@@ -6,6 +6,10 @@ it is shut unless the platform presents a secret kept in a file in the app's fol
 development. The browser never gets that secret: it asks the platform, and the platform asks the app.
 
 This module keeps the secret, checks where the app is, and passes the stream through. It does not run an agent.
+
+Where the app is: on the same computer as the platform (a plain localhost address, found by looking on the usual ports), or,
+when the platform is on a server, on the builder's own computer behind a reverse SSH tunnel (services/agent_tunnel.py), which
+has its own secret and its own address that the platform chose, never one a person typed.
 """
 from __future__ import annotations
 
@@ -17,6 +21,8 @@ from typing import Any, AsyncIterator
 from urllib.parse import urlparse
 
 import httpx
+
+from services import agent_tunnel
 
 SECRET_FILE = ".forge-debug-secret"
 HEADER = "x-forge-debug-secret"
@@ -60,6 +66,21 @@ def _git_ignore(app_root: Path) -> None:
             gi.write_text(text.rstrip("\n") + ("\n" if text else "") + SECRET_FILE + "\n", encoding="utf-8")
     except OSError:
         pass
+
+
+async def hosting(db: Any, project_id: Any) -> dict[str, Any]:
+    """Where the platform knows this project's app is hosted: ``{"vercel": {"url": ..., "environment": ...}}`` when its latest
+    live deployment is on Vercel, else ``{}``. An app run on the builder's own computer is not recorded anywhere."""
+    from sqlalchemy import select
+
+    from models.deployment import LIVE_STATUSES, Deployment
+
+    row = (await db.execute(
+        select(Deployment).where(Deployment.project_id == project_id, Deployment.status.in_(LIVE_STATUSES))
+        .order_by(Deployment.created_at.desc()).limit(1))).scalars().first()
+    if row is None or row.target != "vercel":
+        return {}
+    return {"vercel": {"url": row.url or row.deployment_url, "environment": row.environment}}
 
 
 def clean_app_url(url: str) -> str:
@@ -139,6 +160,67 @@ async def status(app_url: str, secret: str | None) -> dict[str, Any]:
     return {"ok": True, "appUrl": url, "agents": agents}
 
 
+# ---------------------------------------------------------------------------
+# the app on the builder's own computer, behind its reverse SSH tunnel
+# ---------------------------------------------------------------------------
+
+NOT_PAIRED = ("This computer has not been connected yet. Press Connect your computer, run the one command it shows on the computer "
+              "where the app is running, then press Connect again.")
+TUNNEL_DOWN = ("Your computer is not connected right now: the tunnel to it is down (the connector stopped, the computer slept, or "
+               "its network dropped). Start the connector again; it reconnects by itself after that.")
+
+
+WRONG_KEY = ("An app is answering on your computer, but it does not accept Watch live's key. Most likely the connector was run from a "
+             "different folder than the app (it puts the key in the folder it is run from): run it again from the app's own folder. "
+             "Otherwise it is another project's app, a production build (a Docker image refuses on purpose), or it needs the latest "
+             "agent runtime (Apply the agent once and download the app again).")
+
+
+def _nothing_answers(app_port: Any) -> str:
+    where = f"port {app_port}" if app_port else "the port it was paired with"
+    return (f"Your computer is connected, but nothing answered on {where} there. Start the app on that computer "
+            "(for example `npm run dev`) and press Connect again.")
+
+
+async def tunnel_status(project_id: str) -> dict[str, Any]:
+    """Can the app on the builder's computer be watched? Checked in the order a builder can fix things: is a computer paired,
+    is its tunnel up, does the app answer behind it, does the app accept this project's key. Each failure is one plain
+    sentence. Returns the same shape as ``status``, plus the tunnel's state."""
+    state = await asyncio.to_thread(agent_tunnel.describe, project_id)
+    if not state["enabled"]:
+        return {"ok": False, "reason": "This platform runs on your own computer, so there is nothing to connect: use the app's address.", "tunnel": state}
+    if not state["registered"]:
+        return {"ok": False, "reason": NOT_PAIRED, "tunnel": state}
+    if not state["connected"]:
+        return {"ok": False, "reason": TUNNEL_DOWN, "tunnel": state}
+    reg = agent_tunnel.get(project_id) or {}
+    url = agent_tunnel.target_url(project_id)
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            info = await client.get(f"{url}/api/agent/debug", headers={HEADER: reg.get("secret", "")})
+    except httpx.ConnectError:
+        return {"ok": False, "reason": TUNNEL_DOWN, "tunnel": {**state, "connected": False}}
+    except (httpx.RemoteProtocolError, httpx.ReadError, httpx.ReadTimeout, httpx.WriteError):
+        # the tunnel accepted the request and the builder's computer had nothing to give it to
+        return {"ok": False, "reason": _nothing_answers(state.get("appPort")), "tunnel": state}
+    except httpx.HTTPError as e:
+        return {"ok": False, "reason": f"The connection to your computer broke: {e}", "tunnel": state}
+    if info.status_code == 404:
+        return {"ok": False, "reason": WRONG_KEY, "tunnel": state}
+    if info.status_code >= 400:
+        return {"ok": False, "tunnel": state,
+                "reason": f"Something on your computer answered with an error ({info.status_code}), so it does not look like one of your apps."}
+    try:
+        body = info.json()
+        agents = body.get("agents") if isinstance(body, dict) else None
+    except ValueError:
+        agents = None
+    if not isinstance(agents, list):
+        return {"ok": False, "tunnel": state,
+                "reason": "Something answered on your computer, but it is not one of your apps: it did not answer the way a generated app does."}
+    return {"ok": True, "appUrl": f"your computer, port {state.get('appPort')}", "agents": agents, "tunnel": state}
+
+
 async def _not_here(url: str, secret: str, reason: str, said: str | None = None) -> dict[str, Any]:
     """The address did not work. If this project's app is running somewhere else on this computer, say where: `said`
     is what is true of this address, then where the app is. Otherwise the fuller `reason` stands alone."""
@@ -150,7 +232,7 @@ async def _not_here(url: str, secret: str, reason: str, said: str | None = None)
 
 
 async def watch_stream(app_url: str, secret: str | None, role: str | None = None,
-                       user_id: str | None = None) -> AsyncIterator[bytes]:
+                       user_id: str | None = None, *, trusted: bool = False) -> AsyncIterator[bytes]:
     """The app's chats as they happen, passed through as the app sends them. Stays open until the builder closes it;
     a failure or a dropped connection is one ``error`` event, so the screen can say so and reconnect.
 
@@ -160,7 +242,8 @@ async def watch_stream(app_url: str, secret: str | None, role: str | None = None
         return f"data: {json.dumps({'type': 'error', 'message': message})}\n\n".encode()
 
     try:
-        url = clean_app_url(app_url)
+        # ``trusted``: the address was chosen by the platform (a tunnel it set up), not typed by a person
+        url = app_url.rstrip("/") if trusted else clean_app_url(app_url)
     except DebugError as e:
         yield event(str(e))
         return
@@ -178,9 +261,10 @@ async def watch_stream(app_url: str, secret: str | None, role: str | None = None
                 async for chunk in r.aiter_bytes():
                     yield chunk
     except httpx.ConnectError:
-        yield event(str(_unreachable(url)))
+        yield event(TUNNEL_DOWN if trusted else str(_unreachable(url)))
     except httpx.HTTPError as e:
-        yield event(f"The connection to the app broke: {e}")
+        yield event(f"The connection to your computer broke ({type(e).__name__}). Check that the app and the connector are still running."
+                    if trusted else f"The connection to the app broke: {e}")
 
 
 def flow_map(graph: dict[str, Any]) -> dict[str, Any]:
