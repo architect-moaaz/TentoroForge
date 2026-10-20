@@ -65,6 +65,7 @@ import {
   type AttachedPicture,
 } from "./attachedDocuments";
 import ReactMarkdown from "react-markdown";
+import { ASK_SMITH_EVENT, type AskSmithDetail } from "@/lib/ask-smith";
 import { MarkdownLink } from "@/components/chat/MarkdownLink";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
@@ -832,6 +833,18 @@ export function SmithPanel({
     setDraft("");
     sendText(text);
   };
+
+  // Another tab hands Smith a request (lib/ask-smith): it lands in the
+  // composer for the person to read and send.
+  useEffect(() => {
+    const onAsk = (e: Event) => {
+      const d = (e as CustomEvent<AskSmithDetail>).detail;
+      if (!d || d.projectId !== projectId || !d.text) return;
+      setDraft(d.text);
+    };
+    window.addEventListener(ASK_SMITH_EVENT, onAsk);
+    return () => window.removeEventListener(ASK_SMITH_EVENT, onAsk);
+  }, [projectId]);
 
   // THE FIGMA IMPORT LANDS HERE.
   //

@@ -25,6 +25,8 @@ import type { FieldMeta } from "@/lib/field-types";
 interface ActionEditorProps {
   /** "then" (condition true / ✓) or "else" (condition false / ✗). */
   branch: "then" | "else";
+  /** Inside a section that already says Then / Otherwise: no frame, no heading. */
+  bare?: boolean;
   value: RuleAction[];
   onChange: (next: RuleAction[]) => void;
   /** Field names of the rule's model, for field-target dropdowns. */
@@ -43,7 +45,7 @@ function newAction(): RuleAction {
   return { id: genActionId(), type: "set_field", valueMode: "literal", value: "" };
 }
 
-export function ActionEditor({ branch, value, onChange, fields, fieldMeta, workflows }: ActionEditorProps) {
+export function ActionEditor({ branch, value, onChange, fields, fieldMeta, workflows, bare }: ActionEditorProps) {
   const accent =
     branch === "then"
       ? "border-emerald-200 dark:border-emerald-900/50"
@@ -58,19 +60,23 @@ export function ActionEditor({ branch, value, onChange, fields, fieldMeta, workf
   const add = () => onChange([...value, newAction()]);
 
   return (
-    <div className={`space-y-2 rounded-md border ${accent} bg-muted/10 p-3`}>
-      <div className="flex items-center justify-between">
-        <Label className="text-xs font-semibold">
-          {branch === "then" ? "Then (condition is true)" : "Else (condition is false)"}
-        </Label>
-        <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={add}>
-          <Plus className="mr-1 h-3 w-3" />
-          Action
-        </Button>
-      </div>
+    <div className={bare ? "space-y-2" : `space-y-2 rounded-md border ${accent} bg-muted/10 p-3`}>
+      {!bare && (
+        <div className="flex items-center justify-between">
+          <Label className="text-xs font-semibold">
+            {branch === "then" ? "Then (condition is true)" : "Else (condition is false)"}
+          </Label>
+          <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={add}>
+            <Plus className="mr-1 h-3 w-3" />
+            Action
+          </Button>
+        </div>
+      )}
 
       {value.length === 0 && (
-        <p className="py-2 text-center text-xs text-muted-foreground">No actions yet.</p>
+        <p className="py-2 text-center text-xs text-muted-foreground">
+          {bare ? (branch === "then" ? "Nothing yet — add what the rule does." : "Nothing — the rule does nothing otherwise.") : "No actions yet."}
+        </p>
       )}
 
       {value.map((action, i) => {
@@ -241,6 +247,11 @@ export function ActionEditor({ branch, value, onChange, fields, fieldMeta, workf
           </div>
         );
       })}
+      {bare && (
+        <Button type="button" variant="outline" size="sm" className="h-7 w-full border-dashed text-xs" onClick={add}>
+          <Plus className="mr-1 h-3 w-3" /> Add an action
+        </Button>
+      )}
     </div>
   );
 }

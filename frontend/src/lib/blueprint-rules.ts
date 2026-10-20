@@ -11,7 +11,7 @@
 import type { ColumnModel } from "@/types/app-model";
 import type { RuleAction, RuleScope } from "@/types/business-rules";
 import type { DecisionTableDefinition } from "@/types/decision";
-import type { ConditionActionDraft } from "@/components/business-rules/RuleEditor";
+import type { ConditionActionDraft } from "@/components/business-rules/studio/WhenThenEditor";
 import { conditionToFeel } from "@/lib/condition-to-feel";
 import { feelToCondition, conditionFields } from "@/lib/feel-to-condition";
 

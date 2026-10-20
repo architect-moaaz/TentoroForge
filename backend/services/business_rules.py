@@ -1098,7 +1098,9 @@ def test_rule(output_dir: str | Path, payload: dict | None, *, rule_id: str | No
 
 #: How a rule's step in a workflow is keyed: one step per rule per workflow.
 def _step_key(rule_id: str) -> str:
-    return "rule_" + re.sub(r"[^a-z0-9]+", "_", str(rule_id).lower()).strip("_")
+    """RULE-008 -> rule_008."""
+    slug = re.sub(r"[^a-z0-9]+", "_", str(rule_id).lower()).strip("_")
+    return slug if slug.startswith("rule_") else f"rule_{slug}"
 
 
 def usages(doc: dict, rule: dict) -> dict:

@@ -63,6 +63,7 @@ import { BusinessRulesPanel } from "@/components/business-rules/BusinessRulesPan
 import { ExportDialog } from "@/components/projects/ExportDialog";
 import { MORE_TABS, PRIMARY_TABS, TabRow, type Tab } from "@/components/projects/ProjectTabs";
 import { PublishButton } from "@/components/deploy/PublishButton";
+import { ASK_SMITH_EVENT, type AskSmithDetail } from "@/lib/ask-smith";
 import { SaveAsTemplateButton } from "@/components/templates/SaveAsTemplateButton";
 import { DeleteProjectDialog } from "@/components/projects/DeleteProjectDialog";
 import { CommandPalette } from "@/components/CommandPalette";
@@ -159,6 +160,14 @@ function ProjectWorkspace({
   // "Manage in App settings" from the Publish dialog opens App settings on that section.
   const settingsRequested = useAppSettingsStore((st) => st.requested);
   useEffect(() => { if (settingsRequested) setActiveTab("app-settings"); }, [settingsRequested]);
+  // A tab that hands Smith a request (lib/ask-smith) shows the chat it lands in.
+  useEffect(() => {
+    const show = (e: Event) => {
+      if ((e as CustomEvent<AskSmithDetail>).detail?.projectId === projectId) setActiveTab("chat");
+    };
+    window.addEventListener(ASK_SMITH_EVENT, show);
+    return () => window.removeEventListener(ASK_SMITH_EVENT, show);
+  }, [projectId]);
   // Back from a DNS provider's approval (`?settings=domains&dc=…`): App settings → Domains.
   const searchParams = useSearchParams();
   useEffect(() => { if (searchParams?.get("settings") === "domains") setActiveTab("app-settings"); }, [searchParams]);
