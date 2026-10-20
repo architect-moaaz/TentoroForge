@@ -361,23 +361,21 @@ describe("AgentBuilderPanel — putting a message away", () => {
   });
 });
 
-describe("AgentBuilderPanel — Watch live is coming soon", () => {
-  it("shows a Coming soon page in its place, not the live panel", async () => {
+describe("AgentBuilderPanel — Watch live is open", () => {
+  it("opens the real Watch live panel, not a Coming soon page", async () => {
     await mountEditor();
     await click(button(/Watch live/));
-    const page = container.querySelector('[data-testid="watch-coming-soon"]');
-    expect(page?.textContent).toContain("Coming soon");
-    expect(page?.textContent).toContain("Watch live");
-    expect(container.querySelector('[data-testid="watch-panel"]'), "the real panel is not offered").toBeNull();
+    expect(container.querySelector('[data-testid="watch-panel"]'), "the real panel is there").not.toBeNull();
+    expect(container.querySelector('[data-testid="watch-coming-soon"]')).toBeNull();
     expect(container.textContent, "the components belong to the diagram page").not.toContain("Agent Nodes");
   });
 
-  it("marks the button as coming soon, and Diagram takes the person back to the drawing", async () => {
+  it("has no Soon badge on its button, and Diagram takes the person back to the drawing", async () => {
     await mountEditor();
-    expect(button(/Watch live/).textContent).toContain("Soon");
+    expect(button(/Watch live/).textContent).not.toContain("Soon");
     await click(button(/Watch live/));
     await click(button(/^\s*Diagram\s*$/));
-    expect(container.querySelector('[data-testid="watch-coming-soon"]')).toBeNull();
+    expect(container.querySelector('[data-testid="watch-panel"]')).toBeNull();
     expect(container.textContent).toContain("Agent Nodes");
   });
 });
