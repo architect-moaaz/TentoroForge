@@ -113,7 +113,7 @@ def test_journeys_that_name_nothing_are_left_out():
         assert [p.section for p in result.proposals] == [] and "left out" in said[0]
 
 
-def _subject(monkeypatch, tmp_path, refusal: Exception, *, attempt: int):
+def _subject(monkeypatch, tmp_path, refusal: Exception, *, attempt: int, escalated: bool = True):
     svc = SimpleNamespace(output_dir=str(tmp_path), doc={})
     applied = SimpleNamespace(applied=True, artifacts=["PAGE-001"], change_requests=[],
                               needs_clarification=False)
@@ -135,10 +135,13 @@ def _subject(monkeypatch, tmp_path, refusal: Exception, *, attempt: int):
     import services.incidents as incidents
     monkeypatch.setattr(incidents, "record", lambda *a, **k: recorded.append((a, k)) or {})
     state = orch._NodeRun(subjects=[""], pending=[""])
+    if escalated:
+        state.escalated.add("")
     report = orch.RunReport()
     outcome = AgentResult(task_id="t", agent="page_design")
     got = orch._apply_subject(svc, "page_contracts", state, "", outcome, attempt=attempt, max_attempts=2,
                               commit=True, user_request="", report=report)
+    _subject.state = state
     return got, report, recorded
 
 
@@ -183,3 +186,24 @@ def test_the_same_fault_in_a_second_app_is_marked_recurring(monkeypatch, tmp_pat
     # Without an error name, the app's own words are taken out of the reason.
     assert incidents.signature("x", "n", "the page /cases/[id] for ROLE-004 has 3 tabs") == \
         incidents.signature("x", "n", "the page /orders for ROLE-001 has 7 tabs")
+
+
+def test_a_refusal_is_put_to_the_strongest_model_before_anything_is_settled(monkeypatch, tmp_path):
+    refusal = ac.InconsistentPageAccess("/reports: names no role", settle=lambda: ["settled"])
+    got, report, recorded = _subject(monkeypatch, tmp_path, refusal, attempt=2, escalated=False)
+    state = _subject.state
+    assert got == "retry" and "" in state.escalated and not report.settled and not recorded
+    assert "/reports: names no role" in state.feedback[""]
+
+
+def test_the_last_try_runs_on_the_strongest_model_at_high_effort():
+    from dataclasses import dataclass
+    from services.blueprint import executors as ex
+
+    @dataclass
+    class Client:
+        model: str = "claude-sonnet-5"
+        effort: str = "medium"
+    spec = SimpleNamespace(escalate=True)
+    assert ex.escalated(Client(), spec) == Client(model=ex.ESCALATION_MODEL, effort="high")
+    assert ex.escalated(Client(), SimpleNamespace(escalate=False)) == Client()

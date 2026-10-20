@@ -100,7 +100,7 @@ def run_checks_to_green(svc: Any, output_dir: str, app_root: str, report: Any, *
                           app_factory=app_factory, bench_factory=bench_factory, client=client,
                           cancelled=cancelled, record=record)
         scorecard_event("checking")
-        reds = _ours(sc.reds(svc.doc))
+        reds = _ours(sc.reds(svc.doc)) + settled_reds(output_dir)
         if reds and not cancelled():
             sc.set_status(svc, "fixing")
             scorecard_event("fixing")
@@ -145,7 +145,7 @@ def run_checks_to_green(svc: Any, output_dir: str, app_root: str, report: Any, *
                 sc.restore(svc, card_before)
             _check_again(svc, output_dir, app_root, report, batch, run_turn=run_turn, app_factory=app_factory,
                          bench_factory=bench_factory, client=client, cancelled=cancelled, record=record)
-            reds = _ours(sc.reds(svc.doc))
+            reds = _ours(sc.reds(svc.doc)) + settled_reds(output_dir)
             after = {(r["criterion"], r["id"]) for r in reds}
             turned = [(key[0], before[key]) for key in sorted(set(before) - after)]
             yields.append(len(turned))
@@ -426,6 +426,22 @@ def _write_smith(svc: Any, turns: int, yields: list[int], *, before_total: int) 
 # The fix loop
 # --------------------------------------------------------------------------- #
 
+def settled_reds(output_dir: str) -> list[dict]:
+    """What the build shipped in its safe, closed version (`AuthorRefusal.settle`),
+    as reds the loop works on like any other: a screen open to the
+    administrator alone, a process switched off, a rule not yet enforced.
+    One cause per build step; cleared once a turn has changed the
+    application for it (`orchestrator.clear_settled`)."""
+    from services.blueprint.orchestrator import settled_rows
+    from services.office_events import NODE_LABEL
+    out: list[dict] = []
+    for node, lines in settled_rows(output_dir).items():
+        for i, line in enumerate(lines):
+            out.append({"criterion": "settled", "id": f"settled:{node}:{i}", "cause": f"settled:{node}",
+                        "label": NODE_LABEL.get(node, node.replace("_", " ")), "why": line})
+    return out
+
+
 def _ours(reds: list[dict]) -> list[dict]:
     """The reds that are the app's to fix: a red marked the platform's is
     said in the closing and not worked again."""
@@ -440,14 +456,16 @@ def by_cause(reds: list[dict]) -> list[dict]:
     groups: dict[str, dict] = {}
     for r in reds:
         cause = str(r.get("cause") or r.get("id"))
-        kind = ("process" if cause.startswith("FLOW-") else "rule" if cause.startswith("RULE-")
+        kind = ("settled" if cause.startswith("settled:")
+                else "process" if cause.startswith("FLOW-") else "rule" if cause.startswith("RULE-")
                 else "access" if cause.startswith("ENTITY-") else "integration" if cause.startswith("INT-")
                 else "audit" if cause == "audit" else "tenancy" if cause == "tenancy"
                 else "sign_in" if cause.startswith("sso:") or cause in ("magic_link", "sign_up")
                 else "mobile" if cause == "mobile" else "page")
         g = groups.setdefault(cause, {"cause": cause, "kind": kind, "items": []})
         g["items"].append(r)
-    order = {"page": 0, "process": 1, "rule": 2, "access": 3, "integration": 4, "audit": 5, "tenancy": 6, "sign_in": 7, "mobile": 8}
+    order = {"page": 0, "process": 1, "rule": 2, "access": 3, "integration": 4, "audit": 5, "tenancy": 6, "sign_in": 7,
+             "mobile": 8, "settled": 9}
     return sorted(groups.values(), key=lambda g: (order[g["kind"]], g["cause"]))
 
 
@@ -477,6 +495,13 @@ def ask_for(group: dict, doc: dict) -> str:
         item = {"name": str(page.get("name") or items[0].get("label")), "route": str(page.get("route") or ""),
                 "findings": [(str(r.get("criterion") or "check"), str(r.get("why") or "")) for r in items]}
         return page_ask(group["cause"], item)
+    if group["kind"] == "settled":
+        lines = "\n".join(f"- {r.get('why')}" for r in items[:12])
+        return ("To finish the build, Forge shipped these in their safe, closed version, because the step that "
+                f"writes them ({items[0].get('label')}) could not get past its own checks:\n{lines}\n\n"
+                "Make each what the application was meant to be — from the requirements and the definition — "
+                "and try it as the people it is for: it is fixed only when it works for them and stays as "
+                "closed as it should be. Nobody is waiting to answer questions: decide from the definition and act.")
     seen = "\n".join(f"- {r.get('label')}: {r.get('why')}" for r in items[:12])
     what = {"process": "process", "rule": "rule", "access": "record type", "integration": "outside system",
             "audit": "audit trail", "tenancy": "organisations", "sign_in": "way in", "mobile": "application on a phone"}[group["kind"]]
@@ -528,6 +553,11 @@ def _fix(batch: list[dict], output_dir: str, *, run_turn: Callable, say: Callabl
         except Exception as exc:  # noqa: BLE001 — one repair never ends the loop
             logger.warning("[fix-to-green] %s: %s", group["cause"], exc)
             return
+        if group["kind"] == "settled" and (result or {}).get("edited_paths") \
+                and str((result or {}).get("status")) == "resolved":
+            # Changed and tried by the turn: the settlement is dealt with.
+            from services.blueprint.orchestrator import clear_settled
+            clear_settled(output_dir, str(group["cause"]).split(":", 1)[1])
         # NOT THE APP'S TO FIX. A repair that had to reach into the engine
         # is a platform fault: said as such, on the record, and left alone —
         # thirty reds were worked twice and fixed zero times because every

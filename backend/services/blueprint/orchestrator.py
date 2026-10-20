@@ -1213,6 +1213,9 @@ class TaskSpec:
     #: An observer repair — a targeted fix against named findings, run one
     #: effort notch below the node's own (see ``executors.for_repair``).
     repair: bool = False
+    #: The last try at a reply a check refused the same way twice, or until
+    #: its attempts ran out: on the strongest model (``executors.escalated``).
+    escalate: bool = False
 
 
 @dataclass
@@ -1635,6 +1638,7 @@ def _execute(
                 subject=subject,
                 feedback=state.feedback.get(subject, ""),
                 current=state.current.get(subject, ()),
+                escalate=subject in state.escalated,
             )
             leads = state.warm is not None and subject == state.leader and attempt == 1
             # After an outage, the re-send waits — on its worker, not here.
@@ -2599,6 +2603,29 @@ def _keep_settled(output_dir: Any, key: str, said: list[str]) -> None:
         logger.debug("[orchestrator] settled record not kept", exc_info=True)
 
 
+def settled_rows(output_dir: Any) -> dict[str, list[str]]:
+    """Node -> what its builds settled for and nobody has fixed yet."""
+    path = Path(output_dir or "") / SETTLED_FILE
+    try:
+        held = json.loads(path.read_text("utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return {str(k): [str(s) for s in (v or {}).get("settled") or []]
+            for k, v in (held.items() if isinstance(held, dict) else []) if isinstance(v, dict)}
+
+
+def clear_settled(output_dir: Any, key: str) -> None:
+    """A node's settlements, dealt with: the after-build fixing changed the
+    application for them (`fix_to_green`). Never raises."""
+    path = Path(output_dir or "") / SETTLED_FILE
+    try:
+        held = json.loads(path.read_text("utf-8"))
+        if isinstance(held, dict) and held.pop(key, None) is not None:
+            path.write_text(json.dumps(held, indent=1, ensure_ascii=False), "utf-8")
+    except (OSError, ValueError):
+        pass
+
+
 def settled_for(output_dir: Any) -> list[str]:
     """Everything the builds of this application settled for, a line each."""
     path = Path(output_dir or "") / SETTLED_FILE
@@ -2716,6 +2743,8 @@ class _NodeRun:
     in_flight: set[str] = field(default_factory=set)
     #: Subject -> attempts made so far.
     attempts: dict[str, int] = field(default_factory=dict)
+    #: Subjects given their last try on the strongest model (`escalate`).
+    escalated: set[str] = field(default_factory=set)
     #: Subject -> the identities its accepted proposals wrote (see
     #: :func:`_proposed_identities`). What a repair of that subject is
     #: measured against: anything here the repair does not re-propose is
@@ -2866,6 +2895,17 @@ def _apply_subject(
         # attempt before this one was refused as before); what ships is still
         # correct, only less complete, and what was settled for is said.
         final = attempt >= max_attempts or _same_refusal(state.feedback.get(subject, ""), _reason(exc))
+        # FIRST, ASKED HARDER. A refusal the author could not get past is put
+        # once more to the strongest model, with every refusal so far and the
+        # refused reply to edit (`executors.escalated`), before anything is
+        # settled for: what it writes is what was meant, and a settlement is
+        # only the safe version of it.
+        if final and subject not in state.escalated and DAG[key].kind == "agent":
+            state.escalated.add(subject)
+            state.feedback[subject] = accumulate_refusals(state.feedback.get(subject, ""), attempt, _reason(exc))
+            _note(ledger, "node_retry", key, subject, attempt + 1, attempt + 1,
+                  f"refused again; one last try on the strongest model — {_reason(exc)}")
+            return "retry"
         took = _settle(svc, outcome, exc, commit=commit, user_request=user_request) if final else None
         if took is None:
             # A validator's verdict on a proposal: deterministic, so the same
@@ -2875,6 +2915,13 @@ def _apply_subject(
         report.settled.setdefault(label, []).extend(said)
         _note(ledger, "node_settled", key, subject, said)
         _keep_settled(svc.output_dir, key, said)
+        if not application.applied and not application.needs_clarification:
+            # WHAT WAS HELD BACK WAS THE WHOLE REPLY (a screen's only layout, a
+            # reply of journeys): the subject is settled with nothing to write,
+            # and what follows the build writes it.
+            state.current.pop(subject, None)
+            _note(ledger, "node_subject", key, subject, _at(), total, True)
+            return "applied"
 
     if application.applied:
         state.current.pop(subject, None)

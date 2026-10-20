@@ -520,7 +520,7 @@ def check_workflow_steps(result: "AgentResult", doc: dict | None = None,
     with the missing keys named, so the agent is asked again.
     """
     proposals = [p for p in result.proposals if p.section == "workflows"]
-    if not proposals:
+    if not proposals or _settled(result, "check_workflow_steps"):
         return
 
     from services.catalog import workflow_nodes
@@ -604,7 +604,54 @@ def check_workflow_steps(result: "AgentResult", doc: dict | None = None,
         {"workflows": [p.body for p in proposals], "businessRules": [],
          "data": (doc or {}).get("data") or {}}))
     if problems:
-        raise InvalidWorkflowStep(_all_of(problems))
+        raise InvalidWorkflowStep(_all_of(problems),
+                                  settle=_process_off(result, proposals, problems, "check_workflow_steps"))
+
+
+def _process_off(result: "AgentResult", proposals: list, problems: list[str], check: str) -> "Callable[[], list[str]]":
+    """The safe way through for a process the author could not get right:
+    SHIPPED CLOSED. A fault in its steps makes it a process whose one step
+    refuses with "not available yet" — its button says so, nothing is done
+    wrongly; a fault in its trigger alone switches the automation off. A
+    fault that names no process closes every process of the reply. The
+    after-build fixing works on each (`settled.json`)."""
+    def name_of(p) -> str:
+        return str((p.body or {}).get("name") or p.natural_key)
+
+    steps: dict[int, Any] = {}
+    trigger: dict[int, Any] = {}
+    for prob in problems:
+        owner = next((p for p in proposals if prob.startswith(name_of(p) + "/")), None)
+        if owner is not None:
+            steps[id(owner)] = owner
+            continue
+        owner = next((p for p in proposals if prob.startswith(name_of(p) + ":")), None)
+        if owner is not None:
+            trigger[id(owner)] = owner
+            continue
+        owner = proposals[0] if len(proposals) == 1 else None
+        for p in ([owner] if owner is not None else proposals):
+            steps[id(p)] = p
+
+    def settle() -> list[str]:
+        said: list[str] = []
+        for p in steps.values():
+            name = name_of(p)
+            p.body["steps"] = [{"key": "unavailable", "name": "Not available yet", "type": "end", "next": [],
+                                "config": {"refused": True,
+                                           "message": f"{name} is not available yet — it is being fixed."}}]
+            said.append(f"{name} is built switched off: starting it says it is not available yet, until its "
+                        "steps are fixed")
+        for p in trigger.values():
+            if id(p) in steps:
+                continue
+            trig = p.body.get("trigger") if isinstance(p.body.get("trigger"), dict) else None
+            if trig is not None:
+                trig["enabled"] = False
+            said.append(f"{name_of(p)} does not start by itself yet: its trigger is off until it is fixed")
+        settle_check(result, check)
+        return said
+    return settle
 
 
 class InvalidTrigger(AuthorRefusal):
@@ -620,7 +667,7 @@ def check_workflow_triggers(result: "AgentResult", doc: dict | None = None) -> N
     at the author and silent in the app (2026-10-12). Refused here with
     what to write instead, so the agent is asked again."""
     proposals = [p for p in result.proposals if p.section == "workflows"]
-    if not proposals:
+    if not proposals or _settled(result, "check_workflow_triggers"):
         return
     from services.blueprint.cron_expr import is_valid_cron, parse_duration_ms
     from services.blueprint.functional_completeness import with_loop_bodies
@@ -719,7 +766,8 @@ def check_workflow_triggers(result: "AgentResult", doc: dict | None = None) -> N
                     problems.append(f"{name}/{key}: `auth.secretRef` {ref!r} is declared by no integration; declare it under "
                                     f"`integrations[].secretRefs` first" + (f" (declared: {', '.join(sorted(declared_refs))})" if declared_refs else ""))
     if problems:
-        raise InvalidTrigger(_all_of(problems))
+        raise InvalidTrigger(_all_of(problems),
+                             settle=_process_off(result, proposals, problems, "check_workflow_triggers"))
 
 
 class InvalidIntegration(AuthorRefusal):
@@ -735,8 +783,15 @@ def check_integrations(result: "AgentResult", doc: dict | None = None) -> None:
     secret NAMES never values, and an `inbound` that says how a call is
     verified and by which of its names."""
     proposals = [p for p in result.proposals if p.section == "integrations"]
-    if not proposals:
+    if not proposals or _settled(result, "check_integrations"):
         return
+    # SHIPPED CLOSED WHEN THE AUTHOR CANNOT FIX IT (`AuthorRefusal.settle`):
+    # a value written where a name goes is removed and a name put in its
+    # place for the person to fill in settings — the value is never kept; an
+    # adapter that does not fit is unset, so the system is reached from the
+    # steps that call it; an inbound call that cannot be verified is not
+    # accepted at all.
+    fixes: list = []
     from services.smith.connect_service import actions, providers_of
     from services.smith.secrets_scrub import carries_secret
     problems: list[str] = []
@@ -744,14 +799,23 @@ def check_integrations(result: "AgentResult", doc: dict | None = None) -> None:
         body = proposal.body or {}
         name = body.get("name") or proposal.natural_key
         refs = [str(r) for r in body.get("secretRefs") or []]
-        for ref in refs:
-            if not SECRET_NAME.match(ref) or carries_secret(ref):
-                problems.append(f"{name}: `secretRefs` holds NAMES, UPPER_SNAKE (`XERO_API_KEY`); got {ref[:40]!r}")
+        bad_refs = [ref for ref in refs if not SECRET_NAME.match(ref) or carries_secret(ref)]
+        for ref in bad_refs:
+            problems.append(f"{name}: `secretRefs` holds NAMES, UPPER_SNAKE (`XERO_API_KEY`); got {ref[:40]!r}")
+        if bad_refs:
+            stem = re.sub(r"[^A-Z0-9]+", "_", str(name).upper()).strip("_") or "SERVICE"
+            def names_not_values(b=body, bad=frozenset(bad_refs), stem=stem):
+                kept = [r for r in b.get("secretRefs") or [] if str(r) not in bad]
+                b["secretRefs"] = kept + ([f"{stem}_API_KEY"] if f"{stem}_API_KEY" not in kept else [])
+            fixes.append((names_not_values, f"{name}: what was written as its key was not kept; enter the key "
+                                            f"in the app's settings as {stem}_API_KEY"))
         serves = str(body.get("serves") or "").strip()
         if serves:
             if serves not in actions():
                 problems.append(f"{name}: `serves` names an action with an adapter ({', '.join(sorted(actions()))}) "
                                 f"or is empty; got {serves!r}")
+                fixes.append((lambda b=body: b.__setitem__("serves", ""),
+                              f"{name} is reached from the steps that call it, not through a built-in adapter"))
             else:
                 provider = str(body.get("provider") or "").strip().lower()
                 known = providers_of(serves)
@@ -759,28 +823,52 @@ def check_integrations(result: "AgentResult", doc: dict | None = None) -> None:
                 flexible = bool(getattr(adapter_for(serves), "FLEXIBLE_NAMES", False))
                 if provider not in known:
                     problems.append(f"{name}: `{serves}` is carried by {', '.join(sorted(known))}; got provider {provider!r}")
+                    fixes.append((lambda b=body: b.__setitem__("serves", ""),
+                                  f"{name} ({provider}) is reached from the steps that call it: the built-in "
+                                  f"{serves} adapter is for {', '.join(sorted(known))}"))
                 elif flexible:
                     # NAMES PER ENTRY (`SSO_<ID>_ISSUER/CLIENT_ID/CLIENT_SECRET`):
                     # any complete triple reaches a provider.
                     if not adapter_for(serves).complete_triples(refs):
                         problems.append(f"{name}: {provider} reads a triple of names — {', '.join(known[provider])} "
                                         "(or the same three under the entry's own id)")
+                        fixes.append((lambda b=body, want=list(known[provider]): b.__setitem__(
+                            "secretRefs", [*(b.get("secretRefs") or []), *[k for k in want if k not in (b.get("secretRefs") or [])]]),
+                            f"{name}: its keys are {', '.join(known[provider])}"))
                 else:
                     missing = [k for k in known[provider] if k not in refs]
                     if missing:
                         problems.append(f"{name}: {provider} reads {', '.join(known[provider])} — add {', '.join(missing)} to `secretRefs`")
+                        fixes.append((lambda b=body, add=list(missing): b.__setitem__(
+                            "secretRefs", [*(b.get("secretRefs") or []), *add]),
+                            f"{name}: also needs {', '.join(missing)} in the app's settings"))
         inbound = body.get("inbound")
         if inbound is not None:
+            closed = (lambda b=body: b.pop("inbound", None),
+                      f"{name} cannot call the app yet: how its calls are verified was not settled")
             if not isinstance(inbound, dict):
                 problems.append(f"{name}: `inbound` is an object: events, verify, signingSecretRef")
+                fixes.append(closed)
             else:
                 ref = str(inbound.get("signingSecretRef") or "")
+                no_events = not [e for e in inbound.get("events") or [] if str(e).strip()]
                 if ref not in refs:
                     problems.append(f"{name}: `inbound.signingSecretRef` names one of `secretRefs`; got {ref!r}")
-                if not [e for e in inbound.get("events") or [] if str(e).strip()]:
+                if no_events:
                     problems.append(f"{name}: `inbound.events` lists the events the system sends (`payment.succeeded`)")
+                if no_events or not SECRET_NAME.match(ref) or carries_secret(ref):
+                    if ref not in refs or no_events:
+                        fixes.append(closed)
+                elif ref not in refs:
+                    fixes.append((lambda b=body, r=ref: b.__setitem__("secretRefs", [*(b.get("secretRefs") or []), r]),
+                                  f"{name}: its calls are verified with {ref}, kept with its other keys"))
     if problems:
-        raise InvalidIntegration(_all_of(problems))
+        def settle() -> list[str]:
+            for fix, _said in fixes:
+                fix()
+            settle_check(result, "check_integrations")
+            return list(dict.fromkeys(said for _fix, said in fixes))
+        raise InvalidIntegration(_all_of(problems), settle=settle)
 
 
 class InvalidEntityFields(AuthorRefusal):
@@ -1502,10 +1590,88 @@ def ownership_findings(security: dict, doc: dict) -> list[str]:
 
 def check_security(result: "AgentResult", doc: dict | None) -> None:
     """The security section's ownership rules are ones the engine can apply."""
+    if _settled(result, "check_security"):
+        return
     problems = [msg for p in result.proposals if p.section == "security" and isinstance(p.body, dict)
                 for msg in ownership_findings(p.body, doc or {})]
     if problems:
-        raise InvalidOwnershipRule(_all_of(problems))
+        raise InvalidOwnershipRule(_all_of(problems), settle=_records_closed(result, doc or {}))
+
+
+def _records_closed(result: "AgentResult", doc: dict) -> "Callable[[], list[str]] | None":
+    """The safe way through for ownership rules the author could not get
+    right: SHIPPED CLOSED. The rule is taken out, and the record type it
+    governed is the administrator's alone — every other role loses its
+    permissions on it — until the rule is fixed; a guest column that is not a
+    field is dropped (visitors lose access, owners keep theirs). Never open:
+    when a rule names a record type the data model does not have, or a role
+    holding permissions on it is not in this reply to change, there is no
+    closed version to ship, and the refusal stands."""
+    sec = next((p for p in result.proposals if p.section == "security" and isinstance(p.body, dict)), None)
+    if sec is None:
+        return None
+    role_props = [p for p in result.proposals if p.section == "roles" and isinstance(p.body, dict)]
+    perm_props = [p.body for p in result.proposals if p.section == "permissions" and isinstance(p.body, dict)]
+    roles = [p.body for p in role_props] + [r for r in doc.get("roles") or [] if isinstance(r, dict)
+                                            and r.get("name") not in {b.get("name") for b in (p.body for p in role_props)}]
+    admin, _ = _admin_of({**doc, "roles": roles})
+    if not admin:
+        return None
+    entities = {str(e.get("name")): e for e in (doc.get("data") or {}).get("entities") or [] if isinstance(e, dict)}
+    rules = [r for r in sec.body.get("ownershipRules") or [] if isinstance(r, dict)]
+    closing: list[tuple[dict, dict]] = []      # (rule, entity) to take out and close
+    guests: list[dict] = []
+    for rule in rules:
+        found = ownership_findings({**sec.body, "ownershipRules": [rule] + [r for r in rules if r is not rule
+                                                                           and r.get("entity") != rule.get("entity")]},
+                                   doc)
+        mine = [f for f in found if str(rule.get("entity")) in f or str(rule.get("column")) in f]
+        if not mine:
+            continue
+        if any("the data model has no such entity" in f for f in mine):
+            return None
+        entity = next((e for name, e in entities.items()
+                       if re.sub(r"[^a-z0-9]", "", name.lower()) in
+                       {re.sub(r"[^a-z0-9]", "", str(rule.get("entity")).lower()) + x for x in ("", "s", "es")}
+                       or str(e.get("id")) == str(rule.get("entity"))), None)
+        if entity is None:
+            return None
+        if all("guestColumn" in f for f in mine):
+            guests.append(rule)
+        else:
+            closing.append((rule, entity))
+    if not closing and not guests:
+        return None              # a fault no rule owns has no closed version
+    perms = [*perm_props, *[q for q in doc.get("permissions") or [] if isinstance(q, dict)]]
+    shut: dict[str, set[str]] = {}
+    for _rule, entity in closing:
+        ids = {str(q.get("id")) for q in perms
+               if str(q.get("subject")) in (str(entity.get("id")), str(entity.get("name")))}
+        shut[str(entity.get("name"))] = ids
+        # Every non-administrator holding one of them must be in this reply,
+        # or it would keep its access.
+        for r in doc.get("roles") or []:
+            if isinstance(r, dict) and r.get("name") != admin and ids & {str(x) for x in r.get("permissions") or []} \
+                    and r.get("name") not in {p.body.get("name") for p in role_props}:
+                return None
+
+    def settle() -> list[str]:
+        said: list[str] = []
+        for rule in guests:
+            rule.pop("guestColumn", None)
+            said.append(f"visitors who are not signed in cannot keep {rule.get('entity')} records yet: "
+                        "the column for their guest token was not settled")
+        gone = {id(rule) for rule, _e in closing}
+        sec.body["ownershipRules"] = [r for r in sec.body.get("ownershipRules") or [] if id(r) not in gone]
+        for name, ids in shut.items():
+            for p in role_props:
+                if p.body.get("name") != admin:
+                    p.body["permissions"] = [x for x in p.body.get("permissions") or [] if str(x) not in ids]
+            said.append(f"{name} records are open to the administrator ({admin}) only: who owns each one was "
+                        "not settled, so nobody else may reach them until it is")
+        settle_check(result, "check_security")
+        return said
+    return settle
 
 
 class InvalidTenancy(AuthorRefusal):
@@ -1517,6 +1683,14 @@ def check_tenancy(result: "AgentResult", doc: dict | None) -> None:
     role or a platform role, never both; the admin role is a member role."""
     doc = doc or {}
     problems: list[str] = []
+    if _settled(result, "check_tenancy"):
+        return
+    # THE SAFE WAY THROUGH, ONE PER FAULT, EACH STRICTER (`AuthorRefusal.settle`):
+    # one organisation record, roles that exist, a role inside organisations
+    # rather than across them. An organisation with no record to be has none:
+    # `closable` turns false and the refusal stands.
+    fixes: list = []
+    closable = True
     entities = [p.body for p in result.proposals if p.section == "data.entities" and isinstance(p.body, dict)]
     tenants_here = [str(e.get("name")) for e in entities if e.get("tenant") is True]
     existing = [str(e.get("name")) for e in (doc.get("data") or {}).get("entities") or []
@@ -1524,6 +1698,12 @@ def check_tenancy(result: "AgentResult", doc: dict | None) -> None:
                 and str(e.get("status") or "").upper() not in ("DEPRECATED", "REMOVED")]
     if len(tenants_here) + len(existing) > 1:
         problems.append(f"only ONE entity is the organisation (`tenant: true`); got {', '.join(tenants_here + existing)}")
+        keep = (existing or tenants_here)[0]
+        def one_tenant(keep=keep):
+            for e in entities:
+                if e.get("tenant") is True and str(e.get("name")) != keep:
+                    e.pop("tenant", None)
+        fixes.append((one_tenant, f"{keep} is the organisation; the other record types are not"))
     roles = known_roles(result, doc)
     role_names: set[str] = set()
     for p in result.proposals:
@@ -1536,21 +1716,47 @@ def check_tenancy(result: "AgentResult", doc: dict | None) -> None:
                                                            for e in (doc.get("data") or {}).get("entities") or []))
         if not has_tenant:
             problems.append("security.tenancy: `organisation` needs an entity marked `tenant: true` in the data model")
+            closable = False
         members = [str(r) for r in ten.get("memberRoles") or []]
         platform = [str(r) for r in ten.get("platformRoles") or []]
-        for r in members + platform:
-            if r not in roles | role_names:
-                problems.append(f"security.tenancy: {r!r} is not a declared role")
+        unknown = [r for r in members + platform if r not in roles | role_names]
+        for r in unknown:
+            problems.append(f"security.tenancy: {r!r} is not a declared role")
+        if unknown:
+            def known_only(t=ten, bad=frozenset(unknown)):
+                t["memberRoles"] = [r for r in t.get("memberRoles") or [] if str(r) not in bad]
+                t["platformRoles"] = [r for r in t.get("platformRoles") or [] if str(r) not in bad]
+            fixes.append((known_only, f"roles that do not exist were taken out of the organisations: {', '.join(unknown)}"))
         both = sorted(set(members) & set(platform))
         if both:
             problems.append(f"security.tenancy: a role is a member role or a platform role, never both: {', '.join(both)}")
+            fixes.append((lambda t=ten, b=frozenset(both): t.__setitem__(
+                "platformRoles", [r for r in t.get("platformRoles") or [] if str(r) not in b]),
+                f"{', '.join(both)} work inside one organisation, not across all of them"))
         if not members:
             problems.append("security.tenancy: name the `memberRoles` people hold inside an organisation")
+            names = sorted({str(r.get("name")) for r in [*(p.body for p in result.proposals if p.section == "roles"
+                                                            and isinstance(p.body, dict)),
+                                                         *(doc.get("roles") or [])]
+                            if isinstance(r, dict) and r.get("name")} - set(platform))
+            if names:
+                fixes.append((lambda t=ten, n=names: t.__setitem__("memberRoles", list(n)),
+                              f"everyone but the platform's own staff works inside one organisation: {', '.join(names)}"))
+            else:
+                closable = False
         admin = ten.get("organisationAdminRole")
         if admin and str(admin) not in members:
             problems.append(f"security.tenancy: `organisationAdminRole` {admin!r} is not one of the member roles")
+            fixes.append((lambda t=ten, a=str(admin): t.__setitem__(
+                "memberRoles", [*(t.get("memberRoles") or []), a] if a not in (t.get("memberRoles") or []) else t["memberRoles"]),
+                f"{admin} administers one organisation, as one of its members"))
     if problems:
-        raise InvalidTenancy(_all_of(problems))
+        def settle() -> list[str]:
+            for fix, _said in fixes:
+                fix()
+            settle_check(result, "check_tenancy")
+            return [said for _fix, said in fixes]
+        raise InvalidTenancy(_all_of(problems), settle=settle if closable and fixes else None)
 
 
 class NoRequirements(AuthorRefusal):
@@ -1850,7 +2056,7 @@ def check_business_rules(result: "AgentResult", doc: dict | None) -> None:
     a condition the engine's parser reads — refused at the author, with the
     fault named, never at the forms that later fire it."""
     proposals = [p for p in result.proposals if p.section == "businessRules"]
-    if not proposals:
+    if not proposals or _settled(result, "check_business_rules"):
         return
     from services.blueprint.functional_completeness import authoring_findings
     findings = authoring_findings({
@@ -1862,7 +2068,39 @@ def check_business_rules(result: "AgentResult", doc: dict | None) -> None:
     problems += [f"{p.body.get('name') or p.natural_key}: {e}"
                  for p in proposals for e in prerequisite_findings(p.body, doc or {})]
     if problems:
-        raise InvalidBusinessRule("; ".join(problems))
+        def settle() -> list[str]:
+            # KEPT AS WRITTEN POLICY, SAID AS NOT ENFORCED. A rule the engine
+            # cannot evaluate cannot be run either way; shipped closed it would
+            # refuse every save of its record type, which no person meant. It
+            # is listed as a stated rule not enforced — the Business Rules tab
+            # and the person see it so — and the after-build fixing makes it
+            # one the engine can run (`settled.json`).
+            said = []
+            for p in proposals:
+                body = p.body if isinstance(p.body, dict) else {}
+                name = str(body.get("name") or p.natural_key)
+                if not any(m.startswith(name) or name in m for m in problems):
+                    continue
+                if body.get("kind") == "prerequisite":
+                    body["enabled"] = False
+                else:
+                    body["kind"] = "statement"
+                    body["statement"] = str(body.get("statement") or body.get("name") or name)
+                    for k in ("when", "then", "otherwise", "expression", "table", "scope"):
+                        body.pop(k, None)
+                said.append(f"the rule “{name}” is written down but NOT ENFORCED yet: as written, the app "
+                            "could not check it")
+            if not said:                       # no rule owns a fault: every rule of the reply
+                for p in proposals:
+                    body = p.body if isinstance(p.body, dict) else {}
+                    body["kind"], name = "statement", str(body.get("name") or p.natural_key)
+                    body["statement"] = str(body.get("statement") or name)
+                    for k in ("when", "then", "otherwise", "expression", "table", "scope", "gates", "requires"):
+                        body.pop(k, None)
+                    said.append(f"the rule “{name}” is written down but NOT ENFORCED yet")
+            settle_check(result, "check_business_rules")
+            return said
+        raise InvalidBusinessRule("; ".join(problems), settle=settle)
 
 
 def prerequisite_findings(rule: dict, doc: dict) -> list[str]:
@@ -1975,8 +2213,9 @@ def check_pattern_templates(result: AgentResult,
     here so the agent is asked again rather than the schema loosened.
     """
     proposals = [p for p in result.proposals if p.section == "pageLayouts"]
-    if not proposals:
+    if not proposals or _settled(result, "check_pattern_templates"):
         return
+    bad: list = []
 
     from services.blueprint.page_planner import (
         load_catalog, validate_props, validate_template,
@@ -1994,6 +2233,7 @@ def check_pattern_templates(result: AgentResult,
         if errors:
             pattern = proposal.body.get("pattern") or proposal.body.get("page", "?")
             problems.extend(f"{pattern}: {e}" for e in errors)
+            bad.append(proposal)
     # WOULD IT DO ANYTHING. The checks above ask whether the tree renders; this
     # asks whether it works. A Button with a label and no action renders
     # perfectly and does nothing, an action naming a workflow that does not
@@ -2042,12 +2282,25 @@ def check_pattern_templates(result: AgentResult,
             # Advisory findings are surfaced but never REFUSE a composition — the
             # composer cannot fix an upstream/degradable cause, so blocking on
             # them only loops (see ADVISORY_PAGE_RULES).
-            problems.extend(f["detail"] for f in findings
-                            if f.get("rule") not in ADVISORY_PAGE_RULES
-                            and str(f.get("page")) == str(page_id))
+            mine = [f["detail"] for f in findings
+                    if f.get("rule") not in ADVISORY_PAGE_RULES and str(f.get("page")) == str(page_id)]
+            problems.extend(mine)
+            if mine and proposal not in bad:
+                bad.append(proposal)
 
     if problems:
-        raise InvalidPatternTemplate(_all_of(problems))
+        def settle() -> list[str]:
+            # A SCREEN THAT WILL NOT RENDER IS NOT SHIPPED, AND IS WRITTEN AFTER.
+            # Its layout is left out, so the screen counts as unbuilt, and the
+            # page repair that follows every build writes it (`page_repair`).
+            gone = bad or proposals
+            result.proposals = [p for p in result.proposals if p not in gone]
+            settle_check(result, "check_pattern_templates")
+            names = {str(pg.get("id")): str(pg.get("route") or pg.get("name")) for pg in (doc or {}).get("pages") or []
+                     if isinstance(pg, dict)}
+            return [f"{names.get(str(p.body.get('page')), p.body.get('page'))} is written after the build: its "
+                    "layout could not be composed" for p in gone]
+        raise InvalidPatternTemplate(_all_of(problems), settle=settle)
 
 
 #: EVERY FAULT IN ONE REPLY, NOT THE FIRST FEW.

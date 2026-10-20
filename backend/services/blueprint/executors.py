@@ -87,6 +87,8 @@ logger = logging.getLogger(__name__)
 #: FORGE_ONESHOT_MODEL default, which is still pinned to an older Sonnet.
 AGENT_MODEL = os.environ.get("FORGE_AGENT_MODEL", "").strip() or "claude-sonnet-5"
 SMITH_MODEL = os.environ.get("FORGE_SMITH_MODEL", "").strip() or "claude-opus-5"
+#: The model for the last try at a reply a check refused twice (`escalated`).
+ESCALATION_MODEL = os.environ.get("FORGE_ESCALATION_MODEL", "").strip() or SMITH_MODEL
 
 #: What `AnthropicModel()` and `tiered_router()` run on when not told: the
 #: specialists' model. Kept under its old name because the router, the
@@ -4136,6 +4138,21 @@ def after_refusal(client: Any, spec: Any) -> Any:
     return dataclasses.replace(client, effort="high")
 
 
+def escalated(client: Any, spec: Any) -> Any:
+    """The client for the LAST TRY at a reply a check refused the same way
+    twice (`TaskSpec.escalate`): the strongest model, at high effort. Asking
+    the same model the same way a third time gets the same answer; the build
+    used to stop there (Refund And Chargeback and three before it,
+    2026-10-20). Any other call is left as it is."""
+    import dataclasses
+
+    if not getattr(spec, "escalate", False) or not dataclasses.is_dataclass(client) \
+            or not hasattr(client, "model") or not hasattr(client, "effort"):
+        return client
+    return dataclasses.replace(client, model=ESCALATION_MODEL,
+                               effort="high" if str(client.effort) not in ("xhigh", "max") else client.effort)
+
+
 #: One notch down, never below `low`.
 _LOWER_EFFORT = {"max": "xhigh", "xhigh": "high", "high": "medium", "medium": "low", "low": "low"}
 
@@ -4519,8 +4536,8 @@ def make_executor(
         from services.blueprint.artifact_patch import patch_node_output
         from services.blueprint.orchestrator import DAG
 
-        client = for_repair(model.for_task(spec.node, spec.agent)
-                            if isinstance(model, ModelRouter) else model, spec)
+        client = escalated(for_repair(model.for_task(spec.node, spec.agent)
+                                      if isinstance(model, ModelRouter) else model, spec), spec)
         try:
             with svc.lock:
                 system, context = build_prompt(
@@ -4749,12 +4766,12 @@ def make_executor(
             composed = _compose_via_a2ui(spec)
             if composed is not None:
                 return composed
-        client = for_repair(after_refusal(after_no_answer(
+        client = escalated(for_repair(after_refusal(after_no_answer(
             model.for_task(spec.node, spec.agent)
             if isinstance(model, ModelRouter)
             else model,
             spec.feedback,
-        ), spec), spec)
+        ), spec), spec), spec)
         # §5 — an application can be described by showing as well as by
         # telling. Resolved per call rather than threaded through `run`,
         # because the references belong to the application and `svc` is the
