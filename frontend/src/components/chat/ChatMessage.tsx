@@ -231,10 +231,12 @@ export function ChatMessage({ message, onSend, isGenerating, isLastAssistantMess
                 onSend={onSend}
               />
             ) : selfHealMeta ? (
-              <SelfHealCard
-                metadata={selfHealMeta}
-                createdAt={message.created_at}
-              />
+              <div className="rounded-xl border bg-card p-4 shadow-sm">
+                <SelfHealCard
+                  metadata={selfHealMeta}
+                  createdAt={message.created_at}
+                />
+              </div>
             ) : needsUser ? (
               <NeedsUserCard
                 payload={needsUser}

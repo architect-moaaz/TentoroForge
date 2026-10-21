@@ -54,6 +54,7 @@ def smith_result(project_id: str, output_dir: str, message: str, *,
         "trace": [{"tool": t} for t in out.steps],
         "diagnosis": None,
         "finding": out.finding,
+        "untried": bool(getattr(out, "untried", False)),
     }
 
 
