@@ -16,7 +16,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { Project } from "@/types/project";
-import { MobileTargetChoice, type MobileTarget } from "./MobileTargetChoice";
 
 interface NewAppDialogProps {
   orgId: string;
@@ -37,8 +36,6 @@ export function NewAppDialog({ orgId, open, onOpenChange }: NewAppDialogProps) {
   const [mode, setMode] = useState<Mode>(null);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  // A website that works on phones, or a website AND a mobile app. Chosen here, once, when the app is created.
-  const [mobileTarget, setMobileTarget] = useState<MobileTarget>("responsive");
   const [provider, setProvider] = useState<DesignProvider>("figma");
   const [figmaUrl, setFigmaUrl] = useState("");
   const [uxpilotRef, setUxpilotRef] = useState("");
@@ -54,7 +51,7 @@ export function NewAppDialog({ orgId, open, onOpenChange }: NewAppDialogProps) {
   // nothing that runs ever read it back.
 
   const createProject = useMutation({
-    mutationFn: (data: { name: string; description?: string; mobile_target: MobileTarget }) =>
+    mutationFn: (data: { name: string; description?: string }) =>
       api.post<Project>(`/api/orgs/${orgId}/projects`, data),
     onSuccess: (project) => {
       queryClient.invalidateQueries({ queryKey: ["org", orgId, "projects"] });
@@ -83,7 +80,6 @@ export function NewAppDialog({ orgId, open, onOpenChange }: NewAppDialogProps) {
       const project = await api.post<Project>(`/api/orgs/${orgId}/projects`, {
         name: data.name,
         description: desc,
-        mobile_target: mobileTarget,
       });
       return project;
     },
@@ -128,7 +124,6 @@ export function NewAppDialog({ orgId, open, onOpenChange }: NewAppDialogProps) {
     createProject.mutate({
       name: name.trim(),
       description: description.trim() || undefined,
-      mobile_target: mobileTarget,
     });
   };
 
@@ -159,7 +154,6 @@ export function NewAppDialog({ orgId, open, onOpenChange }: NewAppDialogProps) {
     setMode(null);
     setName("");
     setDescription("");
-    setMobileTarget("responsive");
     setProvider("figma");
     setFigmaUrl("");
     setUxpilotRef("");
@@ -255,7 +249,6 @@ export function NewAppDialog({ orgId, open, onOpenChange }: NewAppDialogProps) {
                 className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
               />
             </div>
-            <MobileTargetChoice value={mobileTarget} onChange={setMobileTarget} idPrefix="describe-target" />
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={handleReset}>
                 Back
@@ -400,7 +393,6 @@ export function NewAppDialog({ orgId, open, onOpenChange }: NewAppDialogProps) {
                 The {providerLabel} credential comes from your organisation&apos;s integrations (Settings &rarr; Integrations).
               </p>
             </div>
-            <MobileTargetChoice value={mobileTarget} onChange={setMobileTarget} idPrefix="design-target" />
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={handleReset}>
                 Back

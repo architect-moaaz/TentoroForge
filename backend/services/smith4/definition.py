@@ -43,12 +43,96 @@ def user_turns(ctx: Ctx) -> int:
                if str(t[0] if isinstance(t, (tuple, list)) else getattr(t, "role", "")) == "user")
 
 
+def _turn_text(turn: object) -> tuple[str, str]:
+    if isinstance(turn, (tuple, list)) and len(turn) == 2:
+        role, text = turn
+    else:
+        role, text = getattr(turn, "role", ""), getattr(turn, "text", "")
+    return str(role), str(text or "")
+
+
+def platform_asked(ctx: Ctx) -> int:
+    """How many times Smith has put the platform question: a turn of its own that names the options."""
+    from services.blueprint import app_target
+    asked = 0
+    for role, text in map(_turn_text, ctx.history):
+        low = text.lower()
+        if role != "user" and ("where will people use it" in low
+                               or sum(1 for _s, label in app_target.OPTIONS if label.lower() in low) >= 2):
+            asked += 1
+    return asked
+
+
+def settle_platform(ctx: Ctx) -> str | None:
+    """Where people will use the app, if it is settled now: already kept, or answered by this turn's message.
+
+    ONLY A REPLY TO THE QUESTION COUNTS. The brief itself may say "a native phone app for iPhone and Android"; that
+    is a wish, not an answer to the five choices, and reading it as one picked an option nobody was offered. So the
+    message is read only once the question has been asked, and a message that names no choice is asked about once more;
+    after that, or when nobody can be asked, the app is a website: the choice that adds nothing the person did not
+    ask for. The choice is written down either way, so a build never starts without one."""
+    from services.blueprint import app_target
+
+    chosen = app_target.read(ctx.out)
+    if chosen:
+        return chosen
+    asked = platform_asked(ctx)
+    if asked:
+        said = app_target.parse_choice(ctx.message)
+        if said:
+            app_target.write(ctx.out, said)
+            return said
+    if asked >= 2 or getattr(ctx, "unattended", False) or (not asked and user_turns(ctx) >= MAX_CLARIFY_TURNS):
+        # Asked twice without a pick, nobody to ask, or a conversation too long to start with a new question.
+        app_target.write(ctx.out, "web")
+        return "web"
+    return None
+
+
+def platform_question(ctx: Ctx) -> str:
+    """The instruction that makes Smith ask where people will use the app — first, in these words, with these chips."""
+    from services.blueprint import app_target
+
+    again = ("They were asked this already and did not pick one of the five: say so in one short line, "
+             "then ask it again. " if platform_asked(ctx) else "")
+    chips = "; ".join(label for _surface, label in app_target.OPTIONS)
+    return ("THE PLATFORM IS NOT CHOSEN, AND IT IS ASKED FIRST. " + again +
+            "Ask it with `ask_user`: the `question` is the text below, word for word, and the `options` are exactly "
+            f"these five chips, in this order: {chips}. Ask nothing else this turn, and do not choose for them "
+            "or define the application.\n\nQUESTION:\n" + app_target.QUESTION)
+
+
+def canonical_platform_ask(ctx: Ctx, args: dict) -> dict:
+    """While the platform is still open on a new app, Smith's question IS the platform question, in its own words and with
+    its five chips. The model is told to pass them word for word, but it had merged the limits into one paragraph; the
+    words are fixed text, so they are put back here rather than trusted to a model."""
+    from services.blueprint import app_target
+    from services.smith4.context import defined
+
+    if defined(ctx.out) or not _is_platform_question(args):
+        return args                      # an app exists, or this is some other question: it is the model's own
+    if settle_platform(ctx) is not None:
+        return args
+    return {**args, "question": app_target.QUESTION, "options": [label for _surface, label in app_target.OPTIONS]}
+
+
+def _is_platform_question(args: dict) -> bool:
+    """Is the model's question the one about where people will use the app? By its words or by its chips."""
+    from services.blueprint import app_target
+
+    said = str(args.get("question") or "").lower()
+    chips = " | ".join(str(o).lower() for o in (args.get("options") or []))
+    named = sum(1 for _surface, label in app_target.OPTIONS if label.lower() in said or label.lower() in chips)
+    return "where will people use" in said or named >= 2 or ("pwa" in said and "native" in said)
+
+
 def open_decisions(ctx: Ctx, args: dict) -> str:
     """The decisions the brief so far leaves open, as questions with chips.
 
-    Silence is the default: a brief that says what the application is for and
-    what people do in it gets no question. The cap is structural — past it,
-    the answer is "define with what is known"."""
+    The first is always where people will use the app (`app_target`), asked in fixed words so the answer can be read
+    exactly; the rest are the clarifier's. Silence is the default for those: a brief that says what the application
+    is for and what people do in it gets no question. The cap is structural — past it, the answer is "define with
+    what is known"."""
     from services.smith.clarify_brief import clarify_brief, company_palette_option
     from services.smith.figma_connect import find_in as figma_in
     from services.smith.uxpilot_connect import find_in as uxpilot_in
@@ -56,6 +140,8 @@ def open_decisions(ctx: Ctx, args: dict) -> str:
     brief = brief_of(ctx)
     if not brief.strip():
         return "Nothing has been asked for yet. There is no brief to clarify."
+    if settle_platform(ctx) is None:
+        return platform_question(ctx)
     if user_turns(ctx) >= MAX_CLARIFY_TURNS:
         return (f"The person has answered {user_turns(ctx)} times already; asking more would be "
                 "interrogating. Define with what is known.")
@@ -99,6 +185,10 @@ def define_application(ctx: Ctx, args: dict) -> dict:
             svc.doc.setdefault("application", {})["description"] = merged
             svc.validate(); svc.save()
         else:
+            # THE PLATFORM IS SETTLED BEFORE THE APP IS MADE: `create` reads it. When it is not settled the person has
+            # not been asked (or has not picked), so the definition goes back to ask, not on with a guess.
+            if settle_platform(ctx) is None:
+                return _finding(platform_question(ctx))
             svc = BlueprintService.create(output_dir=output_dir, app_id=Path(output_dir).name,
                                           name=ctx.app_name or "Application", domain="unknown",
                                           description=brief)

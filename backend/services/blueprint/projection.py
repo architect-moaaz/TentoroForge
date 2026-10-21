@@ -4097,9 +4097,14 @@ def project_ownership_rules(doc: dict, app_root: str | Path) -> dict[str, Any]:
 #: were answered with a redirect to the sign-in page and never ran: every
 #: scheduled process in every published app slept (confirmed on a built app's
 #: matcher, 2026-10-11).
+#:
+#: `offline` is the page an installed app (a PWA) shows when it has no network. The service worker keeps it at install
+#: and serves it when a page cannot be reached, so a person with no signal must be able to open it WITHOUT a session:
+#: gated, the worker kept the sign-in page instead (the fetch was redirected) and a redirected answer cannot be used
+#: for a page load, so "no network" showed the browser's error. It is static and shows no data.
 _ALWAYS_OPEN: tuple[str, ...] = (
     "api/auth", "_next", "favicon.ico",
-    "login", "signup", "set-password",
+    "login", "signup", "set-password", "offline", "install",
     "api/cron", "api/webhooks",
     # The stand-in checkout: a signed-out buyer (a guest cart) is sent here
     # too; it shows an amount by a session id and charges nothing.
@@ -5036,7 +5041,7 @@ def project_pwa(doc: dict, app_root: str | Path, output_dir: str | Path | None =
         f"export const MOBILE: MobilePolicy = {json.dumps(policy, indent=2)};\n", "utf-8")
     files = [MOBILE_POLICY_FILE]
     if not policy["installable"]:
-        for stale in ("public/manifest.webmanifest", "public/sw.js"):
+        for stale in ("public/manifest.webmanifest", "public/sw.js", "src/app/install/page.tsx"):
             if (root / stale).exists():
                 (root / stale).unlink()
         return {"files": files, **policy}
@@ -5075,6 +5080,13 @@ def project_pwa(doc: dict, app_root: str | Path, output_dir: str | Path | None =
         (public / "sw.js").write_text(sw_src.read_text("utf-8").replace("__BASE__", "").replace("__VERSION__", version)
                                       .replace("__SHELL__", json.dumps(shell)), "utf-8")
         files.append("public/sw.js")
+    # THE INSTALL PAGE: where a link or a QR code sends someone who wants the app on their phone. Public.
+    install_src = Path(__file__).resolve().parents[2] / "templates" / "app-foundation" / "src" / "app" / "install" / "page.tsx"
+    if install_src.is_file():
+        install_dst = root / "src" / "app" / "install" / "page.tsx"
+        install_dst.parent.mkdir(parents=True, exist_ok=True)
+        install_dst.write_text(install_src.read_text("utf-8"), "utf-8")
+        files.append("src/app/install/page.tsx")
     return {"files": files, **policy}
 
 

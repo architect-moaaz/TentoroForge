@@ -64,7 +64,12 @@ def choose_target(output_dir: str | Path, doc: Optional[dict]) -> Optional[Targe
     if doc and enabled(doc):
         return Target("native", native_root(output_dir))
     shell = Path(output_dir) / "mobile"
-    return Target("shell", shell) if shell.is_dir() else None
+    if shell.is_dir():
+        return Target("shell", shell)
+    # A PWA's phone app is the shell, and `prepare_shell` makes it when there is none yet (full generation makes it;
+    # an app built another way, or before this choice, does not).
+    surface = str(((doc or {}).get("mobile") or {}).get("surface") or "") if doc else ""
+    return Target("shell", shell) if surface in SHELL_SURFACES else None
 
 
 def _read_app_json(native_dir: Path) -> dict:
@@ -113,6 +118,73 @@ def prepare(output_dir: str | Path, doc: dict, deployed_url: str) -> Path:
         expo["owner"] = prior_owner
     _write_app_json(root, data)
     return root
+
+
+#: The choices whose phone app is the WebView shell: it opens the installable website inside an app.
+SHELL_SURFACES = ("web_pwa", "pwa_only")
+
+
+def _brand_hex(doc: dict) -> str:
+    value = str((((doc or {}).get("designSystem") or {}).get("colors") or {}).get("primary") or "").strip()
+    return value if re.match(r"^#[0-9a-fA-F]{6}$", value) else ""
+
+
+#: What in an application's pages means it uses the phone's camera: a barcode scanner, a photo capture, an image search, or
+#: a page of the `capture` pattern.
+_CAMERA_USE = re.compile(r"BarcodeScanner|CameraCapture|ImageSearch|\"pattern\":\s*\"capture\"")
+
+
+def uses_camera(doc: dict) -> bool:
+    """Does the application use the camera? Decided from its own pages, so a habit tracker does not ask for it."""
+    text = json.dumps([doc.get("pageCode"), doc.get("pageLayouts"), doc.get("pages")], ensure_ascii=False, default=str)
+    return bool(_CAMERA_USE.search(text))
+
+
+def prepare_shell(output_dir: str | Path, doc: dict, deployed_url: str) -> Path:
+    """The WebView shell of a PWA, current: made when the application has none, with the web app's address, its brand
+    colour and icons, and a unique slug written in. Keeps the EAS project and the owning Expo account already linked
+    (the scaffold rewrites app.json from the template, and a robot token is refused without the owner)."""
+    from services.mobile_branding import apply_mobile_branding
+    from services.mobile_scaffold import scaffold_mobile
+
+    out = Path(output_dir)
+    shell = out / "mobile"
+    try:
+        prior_owner = str(((_read_app_json(shell).get("expo") or {}).get("owner")) or "").strip()
+    except NativeBuildError:
+        prior_owner = ""
+    name = str((doc.get("application") or {}).get("name") or "").strip() or None
+    bundle = str((((doc.get("mobile") or {}).get("store")) or {}).get("bundleId") or "").strip() or None
+    try:
+        scaffold_mobile(str(out), app_name=name, deployed_url=str(deployed_url or "").strip().rstrip("/"),
+                        brand_hex=_brand_hex(doc) or None, bundle_id=bundle)
+        apply_mobile_branding(str(shell))
+    except Exception as exc:  # noqa: BLE001 - said as a reason, not a traceback
+        raise NativeBuildError(f"the phone app could not be written ({type(exc).__name__}: {str(exc)[:160]})") from exc
+    data = _read_app_json(shell)
+    expo = data.setdefault("expo", {})
+    expo["slug"] = unique_slug(str(expo.get("slug") or "app"), out.name)
+    expo["scheme"] = expo["slug"]
+    # THE CAMERA ONLY WHEN THE APP USES IT: the shell's Scan button, its start-up camera prompt and the manifest's camera,
+    # microphone and storage permissions are for apps with a scanner. Without one they are a prompt people refuse and a
+    # question in store review.
+    camera = uses_camera(doc)
+    expo.setdefault("extra", {})["camera"] = camera
+    if not camera:
+        # `permissions: []` is not enough: the camera library brings its own into the manifest. Expo's `blockedPermissions`
+        # removes them from the built app.
+        expo.setdefault("android", {})["permissions"] = []
+        expo["android"]["blockedPermissions"] = [
+            "android.permission.CAMERA", "android.permission.RECORD_AUDIO",
+            "android.permission.READ_EXTERNAL_STORAGE", "android.permission.WRITE_EXTERNAL_STORAGE",
+        ]
+        plist = (expo.get("ios") or {}).get("infoPlist") or {}
+        for key in ("NSCameraUsageDescription", "NSMicrophoneUsageDescription", "NSPhotoLibraryUsageDescription"):
+            plist.pop(key, None)
+    if prior_owner:
+        expo["owner"] = prior_owner
+    _write_app_json(shell, data)
+    return shell
 
 
 def _host(url: str) -> str:
@@ -318,5 +390,5 @@ async def ensure_eas_project(native_dir: Path, expo_token: str, *, run: Any = No
     return linked
 
 
-__all__ = ["BUNDLE", "LOCAL_HOSTS", "NativeBuildError", "Report", "Target", "choose_target", "ensure_eas_project",
-           "owner", "prepare", "preflight", "project_id", "stage", "unique_slug", "unstage", "write_submit_keys"]
+__all__ = ["BUNDLE", "LOCAL_HOSTS", "SHELL_SURFACES", "NativeBuildError", "Report", "Target", "choose_target", "ensure_eas_project",
+           "owner", "prepare", "prepare_shell", "preflight", "project_id", "stage", "unique_slug", "unstage", "uses_camera", "write_submit_keys"]

@@ -510,12 +510,15 @@ FANOUT: dict[str, Any] = {
     # A deferred module's screens are declared and not written (see `scope`).
     # An `audit_trail` page is the runtime's own screen (`project_audit`),
     # gated to the reviewers; nobody writes code for it.
+    # An application that is the phone app alone (`mobile.surface` = native_only) writes no web pages: the web app is
+    # only its backend, so no subjects and the node completes without calling anything — the same way `native_pages`
+    # is empty for an app with no phone app.
     "pages": lambda doc: [
         p["id"] for p in (doc.get("pages") or [])
         if p.get("id") and p.get("status") != "DEPRECATED"
         and p["id"] not in _deferred_pages(doc)
         and str(p.get("pattern") or "") != "audit_trail"
-    ],
+    ] if _web_pages(doc) else [],
     # The same pages, one native screen each — only when the application asks
     # for a native app (`mobile.native.enabled`); none otherwise.
     "native_pages": lambda doc: native_page_subjects(doc),
@@ -534,6 +537,12 @@ FANOUT: dict[str, Any] = {
     # primary record) on its own.
     "page_features": lambda doc: page_features(doc),
 }
+
+
+def _web_pages(doc: Mapping[str, Any]) -> bool:
+    """False only when the application is the phone app alone."""
+    from services.blueprint.app_target import web_pages_enabled
+    return web_pages_enabled(doc)
 
 
 def _deferred_pages(doc: Mapping[str, Any]) -> set[str]:

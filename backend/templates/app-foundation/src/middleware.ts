@@ -38,6 +38,6 @@ export default withAuth(
 //   _next, favicon, files with extensions — static assets
 export const config = {
   matcher: [
-    "/((?!login|signup|set-password|api/auth|api/cron|api/webhooks|api/editor|api/figma|editor|_next|favicon.ico|.*\\..*).*)",
+    "/((?!login|signup|set-password|offline|install|api/auth|api/cron|api/webhooks|api/editor|api/figma|editor|_next|favicon.ico|.*\\..*).*)",
   ],
 };

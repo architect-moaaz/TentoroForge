@@ -3274,6 +3274,16 @@ export const Blueprint = z.object({
           enabled: z.boolean().default(false),
         })
         .default({}),
+      /**
+       * WHERE PEOPLE USE THE APP, as the person chose it when Smith asked.
+       * `web`: a website that also works on phones. `web_native`: the website
+       * and a native iPhone/Android app. `web_pwa`: the website, installable
+       * from the browser. `native_only`: only the phone app (the web app is
+       * its backend and writes no pages). `pwa_only`: a phone-first website,
+       * installed from the browser. Absent for an app made before the choice
+       * existed, which is read as `native.enabled` says.
+       */
+      surface: z.enum(["web", "web_native", "web_pwa", "native_only", "pwa_only"]).optional(),
     })
     .default({}),
 

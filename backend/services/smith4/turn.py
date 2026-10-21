@@ -472,6 +472,9 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
                     sum(len(o.said or "") for o in observations), t2 - turn_started)
         args = chosen.get("args") if isinstance(chosen.get("args"), dict) else {}
         args = {k: v for k, v in args.items() if v not in (None, "")}
+        if tool == "ask_user" and not ctx.unattended:
+            from services.smith4.definition import canonical_platform_ask
+            args = canonical_platform_ask(ctx, args)
         # SAID TO THE LEDGER, so a long turn can be reported on while it runs.
         try:
             from services import run_registry as _rr

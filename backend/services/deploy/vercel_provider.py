@@ -21,6 +21,7 @@ async generator; a top-level session would need locking).
 from __future__ import annotations
 
 import asyncio
+import re
 import secrets
 import uuid
 from datetime import datetime, timezone
@@ -183,13 +184,20 @@ def _ensure_test_ribbon(output_dir: Path) -> bool:
     if not layout.is_file():
         return False
     text = layout.read_text("utf-8")
-    if "TestRibbon" in text or "<body" not in text:
+    if "TestRibbon" in text:
         return False
-    head, sep, rest = text.partition("<body")
-    tag_end = rest.find(">")
-    if tag_end < 0:
+    # The real <body ...> tag, not the word in a comment: a layout may say "<html>/<body>" in a comment above it, and the
+    # first "<body" in the file is then inside that comment (the ribbon went there and the build failed on a syntax error).
+    found = None
+    for match in re.finditer(r"<body(?=[ >/])[^>]*>", text):
+        before = text[text.rfind(chr(10), 0, match.start()) + 1: match.start()]
+        if "//" in before or "/*" in before or before.lstrip().startswith("*"):
+            continue
+        found = match
+        break
+    if found is None:
         return False
-    body_open, after = rest[: tag_end + 1], rest[tag_end + 1:]
+    head, sep, body_open, after = text[: found.start()], "", found.group(0), text[found.end():]
     import_line = 'import { TestRibbon } from "@/components/TestRibbon";\n'
     layout.write_text(import_line + head + sep + body_open + "\n        <TestRibbon />" + after, "utf-8")
     return True

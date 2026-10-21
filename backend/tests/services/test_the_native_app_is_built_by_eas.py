@@ -262,7 +262,7 @@ def test_eas_is_told_a_native_folder_has_no_git_repository_and_a_shell_is_not_ch
     assert seen[0]["EAS_NO_VCS"] == "1" and "EAS_NO_VCS" not in seen[1]
 
 
-def test_the_runner_links_and_builds_a_native_project_and_only_builds_a_shell(tmp_path, monkeypatch):
+def test_the_runner_links_and_builds_a_native_project_and_a_shell_the_same_way(tmp_path, monkeypatch):
     calls = []
 
     async def fake_link(root, token):
@@ -297,13 +297,19 @@ def test_the_runner_links_and_builds_a_native_project_and_only_builds_a_shell(tm
     (tmp_path / "native").mkdir()
     (tmp_path / "native" / "app.json").write_text("{}", "utf-8")
     asyncio.run(mb._run_build_and_poll("row", str(tmp_path / "native"), "preview", "android", creds, URL, "native"))
+    (tmp_path / "mobile").mkdir()
+    (tmp_path / "mobile" / "app.json").write_text("{}", "utf-8")
     asyncio.run(mb._run_build_and_poll("row", str(tmp_path / "mobile"), "preview", "android", creds, URL))
     assert calls[0] == ("link", str(tmp_path / "native"), "tok")
     assert calls[1][0] == "create" and calls[1][2] == eas_client.NO_VCS
     assert calls[1][1] != str(tmp_path / "native"), "EAS is run in a clean staged copy, not in the real folder"
     assert not Path(calls[1][1]).exists(), "and the copy is removed afterwards"
-    assert calls[2] == ("create", str(tmp_path / "mobile"), None), "the shell is built as it always was: no link, no change"
-    assert len(calls) == 3
+    # A PWA's WebView shell is an Expo project like any other: a robot token needs its owner, and EAS must not pack the
+    # output folder, so it is linked and built from a staged copy too.
+    assert calls[2] == ("link", str(tmp_path / "mobile"), "tok")
+    assert calls[3][0] == "create" and calls[3][2] == eas_client.NO_VCS and calls[3][1] != str(tmp_path / "mobile")
+    assert not Path(calls[3][1]).exists()
+    assert len(calls) == 4
 
 
 # ---- the folder EAS is run in ------------------------------------------------------------------------------------------

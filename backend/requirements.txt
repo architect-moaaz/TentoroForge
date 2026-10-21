@@ -114,3 +114,7 @@ langchain-core>=0.3.30
 # every business actually has would make the import a feature for other
 # developers. Read-only use: openpyxl never writes a workbook here.
 openpyxl>=3.1.0
+
+# The IANA zone database. Windows and slim containers have none of their own, and without it every zone name (even UTC) is
+# "not an IANA zone": a workflow with a schedule is refused and the app's pages are never composed.
+tzdata>=2024.1

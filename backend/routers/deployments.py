@@ -210,8 +210,10 @@ async def publish(
     provider = VercelDeployProvider(db=db)
 
     async def stream():
+        went_live = False
         try:
             async for evt in provider.publish(snapshot):
+                went_live = went_live or evt.stage == "done"
                 payload = {
                     "stage": evt.stage,
                     "message": evt.message,
@@ -219,6 +221,11 @@ async def publish(
                     "data": evt.data,
                 }
                 yield f"data: {json.dumps(payload)}\n\n"
+            if went_live and side == envs.PRODUCTION:
+                # A PWA's phone app is built once, when it first reaches production, and the Mobile tab offers the install.
+                # It never fails the publish: the app is live whatever happens here.
+                from services import mobile_autobuild
+                await mobile_autobuild.start_phone_app(project.id, user.id)
         except Exception as exc:
             # Belt-and-suspenders — the provider promises to catch its
             # own errors, but if something slips through, emit a final
