@@ -2355,7 +2355,53 @@ def mend_mechanics(result: "AgentResult", doc: dict | None) -> list[str]:
             name = str(p.body.get("name") or p.natural_key)
             trigger = p.body.get("trigger") if isinstance(p.body.get("trigger"), dict) else {}
             mend_steps(p.body.get("steps") or [], name, trigger)
+            said += _record_fields_by_entity(p.body, doc, name)
     return said
+
+
+_TEMPLATE_INNER = re.compile(r"\{\{(.*?)\}\}")
+_BARE_NAME = re.compile(r"^\s*([A-Za-z_]\w*)((?:\.[\w\[\]]+)*)\s*$")
+
+
+def _record_fields_by_entity(body: dict, doc: dict, name: str) -> list[str]:
+    """In a process a record change starts, `{{guestName}}` — a field of the
+    record that changed, and no input, step or variable of the process — is
+    `{{entity.guestName}}`: the engine holds the record under `entity` and
+    nothing under the bare name (pah7lhfz's case hand-off, sixteen refusals,
+    2026-10-20). A name that is also anything else is left for the author."""
+    from services.blueprint.functional_completeness import RECORD_EVENT_ROOTS, record_event
+    roots, changed = record_event(doc, body)
+    if changed is None:
+        return []
+    fields = {str(f.get("name")) for f in changed.get("fields") or [] if isinstance(f, dict) and f.get("name")}
+    fields |= {"id"}
+    steps = [st for st in body.get("steps") or [] if isinstance(st, dict)]
+    taken = ({str(i.get("name")) for i in body.get("inputs") or [] if isinstance(i, dict)}
+             | {str(st.get("key") or st.get("id")) for st in steps}
+             | {str((st.get("config") or {}).get("variableName")) for st in steps if isinstance(st.get("config"), dict)}
+             | set(roots) | set(RECORD_EVENT_ROOTS))
+    said: list[str] = []
+
+    def side(text: str) -> str:
+        m = _BARE_NAME.match(text)
+        if not m or m.group(1) not in fields or m.group(1) in taken:
+            return text
+        said.append(f"{name}: {{{{{m.group(1)}}}}} is the changed record's {{{{entity.{m.group(1)}}}}}")
+        return text.replace(m.group(1), f"entity.{m.group(1)}", 1)
+
+    def fix(node: Any) -> Any:
+        if isinstance(node, str):
+            return _TEMPLATE_INNER.sub(lambda m: "{{" + "??".join(side(x) for x in m.group(1).split("??")) + "}}", node)
+        if isinstance(node, dict):
+            return {k: fix(v) for k, v in node.items()}
+        if isinstance(node, list):
+            return [fix(v) for v in node]
+        return node
+
+    for st in steps:
+        if isinstance(st.get("config"), dict):
+            st["config"] = fix(st["config"])
+    return list(dict.fromkeys(said))
 
 
 #: An id the contract asks for, by its prefix: `^ROLE-\d{3,}$` -> ROLE.
