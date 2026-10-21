@@ -38,7 +38,8 @@ busy() {
   # A PUBLISH UNDER WAY. Personal Finance's publish started in the minute a
   # cutover restarted the backend and was cut off at "snapshot"
   # (u8w3uw4j, 2026-10-21): publishes keep no ledger, so the gate never saw it.
-  p=$(docker exec tentoro-forge-v3-postgres-1 sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -At -c "select count(*) from deployments where status not in ('"'"'succeeded'"'"', '"'"'succeeded_with_warnings'"'"', '"'"'failed'"'"') and created_at > now() - interval '"'"'45 minutes'"'"'"' 2>/dev/null || echo 0)
+  since=$(docker inspect -f '{{.State.StartedAt}}' tentoro-forge-v3-backend-1 2>/dev/null || echo 1970-01-01)
+  p=$(docker exec tentoro-forge-v3-postgres-1 sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -At -c "select count(*) from deployments where status not in ('"'"'succeeded'"'"', '"'"'succeeded_with_warnings'"'"', '"'"'failed'"'"') and created_at > now() - interval '"'"'45 minutes'"'"' and created_at > '"'"'$since'"'"'"' 2>/dev/null || echo 0)
   if [ "${p:-0}" != "0" ]; then echo "[$(date -u +%T)] busy: $p publish(es) under way"; exit 1; fi
   exit 0 )
 }
