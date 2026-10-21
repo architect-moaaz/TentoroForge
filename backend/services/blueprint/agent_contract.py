@@ -2248,6 +2248,116 @@ class InvalidPatternTemplate(AuthorRefusal):
     """A2UI proposed a template the component registry cannot render."""
 
 
+#: The engine's whole-value sentinels: written bare (`"$now"`), never in braces.
+SENTINELS = frozenset({"$now", "$today", "$user.id", "$uuid", "$guest"})
+_SENTINEL_IN_BRACES = re.compile(r"^\s*\{\{\s*(\$[A-Za-z_][\w.]*)\s*\}\}\s*$")
+#: The timestamps a new record always takes at the moment it is made.
+_STAMPS = {"createdat", "updatedat"}
+
+
+def mend_mechanics(result: "AgentResult", doc: dict | None) -> list[str]:
+    """Mend, in the processes a reply proposes, what has exactly one right
+    answer the platform already knows — before any check reads them, so a
+    reply is never sent back for it. Each was a refusal that cost a retry, and
+    sometimes the strongest model (Refund And Chargeback, pah7lhfz, forge-v3
+    2026-10-20, about ten retries and one process shipped switched off):
+
+    - A SENTINEL IN BRACES. `"{{$user.id}}"` where the engine reads the whole
+      value `"$user.id"` (also `$now`, `$today`, `$uuid`, `$guest`). Only when
+      the sentinel IS the whole value; inside a sentence it is the author's.
+    - A NEW RECORD'S TIMESTAMPS. A `db_insert` that leaves out a required
+      `createdAt` / `updatedAt` time gets `$now`: a record is made and last
+      changed at the moment it is made.
+    - A START STEP'S TRIGGER. A `trigger` step with no `config.type` gets the
+      kind its workflow declares (`trigger.kind`), when that is a catalog one.
+    - PUSH WHERE THERE IS NONE. A notification sending by `push` in an app
+      that does not send push sends in the app instead.
+
+    Returns what was mended, a line each. Never anything that needs judging:
+    the author is still asked about everything else."""
+    doc = doc or {}
+    said: list[str] = []
+    try:
+        from services.catalog import workflow_nodes
+        catalog = workflow_nodes()
+        trigger_kinds = set(catalog.variants("trigger") or [])
+    except Exception:  # noqa: BLE001 — without the catalog, that mend is skipped
+        trigger_kinds = set()
+    mobile = doc.get("mobile") if isinstance(doc.get("mobile"), dict) else {}
+    push_on = mobile.get("push") is True or any(
+        p.section == "mobile" and isinstance(p.body, dict) and p.body.get("push") is True for p in result.proposals)
+    entities = [e for e in (doc.get("data") or {}).get("entities") or [] if isinstance(e, dict)]
+
+    def entity_for(table: Any) -> dict | None:
+        t = str(table or "").strip().lower()
+        return next((e for e in entities if t and t in (str(e.get("table") or "").lower(),
+                                                         str(e.get("name") or "").lower())), None)
+
+    def unbrace(node: Any, where: str) -> Any:
+        if isinstance(node, str):
+            m = _SENTINEL_IN_BRACES.match(node)
+            if m and m.group(1) in SENTINELS:
+                said.append(f"{where}: {node.strip()} is {m.group(1)}")
+                return m.group(1)
+            return node
+        if isinstance(node, dict):
+            return {k: unbrace(v, where) for k, v in node.items()}
+        if isinstance(node, list):
+            return [unbrace(v, where) for v in node]
+        return node
+
+    def mend_steps(steps: list, name: str, trigger: dict) -> None:
+        for st in steps or []:
+            if not isinstance(st, dict):
+                continue
+            where = f"{name}/{st.get('key') or st.get('id')}"
+            cfg = st.get("config") if isinstance(st.get("config"), dict) else None
+            if cfg is not None:
+                st["config"] = cfg = unbrace(cfg, where)
+            if st.get("type") == "trigger" and trigger_kinds:
+                cfg = st.setdefault("config", {}) if cfg is None else cfg
+                kind = str(trigger.get("kind") or "")
+                if not cfg.get("type") and kind in trigger_kinds:
+                    cfg["type"] = kind
+                    said.append(f"{where}: starts on its workflow's {kind} trigger")
+                if cfg.get("type") == kind:
+                    for k in ("cron", "event", "timezone", "on"):  # what that trigger already says
+                        if trigger.get(k) and not cfg.get(k):
+                            cfg[k] = trigger[k]
+                    # A record-change start names the record type's table; the
+                    # trigger names the record type.
+                    if kind == "db_change" and not (cfg.get("table") or cfg.get("model")) and trigger.get("entity"):
+                        ent = next((e for e in entities if str(e.get("id")) == str(trigger["entity"])), None)
+                        if ent and (ent.get("table") or ent.get("name")):
+                            cfg["table"] = str(ent.get("table") or ent.get("name"))
+                            said.append(f"{where}: watches {cfg['table']}, the record type its trigger names")
+            if cfg is None:
+                continue
+            if cfg.get("actionType") == "db_insert" and isinstance(cfg.get("values"), dict):
+                ent = entity_for(cfg.get("table"))
+                for f in (ent or {}).get("fields") or []:
+                    fname = str(f.get("name") or "")
+                    ftype = str(f.get("type") or "").lower()
+                    if (f.get("required") and _norm_name(fname) in _STAMPS and fname not in cfg["values"]
+                            and ("date" in ftype or "time" in ftype)):
+                        cfg["values"][fname] = "$now"
+                        said.append(f"{where}: {fname} is $now")
+            channels = cfg.get("channels")
+            if not push_on and isinstance(channels, list) and "push" in [str(c) for c in channels]:
+                rest = [c for c in channels if str(c) != "push"]
+                cfg["channels"] = rest or ["in_app"]
+                said.append(f"{where}: sends in the app, not by push (the app does not send push)")
+            if cfg.get("actionType") == "for_each" and isinstance(cfg.get("steps"), list):
+                mend_steps(cfg["steps"], name, trigger)
+
+    for p in result.proposals:
+        if p.section == "workflows" and isinstance(p.body, dict):
+            name = str(p.body.get("name") or p.natural_key)
+            trigger = p.body.get("trigger") if isinstance(p.body.get("trigger"), dict) else {}
+            mend_steps(p.body.get("steps") or [], name, trigger)
+    return said
+
+
 #: An id the contract asks for, by its prefix: `^ROLE-\d{3,}$` -> ROLE.
 _ID_PATTERN = re.compile(r"^\^([A-Z]+)-\\d")
 
@@ -2594,6 +2704,9 @@ def apply_agent_result(
         except AuthorRefusal as exc:
             refusals.append(exc)
 
+    mended = mend_mechanics(result, svc.doc)
+    if mended:
+        logger.info("[contract] mended before checking: %s", "; ".join(mended[:12]))
     from services.blueprint.mcp_catalog import load as _mcp_servers
     from services.blueprint.api_reference import load as _api_refs
     run(check_pattern_templates, result, svc.doc)
