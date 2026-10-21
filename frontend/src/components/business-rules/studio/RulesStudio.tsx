@@ -16,7 +16,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   AlertTriangle, BookText, ChevronDown, FileText, GitBranch, Hammer, Lightbulb, Loader2, MessageSquare,
-  Plus, RefreshCw, Save, Scale, Search, ShieldCheck, Table2, Trash2, Wand2, X,
+  List as ListIcon, Network, Plus, RefreshCw, Save, Scale, Search, ShieldCheck, Table2, Trash2, Wand2, X,
 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -43,6 +43,7 @@ import { WhenThenEditor, emptyDraft, type ConditionActionDraft } from "./WhenThe
 import { TableEditor } from "./TableEditor";
 import { TestPanel } from "./TestPanel";
 import { WorkflowsPanel } from "./WorkflowsPanel";
+import { RulesMap } from "./RulesMap";
 
 type Draft = { id?: string; revision?: string } & (
   | { kind: "condition_action"; ca: ConditionActionDraft; on: FiresOn[] }
@@ -80,6 +81,15 @@ export function RulesStudio({ projectId, initial }: { projectId: string; initial
   const [q, setQ] = useState("");
   const [record, setRecord] = useState<string>("all");
   const [draft, setDraft] = useState<Draft | null>(null);
+  // List or Map, remembered per browser.
+  const [layout, setLayoutState] = useState<"list" | "map">("list");
+  useEffect(() => {
+    try { if (localStorage.getItem("forge.rules.layout") === "map") setLayoutState("map"); } catch { /* storage off */ }
+  }, []);
+  const setLayout = (l: "list" | "map") => {
+    setLayoutState(l);
+    try { localStorage.setItem("forge.rules.layout", l); } catch { /* storage off */ }
+  };
   const refresh = () => queryClient.invalidateQueries({ queryKey: key(projectId) });
 
   const toggle = useMutation({
@@ -149,9 +159,20 @@ export function RulesStudio({ projectId, initial }: { projectId: string; initial
             <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
             <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a rule…" className="h-8 pl-8 text-sm" />
           </div>
+          {hasRecords && (
+            <div role="radiogroup" aria-label="Show the rules as" className="inline-flex rounded-lg border p-0.5 text-xs">
+              {([["list", "List", ListIcon], ["map", "Map", Network]] as const).map(([id, label, Icon]) => (
+                <button key={id} type="button" role="radio" aria-checked={layout === id} onClick={() => setLayout(id)}
+                        className={cn("inline-flex items-center gap-1 rounded-md px-2.5 py-1 transition-colors",
+                                      layout === id ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted")}>
+                  <Icon className="h-3.5 w-3.5" /> {label}
+                </button>
+              ))}
+            </div>
+          )}
           {model.models.length > 1 && (
             <select aria-label="Record" value={record} onChange={(e) => setRecord(e.target.value)} className="h-8 rounded-md border bg-background px-2 text-sm">
-              <option value="all">Every record</option>
+              {layout === "list" && <option value="all">Every record</option>}
               {model.models.map((m) => <option key={m} value={m}>{m}</option>)}
             </select>
           )}
@@ -170,6 +191,13 @@ export function RulesStudio({ projectId, initial }: { projectId: string; initial
         </div>
       )}
 
+      {layout === "map" && hasRecords ? (
+        <div className="flex-1 p-4 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-300">
+          <RulesMap projectId={projectId} views={views} catalogue={catalogue}
+                    entityName={record !== "all" ? record : (views.find((v) => v.entityName && (v.kind === "condition_action" || v.kind === "decision_table"))?.entityName ?? model.models[0] ?? null)}
+                    onOpen={open} />
+        </div>
+      ) : (
       <div className="flex-1 space-y-6 overflow-y-auto px-6 py-5">
         {!hasRecords && (
           <div className="flex gap-3 rounded-xl border border-violet-200 bg-violet-50/60 p-4 text-sm dark:border-violet-900 dark:bg-violet-950/20" data-testid="no-records">
@@ -221,6 +249,7 @@ export function RulesStudio({ projectId, initial }: { projectId: string; initial
           </>
         )}
       </div>
+      )}
 
       <RuleSheet projectId={projectId} draft={draft} setDraft={setDraft} views={views} catalogue={catalogue}
                  model={model} building={building} onSaved={refresh} onCreated={open} />

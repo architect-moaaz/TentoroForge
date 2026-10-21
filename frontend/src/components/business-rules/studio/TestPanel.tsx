@@ -15,7 +15,7 @@ import { coerceSample, humanField, type FiresOn, type StudioCatalogue, type Test
 
 const SKIP = new Set(["id", "createdAt", "updatedAt", "created_at", "updated_at"]);
 
-function FieldInput({ f, value, onChange, label }: {
+export function FieldInput({ f, value, onChange, label }: {
   f: CatalogueField; value: string; onChange: (v: string) => void; label: string;
 }) {
   const cls = "h-8 w-full rounded-md border bg-background px-2 text-xs outline-none focus:ring-2 focus:ring-primary/30";
