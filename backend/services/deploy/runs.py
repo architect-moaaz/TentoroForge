@@ -72,11 +72,34 @@ async def frames(queue: asyncio.Queue) -> AsyncIterator[str]:
         yield f"data: {json.dumps(item)}\n\n"
 
 
+def platform_started() -> datetime | None:
+    """When the platform's processes began — the container's first process,
+    which a single worker restarting does not change. None where it cannot be
+    read (outside a container): then only the long wait closes a row."""
+    try:
+        ticks = int(open("/proc/1/stat").read().rsplit(")", 1)[1].split()[19])
+        boot = next(int(line.split()[1]) for line in open("/proc/stat") if line.startswith("btime "))
+        import os
+        return datetime.fromtimestamp(boot + ticks / os.sysconf("SC_CLK_TCK"), timezone.utc)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 async def close_stale(db: AsyncSession, project_id: Any = None) -> int:
     """Close every publish row that is still not finished long after any
-    publish could have been: failed, with the reason said. Returns how many."""
+    publish could have been — or that began before this platform did, which
+    nothing is running any more: failed, with the reason said. Returns how many.
+
+    A publish cut off by a restart span "snapshot" for 45 minutes before this
+    closed it, and the person watched a publish that would never finish
+    (Personal Finance, u8w3uw4j, 2026-10-21)."""
+    from sqlalchemy import or_
     now = datetime.now(timezone.utc)
-    cond = [Deployment.status.notin_(TERMINAL), Deployment.created_at < now - STALE_AFTER]
+    started = platform_started()
+    old = Deployment.created_at < now - STALE_AFTER
+    if started is not None:
+        old = or_(old, Deployment.created_at < started - timedelta(seconds=5))
+    cond = [Deployment.status.notin_(TERMINAL), old]
     if project_id is not None:
         cond.append(Deployment.project_id == project_id)
     res = await db.execute(update(Deployment).where(*cond)

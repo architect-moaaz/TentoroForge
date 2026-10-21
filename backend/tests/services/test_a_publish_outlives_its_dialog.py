@@ -74,3 +74,34 @@ async def test_rows_left_unfinished_are_closed_as_interrupted(test_db, auth_clie
     assert rows[fresh.id].status == "snapshot"     # may still be running
     assert rows[done.id].status == "succeeded"
     await gen.aclose()
+
+
+@pytest.mark.asyncio
+async def test_a_publish_the_last_restart_cut_off_is_closed_at_once(test_db, auth_client, org_id, monkeypatch):
+    """Personal Finance's publish began in the minute a cutover restarted the
+    backend and spun at "snapshot" for 45 minutes (u8w3uw4j, 2026-10-21): a
+    row older than the running platform is closed straight away."""
+    from database import get_db
+    from main import app
+    project = (await auth_client.post(f"/api/orgs/{org_id}/projects", json={"name": "Personal Finance"})).json()
+    pid = uuid.UUID(project["id"])
+    gen = app.dependency_overrides.get(get_db, get_db)()
+    db = await gen.__anext__()
+    now = datetime.now(timezone.utc)
+    monkeypatch.setattr(runs, "platform_started", lambda: now - timedelta(minutes=1))
+    cut_off = Deployment(project_id=pid, target="vercel", status="snapshot", environment="test",
+                         created_at=now - timedelta(minutes=2))
+    running = Deployment(project_id=pid, target="vercel", status="build", environment="test",
+                         created_at=now - timedelta(seconds=20))
+    db.add_all([cut_off, running])
+    await db.commit()
+    assert await runs.close_stale(db, pid) == 1
+    rows = {r.id: r for r in (await db.execute(select(Deployment).where(Deployment.project_id == pid))).scalars()}
+    assert rows[cut_off.id].status == "failed" and rows[cut_off.id].error == runs.INTERRUPTED
+    assert rows[running.id].status == "build"
+    await gen.aclose()
+
+
+def test_the_platform_start_is_read_or_said_unknown():
+    started = runs.platform_started()
+    assert started is None or started <= datetime.now(timezone.utc)
