@@ -52,6 +52,15 @@ async def projects_known(db: AsyncSession) -> tuple[dict[str, dict[str, Any]], d
     projects = {str(r.short_id): {"org": str(r.org_id), "owner": emails.get(str(r.owner_id), ""), "name": r.name}
                 for r in rows}
     names = {f"org:{o.id}": o.name for o in orgs}
+    # WHOSE A DELETED APPLICATION WAS. The register keeps every application
+    # this has ever listed; one no longer in the table keeps its spend with
+    # its organisation and owner (services/app_register).
+    from services import app_register
+    app_register.remember(projects)
+    for app_id, info in app_register.all_apps().items():
+        if app_id not in projects:
+            projects[app_id] = {"org": info.get("org", ""), "owner": info.get("owner", ""),
+                                "name": info.get("name", "") or app_id, "deleted": True}
     names.update({f"project:{k}": v["name"] for k, v in projects.items()})
     return projects, names
 

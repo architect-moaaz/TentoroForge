@@ -197,6 +197,13 @@ def _strip_pg_only_server_defaults(metadata):
                     col.default = _ColumnDefault(_uuid.uuid4)
 
 
+@pytest.fixture(autouse=True)
+def _own_app_register(tmp_path, monkeypatch):
+    """Each test its own register of applications (services/app_register):
+    a shared one would carry one test's deleted applications into the next."""
+    monkeypatch.setenv("FORGE_APP_REGISTER", str(tmp_path / "apps.json"))
+
+
 @pytest_asyncio.fixture
 async def test_db():
     """Create fresh in-memory tables for each test."""

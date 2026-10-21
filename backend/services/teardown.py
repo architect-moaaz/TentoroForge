@@ -95,6 +95,13 @@ async def remove_project(db: AsyncSession, project: Project, *, report: dict[str
     report = report if report is not None else _report()
     short_id = str(project.short_id)
     output_dir = str(project.output_dir or "")
+    # ITS SPEND STAYS ITS ORGANISATION'S: whose it was is written down before
+    # the row that says so goes (services/app_register).
+    try:
+        from services.credits import projects_known
+        await projects_known(db)
+    except Exception:  # noqa: BLE001 — accounting never stops a removal
+        pass
 
     from preview import stop_preview
     _step(report, "preview", short_id, lambda: stop_preview(short_id))

@@ -134,6 +134,12 @@ async def _output_dir_of(project_id: uuid.UUID) -> str | None:
         return project.output_dir if project is not None and project.output_dir else None
 
 
+async def _org_of(project_id: uuid.UUID) -> str:
+    async with async_session() as db:
+        project = await db.get(Project, project_id)
+        return str(project.org_id or "") if project is not None else ""
+
+
 async def _wait_until_idle(output_dir: str) -> bool:
     """True once no build, check or Smith turn is working on the app."""
     from services.run_registry import work_in_flight
@@ -202,10 +208,14 @@ async def _heal_batch(project_id: uuid.UUID, output_dir: str, batch: list[dict])
         # commit — the commit below stages exactly what it touched.
         anchor_block = _load_anchor_files(snapshot, output_dir)
         prompt_with_anchors = f"{prompt}\n\n{anchor_block}" if anchor_block else prompt
-        smith_result = await asyncio.to_thread(
-            _smith_turn, str(proj_id), output_dir, prompt_with_anchors,
-            commit=False, unattended=True,
-        )
+        # THE HEAL IS THE APPLICATION'S ORGANISATION'S TO PAY FOR, stamped on
+        # every call it makes; nobody asked for it in person.
+        from services.build_usage import acting
+        with acting(org=await _org_of(proj_id)):
+            smith_result = await asyncio.to_thread(
+                _smith_turn, str(proj_id), output_dir, prompt_with_anchors,
+                commit=False, unattended=True,
+            )
     except Exception as exc:  # noqa: BLE001
         logger.exception("[self-heal] Smith crashed")
         for exc_id in exc_ids:
