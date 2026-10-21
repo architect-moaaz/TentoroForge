@@ -93,6 +93,27 @@ async function contextsFor(p) {
 
 const MISSING_ID = "00000000-0000-4000-8000-000000000000";
 const MAX_CONTROLS = 24;
+// CONTROLS ARE PRESSED A FEW AT A TIME. One at a time, each from a fresh
+// load on a dev server, a screen took one to three minutes and a Smith turn
+// that checked Personal Finance's fifteen screens spent 56 of its 72 minutes
+// pressing (u8w3uw4j, 2026-10-21). What worked in the parallel round is what
+// it did; anything that looked broken is pressed again ALONE afterwards, so
+// two presses meeting on the same data never make a working control read as
+// broken.
+const PRESS_PARALLEL = Math.max(1, Number(cfg.pressParallel ?? 3) || 1);
+const WORKED = new Set(["navigated", "changed", "workflow", "refused"]);
+
+async function inTurns(items, n, fn) {
+  const results = new Array(items.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => {
+    while (next < items.length) {
+      const k = next++;
+      results[k] = await fn(items[k]).catch((e) => ({ outcome: "error", detail: String(e?.message || e) }));
+    }
+  }));
+  return results;
+}
 
 async function firstRow(context, entity) {
   if (!entity) return null;
@@ -498,12 +519,20 @@ async function visit(p) {
       pressedIn.add(key);
       return true;
     });
-    for (const c of fresh.slice(0, MAX_CONTROLS)) {
+    const picked = fresh.slice(0, MAX_CONTROLS);
+    const first = PRESS_PARALLEL > 1 ? await inTurns(picked, PRESS_PARALLEL, (c) => press(who.ctx, url, c)) : [];
+    for (const [k, c] of picked.entries()) {
+      if (first[k] && WORKED.has(first[k].outcome)) {
+        result.controls.push(first[k]);
+        continue;
+      }
       // A DEAD CONTROL IS DEAD TWICE. The first press of a link on a cold dev
       // server compiles the page it opens, and F&B's working Edit link read
       // as "does nothing when pressed" (2026-10-01) — a false finding that
       // sends Smith to fix what works. Pressed again, the page is compiled.
-      let outcome = await press(who.ctx, url, c);
+      // A parallel press that did nothing is the first of the two; one that
+      // errored is pressed again alone, where nothing else can have caused it.
+      let outcome = first[k]?.outcome === "nothing" ? first[k] : await press(who.ctx, url, c);
       if (outcome.outcome === "nothing") outcome = await press(who.ctx, url, c);
       if (outcome.outcome === "nothing" && c.chosen) {
         outcome = { ...outcome, outcome: "chosen", detail: "the option already chosen" };

@@ -17,6 +17,7 @@ import {
   buildResumeInput,
   buildTimeoutResumeInput,
   WAITING_EVENT_VAR,
+  eventRunInput,
 } from "../events/triggers.ts";
 import { makeEmitEventHandler } from "../events/emit-node.ts";
 import { executeWorkflow, registerActionHandler } from "../workflows/engine.ts";
@@ -99,6 +100,27 @@ assertEq(
   0,
   "no match for an unknown event",
 );
+
+// ── what an event-started run is given ──────────────────────────────
+// Personal Finance (u8w3uw4j, 2026-10-21): a process written before the
+// build said `{{entity.f}}` read `{{categoryId}}` and required it; the event
+// carried the record under `entity` only, and every run was refused.
+console.log("eventRunInput:");
+{
+  const evt = { type: "transactions.created", entity: "transactions", entity_id: "t1",
+                payload: { entity: { id: "t1", categoryId: "c1", profileId: "p1", date: "2026-10-21" },
+                           user: { id: "u1" }, event: "ignored" } };
+  const input = eventRunInput(evt);
+  assertEq([input.categoryId, input.profileId, input.date], ["c1", "p1", "2026-10-21"],
+           "the record's own fields are there for a bare read");
+  assertEq(input.entityId, "t1", "the envelope still names the record");
+  assertEq(input.event, "transactions.created", "and the event, over anything the payload said");
+  assertEq((input.entity as any).categoryId, "c1", "`entity` is still the record");
+  const said = eventRunInput({ ...evt, payload: { ...evt.payload, categoryId: "explicit" } });
+  assertEq(said.categoryId, "explicit", "what the event says wins over the record's field");
+  assertEq("id" in eventRunInput(evt) ? (eventRunInput(evt) as any).id : undefined, undefined,
+           "the record's id is not passed as a bare `id`");
+}
 
 // ── emit_event node (mock emitter) ──────────────────────────────────
 

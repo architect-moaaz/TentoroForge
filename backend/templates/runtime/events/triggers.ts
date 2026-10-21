@@ -87,6 +87,34 @@ export function getTriggerContract(wf: unknown): TriggerContract | null {
   return null;
 }
 
+/** What a run an event starts is given. */
+export function eventRunInput(
+  evt: { type: string; entity?: string | null; entity_id?: string | null; payload?: unknown },
+): Record<string, unknown> {
+  const payload =
+    evt.payload && typeof evt.payload === "object" ? evt.payload : {};
+  // THE RECORD'S OWN FIELDS UNDERNEATH. A process a record change starts
+  // reads that record; one written before the build said `{{entity.f}}`
+  // reads `{{categoryId}}`, and declares it required — Personal Finance's
+  // "Generate Insight from Activity" was refused on every transaction for
+  // "needs profileId, categoryId, date" (u8w3uw4j, 2026-10-21). They fill
+  // only what the event does not already say.
+  const record = (payload as any)?.entity;
+  const fields: Record<string, unknown> =
+    record && typeof record === "object" && !Array.isArray(record) ? { ...record } : {};
+  delete fields.id;
+  // Payload fields at the top level (so {{entity.id}}-style bindings
+  // resolve), plus the event envelope for explicit reads.
+  const input: Record<string, unknown> = {
+    ...fields,
+    ...payload,
+    event: evt.type,
+    entityType: evt.entity ?? undefined,
+    entityId: evt.entity_id ?? (payload as any)?.entity?.id ?? undefined,
+  };
+  return input;
+}
+
 /** All workflows (deduped by id) whose event trigger matches `eventType`. */
 export function findWorkflowsForEvent<T extends { id?: string }>(
   workflows: Iterable<T>,

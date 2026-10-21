@@ -294,6 +294,15 @@ def ledger_snapshot(output_dir: str | Path, *, turns: bool = True) -> dict[str, 
 
 
 
+def work_in_flight(output_dir: str | Path) -> bool:
+    """Whether a build, a check or a Smith turn is working on the application
+    now — a ledger of its that has not ended and is not stale."""
+    import glob
+    import os
+    runs = sorted(glob.glob(os.path.join(str(output_dir), ".forge", "runs", "*.jsonl")))
+    return any((_fold(path) or {}).get("active") for path in runs[-6:])
+
+
 def live_state(output_dir: str | Path) -> str:
     """Where the work on this application stands RIGHT NOW, read off the
     ledgers on disk — the one thing a status answer may be built on.

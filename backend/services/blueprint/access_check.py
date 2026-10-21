@@ -64,6 +64,14 @@ def people_of_role(app: Any, doc: dict, role: str) -> list[tuple[str, str]]:
         order = "order by created_at " if "created_at" in cols else ""
         rows = _query(app, f"select id, {name} from users where ({where}) and id <> '{_ADMIN_UUID}' {order}limit 2")
         people = [(r[0], r[1] if len(r) > 1 else role) for r in rows or [] if r and r[0]]
+        if not people:
+            # A ONE-ROLE APPLICATION'S ADMINISTRATOR IS ONE OF ITS PEOPLE. Its
+            # only role is the administrator's too, so the seed makes no other
+            # login of it, and every scoped record type of Personal Finance
+            # went untried (u8w3uw4j, 2026-10-21). The administrator holding
+            # the role is the first person; the second is made from them.
+            rows = _query(app, f"select id, {name} from users where ({where}) and id = '{_ADMIN_UUID}' limit 1")
+            people = [(r[0], r[1] if len(r) > 1 else role) for r in rows or [] if r and r[0]]
     if len(people) == 1:
         made = second_person(app, people[0])
         if made:

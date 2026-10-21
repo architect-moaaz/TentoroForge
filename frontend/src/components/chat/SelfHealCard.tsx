@@ -51,6 +51,14 @@ export interface SelfHealMetadata {
   question?: string;
   /** Smith's own account of what it found or did. */
   summary?: string;
+  /** The other errors this one heal took with the first. */
+  others?: {
+    exception_id?: string;
+    error_message?: string;
+    workflow_id?: string | null;
+    node_id?: string | null;
+    page_route?: string | null;
+  }[];
 }
 
 interface Props {
@@ -67,31 +75,37 @@ export function healPlace(m: SelfHealMetadata): string {
   return "the app";
 }
 
-const TONE: Record<SelfHealStatus, { badge: string; icon: ReactNode; title: (place: string) => string }> = {
+/** What the card is about: "an error in the reject-case process", or "3 errors in the app". */
+function subject(m: SelfHealMetadata): string {
+  const n = 1 + (m.others?.length ?? 0);
+  return n > 1 ? `${n} errors in the app` : `an error in ${healPlace(m)}`;
+}
+
+const TONE: Record<SelfHealStatus, { badge: string; icon: ReactNode; title: (about: string) => string }> = {
   in_progress: {
     badge: "bg-sky-500 text-white",
     icon: <Loader2 className="h-3.5 w-3.5 animate-spin" />,
-    title: (p) => `Fixing an error in ${p}`,
+    title: (a) => `Fixing ${a}`,
   },
   resolved: {
     badge: "bg-emerald-500 text-white",
     icon: <Check className="h-3.5 w-3.5" />,
-    title: (p) => `Fixed an error in ${p}`,
+    title: (a) => `Fixed ${a}`,
   },
   untried: {
     badge: "bg-amber-500 text-white",
     icon: <Hourglass className="h-3.5 w-3.5" />,
-    title: (p) => `Changed, not yet proven: an error in ${p}`,
+    title: (a) => `Changed, not yet proven: ${a}`,
   },
   asked: {
     badge: "bg-amber-500 text-white",
     icon: <HelpCircle className="h-3.5 w-3.5" />,
-    title: (p) => `A question before fixing ${p}`,
+    title: (a) => `A question before fixing ${a}`,
   },
   failed: {
     badge: "bg-rose-500 text-white",
     icon: <TriangleAlert className="h-3.5 w-3.5" />,
-    title: (p) => `Not fixed yet: an error in ${p}`,
+    title: (a) => `Not fixed yet: ${a}`,
   },
 };
 
@@ -115,7 +129,14 @@ export function SelfHealCard({ metadata, createdAt }: Props) {
     createdAt != null
       ? new Date(createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
       : null;
-  const error = (metadata.error_message || "").trim();
+  const errors = [
+    { message: (metadata.error_message || "").trim(), where: metadata.workflow_id || metadata.page_route || "" },
+    ...(metadata.others ?? []).map((o) => ({
+      message: (o.error_message || "").trim(),
+      where: o.workflow_id || o.page_route || "",
+    })),
+  ].filter((e) => e.message);
+  const several = errors.length > 1;
 
   return (
     <div data-testid="self-heal-card" data-status={status}>
@@ -125,7 +146,7 @@ export function SelfHealCard({ metadata, createdAt }: Props) {
           {tone.icon}
         </span>
         <div className="min-w-0 flex-1">
-          <div className="text-[15px] font-semibold leading-tight">{tone.title(healPlace(metadata))}</div>
+          <div className="text-[15px] font-semibold leading-tight">{tone.title(subject(metadata))}</div>
           <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
             <span>Self-heal</span>
             {attempt != null && max != null && (
@@ -145,7 +166,7 @@ export function SelfHealCard({ metadata, createdAt }: Props) {
       </div>
 
       {/* What broke. */}
-      {error && (
+      {errors.length > 0 && (
         <button
           type="button"
           onClick={() => setErrorOpen((o) => !o)}
@@ -153,19 +174,29 @@ export function SelfHealCard({ metadata, createdAt }: Props) {
           title={errorOpen ? "Show less" : "Show the whole error"}
         >
           <div className="text-[11px] font-medium uppercase tracking-wide text-rose-700/80 dark:text-rose-300/80">
-            The error
+            {several ? `The errors (${errors.length})` : "The error"}
           </div>
-          <code className={cn(
-            "mt-0.5 block whitespace-pre-wrap break-words font-mono text-xs text-foreground",
-            !errorOpen && "line-clamp-2",
-          )}>
-            {error}
-          </code>
+          {(several && !errorOpen ? errors.slice(0, 3) : errors).map((e, i) => (
+            <div key={i} className={cn(several && "mt-1 flex gap-2")}>
+              {several && e.where && (
+                <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{e.where}</span>
+              )}
+              <code className={cn(
+                "mt-0.5 block min-w-0 whitespace-pre-wrap break-words font-mono text-xs text-foreground",
+                !errorOpen && (several ? "line-clamp-1" : "line-clamp-2"),
+              )}>
+                {e.message}
+              </code>
+            </div>
+          ))}
+          {several && !errorOpen && errors.length > 3 && (
+            <div className="mt-1 text-[11px] text-muted-foreground">and {errors.length - 3} more</div>
+          )}
         </button>
       )}
 
       {/* Where. */}
-      {where.length > 0 && (
+      {!several && where.length > 0 && (
         <div className="mt-2.5 flex flex-wrap gap-1.5">
           {where.map((w) => (
             <span
