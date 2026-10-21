@@ -115,3 +115,28 @@ def test_format_message_reports_no_fix_when_no_edits():
     )
     assert "no fix produced" in text.lower()
     assert "Couldn't localize" in text
+
+
+# =========================================================================
+# A change made but not yet proven is said as one (pah7lhfz, 2026-10-21)
+# =========================================================================
+
+def test_an_unproven_change_is_not_reported_as_no_fix():
+    from services.self_healing import _terminal_metadata
+    result = {"answer": "Changed the platform's `src/lib/data-engine.ts` for this app.",
+              "edited_paths": ["app/src/lib/data-engine.ts"], "untried": True}
+    text = _format_chat_message(_UUID_CRASH_EXC, smith_result=result, commit=None)
+    assert "not yet proven" in text and "no fix produced" not in text
+    meta = _terminal_metadata(_UUID_CRASH_EXC, result["edited_paths"], None, result)
+    assert meta["status"] == "untried"
+    assert meta["summary"].startswith("Changed the platform's")
+
+
+def test_the_card_carries_smiths_account_and_the_outcome():
+    from services.self_healing import _terminal_metadata
+    fixed = _terminal_metadata(_UUID_CRASH_EXC, ["src/x.ts"], "abc", {"answer": "Coerced the ref."})
+    assert (fixed["status"], fixed["summary"], fixed["commit"]) == ("resolved", "Coerced the ref.", "abc")
+    asked = _terminal_metadata(_UUID_CRASH_EXC, [], None, {"question": "Null or throw?"})
+    assert (asked["status"], asked["question"]) == ("asked", "Null or throw?")
+    failed = _terminal_metadata(_UUID_CRASH_EXC, [], None, {"answer": "Could not find it."})
+    assert failed["status"] == "failed" and failed["attempt"] == 1 and failed["max_attempts"]

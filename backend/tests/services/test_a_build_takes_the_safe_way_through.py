@@ -207,3 +207,16 @@ def test_the_last_try_runs_on_the_strongest_model_at_high_effort():
     spec = SimpleNamespace(escalate=True)
     assert ex.escalated(Client(), spec) == Client(model=ex.ESCALATION_MODEL, effort="high")
     assert ex.escalated(Client(), SimpleNamespace(escalate=False)) == Client()
+
+
+def test_a_scorecard_with_skipped_items_is_a_valid_document(tmp_path):
+    """The card's `skipped` was written and never declared, so a card holding
+    one refused every save of the document during the checks (pah7lhfz,
+    2026-10-21)."""
+    from services.blueprint import scorecard
+    from services.blueprint.service import BlueprintService
+    svc = BlueprintService.create(output_dir=tmp_path, app_id="t", name="T", domain="d")
+    svc.doc.setdefault("runtime", {})["scorecard"] = {
+        "status": "checking",
+        "criteria": {"logic": scorecard._criterion(total=1, skipped=[scorecard.item("RULE-001", "A rule", "gates no process")])}}
+    svc.validate()

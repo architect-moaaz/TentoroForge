@@ -1854,6 +1854,31 @@ def _strings(value):
             yield from _strings(v)
 
 
+#: What a process started by a record change holds besides its inputs — the
+#: event the data engine writes (`templates/runtime/data-engine.ts`
+#: `_persistEvent`: entityId, entity, previousEntity on an update, user) spread
+#: by the bus (`events/bus.ts` `_dispatchEvent`: plus event, entityType). The
+#: engine reads dotted paths, so the record's fields are `entity.<field>`.
+RECORD_EVENT_ROOTS = frozenset({"entity", "entityId", "entityType", "event", "user"})
+#: Columns every record has whatever its fields say.
+_EVERY_RECORD = frozenset({"id", "createdAt", "updatedAt"})
+
+
+def record_event(doc: dict, wf: dict) -> tuple[set[str], dict | None]:
+    """`(roots, entity)` for a process a record change starts: the names it
+    may read and the record type that changed — or `(set(), None)`. A record
+    change's process could read its record by no name the checks accepted:
+    `{{guestName}}` is empty at run time and `{{entity.guestName}}` was
+    refused, sixteen times in one process (pah7lhfz, 2026-10-20)."""
+    t = wf.get("trigger") if isinstance(wf.get("trigger"), dict) else {}
+    if str(t.get("kind") or "") != "db_change":
+        return set(), None
+    ent = next((e for e in (doc.get("data") or {}).get("entities") or []
+                if isinstance(e, dict) and str(e.get("id")) == str(t.get("entity") or "")), None)
+    roots = set(RECORD_EVENT_ROOTS) | ({"previousEntity"} if str(t.get("on") or "") == "updated" else set())
+    return roots, ent
+
+
 def template_findings(doc: dict) -> list[dict]:
     out: list[dict] = []
     for wf in _live(doc.get("workflows")):
@@ -1862,7 +1887,10 @@ def template_findings(doc: dict) -> list[dict]:
         keys = {str(st.get("key") or st.get("id")) for st in steps}
         variables = {str((st.get("config") or {}).get("variableName")) for st in steps
                      if (st.get("config") or {}).get("variableName")}
-        known = inputs | keys | variables
+        event_roots, changed = record_event(doc, wf)
+        record_fields = ({str(f.get("name")) for f in changed.get("fields") or [] if isinstance(f, dict)}
+                         | _EVERY_RECORD) if changed else set()
+        known = inputs | keys | variables | event_roots
         seen: set[str] = set()
         for st in steps:
             for text in _strings(st.get("config") or {}):
@@ -1906,6 +1934,17 @@ def template_findings(doc: dict) -> list[dict]:
                                               f"a `custom` step whose `code` is the formula, then name its result"})
                 for ref in _TEMPLATE_RE.findall(text):
                     root = ref.split(".")[0].split("[")[0].split("|")[0]
+                    parts = ref.split("|")[0].split(".")
+                    if root in ("entity", "previousEntity") and root in event_roots and changed \
+                            and len(parts) > 1 and parts[1].split("[")[0] not in record_fields \
+                            and (ref, str(st.get("key"))) not in seen:
+                        seen.add((ref, str(st.get("key"))))
+                        out.append({"rule": "template-unknown", "page": str(wf.get("id")),
+                                    "detail": f"{wf.get('name') or wf.get('id')}, step {st.get('key')!r}: "
+                                              f"{{{{{ref}}}}} — {parts[1]!r} is not a field of "
+                                              f"{changed.get('name')}, the record whose change starts this "
+                                              f"process (its fields: {', '.join(sorted(record_fields))})"})
+                        continue
                     if root in known or (root, str(st.get("key"))) in seen:
                         continue
                     seen.add((root, str(st.get("key"))))
@@ -1914,6 +1953,12 @@ def template_findings(doc: dict) -> list[dict]:
                         out.append({"rule": "template-unknown", "page": str(wf.get("id")),
                                     "detail": f"{wf.get('name') or wf.get('id')}, step {st.get('key')!r}: "
                                               f"{{{{{ref}}}}} names nothing the engine holds — write {fix}"})
+                    elif changed is not None and root in record_fields:
+                        out.append({"rule": "template-unknown", "page": str(wf.get("id")),
+                                    "detail": f"{wf.get('name') or wf.get('id')}, step {st.get('key')!r}: "
+                                              f"{{{{{ref}}}}} — this process starts when a {changed.get('name')} "
+                                              f"changes, and holds that record as `entity`: write "
+                                              f"`{{{{entity.{ref}}}}}`"})
                     else:
                         out.append({"rule": "template-unknown", "page": str(wf.get("id")),
                                     "detail": f"{wf.get('name') or wf.get('id')}, step {st.get('key')!r}: "

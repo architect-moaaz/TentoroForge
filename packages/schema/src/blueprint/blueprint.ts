@@ -3019,9 +3019,13 @@ export const Runtime = z.object({
             green: z.number().default(0),
             red: z.array(z.record(z.string(), z.unknown())).default([]),
             untried: z.array(z.record(z.string(), z.unknown())).default([]),
-            /** What no check can judge here (a rule that gates no process, a
-             * trail nobody declared), with its reason; counted nowhere and
-             * never a red. Written by `scorecard._criterion` when there is any. */
+            /**
+             * What no check can judge here — a rule that gates no process, a
+             * trail nobody declared — with its reason, counted nowhere. Written
+             * since 0537a239 and never declared, so a card holding one refused
+             * every save of the document during the checks (pah7lhfz,
+             * 2026-10-21).
+             */
             skipped: z.array(z.record(z.string(), z.unknown())).optional(),
           }),
         )

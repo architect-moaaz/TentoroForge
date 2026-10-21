@@ -261,6 +261,21 @@ def turn(ctx: Ctx, *, choose: Choose, history: list | None = None,
             said.append("The try after the change could not run to the end (the app's server was not "
                         "there to answer), so it decides nothing: the change stays, untried, until a "
                         "try that runs says whether it works.")
+            # AND THE CHANGE IS SAID AS MADE. A turn whose only change was this
+            # patch opened with "Nothing needed doing." and self-heal reported
+            # "no fix produced" above "the change stays" (pah7lhfz, 2026-10-21).
+            out.untried = True
+            made = [p for p in patches if p.get("id") in pending]
+            for p in made:
+                path = f"app/{p.get('path')}"
+                if p.get("path") and path not in out.touched:
+                    out.touched.append(path)
+            lead = "Nothing needed doing."
+            if out.said.strip().startswith(lead):
+                out.said = " ".join(
+                    f"Changed the platform's `{p.get('path')}` for this app"
+                    + (f": {str(p.get('why')).rstrip('.')}" if p.get("why") else "") + "."
+                    for p in made) + out.said.strip()[len(lead):]
         elif pending:
             said += file_edit.settle(ctx.out, pending, verdict == "proven")
         if older and verdict == "proven":

@@ -146,7 +146,18 @@ def step_refs(wf: Mapping[str, Any]) -> Iterator[tuple[str, str, str]]:
 def _supplied_by_workflow(wf: Mapping[str, Any]) -> set[str]:
     inputs = {str(i.get("name")) for i in (wf.get("inputs") or []) if isinstance(i, dict) and i.get("name")}
     keys = {str(s.get("key")) for s in (wf.get("steps") or []) if isinstance(s, dict) and s.get("key")}
-    return inputs | keys | set_variables(wf) | set(RUNTIME_HEADS)
+    return inputs | keys | set_variables(wf) | set(RUNTIME_HEADS) | _record_event_heads(wf)
+
+
+def _record_event_heads(wf: Mapping[str, Any]) -> set[str]:
+    """What the record change that starts a process hands it (the record as
+    `entity`, `entityId`, …; `functional_completeness.record_event`). Not
+    declared as inputs, because no control supplies them: the event does."""
+    from services.blueprint.functional_completeness import RECORD_EVENT_ROOTS
+    t = wf.get("trigger") if isinstance(wf.get("trigger"), Mapping) else {}
+    if str(t.get("kind") or "") != "db_change":
+        return set()
+    return set(RECORD_EVENT_ROOTS) | ({"previousEntity"} if str(t.get("on") or "") == "updated" else set())
 
 
 def set_variables(wf: Mapping[str, Any]) -> set[str]:

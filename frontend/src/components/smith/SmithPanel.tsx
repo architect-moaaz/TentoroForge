@@ -67,6 +67,7 @@ import {
 import ReactMarkdown from "react-markdown";
 import { ASK_SMITH_EVENT, type AskSmithDetail } from "@/lib/ask-smith";
 import { MarkdownLink } from "@/components/chat/MarkdownLink";
+import { SelfHealCard, type SelfHealMetadata } from "@/components/chat/SelfHealCard";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 import { ReviewWindow } from "@/components/smith/ReviewWindow";
@@ -195,6 +196,30 @@ interface Message {
   options?: string[];
   /** What the turn changed in the Blueprint, if anything. */
   diffSummary?: string;
+  /** The transcript row's id: a row the server rewrites (a self-heal that
+   *  started and then finished) replaces what is shown, never sits beside it. */
+  id?: string;
+  /** A self-heal of an error the running app hit — drawn as its own card. */
+  selfHeal?: SelfHealMetadata;
+}
+
+/** A transcript row as the panel shows it. */
+function messageOf(r: Record<string, unknown>): Message {
+  const meta = (r.metadata ?? {}) as Record<string, unknown>;
+  const heal = meta.self_heal === true && typeof meta.status === "string"
+    ? (meta as unknown as SelfHealMetadata) : undefined;
+  return {
+    id: r.id != null ? String(r.id) : undefined,
+    role: r.role === "user" ? ("user" as const) : ("smith" as const),
+    text: String(r.content ?? ""),
+    options: (meta.options as string[]) ?? undefined,
+    diffSummary: (meta.diffSummary as string) || undefined,
+    // A heal's status is its own (in_progress, resolved…), not the
+    // transcript's "progress"; it lives on `selfHeal`.
+    status: heal ? undefined : (meta.status as string) || undefined,
+    at: r.created_at ? Date.parse(String(r.created_at)) : Date.now(),
+    selfHeal: heal,
+  };
 }
 
 interface ArchitectTurn {
@@ -241,8 +266,9 @@ function clock(at: number): string {
  *  is a change even when no file list came with it. */
 const RECEIPT = /^(Changed|Added|Removed|Rewrote|Renamed|Restyled|Laid out|Edited)\b/;
 
-function kindOf(m: Message): "user" | "progress" | "update" | "smith" {
+function kindOf(m: Message): "user" | "progress" | "update" | "heal" | "smith" {
   if (m.role === "user") return "user";
+  if (m.selfHeal) return "heal";
   if (m.status === "progress" || /^Still (at it|working on it|checking)/.test(m.text)) return "progress";
   if (m.diffSummary || RECEIPT.test(m.text)) return "update";
   return "smith";
@@ -364,22 +390,21 @@ export function SmithPanel({
       const rows = (await res.json()) as Array<Record<string, unknown>>;
       if (!Array.isArray(rows)) return;
       setMessages((cur) => {
-        const seen = new Set(cur.map((m) => `${m.role}\u0000${m.text}`));
-        const add = rows
-          .filter((r) => String(r.content ?? "").trim())
-          .map((r) => {
-            const meta = (r.metadata ?? {}) as Record<string, unknown>;
-            return {
-              role: r.role === "user" ? ("user" as const) : ("smith" as const),
-              text: String(r.content ?? ""),
-              options: (meta.options as string[]) ?? undefined,
-              diffSummary: (meta.diffSummary as string) || undefined,
-              status: (meta.status as string) || undefined,
-              at: r.created_at ? Date.parse(String(r.created_at)) : Date.now(),
-            };
-          })
-          .filter((m) => !seen.has(`${m.role}\u0000${m.text}`));
-        return add.length ? [...cur, ...add] : cur;
+        const fresh = rows.filter((r) => String(r.content ?? "").trim()).map(messageOf);
+        const byId = new Map(fresh.filter((m) => m.id).map((m) => [m.id!, m]));
+        // A row shown already is replaced by what the server says now: the
+        // "Fixing…" heal card becomes its outcome in place.
+        let changed = false;
+        const next = cur.map((m) => {
+          const now = m.id ? byId.get(m.id) : undefined;
+          if (!now || (now.text === m.text && now.selfHeal?.status === m.selfHeal?.status)) return m;
+          changed = true;
+          return { ...m, ...now };
+        });
+        const shown = new Set(next.map((m) => m.id).filter(Boolean));
+        const seen = new Set(next.map((m) => `${m.role}\u0000${m.text}`));
+        const add = fresh.filter((m) => !(m.id && shown.has(m.id)) && !seen.has(`${m.role}\u0000${m.text}`));
+        return add.length ? [...next, ...add] : changed ? next : cur;
       });
     } catch {
       /* a missed sync is not an error — a reload still recovers it */
@@ -390,15 +415,21 @@ export function SmithPanel({
   // read it every few seconds so each "fixed" line arrives as it is said;
   // once more when they end, for the closing line.
   const checksActive = Boolean(run.checks?.active);
+  // A SELF-HEAL STARTS ON ITS OWN — the running app hit an error — so the
+  // transcript is read now and then even when nothing here is running, and
+  // every few seconds while a heal is under way, so its card turns into the
+  // outcome without a reload.
+  const healing = messages.some((m) => m.selfHeal?.status === "in_progress");
   useEffect(() => {
     if (!projectId) return;
-    if (!checksActive) {
+    if (!checksActive && !healing) {
       void syncTranscript();
-      return;
+      const idle = setInterval(() => void syncTranscript(), 45000);
+      return () => clearInterval(idle);
     }
     const timer = setInterval(() => void syncTranscript(), 10000);
     return () => clearInterval(timer);
-  }, [projectId, checksActive, syncTranscript]);
+  }, [projectId, checksActive, healing, syncTranscript]);
 
   // Fire `onRunComplete` once per run, not on every render that follows it.
   useEffect(() => {
@@ -578,17 +609,7 @@ export function SmithPanel({
         if (!live || !Array.isArray(rows) || rows.length === 0) return;
         const past: Message[] = rows
           .filter((r) => String(r.content ?? "").trim())
-          .map((r) => {
-            const meta = (r.metadata ?? {}) as Record<string, unknown>;
-            return {
-              role: r.role === "user" ? ("user" as const) : ("smith" as const),
-              text: String(r.content ?? ""),
-              at: r.created_at ? Date.parse(String(r.created_at)) : undefined,
-              options: (meta.options as string[]) ?? undefined,
-              diffSummary: (meta.diffSummary as string) || undefined,
-              status: (meta.status as string) || undefined,
-            };
-          });
+          .map(messageOf);
         setMessages((m) => (m.length ? m : past));
       })
       .catch(() => undefined);
@@ -1167,12 +1188,14 @@ export function SmithPanel({
                 "text-sm",
                 kindOf(m) === "user" && "rounded-xl bg-blue-600 px-4 py-2.5 text-white shadow-sm",
                 kindOf(m) === "progress" && "ml-[52px] rounded-lg bg-muted/60 px-3 py-2 text-[13px] text-muted-foreground",
-                kindOf(m) === "update" && "ml-[52px] rounded-xl border bg-card p-4 shadow-sm",
+                (kindOf(m) === "update" || kindOf(m) === "heal") && "ml-[52px] rounded-xl border bg-card p-4 shadow-sm",
                 kindOf(m) === "smith" && "ml-[52px] rounded-xl bg-muted/60 px-4 py-3",
               )}
             >
             {kindOf(m) === "user" ? (
               <p className="whitespace-pre-wrap">{m.text}</p>
+            ) : kindOf(m) === "heal" && m.selfHeal ? (
+              <SelfHealCard metadata={m.selfHeal} createdAt={m.at} />
             ) : kindOf(m) === "update" ? (
               // A CHANGE, AS A CARD: what it did, then the files it touched.
               <UpdateCard text={m.text} files={m.diffSummary || filesNamed(m.text).join(", ")} />

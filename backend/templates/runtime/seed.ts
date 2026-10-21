@@ -39,6 +39,9 @@ import * as accountModule from "../lib/account";
 import { ACCOUNT, ADMIN_ROLE, SIGNUP_ROLE } from "../lib/account";
 // Read through the module so an app projected before `ROLES` existed builds.
 const ROLES: string[] = ((accountModule as unknown as { ROLES?: string[] }).ROLES) ?? [];
+// The login's columns that decide which records a person reaches (account_model.scope_reach).
+type Reach = { column: string; table: string; many: boolean };
+const SCOPE_REACH: Reach[] = ((accountModule as unknown as { SCOPE_REACH?: Reach[] }).SCOPE_REACH) ?? [];
 import { accountTable } from "../lib/account-table";
 
 const ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL || "admin@example.com";
@@ -621,6 +624,19 @@ function prepRow(table: any, row: Record<string, unknown>, ids: Record<string, s
     const prop = (k in table) ? k : propByNorm[norm(k)];
     if (!prop) continue;
     let val: unknown = v;
+    if (Array.isArray(val)) {
+      // A LIST OF RECORDS — the properties a person is assigned to — names
+      // each by "ref:properties[i]"; each becomes that record's id, and one
+      // that cannot be resolved is left out rather than kept as text.
+      val = val.flatMap((one) => {
+        const m = typeof one === "string" ? one.match(/^ref:(\w+)\[(\d+)\]$/) : null;
+        if (!m) return [one];
+        const pool = ids[norm(m[1])] || ids[norm(m[1]) + "s"] || ids[norm(m[1]) + "es"];
+        return pool && pool.length ? [pool[Number(m[2]) % pool.length]] : [];
+      });
+      const col: any = (table as any)[prop];
+      if (String(col?.dataType ?? "").toLowerCase() === "string") val = JSON.stringify(val);
+    }
     if (typeof val === "string") {
       // Resolve seed-plan FK placeholders like "ref:landlords[0]" to the real
       // id of the already-inserted parent row. Unresolvable refs fall through
@@ -1084,7 +1100,55 @@ async function recordSeedFingerprint(fp: string): Promise<void> {
   }
 }
 
+/**
+ * THE TEST LOGINS REACH THE SAMPLE RECORDS. A record a person reaches through
+ * one of their own columns — the properties they are assigned to — is out of
+ * sight to a login that holds none: Refund And Chargeback's role logins saw no
+ * case, and every screen of one was untried (pah7lhfz, 2026-10-21). The admin
+ * and each role's demo login are given every record of that table (a column of
+ * one value: the first), when theirs is empty. Never a value someone set.
+ */
+async function giveLoginsReach(): Promise<void> {
+  if (!SCOPE_REACH.length || process.env.FORGE_DEMO_LOGINS === "0") return;
+  const users = tableFor("users");
+  if (!users) return;
+  const emails = [ADMIN_EMAIL, ...ROLES.filter((r) => r && r !== ADMIN_ROLE).map(demoEmail)];
+  for (const reach of SCOPE_REACH) {
+    try {
+      const parent = tableFor(reach.table);
+      const holder = reach.column in users ? users : (accountTable && reach.column in accountTable ? accountTable : null);
+      if (!parent || !holder) continue;
+      const ids = (await db.select({ id: (parent as any).id }).from(parent).limit(500)).map((r: any) => String(r.id));
+      if (!ids.length) continue;
+      const col: any = (holder as any)[reach.column];
+      const asText = String(col?.dataType ?? "").toLowerCase() === "string";
+      const value = reach.many ? (asText ? JSON.stringify(ids) : ids) : ids[0];
+      for (const email of emails) {
+        const [u]: any[] = await db.select().from(users).where(eq((users as any).email, email)).limit(1);
+        if (!u?.id) continue;
+        const [row]: any[] = holder === users ? [u]
+          : await db.select().from(holder).where(eq((holder as any).id, u.id)).limit(1);
+        if (!row) continue;
+        const held = row[reach.column];
+        const empty = held === null || held === undefined || held === "" || held === "[]"
+          || (Array.isArray(held) && held.length === 0);
+        if (!empty) continue;
+        await db.update(holder).set({ [reach.column]: value } as any).where(eq((holder as any).id, u.id));
+        console.log(`✅ ${email} reaches ${reach.many ? ids.length : 1} ${reach.table} through ${reach.column}`);
+      }
+    } catch (e) {
+      console.warn(`[seed] logins not given ${reach.column}:`, e);
+    }
+  }
+}
+
 async function seedEverything(): Promise<void> {
+  // After the domain data, whichever gate ends the seed: a reused database
+  // keeps its records, and the logins still have to reach them.
+  try { await seedEverythingElse(); } finally { await giveLoginsReach(); }
+}
+
+async function seedEverythingElse(): Promise<void> {
   const forceSeed = /^(1|true|yes)$/i.test(String(process.env.FORCE_SEED || ""));
 
   // THE ADMIN MUST ALWAYS EXIST — the skip gates below preserve DOMAIN data,

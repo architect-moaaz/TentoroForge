@@ -57,6 +57,64 @@ def account_entity(doc: dict) -> dict | None:
     return next((e for e in _live((doc.get("data") or {}).get("entities")) if e.get("account")), None)
 
 
+def login_record(doc: dict) -> dict | None:
+    """The record type a signed-in person's row is read from: the account
+    entity, else the one that extends the platform's `users` table. Refund And
+    Chargeback's `User` carried no account flag and was still the session's row."""
+    from services.blueprint.projection import to_snake
+    return account_entity(doc) or next(
+        (e for e in _live((doc.get("data") or {}).get("entities"))
+         if str(e.get("table") or to_snake(str(e.get("name") or ""))) == "users"), None)
+
+
+#: Field types that hold several values (a list of ids), not one.
+_MANY_TYPES = frozenset({"json", "jsonb", "array", "list", "string[]", "text[]", "uuid[]"})
+
+
+def scope_reach(doc: dict) -> list[dict]:
+    """The login's own fields that decide which records a person reaches, each
+    with the table its values point into: `[{column, table, many}]`.
+
+    Read off the ownership rules, nothing else. A rule scoped by workspace with
+    an `actorColumn` on the login says: a person reaches a row when the row's
+    `column` is in (or equals) their `actorColumn`. Its values are therefore
+    rows of the table `column` points at. Sample people and the test logins are
+    given those, so each role sees sample records when the app is tried —
+    Refund And Chargeback's role logins held no properties, saw no cases, and
+    twelve screens went untried (pah7lhfz, 2026-10-21)."""
+    from services.blueprint.projection import _link_target, to_snake
+    login = login_record(doc)
+    if login is None:
+        return []
+    login_fields = {str(f.get("name")): f for f in login.get("fields") or [] if isinstance(f, dict)}
+    ents = [e for e in _live((doc.get("data") or {}).get("entities")) if isinstance(e, dict)]
+    by_id = {str(e.get("id")): e for e in ents}
+    out: list[dict] = []
+    seen: set[str] = set()
+    for rule in ((doc.get("security") or {}).get("ownershipRules") or []):
+        if not isinstance(rule, dict) or str(rule.get("scope") or "") != "workspace" or rule.get("kind") == "attribution":
+            continue
+        actor = str(rule.get("actorColumn") or "")
+        if actor not in login_fields or actor in seen:
+            continue
+        name = re.sub(r"[^a-z0-9]", "", str(rule.get("entity") or "").lower())
+        ent = next((e for e in ents if name in {re.sub(r"[^a-z0-9]", "", str(e.get(k) or "").lower()) + x
+                                                for k in ("name", "table") for x in ("", "s", "es")}
+                    or str(e.get("id")) == str(rule.get("entity"))), None)
+        field = next((f for f in (ent or {}).get("fields") or [] if f.get("name") == rule.get("column")), None)
+        if field is None:
+            continue
+        target = str(field.get("references") or _link_target(doc, ent, field) or "")
+        parent = by_id.get(target)
+        if parent is None:
+            continue
+        seen.add(actor)
+        out.append({"column": actor,
+                    "table": str(parent.get("table") or to_snake(str(parent.get("name") or ""))),
+                    "many": str(login_fields[actor].get("type") or "").lower() in _MANY_TYPES})
+    return out
+
+
 def signup_role(doc: dict) -> str | None:
     """The role a self-registered person gets: `security.signupRole`, else the
     application's only role, else — with the administrator's role set aside —
@@ -451,6 +509,9 @@ def project_account(doc: dict, app_root: str | Path) -> dict[str, Any]:
         + f"export const ADMIN_ROLE: string | null = {json.dumps(admin_role(doc))};\n\n"
         + "/** Every role of the application, by name: the seed signs a demo person into each. */\n"
         + f"export const ROLES: string[] = {json.dumps([str(r.get('name')) for r in _live(doc.get('roles')) if r.get('name')])};\n\n"
+        + "/** The login's fields that decide which records a person reaches, and the table their values\n"
+          " *  point into: the seed gives the test logins the sample rows there. */\n"
+        + f"export const SCOPE_REACH: {{ column: string; table: string; many: boolean }}[] = {json.dumps(scope_reach(doc))};\n\n"
         + f"export const AFTER_SIGNUP: string = {json.dumps(after_signup_route(doc))};\n\n"
         + f"export const HOME: string = {json.dumps(home_route(doc))};\n\n"
         + "/** Where each role lands once signed in, by the role's name; anyone else goes HOME. */\n"

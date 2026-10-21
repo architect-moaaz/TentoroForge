@@ -215,7 +215,9 @@ async def _run_heal_attempt(
         existing_conv_id=in_progress_conv_id,
     )
 
-    resolved = bool(edited_paths) and not smith_result.get("question")
+    # A change no try has proven yet leaves the error open: the next time the
+    # app runs that code is the proof.
+    resolved = bool(edited_paths) and not smith_result.get("question") and not smith_result.get("untried")
     if resolved:
         await _mark_exception(
             exc_id,
@@ -574,6 +576,15 @@ def _format_chat_message(
             f"Detected a runtime error: `{exc['message'][:200]}`\n\n"
             f"Smith asks: {question}"
         )
+    if edited and smith_result.get("untried"):
+        files = "\n".join(f"  • `{p}`" for p in edited[:5])
+        return (
+            "🩹 **Self-heal — changed, not yet proven**\n\n"
+            f"**Symptom:** `{exc['message'][:200]}`\n"
+            f"**Files touched:**\n{files}\n\n"
+            f"{answer}\n\n"
+            "The error stays open until the app runs this again without it."
+        )
     if edited:
         header = f"🩹 **Self-heal — resolved** (commit `{commit or 'HEAD'}`)"
         files = "\n".join(f"  • `{p}`" for p in edited[:5])
@@ -672,6 +683,33 @@ async def _publish_self_heal_event(
         logger.exception("[self-heal] bus publish failed — chat DB row still authoritative")
 
 
+def _terminal_metadata(exc_snapshot: dict, edited_paths: list[str], commit: str | None,
+                       smith_result: dict | None) -> dict:
+    """What the finished heal's card is drawn from: its status, what changed,
+    and Smith's own account."""
+    metadata = _shared_self_heal_metadata(exc_snapshot)
+    metadata.update({
+        "edited_paths": edited_paths,
+        "commit": commit,
+    })
+    # Terminal status: resolved / untried / asked / failed. Frontend uses this to
+    # pick the SelfHealCard variant (icon, color, action buttons).
+    if smith_result and smith_result.get("question"):
+        metadata["status"] = "asked"
+        metadata["question"] = smith_result["question"]
+    elif edited_paths and (smith_result or {}).get("untried"):
+        metadata["status"] = "untried"
+    elif edited_paths:
+        metadata["status"] = "resolved"
+    else:
+        metadata["status"] = "failed"
+    # SMITH'S OWN ACCOUNT, for the card to show under what broke and where.
+    summary = (smith_result or {}).get("answer") or ((smith_result or {}).get("diagnosis") or {}).get("explanation")
+    if summary:
+        metadata["summary"] = str(summary)[:1500]
+    return metadata
+
+
 async def _persist_self_heal_message(
     project_id: uuid.UUID,
     text: str,
@@ -688,20 +726,7 @@ async def _persist_self_heal_message(
     ``_persist_self_heal_progress``), UPDATE that row in place so the
     frontend replaces the progress card instead of rendering two rows.
     Otherwise INSERT a fresh row (backwards-compatible path)."""
-    metadata = _shared_self_heal_metadata(exc_snapshot)
-    metadata.update({
-        "edited_paths": edited_paths,
-        "commit": commit,
-    })
-    # Terminal status: resolved / asked / failed. Frontend uses this to
-    # pick the SelfHealCard variant (icon, color, action buttons).
-    if smith_result and smith_result.get("question"):
-        metadata["status"] = "asked"
-        metadata["question"] = smith_result["question"]
-    elif edited_paths:
-        metadata["status"] = "resolved"
-    else:
-        metadata["status"] = "failed"
+    metadata = _terminal_metadata(exc_snapshot, edited_paths, commit, smith_result)
 
     async with async_session() as db:
         conv = None

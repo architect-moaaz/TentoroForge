@@ -39,6 +39,8 @@ export function actorCtx(user?: { id?: unknown; role?: unknown; email?: unknown;
   for (const [k, v] of Object.entries(user)) {
     if (["id", "role", "email", "workspaceId"].includes(k)) continue;
     if (v === null || ["string", "number", "boolean"].includes(typeof v)) rest[k] = v;
+    // A list of ids is a scope too: the properties a person holds.
+    else if (Array.isArray(v) && v.every((x) => ["string", "number"].includes(typeof x))) rest[k] = v;
   }
   return {
     user: {

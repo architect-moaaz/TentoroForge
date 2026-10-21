@@ -38,13 +38,27 @@ const MAX_SHOT_PX = 7800;
 const ctx = await browser.newContext({ viewport });
 
 // NextAuth's own credentials endpoint; the session cookie lands in this context.
-const { csrfToken } = await (await ctx.request.get(`${cfg.baseUrl}/api/auth/csrf`)).json();
-await ctx.request.post(`${cfg.baseUrl}/api/auth/callback/credentials`, {
-  form: { csrfToken, email: cfg.email, password: cfg.password, json: "true" },
-});
-const session = await (await ctx.request.get(`${cfg.baseUrl}/api/auth/session`)).json().catch(() => ({}));
+// TRIED AGAIN BEFORE IT IS A FAILURE. A dev server compiling its auth route
+// drops the first connection ("socket hang up"), and that ended the run
+// before one page was opened: three of Refund And Chargeback's Administrator
+// screens were never looked at (pah7lhfz, 2026-10-21).
+let session = null, signInError = "";
+for (const pause of [0, 5000, 15000]) {
+  if (pause) await new Promise((r) => setTimeout(r, pause));
+  try {
+    const { csrfToken } = await (await ctx.request.get(`${cfg.baseUrl}/api/auth/csrf`, { timeout: 120000 })).json();
+    await ctx.request.post(`${cfg.baseUrl}/api/auth/callback/credentials`, {
+      form: { csrfToken, email: cfg.email, password: cfg.password, json: "true" }, timeout: 120000,
+    });
+    session = await (await ctx.request.get(`${cfg.baseUrl}/api/auth/session`, { timeout: 60000 })).json().catch(() => ({}));
+    if (session?.user) break;
+    signInError = "the app did not return a session";
+  } catch (e) {
+    signInError = String(e?.message || e).split("\n")[0].slice(0, 200);
+  }
+}
 if (!session?.user) {
-  console.log(JSON.stringify({ error: "could not sign in" }));
+  console.log(JSON.stringify({ error: `could not sign in: ${signInError}` }));
   process.exit(2);
 }
 // The same session, reading an application with no rows.
@@ -108,6 +122,23 @@ function fillRoute(url, row) {
 // The shell scrolls its main column, so a full-page screenshot would stop at
 // the viewport. Let every scroll container grow to its content first.
 async function unclip(page) {
+  // A PAGE THAT MOVES ITSELF is waited for, not crashed on: a screen that
+  // redirects after it loads destroys the context this runs in, and that one
+  // exception ended the run for every page after it (pah7lhfz, Finance, seven
+  // screens never looked at, 2026-10-21). Tried once more on the page it
+  // landed on; failing that, the picture is taken as the page stands.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      await _unclip(page);
+      return;
+    } catch {
+      await page.waitForLoadState("load", { timeout: 15000 }).catch(() => {});
+      await page.waitForTimeout(500);
+    }
+  }
+}
+
+async function _unclip(page) {
   await page.evaluate(() => {
     for (const el of document.querySelectorAll("body *")) {
       const s = getComputedStyle(el);
@@ -368,6 +399,20 @@ async function press(context, url, control, firstIndex = null) {
 const out = [];
 const pressedIn = new Set();          // `${group}|${control}` — a screen's control is pressed once
 for (const p of cfg.pages) {
+  // ONE PAGE'S FAILURE IS THAT PAGE'S. Anything this script cannot do on a
+  // page is said as that page being unavailable — the check's failure, never
+  // the app's — and the next page is opened as if nothing had happened.
+  try {
+    await visit(p);
+  } catch (e) {
+    out.push({ id: p.id, route: p.route, as: p.as ?? null,
+               unavailable: String(e?.message || e).split("\n")[0].slice(0, 300) });
+  }
+}
+console.log(JSON.stringify(out));
+await browser.close();
+
+async function visit(p) {
   if (p.signIn) {
     // SIGNING IN, THROUGH THE FORM, as a person does: where it lands is the
     // app's answer to "the admin lands on the customers' menu", and only the
@@ -404,15 +449,21 @@ for (const p of cfg.pages) {
     out.push({ id: p.id, route: p.route, url: p.route, as: p.as ?? null, status, landed, text,
                signedIn: true, errors: [...new Set(errors)].slice(0, 12), states: {} });
     await fresh.close();
-    continue;
+    return;
   }
   let url = p.route;
   const who = await contextsFor(p);
   const isRecord = /\[[^\]]+\]/.test(url);
   if (isRecord) {
     const row = await firstRow(who.ctx, p.entity);
-    if (!row?.id) { out.push({ id: p.id, route: p.route, skipped: "no record to open" }); continue; }
+    if (!row?.id) { out.push({ id: p.id, route: p.route, skipped: "no record to open" }); return; }
     url = fillRoute(url, row);
+  }
+  // NEVER A LITERAL `[id]`. A route left holding its placeholder opens the
+  // not-found screen, or one that throws, and that is a look at nothing.
+  if (/\[[^\]]+\]|%5B[^/]*%5D/i.test(url)) {
+    out.push({ id: p.id, route: p.route, skipped: "no record to open" });
+    return;
   }
   const t0 = Date.now();
   const file = path.join(cfg.outDir, `${p.id}.png`);
@@ -468,5 +519,3 @@ for (const p of cfg.pages) {
   result.ms = Date.now() - t0;
   out.push(result);
 }
-console.log(JSON.stringify(out));
-await browser.close();

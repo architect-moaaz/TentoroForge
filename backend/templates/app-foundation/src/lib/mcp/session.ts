@@ -27,6 +27,7 @@ function profileOf(row: Record<string, unknown>): Record<string, unknown> {
   for (const [k, v] of Object.entries(row)) {
     if (["password", "passwordHash", "id", "email", "name", "role", "accountType"].includes(k)) continue;
     if (v === null || ["string", "number", "boolean"].includes(typeof v)) out[k] = v;
+    else if (Array.isArray(v) && v.every((x) => ["string", "number"].includes(typeof x))) out[k] = v;  // a list of ids is a scope too
   }
   return out;
 }

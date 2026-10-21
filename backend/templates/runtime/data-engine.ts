@@ -475,9 +475,19 @@ function actorValue(rule: OwnershipRule, ctx: DataEngineContext): unknown {
   // IN AN APPLICATION OF SEVERAL ORGANISATIONS the workspace is the one the
   // person acts in (`activeOrgId`, from their membership); a rule naming an
   // `actorColumn` reads that column of the users row instead.
-  const v = rule.scope === "workspace"
+  let v: unknown = rule.scope === "workspace"
     ? (rule.actorColumn ? user?.[rule.actorColumn] : (user?.activeOrgId ?? user?.workspaceId))
     : ctx.user?.id;
+  // SEVERAL WORKSPACES. An `actorColumn` that holds a list — the properties a
+  // person is assigned to — is the set of workspaces they reach, stored as a
+  // list or as its JSON text. An empty list reaches nothing (fails closed).
+  if (typeof v === "string" && v.trim().startsWith("[")) {
+    try { v = JSON.parse(v); } catch { /* a value that only looks like a list */ }
+  }
+  if (Array.isArray(v)) {
+    const many = v.filter((x) => x !== null && x !== undefined && x !== "");
+    return many.length ? many : undefined;
+  }
   return v === undefined || v === null || v === "" ? undefined : v;
 }
 
@@ -565,7 +575,11 @@ function scopeConditions(
       conds.push(guest ?? sql`false`);
       continue;
     }
-    conds.push(guest ? (or(eq(col, actor as any), guest) as SQL) : eq(col, actor as any));
+    // A person of several workspaces reaches a row in any of them; compared
+    // with `=` a list matched nothing, and Refund And Chargeback's staff, each
+    // assigned a list of properties, saw no case at all (pah7lhfz, 2026-10-21).
+    const mine = Array.isArray(actor) ? inArray(col, actor as any[]) : eq(col, actor as any);
+    conds.push(guest ? (or(mine, guest) as SQL) : mine);
   }
   return conds;
 }
@@ -1119,6 +1133,21 @@ export async function create(
     // rather than nulling a NOT NULL column. A scope column's read path
     // already refuses to return rows this actor cannot claim.
     if (actor === undefined) continue;
+    if (Array.isArray(actor)) {
+      // A PERSON OF SEVERAL WORKSPACES FILES IN ONE OF THEIRS: the one the
+      // request names, if it is theirs; their only one, if it names none;
+      // never one they do not hold.
+      const given = cleanData[rule.column];
+      if (given === undefined || given === null || given === "") {
+        if (actor.length === 1) cleanData[rule.column] = actor[0];
+        else if (rule.kind !== "attribution") {
+          throw new ValidationError([`Say which ${rule.column} this ${entityName} belongs to — one of yours.`]);
+        }
+      } else if (!actor.map(String).includes(String(given))) {
+        throw new ValidationError([`That ${rule.column} is not one of yours.`]);
+      }
+      continue;
+    }
     cleanData[rule.column] = actor;
   }
 
@@ -1216,6 +1245,15 @@ export async function update(
   // Strip system fields
   const { id: _, createdAt, updatedAt, created_at, updated_at, ...cleanData } = data;
   await assertReachableThrough(entityName, cleanData, ctx);
+  // A PERSON OF SEVERAL WORKSPACES MOVES A ROW ONLY BETWEEN THEIRS.
+  for (const rule of ownershipRulesFor(entityName)) {
+    if (rule.kind === "attribution" || rule.through || !(rule.column in cleanData)) continue;
+    if (ctx.user?.role && (rule.unscopedRoles || []).includes(ctx.user.role)) continue;
+    const actor = actorValue(rule, ctx);
+    if (Array.isArray(actor) && !actor.map(String).includes(String(cleanData[rule.column]))) {
+      throw new ValidationError([`That ${rule.column} is not one of yours.`]);
+    }
+  }
 
   // jsonb columns arrive as JSON strings from KeyValueInput — parse them back.
   coerceJsonColumns(entity.table, cleanData);
@@ -1246,10 +1284,21 @@ export async function update(
   // helper skips empty/undefined + round-tripped mask values, so an edit
   // form that pre-filled with the masked read (and left it unchanged)
   // will NOT clobber the existing ciphertext.
-  const updateData = { ...patched, updatedAt: new Date() } as any;
+  // `updatedAt` ONLY WHERE THE TABLE HAS ONE. On a table without it, a save
+  // with nothing else of the table's own to set became
+  // `update … set where …` — "syntax error at or near where", a 500 for every
+  // no-change save and for the audit check (pah7lhfz, 2026-10-21).
+  const tableCols = getTableColumns(entity.table) as Record<string, unknown>;
+  const updateData = { ...patched } as any;
+  if ("updatedAt" in tableCols) updateData.updatedAt = new Date();
   await _encryptSensitiveOnWrite(entityName, updateData);
 
   stringifyDatesForStringColumns(entity.table, updateData);
+  if (!Object.keys(updateData).some((k) => k in tableCols && updateData[k] !== undefined)) {
+    // Nothing of its own to change: id = id keeps the statement valid, and
+    // the trail still records that the change was asked for.
+    updateData.id = sql`${(entity.table as any).id}`;
+  }
   const record = await withAudit(
     async (tx: any) => (await tx.update(entity.table).set(updateData).where(where).returning())[0],
     (r: any) => ({ action: "update", entity: entityName, entityId: String(id),
