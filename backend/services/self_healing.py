@@ -19,10 +19,21 @@ The design ladders on top of the tools built earlier in this session:
 
 Rate limits:
 
-* Max 5 concurrent heals per project (in-process semaphore).
-* Max 20 heal attempts per project per rolling hour (DB check).
-* Max 3 attempts per specific exception before we mark it
-  ``unresolvable`` and stop trying.
+ONE HEAL AT A TIME PER APPLICATION, OF EVERYTHING OPEN. Every new error used
+to start its own Smith turn at once — five at a time, three tries each, blind
+to each other and to the checks already fixing the same app. A checks run on
+Refund And Chargeback broke 25 processes and the heals that followed cost $92
+of Opus in an hour (pah7lhfz, 2026-10-21). Now:
+
+* A heal waits while a build, a check or a Smith turn is working on the app;
+  that work owns its own faults, and the errors it shook loose are still open
+  when it ends.
+* One heal turn takes every open error of the app (up to ``_MAX_BATCH``), so
+  errors with one cause are fixed once. An error arriving while it runs is
+  taken by its next round.
+* At most ``_MAX_HEAL_TURNS_PER_HOUR`` heal turns an hour per app, and
+  ``_MAX_ATTEMPTS_PER_EXCEPTION`` tries per error before it is
+  ``unresolvable``.
 """
 from __future__ import annotations
 
@@ -46,20 +57,31 @@ logger = logging.getLogger(__name__)
 
 
 # --------------------------------------------------------------------------- #
-# Rate-limiting state (in-process; fine for single-node dev)
+# Limits (in-process; one backend process serves an app's heals)
 # --------------------------------------------------------------------------- #
 
-_MAX_CONCURRENT_PER_PROJECT = 5
-_MAX_HEALS_PER_HOUR = 20
 _MAX_ATTEMPTS_PER_EXCEPTION = 3
+#: Errors one heal turn takes; the rest wait for its next round.
+_MAX_BATCH = 8
+#: Rounds one heal runs before it lets go: errors that arrive while a round
+#: works are taken by the next.
+_ROUNDS = 3
+_MAX_HEAL_TURNS_PER_HOUR = 6
+#: How often a waiting heal looks whether the app is still busy, and how long
+#: it waits before leaving the errors open for the next one.
+_BUSY_POLL_S = 30.0
+_BUSY_GIVE_UP_S = 3 * 3600.0
 
-_project_semaphores: dict[uuid.UUID, asyncio.Semaphore] = defaultdict(
-    lambda: asyncio.Semaphore(_MAX_CONCURRENT_PER_PROJECT),
-)
+_healing: set[uuid.UUID] = set()
+_heal_turns: dict[uuid.UUID, list[float]] = defaultdict(list)
 
 
-def _project_semaphore(project_id: uuid.UUID) -> asyncio.Semaphore:
-    return _project_semaphores[project_id]
+def _turns_left(project_id: uuid.UUID) -> int:
+    import time
+    now = time.time()
+    recent = [t for t in _heal_turns[project_id] if now - t < 3600]
+    _heal_turns[project_id] = recent
+    return _MAX_HEAL_TURNS_PER_HOUR - len(recent)
 
 
 # --------------------------------------------------------------------------- #
@@ -69,94 +91,108 @@ def _project_semaphore(project_id: uuid.UUID) -> asyncio.Semaphore:
 async def invoke_smith_on_exception(
     project_id: uuid.UUID, exc_id: uuid.UUID,
 ) -> dict:
-    """Run one heal attempt on the given exception.
+    """Heal the application this new error belongs to.
 
-    Returns a small status dict for logging / tests. Never raises —
-    a failure inside the heal loop is caught and surfaced as
+    Never raises — a failure inside the heal loop is caught and surfaced as
     ``{"status": "error", "reason": …}`` so the caller (a FastAPI
-    BackgroundTasks callable) can't crash the request."""
-    sem = _project_semaphore(project_id)
-    if sem.locked() and sem._value <= 0:
-        return {"status": "rate_limited",
-                "reason": "concurrent heal cap reached for project"}
-    async with sem:
-        try:
-            return await _run_heal_attempt(project_id, exc_id)
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("[self-heal] attempt crashed project=%s exc=%s",
-                             project_id, exc_id)
-            await _mark_exception(
-                exc_id, status=RuntimeExceptionStatus.open,
-                summary=f"heal attempt crashed: {exc!r}",
-            )
-            return {"status": "error", "reason": str(exc)[:400]}
+    BackgroundTasks callable) can't crash the request. A heal of the same
+    app already running takes this error in its next round."""
+    if project_id in _healing:
+        return {"status": "queued", "reason": "a heal of this application is running and takes it next"}
+    _healing.add(project_id)
+    try:
+        return await _heal_application(project_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("[self-heal] heal crashed project=%s exc=%s", project_id, exc_id)
+        return {"status": "error", "reason": str(exc)[:400]}
+    finally:
+        _healing.discard(project_id)
 
 
-# --------------------------------------------------------------------------- #
-# The heal attempt
-# --------------------------------------------------------------------------- #
+async def _heal_application(project_id: uuid.UUID) -> dict:
+    out: dict = {"status": "skipped", "reason": "nothing open"}
+    for _ in range(_ROUNDS):
+        output_dir = await _output_dir_of(project_id)
+        if not output_dir:
+            return {"status": "skipped", "reason": "project missing or no output_dir"}
+        if not await _wait_until_idle(output_dir):
+            return {"status": "deferred", "reason": "the application stayed busy; its errors stay open"}
+        if _turns_left(project_id) <= 0:
+            return {"status": "rate_limited", "reason": f"{_MAX_HEAL_TURNS_PER_HOUR} heal turns in the last hour"}
+        batch = await _claim_open_errors(project_id)
+        if not batch:
+            break
+        import time
+        _heal_turns[project_id].append(time.time())
+        out = await _heal_batch(project_id, output_dir, batch)
+    return out
 
-async def _run_heal_attempt(
-    project_id: uuid.UUID, exc_id: uuid.UUID,
-) -> dict:
+
+async def _output_dir_of(project_id: uuid.UUID) -> str | None:
     async with async_session() as db:
-        row = await db.get(RuntimeException, exc_id)
-        if row is None:
-            return {"status": "skipped", "reason": "exception vanished"}
-        if row.status in (
-            RuntimeExceptionStatus.resolved,
-            RuntimeExceptionStatus.unresolvable,
-            RuntimeExceptionStatus.dismissed,
-        ):
-            return {"status": "skipped",
-                    "reason": f"already {row.status.value}"}
-
-        if (row.heal_attempts or 0) >= _MAX_ATTEMPTS_PER_EXCEPTION:
-            row.status = RuntimeExceptionStatus.unresolvable
-            row.resolution_summary = (
-                f"Gave up after {row.heal_attempts} attempts — Smith could "
-                "not reproduce or repair this crash. Ask a human."
-            )
-            await db.commit()
-            return {"status": "unresolvable", "attempts": row.heal_attempts,
-                    "reason": "per-exception cap"}
-
-        # Per-project rolling-hour cap.
-        one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
-        recent = (await db.execute(
-            select(func.count(RuntimeException.id)).where(
-                RuntimeException.project_id == project_id,
-                RuntimeException.last_seen_at >= one_hour_ago,
-                RuntimeException.heal_attempts > 0,
-            )
-        )).scalar_one()
-        if recent >= _MAX_HEALS_PER_HOUR:
-            return {"status": "rate_limited",
-                    "reason": f"{recent} heals in last hour ≥ cap"}
-
         project = await db.get(Project, project_id)
-        if project is None or not project.output_dir:
-            return {"status": "skipped",
-                    "reason": "project missing or no output_dir"}
+        return project.output_dir if project is not None and project.output_dir else None
 
-        row.status = RuntimeExceptionStatus.in_progress
-        row.heal_attempts = (row.heal_attempts or 0) + 1
+
+async def _wait_until_idle(output_dir: str) -> bool:
+    """True once no build, check or Smith turn is working on the app."""
+    from services.run_registry import work_in_flight
+    waited = 0.0
+    while work_in_flight(output_dir):
+        if waited >= _BUSY_GIVE_UP_S:
+            return False
+        await asyncio.sleep(_BUSY_POLL_S)
+        waited += _BUSY_POLL_S
+    return True
+
+
+async def _claim_open_errors(project_id: uuid.UUID) -> list[dict]:
+    """The app's open errors this heal takes, most frequent first, each
+    counted as tried; one tried out is marked `unresolvable` instead."""
+    async with async_session() as db:
+        rows = (await db.execute(
+            select(RuntimeException).where(
+                RuntimeException.project_id == project_id,
+                RuntimeException.status == RuntimeExceptionStatus.open,
+            ).order_by(RuntimeException.occurrence_count.desc(), RuntimeException.last_seen_at.desc())
+        )).scalars().all()
+        batch: list[dict] = []
+        for row in rows:
+            if (row.heal_attempts or 0) >= _MAX_ATTEMPTS_PER_EXCEPTION:
+                row.status = RuntimeExceptionStatus.unresolvable
+                row.resolution_summary = (
+                    f"Gave up after {row.heal_attempts} attempts — Smith could "
+                    "not reproduce or repair this crash. Ask a human."
+                )
+                continue
+            if len(batch) >= _MAX_BATCH:
+                continue
+            row.status = RuntimeExceptionStatus.in_progress
+            row.heal_attempts = (row.heal_attempts or 0) + 1
+            batch.append(row)
         await db.commit()
-        await db.refresh(row)
+        for row in batch:
+            await db.refresh(row)
+        return [_snapshot(row) for row in batch]
 
-        snapshot = _snapshot(row)
-        output_dir = project.output_dir
-        proj_id = project.id
 
-    prompt = _synthesize_smith_prompt(snapshot)
-    logger.info("[self-heal] invoking Smith project=%s exc=%s attempt=%d",
-                proj_id, exc_id, snapshot["heal_attempts"])
+# --------------------------------------------------------------------------- #
+# The heal turn
+# --------------------------------------------------------------------------- #
+
+async def _heal_batch(project_id: uuid.UUID, output_dir: str, batch: list[dict]) -> dict:
+    snapshot, others = batch[0], batch[1:]
+    exc_ids = [b["id"] for b in batch]
+    proj_id = project_id
+    prompt = _synthesize_batch_prompt(batch)
+    logger.info("[self-heal] invoking Smith project=%s errors=%d attempt=%d",
+                proj_id, len(batch), snapshot["heal_attempts"])
 
     # SH-1: publish an in-progress message BEFORE Smith runs so the user sees
     # "🔧 fixing…" the moment the heal starts, not 30-90s later when Smith
     # commits. On completion the SAME conv row is UPDATED (not appended) so
     # the chat panel replaces the progress card with the final result card.
-    in_progress_conv_id = await _persist_self_heal_progress(proj_id, snapshot)
+    in_progress_conv_id = await _persist_self_heal_progress(proj_id, snapshot, others)
 
     from services.smith4.platform import smith_result as _smith_turn
     try:
@@ -168,14 +204,15 @@ async def _run_heal_attempt(
         prompt_with_anchors = f"{prompt}\n\n{anchor_block}" if anchor_block else prompt
         smith_result = await asyncio.to_thread(
             _smith_turn, str(proj_id), output_dir, prompt_with_anchors,
-            commit=False,
+            commit=False, unattended=True,
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("[self-heal] Smith crashed")
-        await _mark_exception(
-            exc_id, status=RuntimeExceptionStatus.open,
-            summary=f"Smith crashed during heal: {exc!r}",
-        )
+        for exc_id in exc_ids:
+            await _mark_exception(
+                exc_id, status=RuntimeExceptionStatus.open,
+                summary=f"Smith crashed during heal: {exc!r}",
+            )
         return {"status": "error", "reason": str(exc)[:400]}
 
     edited_paths = smith_result.get("edited_paths") or []
@@ -192,7 +229,7 @@ async def _run_heal_attempt(
             if len(edited_paths) > 3:
                 summary += f" (+{len(edited_paths) - 3} more)"
             _commit(output_dir,
-                    f"smith(self-heal exc={str(exc_id)[:8]}): {summary}",
+                    f"smith(self-heal {len(batch)} error(s)): {summary}",
                     git=True,
                     # Stage ONLY what the heal touched (register SX-3). The
                     # paths are right here in `edited_paths`; without them
@@ -208,38 +245,41 @@ async def _run_heal_attempt(
             logger.exception("[self-heal] commit failed")
 
     chat_message = _format_chat_message(snapshot, smith_result,
-                                        resolution_commit)
+                                        resolution_commit, others=others)
     conv_id = await _persist_self_heal_message(
         proj_id, chat_message, snapshot, edited_paths, resolution_commit,
         smith_result=smith_result,
         existing_conv_id=in_progress_conv_id,
+        others=others,
     )
 
-    # A change no try has proven yet leaves the error open: the next time the
+    # A change no try has proven yet leaves the errors open: the next time the
     # app runs that code is the proof.
     resolved = bool(edited_paths) and not smith_result.get("question") and not smith_result.get("untried")
+    for exc_id in exc_ids:
+        if resolved:
+            await _mark_exception(
+                exc_id,
+                status=RuntimeExceptionStatus.resolved,
+                summary=(answer or "Smith applied a fix.")[:2000],
+                commit=resolution_commit,
+                conversation_id=conv_id,
+            )
+        else:
+            await _mark_exception(
+                exc_id,
+                status=RuntimeExceptionStatus.open,
+                summary=(
+                    (smith_result.get("question") or smith_result.get("answer")
+                     or (diagnosis or {}).get("explanation") or "no fix produced")
+                )[:2000],
+                conversation_id=conv_id,
+            )
     if resolved:
-        await _mark_exception(
-            exc_id,
-            status=RuntimeExceptionStatus.resolved,
-            summary=(answer or "Smith applied a fix.")[:2000],
-            commit=resolution_commit,
-            conversation_id=conv_id,
-        )
         return {"status": "resolved", "commit": resolution_commit,
-                "attempts": snapshot["heal_attempts"], "files": edited_paths}
-
-    await _mark_exception(
-        exc_id,
-        status=RuntimeExceptionStatus.open,
-        summary=(
-            (smith_result.get("question") or smith_result.get("answer")
-             or (diagnosis or {}).get("explanation") or "no fix produced")
-        )[:2000],
-        conversation_id=conv_id,
-    )
+                "attempts": snapshot["heal_attempts"], "files": edited_paths, "errors": len(batch)}
     return {"status": "attempted", "attempts": snapshot["heal_attempts"],
-            "reason": "no edits landed"}
+            "reason": "no edits landed", "errors": len(batch)}
 
 
 # --------------------------------------------------------------------------- #
@@ -457,9 +497,47 @@ def _synthesize_smith_prompt(exc: dict) -> str:
     is included verbatim so Smith can pattern-match on it (this is how
     he'd find e.g. the ``22P02 invalid uuid syntax for ""`` and know to
     inspect ``_buildWhere``)."""
+    return "\n".join(["A runtime error just happened in the generated app. Fix it.", "",
+                      *_error_facts(exc), *_HEAL_RULES])
+
+
+def _synthesize_batch_prompt(excs: list[dict]) -> str:
+    """One ask for every open error the heal takes. Errors that share a cause
+    — one engine fault behind three processes — are fixed once."""
+    if len(excs) == 1:
+        return _synthesize_smith_prompt(excs[0])
+    lines = [f"The generated app hit {len(excs)} different runtime errors. Fix them in this one turn.",
+             "Several may share one cause: read them all first, look for what they have in common,",
+             "and fix the cause once rather than each symptom."]
+    for i, exc in enumerate(excs, 1):
+        lines += ["", f"── Error {i} of {len(excs)} ──", *_error_facts(exc, stack_max=1500)]
+    lines += _HEAL_RULES
+    return "\n".join(lines)
+
+
+_HEAL_RULES = [
+    "",
+    "This is a RUNTIME crash captured by the app itself — no user is",
+    "asking you a question. Find the culprit and fix it.",
+    "",
+    "RULES for runtime-exception healing:",
+    "  • Do NOT `ask_user` on this turn. The crash IS the ground truth;",
+    "    there is nothing to clarify. Read instead: `grep` the message or",
+    "    the frame's file, `read_page_code` the route, `read_section` the",
+    "    workflow.",
+    "  • Fix it through the seam that owns it: `write_page_code` for a",
+    "    page's React, `write_section` for a workflow, rule or field,",
+    "    `edit_workflow` / `add_field` where a verb fits. The compiler's",
+    "    verdict comes back to you; a page that did not compile is a brief",
+    "    to sharpen, not a reason to stop.",
+    "  • End with `done` once the fix landed. `answer` only if nothing",
+    "    needed changing, saying why.",
+]
+
+
+def _error_facts(exc: dict, *, stack_max: int = 4000) -> list[str]:
+    """The error's own facts, the locators first, the message verbatim."""
     lines = [
-        "A runtime error just happened in the generated app. Fix it.",
-        "",
         f"Kind:    {exc['kind']}",
         f"Message: {exc['message']}",
     ]
@@ -484,28 +562,10 @@ def _synthesize_smith_prompt(exc: dict) -> str:
         lines.append(f"Seen:    {exc['occurrence_count']} times")
     if exc.get("stack"):
         stack = str(exc["stack"])
-        if len(stack) > 4000:
-            stack = stack[:4000] + "\n… [truncated]"
+        if len(stack) > stack_max:
+            stack = stack[:stack_max] + "\n… [truncated]"
         lines.extend(["", "Stack:", stack])
-    lines.extend([
-        "",
-        "This is a RUNTIME crash captured by the app itself — no user is",
-        "asking you a question. Find the culprit and fix it.",
-        "",
-        "RULES for runtime-exception healing:",
-        "  • Do NOT `ask_user` on this turn. The crash IS the ground truth;",
-        "    there is nothing to clarify. Read instead: `grep` the message or",
-        "    the frame's file, `read_page_code` the route, `read_section` the",
-        "    workflow.",
-        "  • Fix it through the seam that owns it: `write_page_code` for a",
-        "    page's React, `write_section` for a workflow, rule or field,",
-        "    `edit_workflow` / `add_field` where a verb fits. The compiler's",
-        "    verdict comes back to you; a page that did not compile is a brief",
-        "    to sharpen, not a reason to stop.",
-        "  • End with `done` once the fix landed. `answer` only if nothing",
-        "    needed changing, saying why.",
-    ])
-    return "\n".join(lines)
+    return lines
 
 
 # --------------------------------------------------------------------------- #
@@ -562,10 +622,12 @@ def _read_head_commit(output_dir: str) -> str | None:
 
 
 def _format_chat_message(
-    exc: dict, smith_result: dict, commit: str | None,
+    exc: dict, smith_result: dict, commit: str | None, *, others: list[dict] | None = None,
 ) -> str:
     """The user-visible chat message this heal produces. Deliberately
     conversational — this is a system-authored assistant turn."""
+    if others:
+        exc = {**exc, "message": f"{exc['message']} (and {len(others)} more error(s))"}
     edited = smith_result.get("edited_paths") or []
     answer = smith_result.get("answer") or ""
     question = smith_result.get("question")
@@ -611,9 +673,10 @@ def _format_chat_message(
     )
 
 
-def _shared_self_heal_metadata(exc_snapshot: dict) -> dict:
-    """Metadata every SelfHealCard render needs — error anchors + attempt info."""
-    return {
+def _shared_self_heal_metadata(exc_snapshot: dict, others: list[dict] | None = None) -> dict:
+    """Metadata every SelfHealCard render needs — error anchors + attempt info,
+    and the other errors one heal took with it."""
+    meta = {
         "intent": "SMITH_SELF_HEAL",
         "self_heal": True,
         "exception_id": str(exc_snapshot["id"]),
@@ -626,19 +689,25 @@ def _shared_self_heal_metadata(exc_snapshot: dict) -> dict:
         "attempt": exc_snapshot.get("heal_attempts"),
         "max_attempts": _MAX_ATTEMPTS_PER_EXCEPTION,
     }
+    if others:
+        meta["others"] = [{"exception_id": str(o["id"]), "error_message": (o.get("message") or "")[:400],
+                           "workflow_id": o.get("workflow_id"), "node_id": o.get("node_id"),
+                           "page_route": o.get("page_route")} for o in others]
+    return meta
 
 
 async def _persist_self_heal_progress(
-    project_id: uuid.UUID, exc_snapshot: dict,
+    project_id: uuid.UUID, exc_snapshot: dict, others: list[dict] | None = None,
 ) -> uuid.UUID | None:
     """SH-1: insert the ``status="in_progress"`` heal message BEFORE Smith
     runs so the chat panel shows "🔧 fixing…" instantly. Returns the conv
     id so the completion path can UPDATE the same row."""
-    metadata = _shared_self_heal_metadata(exc_snapshot)
+    metadata = _shared_self_heal_metadata(exc_snapshot, others)
     metadata["status"] = "in_progress"
     text = (
         f"🔧 Self-heal started — attempting to fix runtime error in "
-        f"`{exc_snapshot.get('node_id') or exc_snapshot.get('source_file') or 'the app'}`…"
+        f"`{exc_snapshot.get('node_id') or exc_snapshot.get('source_file') or 'the app'}`"
+        + (f" and {len(others)} more…" if others else "…")
     )
     try:
         async with async_session() as db:
@@ -684,10 +753,10 @@ async def _publish_self_heal_event(
 
 
 def _terminal_metadata(exc_snapshot: dict, edited_paths: list[str], commit: str | None,
-                       smith_result: dict | None) -> dict:
+                       smith_result: dict | None, others: list[dict] | None = None) -> dict:
     """What the finished heal's card is drawn from: its status, what changed,
     and Smith's own account."""
-    metadata = _shared_self_heal_metadata(exc_snapshot)
+    metadata = _shared_self_heal_metadata(exc_snapshot, others)
     metadata.update({
         "edited_paths": edited_paths,
         "commit": commit,
@@ -719,6 +788,7 @@ async def _persist_self_heal_message(
     *,
     smith_result: dict | None = None,
     existing_conv_id: uuid.UUID | None = None,
+    others: list[dict] | None = None,
 ) -> uuid.UUID | None:
     """Persist the terminal heal message.
 
@@ -726,7 +796,7 @@ async def _persist_self_heal_message(
     ``_persist_self_heal_progress``), UPDATE that row in place so the
     frontend replaces the progress card instead of rendering two rows.
     Otherwise INSERT a fresh row (backwards-compatible path)."""
-    metadata = _terminal_metadata(exc_snapshot, edited_paths, commit, smith_result)
+    metadata = _terminal_metadata(exc_snapshot, edited_paths, commit, smith_result, others)
 
     async with async_session() as db:
         conv = None

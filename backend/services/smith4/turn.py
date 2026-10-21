@@ -35,7 +35,7 @@ from services.smith import act, reads, tools, trials, web, writes
 from services.smith.loop import Observation
 from services.smith.understand_ask import UNREADABLE_HEAD
 from services.smith.verbs import missing_fields
-from services.smith4.context import opening
+from services.smith4.context import opening, turn_head
 from services.smith4.outcome import Outcome
 from services.smith4.verbs import Ctx, perform
 
@@ -609,6 +609,14 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
     told_up_to = 0
     unreadable = 0
     budget, since, _step = max_steps, 0, 0
+    # THE PAGE IS READ ONCE, AND AGAIN ONLY AFTER A CHANGE. It is the second
+    # cached block of every call; rebuilt each step its top moved ("N min so
+    # far", the turn's own checkpoint) and all of it was written to the cache
+    # again, 32k tokens a call (pah7lhfz, 2026-10-21). A read or a try changes
+    # nothing the page says, so the next call reads it back for a tenth.
+    head = turn_head(ctx.out)
+    page: str | None = None
+    page_at = 0
     while True:
         if _step >= budget:
             more = more_steps(observations, since=since, steps=_step,
@@ -636,7 +644,9 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
             from services.smith import notebook as _nb
             _nb.checkpoint(ctx.out, ctx.ask or ctx.message or "", observations)
         t0 = _time.monotonic()
-        page = opening(ctx.project_id, ctx.out, ctx.ask, brief=brief_of(ctx))
+        if page is None or any(_is_change(o) for o in observations[page_at:]):
+            page = opening(ctx.project_id, ctx.out, ctx.ask, brief=brief_of(ctx), head=head)
+            page_at = len(observations)
         t1 = _time.monotonic()
         chosen = choose(ctx.ask, page, observations, history) or {}
         t2 = _time.monotonic()
@@ -909,7 +919,8 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
         try:
             observations.append(Observation(tool="done", status="error", said=OUT_OF_STEPS))
             for _ask in range(2):
-                final = choose(ctx.ask, opening(ctx.project_id, ctx.out, ctx.ask), observations, history) or {}
+                final = choose(ctx.ask, page or opening(ctx.project_id, ctx.out, ctx.ask, head=head),
+                               observations, history) or {}
                 if str(final.get("tool") or "") == "answer":
                     said = str((final.get("args") or {}).get("text") or "").strip()
                     break

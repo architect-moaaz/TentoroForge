@@ -76,3 +76,20 @@ describe("the self-heal card", () => {
     v.unmount();
   });
 });
+
+describe("one heal of several errors", () => {
+  it("names how many, and lists each with where it happened", () => {
+    const v = mount({
+      ...crash, status: "in_progress",
+      others: [
+        { error_message: 'invalid input syntax for type uuid: "CASE-NEW-002"', workflow_id: "approve-case" },
+        { error_message: "No refund cases matches \"CASE-NEW-001\"", workflow_id: "FLOW-008" },
+      ],
+    });
+    expect(v.text()).toContain("Fixing 3 errors in the app");
+    expect(v.text()).toContain("The errors (3)");
+    expect(v.text()).toContain("approve-case");
+    expect(v.text()).toContain("CASE-NEW-002");
+    v.unmount();
+  });
+});
