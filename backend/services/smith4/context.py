@@ -30,8 +30,16 @@ def defined(output_dir: str) -> bool:
         return False
 
 
-def opening(project_id: str, output_dir: str, ask: str, *, brief: str = "") -> str:
+def opening(project_id: str, output_dir: str, ask: str, *, brief: str = "",
+            head: str | None = None) -> str:
     """The Blueprint slice for `ask`, with the turn-to-turn state on top.
+
+    `head` is that state as the turn read it when it began (`turn_head`). A
+    turn passes it on every step so the top of the page stays the same text:
+    read afresh, the live line's "N min so far" and the turn's own notebook
+    checkpoint changed it every step, and the whole page — the second cached
+    block of every call — was written to the cache again each time (pah7lhfz,
+    2026-10-21: 32k tokens written per call, $74 of a $92 unattended hour).
 
     Before there is an application the slice is empty and the page says so:
     what the person has said so far IS the application, and the moves that
@@ -50,24 +58,51 @@ def opening(project_id: str, output_dir: str, ask: str, *, brief: str = "") -> s
                 "Do not ask what the brief already answers.")
     bp = Blueprint.load(project_id=project_id, output_dir=output_dir)
     page = blueprint_to_context(pick_relevant_slice(bp, ask=ask))
+    # WHERE THINGS LIVE, UNDER THE SLICE. The slice says what a screen does;
+    # this says which file holds it, so the first read is the right one.
+    try:
+        from services.smith import places as where
+        lives = where.index(output_dir, ask=ask)
+        if lives:
+            page = page + "\n\n" + lives
+    except Exception:  # noqa: BLE001 — the page stands without it
+        pass
+    top = turn_head(output_dir) if head is None else head
+    return (top + "\n\n" + page) if top else page
+
+
+def turn_head(output_dir: str) -> str:
+    """The state a turn starts from, above the slice: an agreed plan's
+    waiting steps, what earlier turns learned, what is running right now.
+    Read once when the turn begins — before its own first checkpoint, which
+    read back later was shown to the turn as a lost turn of its own."""
+    parts: list[str] = []
+    waiting = plan_mod.peek(output_dir) if plan_mod.is_agreed(output_dir) else []
+    if waiting:
+        parts.append("STEPS OF AN AGREED PLAN STILL WAITING (each is a later turn, done when they say "
+                     "`next`; do not do them now, and do not put them in a plan you propose for this "
+                     "message — they are already planned):\n" + "\n".join(f"- {s}" for s in waiting))
+    # WHAT EARLIER TURNS LEARNED, FIRST. The page used to start every turn
+    # from nothing: a file read last time was read again, a failed try was
+    # repeated, a fault already found was found again.
+    try:
+        from services.smith import notebook
+        known = notebook.recall(output_dir)
+        if known:
+            parts.append(known)
+    except Exception:  # noqa: BLE001 — the page stands without the notebook
+        pass
     # WHAT IS RUNNING, FROM THE LEDGER, NOT FROM MEMORY. A status answer
     # built from the last check claimed fixes "in progress" while nothing
     # ran (pcn4owv7, 2026-10-15). This turn is itself the thing running, so
     # the line is about anything else: a build, a check, a turn that was lost.
     try:
         from services.run_registry import live_state
-        page = ("LIVE STATE (answer any question about progress, status or time from this line, never "
-                "from the last check; when nothing is running, say so): " + live_state(output_dir)
-                + "\n\n" + page)
+        parts.append("LIVE STATE (answer any question about progress, status or time from this line, never "
+                     "from the last check; when nothing is running, say so): " + live_state(output_dir))
     except Exception:  # noqa: BLE001 — the page stands without the line
         pass
-    waiting = plan_mod.peek(output_dir) if plan_mod.is_agreed(output_dir) else []
-    if waiting:
-        page = ("STEPS OF AN AGREED PLAN STILL WAITING (each is a later turn, done when they say "
-                "`next`; do not do them now, and do not put them in a plan you propose for this "
-                "message — they are already planned):\n" + "\n".join(f"- {s}" for s in waiting)
-                + "\n\n" + page)
-    return page
+    return "\n\n".join(parts)
 
 
 def template_page(staged: dict, brief: str = "") -> str:
@@ -112,4 +147,4 @@ def template_page(staged: dict, brief: str = "") -> str:
     return "\n".join(lines)
 
 
-__all__ = ["defined", "opening", "template_page"]
+__all__ = ["defined", "opening", "template_page", "turn_head"]

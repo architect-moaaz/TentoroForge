@@ -109,9 +109,19 @@ export interface WriteResult {
   message: string;
 }
 
+/** The republish a change of main address starts, so sign-in and links use it. */
+export interface Updating {
+  to: string;
+  since: string;
+  state: "building" | "done" | "failed";
+  reason?: string;
+  finishedAt?: string;
+}
+
 export interface DomainsState {
   domains: DomainView[];
   oldAddress: "redirect" | "keep";
+  updating?: Updating | null;
   vercelAddress: string;
   mainAddress: string;
   elsewhere: { what: string; address: string }[];
@@ -121,6 +131,8 @@ export interface DomainsState {
   /** An app of several organisations can give each its own address. */
   organisations?: { available: boolean; signIn: "shared" | "per_organisation" };
 }
+
+const bare = (address: string) => address.replace(/^https?:\/\//, "");
 
 const KIND_LABEL: Record<DomainView["kind"], string> = {
   subdomain: "Your subdomain",
@@ -132,10 +144,50 @@ const KIND_LABEL: Record<DomainView["kind"], string> = {
 function ago(iso?: string | null): string {
   if (!iso) return "";
   const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
-  if (s < 60) return `${s} seconds ago`;
-  if (s < 3600) return `${Math.round(s / 60)} minutes ago`;
-  if (s < 86400) return `${Math.round(s / 3600)} hours ago`;
-  return `${Math.round(s / 86400)} days ago`;
+  const said = (n: number, unit: string) => `${n} ${unit}${n === 1 ? "" : "s"} ago`;
+  if (s < 60) return said(s, "second");
+  if (s < 3600) return said(Math.round(s / 60), "minute");
+  if (s < 86400) return said(Math.round(s / 3600), "hour");
+  return said(Math.round(s / 86400), "day");
+}
+
+/** The app being republished so sign-in and links use its main address. */
+function UpdatingBanner({ u }: { u: Updating }) {
+  const to = <span className="font-mono">{bare(u.to)}</span>;
+  if (u.state === "building") {
+    return (
+      <div role="status" className="flex gap-2 rounded-md border border-sky-200 bg-sky-50 p-3 text-xs text-sky-900 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-100">
+        <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin" />
+        <p>
+          <b>Updating the app.</b> Sign-in, email links and the phone app are moving to {to}. Forge is republishing
+          the app for it; this usually takes a minute or two, and the app keeps working meanwhile.
+        </p>
+      </div>
+    );
+  }
+  if (u.state === "failed") {
+    return (
+      <div role="alert" className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
+        <b>The app was not updated.</b> It should now use {to}, but republishing it did not finish: {u.reason}{" "}
+        Publish the app again to apply it.
+      </div>
+    );
+  }
+  return (
+    <div role="status" className="flex gap-2 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-100">
+      <Check className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+      <p><b>Done.</b> The app now uses {to} for sign-in, email links and the phone app.</p>
+    </div>
+  );
+}
+
+/** A line saying what a change in flight is doing, under the address it is about. */
+function Doing({ children }: { children: React.ReactNode }) {
+  return (
+    <p role="status" className="mt-2 flex items-center gap-1.5 text-xs text-slate-700 dark:text-slate-300">
+      <Loader2 className="h-3 w-3 animate-spin" /> {children}
+    </p>
+  );
 }
 
 function StatusPill({ d }: { d: DomainView }) {
@@ -179,7 +231,23 @@ export function DomainsPanel({ projectId, compact = false }: { projectId: string
         : false,
   });
 
+  // WHILE THE APP IS BEING UPDATED, ask how it is going every few seconds.
+  const building = data?.updating?.state === "building";
+  useEffect(() => {
+    if (!building) return;
+    const id = window.setInterval(() => {
+      api.get<DomainsState>(`/api/projects/${projectId}/domains/updating`)
+        .then((next) => qc.setQueryData(key, next))
+        .catch(() => { /* the next tick asks again */ });
+    }, 5000);
+    return () => window.clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [building, projectId]);
+
   const done = (next: DomainsState) => qc.setQueryData(key, next);
+  /** What a change set going, said with the toast. */
+  const moving = (next: DomainsState) =>
+    next.updating?.state === "building" ? ` The app is being updated to use ${bare(next.updating.to)}.` : "";
   const fail = (e: unknown) => toast.error(e instanceof Error ? e.message : "That did not work");
 
   const add = useMutation({
@@ -187,7 +255,7 @@ export function DomainsPanel({ projectId, compact = false }: { projectId: string
     onSuccess: (next) => {
       done(next);
       setName("");
-      toast.success("Address added. Add the record below where your DNS is managed.");
+      toast.success("Address added. Add the record below where your DNS is managed; Forge checks it by itself.");
     },
     onError: fail,
   });
@@ -200,15 +268,15 @@ export function DomainsPanel({ projectId, compact = false }: { projectId: string
     mutationFn: (n: string) => api.post<DomainsState>(`/api/projects/${projectId}/domains/${encodeURIComponent(n)}/main`),
     onSuccess: (next) => {
       done(next);
-      toast.success("Main address changed. Sign-in and links follow it once it is live.");
+      toast.success("Main address changed." + (moving(next) || " Sign-in and links follow it once it is live."));
     },
     onError: fail,
   });
   const remove = useMutation({
     mutationFn: (n: string) => api.delete<DomainsState>(`/api/projects/${projectId}/domains/${encodeURIComponent(n)}`),
-    onSuccess: (next) => {
+    onSuccess: (next, n) => {
       done(next);
-      toast.success("Address removed");
+      toast.success(`${n} removed: it no longer opens the app.` + moving(next));
     },
     onError: fail,
   });
@@ -302,10 +370,20 @@ export function DomainsPanel({ projectId, compact = false }: { projectId: string
     <div className="space-y-4">
       {!compact && (
         <p className="text-sm text-slate-600 dark:text-slate-300">
-          Your app answers at <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">{data.vercelAddress.replace("https://", "")}</code>.
-          Add your own domain or a subdomain of it; Forge shows the record to add and tells you in chat when it is live.
+          {/* THE MAIN ADDRESS FIRST: the one people are sent to once it is live;
+              the Vercel address only while there is no other. */}
+          Your app is at <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">{bare(data.mainAddress)}</code>
+          {bare(data.mainAddress) !== bare(data.vercelAddress) && (
+            <>
+              {" "}(its first address, <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">{bare(data.vercelAddress)}</code>,{" "}
+              {data.oldAddress === "redirect" ? "sends people there" : "opens it too"})
+            </>
+          )}
+          . Add your own domain or a subdomain of it; Forge shows the record to add and tells you in chat when it is live.
         </p>
       )}
+
+      {data.updating && <UpdatingBanner u={data.updating} />}
 
       {data.domains.length === 0 && compact && (
         <p className="text-xs text-slate-500">Put the app on your own address, such as app.your-company.com.</p>
@@ -313,7 +391,7 @@ export function DomainsPanel({ projectId, compact = false }: { projectId: string
 
       <ul className="space-y-3">
         {data.domains.map((d) => (
-          <li key={d.name} className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
+          <li key={d.name} className={`rounded-lg border border-slate-200 p-3 dark:border-slate-700 ${busy(remove, d.name) ? "opacity-60" : ""}`}>
             <div className="flex flex-wrap items-center gap-2">
               <span className="break-all font-mono text-sm font-medium">{d.name}</span>
               <StatusPill d={d} />
@@ -328,6 +406,10 @@ export function DomainsPanel({ projectId, compact = false }: { projectId: string
               {d.checkedAt ? ` · checked ${ago(d.checkedAt)}` : ""}
               {d.status === "live" && d.liveAt ? ` · live since ${new Date(d.liveAt).toLocaleString()}` : ""}
             </p>
+            {busy(remove, d.name) && <Doing>Removing — taking it off the app{d.main ? "; the app then moves back to its other address" : ""}…</Doing>}
+            {busy(makeMain, d.name) && <Doing>Making it the main address — sign-in and links will move to it…</Doing>}
+            {busy(check, d.name) && <Doing>Checking its DNS and certificate now…</Doing>}
+            {d.kind === "tentoro" && rename.isPending && <Doing>Renaming — attaching the new name, then letting this one go…</Doing>}
             {d.status !== "live" && (d.problems ?? []).length > 0 ? (
               <div role="alert" className="mt-2 space-y-1 rounded-md bg-amber-50 p-2 text-xs text-amber-900 dark:bg-amber-900/30 dark:text-amber-100">
                 {(d.problems ?? []).map((p) => (
@@ -508,6 +590,12 @@ export function DomainsPanel({ projectId, compact = false }: { projectId: string
             )}
           </li>
         ))}
+        {add.isPending && typeof add.variables === "string" && (
+          <li className="rounded-lg border border-dashed border-slate-300 p-3 dark:border-slate-600">
+            <span className="break-all font-mono text-sm font-medium">{add.variables}</span>
+            <Doing>Adding — attaching it to the app and asking Vercel which records it needs…</Doing>
+          </li>
+        )}
       </ul>
 
       <form

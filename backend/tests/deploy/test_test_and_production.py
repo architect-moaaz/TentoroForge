@@ -26,6 +26,9 @@ def _vercel(**over: Any):
     m.alias_deployment.return_value = {}
     m.redeploy.return_value = {"id": "dpl_prod", "url": "acme-prod.vercel.app"}
     m.set_env_target.return_value = {}
+    # An app whose production side has a version that built; a first publish
+    # is said so by the test that is about it.
+    m.get_project.return_value = {"id": "prj_1", "targets": {"production": {"readyState": "READY"}}}
     for k, v in over.items():
         setattr(m, k, v)
     return m
@@ -118,6 +121,52 @@ def test_an_older_app_gets_the_test_ribbon_once(tmp_path):
     text = layout.read_text()
     assert text.startswith('import { TestRibbon } from "@/components/TestRibbon";')
     assert "<body suppressHydrationWarning>\n        <TestRibbon />" in text
+    assert _ensure_test_ribbon(tmp_path) is False, "once"
+
+
+_OLD_LAYOUT = (
+    'import "./globals.css";\n'
+    "export default function RootLayout({ children }) {\n"
+    "  return (\n"
+    "    // suppressHydrationWarning: browser extensions (Grammarly, ColorZilla, Scribe…)\n"
+    "    // inject attributes onto <html>/<body> before React hydrates; without this they\n"
+    "    // trip a benign hydration-mismatch warning. Scoped to these tags only.\n"
+    '    <html lang="en" dir="ltr" suppressHydrationWarning>\n'
+    "      <body suppressHydrationWarning>\n"
+    "        <Providers>{children}</Providers>\n"
+    "      </body>\n"
+    "    </html>\n"
+    "  );\n"
+    "}\n"
+)
+
+
+def test_the_ribbon_goes_in_the_body_tag_not_a_body_named_in_a_comment(tmp_path):
+    """Mark 8 (cxz95dd1, 2026-10-16): the ribbon was put after the `<body>`
+    in the comment above the markup, and every build failed to compile."""
+    from services.deploy.vercel_provider import _ensure_test_ribbon
+    layout = tmp_path / "src" / "app" / "layout.tsx"
+    layout.parent.mkdir(parents=True)
+    layout.write_text(_OLD_LAYOUT)
+    assert _ensure_test_ribbon(tmp_path) is True
+    text = layout.read_text()
+    assert "onto <html>/<body> before React hydrates; without this they\n" in text
+    assert "<body suppressHydrationWarning>\n        <TestRibbon />\n        <Providers>" in text
+    assert text.count("<TestRibbon />") == 1
+
+
+def test_a_ribbon_once_put_into_a_comment_is_taken_back_out(tmp_path):
+    from services.deploy.vercel_provider import _ensure_test_ribbon
+    layout = tmp_path / "src" / "app" / "layout.tsx"
+    layout.parent.mkdir(parents=True)
+    broken = 'import { TestRibbon } from "@/components/TestRibbon";\n' + _OLD_LAYOUT.replace(
+        "onto <html>/<body> before", "onto <html>/<body>\n        <TestRibbon /> before")
+    layout.write_text(broken)
+    assert _ensure_test_ribbon(tmp_path) is True
+    text = layout.read_text()
+    assert "onto <html>/<body> before React hydrates" in text
+    assert "<body suppressHydrationWarning>\n        <TestRibbon />" in text
+    assert text.count("<TestRibbon />") == 1 and text.count("import { TestRibbon }") == 1
     assert _ensure_test_ribbon(tmp_path) is False, "once"
 
 
@@ -318,3 +367,44 @@ def test_the_live_app_is_shown_at_its_main_address_once_it_answers(tmp_path):
     svc.save()
     assert live_address(tmp_path, "aqua") == "https://app.acme.com"
     assert live_address(None, "aqua") == ""
+
+
+# --- a first publish, to Test ------------------------------------------------
+# Vercel makes a project's first deployment its production one whatever the
+# request says; Personal Finance's first publish, to Test, was built without its
+# test settings — "[reset-schema] DATABASE_URL missing" (u8w3uw4j, 2026-10-21).
+
+@pytest.mark.asyncio
+async def test_a_first_test_publish_gives_both_sides_the_test_settings(db_session, sample_project_id, tmp_path):
+    _mk_app_tree(tmp_path)
+    vercel = _vercel()
+    vercel.get_project.return_value = {"id": "prj_1", "targets": {}}
+    events = await _publish(db_session, sample_project_id, tmp_path, vercel, _neon(created=True), environment="test")
+    assert events[-1].stage == "done"
+    pushed = _pushed(vercel)
+    assert all(sorted(t) == ["preview", "production"] for _, t in pushed.values()), "whichever side Vercel builds"
+    assert pushed["DATABASE_URL"][0].endswith("/forge_test"), "still the test database"
+
+
+@pytest.mark.asyncio
+async def test_after_a_failed_first_build_the_rows_are_widened_and_duplicates_go(db_session, sample_project_id, tmp_path):
+    _mk_app_tree(tmp_path)
+    vercel = _vercel()
+    vercel.get_project.return_value = {"id": "prj_1", "targets": {"production": {"readyState": "ERROR"}}}
+    vercel.list_env.return_value = [
+        {"id": "e1", "key": "DATABASE_URL", "target": ["preview"]},
+        {"id": "e2", "key": "DATABASE_URL", "target": ["production"]},
+    ]
+    await _publish(db_session, sample_project_id, tmp_path, vercel, _neon(created=False), environment="test")
+    widened = [c for c in vercel.update_env.call_args_list if c.args[1] == "e1"]
+    assert widened and sorted(widened[0].args[3]) == ["preview", "production"]
+    assert [c.args[1] for c in vercel.delete_env.call_args_list] == ["e2"], "the second row of the name goes"
+    assert "DATABASE_URL" not in _pushed(vercel), "updated in place, not written twice"
+
+
+@pytest.mark.asyncio
+async def test_once_production_has_built_a_test_publish_is_the_test_sides_alone(db_session, sample_project_id, tmp_path):
+    _mk_app_tree(tmp_path)
+    vercel = _vercel()   # production READY
+    await _publish(db_session, sample_project_id, tmp_path, vercel, _neon(created=True), environment="test")
+    assert all(t == ["preview"] for _, t in _pushed(vercel).values())

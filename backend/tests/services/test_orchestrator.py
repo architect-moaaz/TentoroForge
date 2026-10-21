@@ -1390,7 +1390,8 @@ def test_pages_are_laid_out_after_the_steps_that_declare_their_inputs():
     assert "workflow_steps" in DAG["apis"].depends_on
     assert "workflow_steps" in DAG["integration"].depends_on
     assert DAG["workflow_steps"].fanout == "workflows"
-    assert DAG["workflow_steps"].depends_on == frozenset({"workflows"})
+    # and the outside services' documentation, read beside the declarations
+    assert DAG["workflow_steps"].depends_on == frozenset({"workflows", "api_reference"})
     at = {k: i for i, level in enumerate(levels()) for k in level}
     assert at["page_layouts"] == at["workflow_steps"] + 1 == at["apis"]
 

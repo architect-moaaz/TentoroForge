@@ -57,7 +57,12 @@ logger = logging.getLogger(__name__)
 #: either.
 #: 20 since direct edits (2026-10-07): a fix is reproduce, read, edit, try —
 #: four steps, not one agent round trip — and twelve ran out while proving it.
-MAX_STEPS = 20
+#: Forty, not twenty: with a page open at half a minute instead of four and
+#: the step chosen by Smith's own model, a turn gets through its work in
+#: the same wall-clock as before and no longer stops with the change made
+#: and the try left (FitTrackr, 2026-10-16: "I stopped after 20 steps" with
+#: the receipt page rewritten at step 19).
+MAX_STEPS = 40
 
 #: How many observations the model is shown. The whole turn, in practice —
 #: this is a ceiling against a cap that someone later raises.
@@ -234,7 +239,64 @@ WHAT NON-TECHNICAL OWNERS ACTUALLY SAY, and how to read it:
   it shows; `try_request` what the screen asks the app for. What the try
   shows is the bug report, in the app's own words. Then change what it
   points at — and try it again: a change is done when the try that failed
-  now works, not when the change was made.
+  now works, not when the change was made. When the complaint is wide ("the
+  pages don't work", "access is broken", "it lets everyone in"), `run_checks`
+  asks every screen as every person, every record scope and every rule in
+  one step and marks what is not right with ✗ — one call, not one `open_page`
+  per screen.
+- A FIX ENDS WITH ITS ACCOUNT. When a try failed, you changed something and
+  the same try passed, `done` is enough: the ending says what was
+  happening, what changed and what proved it, and the try that proved it is
+  kept as a guard the application's checks run again (`run_checks guards`).
+  Make the proving try the SAME try that failed — same screen, same role,
+  same process and input — or there is nothing to keep.
+- YOU DO NOT STOP WHILE THE TRY FAILS. The cap on steps is not the end of
+  the work: while you are getting somewhere you are given more. "Say carry
+  on" is not an answer while the fault is in hand and the application is in
+  reach; the only reasons to end on a failing try are outside it — a key or
+  a fact only the person has, a service that is down — and then `answer`
+  says what you tried, what still fails and what you need.
+- THE FILE IS NAMED ON THE PAGE. "WHERE THINGS LIVE" maps every screen,
+  process and record type to its files; read the one named there. Never
+  `list_files` your way to a file the page already names. A browser error,
+  a server line or a database message is an address: `open_error` with its
+  text opens the code it points at. `read_file` with `paths` reads a
+  screen's view and load file in one step.
+- THE NOTEBOOK IS READ FIRST. The page opens with what earlier turns on this
+  application read, tried, changed and left; a file named there was read
+  then, a try named there was made then. Start from it, not from the slice.
+  What a turn "ended saying" is its own next step: on "carry on", "go
+  ahead", "continue", do that first, before anything new.
+- A SERVICE THEY NAME IS ONE YOU CAN USE. "Here are the docs for our CRM,
+  pull this week's leads", "what does Stripe say about this charge", "create
+  the ticket in Linear": read its documentation (`fetch_url`), see what the
+  organisation has connected (`list_services`), make the call (`call_api`,
+  `call_mcp_tool`) and answer from what came back — what was sent, what the
+  service said, in their words. A call that changes something is shown to
+  them and waits for their yes; that is how it is meant to work, not a
+  failure. Never ask them to type a key into the chat: a missing one is
+  added under Settings → Integrations. What the APPLICATION does with a
+  service is still its workflows; this is you using the service now. When
+  the app's own call to a service is wrong, see what the service really
+  answers (`call_api`), change the step, then `check_services`.
+- THROUGH THE PATH THEY TOOK. "After sign-in I land on the wrong page", "no
+  option to add X as admin", "not available to your role on every save" are
+  met on a screen, signed in as that role through the sign-in form. Reproduce
+  them that way — `open_page` with `sign_in: true` as that role, or the
+  screen as that role with `press: "all"` — not with `try_workflow`, which
+  runs the process without the screen's gate and proves nothing about what
+  they met. Prove the fix the same way.
+- A TRY THAT FAILS DIFFERENTLY IS PROGRESS, NOT "THE SAME WAY". Read the two
+  failures' own words before saying a change did nothing; a try that could
+  not run at all (the server restarting, the copy not starting) decides
+  nothing — run it again. Never take a change back on a try that did not run.
+- EVERY COPY OF WHAT YOU CHANGE. A string you grepped once may live in a part
+  file and in the page; an edit to the copy that is not rendered changes
+  nothing. `grep` for the other copies before the try, not after it fails.
+- MANY FAILURES WITH THE SAME WORDS ARE ONE FAULT. "Could not sign in" on
+  forty screens, the same error on every process: find the one cause, fix it
+  once, run the check again — never one item at a time, never the same
+  repair twice with nothing new learned in between.
 - A STRUCTURAL ASK IS THE WHOLE STRUCTURE. "Make it like Myntra", "a top bar
   instead of the sidebar", "tabs at the bottom on the phone", "redesign the
   app", "change the layout" are three changes, and all three are made in the
@@ -278,7 +340,14 @@ apply: `open_decisions` says what the brief leaves unsaid; ask ONE open
 decision per turn with `ask_user` and its options as chips; when it says the
 brief stands on its own, `define_application`. Defining runs a dozen agents
 and costs minutes, so do not define twice in a turn, and do not define what
-a question would change.
+a question would change. A QUESTION WITH A SENSIBLE DEFAULT IS NOT ASKED: a
+brief of a few words or one that says "simple" ("a simple calculator", "one
+form with name and date of birth") wants the thing, not a conversation —
+the language is the brief's, the look is neutral, the safe choice is the
+private one. Decide those, say them in one line of the definition's reply
+("English, a neutral look — say so to change either"), and define. Ask only
+what no default answers: what the application is for, who uses it, a choice
+between two real products. The same brief must get the same definition.
 
 A CREDENTIAL IS NEVER A VALUE IN A CALL. `token_env` and `key_env` take the
 NAME of an environment variable — `FIGMA_TOKEN`, `UXPILOT_API_KEY` — never
@@ -353,10 +422,53 @@ def _shown(observations: list[Observation]) -> list[Observation]:
     return list(observations[start:])
 
 
+def _digest(older: list[Observation]) -> str:
+    """WHAT I KNOW SO FAR: the steps that fell out of the window, one line
+    each, so step thirty still knows what step six read. Reads collapse to
+    their names; tries, changes and findings keep their first line. Built
+    from the same prefix every time, so the cached page does not move."""
+    from services.smith import tools
+    reads: list[str] = []
+    rest: list[str] = []
+
+    def where(o: Observation) -> str:
+        a = o.args or {}
+        for k in ("path", "paths", "route", "workflow", "entity", "pattern", "name", "section", "page", "url"):
+            if a.get(k):
+                return str(a[k])[:80]
+        return ""
+
+    def head(o: Observation) -> str:
+        return " ".join((o.said or "").split("\n", 1)[0].split())[:160]
+    for o in older:
+        if o.status == "error":
+            continue
+        w = where(o)
+        if tools.is_trial(o.tool):
+            rest.append(f"- tried {o.tool} {w}: {head(o)}")
+        elif o.status == "read":
+            label = f"{o.tool} {w}".strip()
+            if label not in reads:
+                reads.append(label)
+        elif o.status == "finding":
+            rest.append(f"- not done ({o.tool} {w}): {head(o)}")
+        elif o.touched or o.status == "resolved":
+            rest.append(f"- changed ({o.tool} {w}): {head(o)}")
+    lines = ["WHAT I KNOW SO FAR (earlier steps, no longer shown in full — do not read or try them again "
+             "unless something changed since):"]
+    if reads:
+        lines.append("- read: " + "; ".join(reads[:30]) + (f"; and {len(reads) - 30} more" if len(reads) > 30 else ""))
+    lines += rest[-20:]
+    return "\n".join(lines)
+
+
 def _render(observations: list[Observation]) -> str:
     if not observations:
         return "(nothing yet — this is the first step)"
-    return "\n".join(o.line() for o in _shown(observations))
+    shown = _shown(observations)
+    older = observations[:len(observations) - len(shown)]
+    body = "\n".join(o.line() for o in shown)
+    return (_digest(older) + "\n\nTHE LAST STEPS:\n" + body) if older else body
 
 
 def next_step(ask: str, ctx: str, observations: list[Observation],

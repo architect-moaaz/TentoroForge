@@ -280,7 +280,9 @@ def patch_node_output(spec: Any, client: Callable[..., Any], *, system: str,
         # author answered a refusal by ADDING an artifact in `requirements`,
         # the edit was unusable, and a 76s rewrite followed (KV, 2026-09-23).
         sections=produces)
-    if dataclasses.is_dataclass(client) and hasattr(client, "effort"):
+    # The last try at a refusal that came back twice (`escalate`) keeps the
+    # strongest model's effort: medium is what failed it.
+    if dataclasses.is_dataclass(client) and hasattr(client, "effort") and not getattr(spec, "escalate", False):
         client = dataclasses.replace(client, effort=EDIT_EFFORT)
     t0 = time.monotonic()
     try:

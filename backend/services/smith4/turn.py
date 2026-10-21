@@ -24,16 +24,18 @@ happen. `answer` may speak only in a turn that changed nothing.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from pathlib import Path
 from typing import Any, Callable
 
 from services.smith import loop as loop_mod
 from services.smith import plan as plan_mod
-from services.smith import reads, tools, trials, web, writes
+from services.smith import act, reads, tools, trials, web, writes
 from services.smith.loop import Observation
+from services.smith.understand_ask import UNREADABLE_HEAD
 from services.smith.verbs import missing_fields
-from services.smith4.context import opening
+from services.smith4.context import opening, turn_head
 from services.smith4.outcome import Outcome
 from services.smith4.verbs import Ctx, perform
 
@@ -111,8 +113,20 @@ FAULT_NOT_SEEN = (
     "This turn was started by a check that saw a fault, and no try in it has shown that fault yet. Use "
     "what the check reported, as the person it names; if the try works, the fault is not there — end "
     "with `done` and say what the try showed. Change nothing for a fault you have not seen.")
+#: The writes that redo a page's code as a whole. The first of them in a turn
+#: that gives no `because` is asked to size the change first: "change the
+#: background to white" went to `write_page_code` — a full rewrite, seventeen
+#: minutes — when one class in the file was the change (Mark 8, cxz95dd1,
+#: 2026-10-16). The reason it gives is what the person is told.
+SIZED = frozenset({"write_page_code", "rewrite_pages"})
+SIZE_FIRST = (
+    "Size the change before rewriting a page. From what you read of its code: a value, a class or a "
+    "line changes — `edit_file` with `find` and `replace`; a section's content or one record's "
+    "fields — the section verbs or `edit_definition`; the layout, a component that is replaced, or "
+    "more than a few lines that move — call this again with `because`: one sentence saying which "
+    "of those it is, in the person's terms. It is said to them as the reason.")
 #: A step these answered never ran: asking for it again is not a repeat.
-_NOT_RUN = frozenset({REPRODUCE_FIRST, PATCH_NEEDS_PROOF, NOT_ASKED_FOR, FAULT_NOT_SEEN})
+_NOT_RUN = frozenset({REPRODUCE_FIRST, PATCH_NEEDS_PROOF, NOT_ASKED_FOR, FAULT_NOT_SEEN, SIZE_FIRST})
 
 
 def _change_said(tool: str, args: dict) -> str:
@@ -152,6 +166,28 @@ TRY_AFTER = (
 #: The start of the message when a trial that failed has not been tried
 #: again since the change meant to fix it.
 UNPROVEN = "Not shown to work yet:"
+#: What `done` hears, once, while the try after the change still fails.
+FINISH_FIRST = ("Not done: the try after your change still fails — "
+                "{what}. A change is done when the try that failed passes. Fix what the try "
+                "points at and try it again; if it cannot be fixed this turn, say why with `answer`.")
+#: KEEP AT IT. A turn's cap used to be its end: four of the six "say carry
+#: on" endings in two weeks of forge-v3 chats were budgets, not dead ends
+#: (2026-10-17). A turn whose steps are up is granted more, in slices, for
+#: as long as it is getting somewhere — a new read, a new try, a change
+#: since the last slice — up to a hard time and step limit. A turn going
+#: round in circles makes only refused steps, which is not progress, and
+#: ends. A turn the platform runs unattended keeps the budget it was given.
+FINISH_STEPS = 8
+KEEP_AT_IT_TIME_S = float(os.environ.get("FORGE_SMITH_KEEP_AT_IT_S") or 45 * 60)
+HARD_MAX_STEPS = int(os.environ.get("FORGE_SMITH_HARD_MAX_STEPS") or 120)
+KEEP_AT_IT = ("Your steps were up, but you are getting somewhere, so you have {n} more. Keep at it "
+              "until the try that failed passes. Do not end on a failing try unless something outside "
+              "this application stops you — then say with `answer` exactly what you tried, what still "
+              "fails, and what you need.")
+#: What the loop is told when its reply could not be read: once, then the
+#: turn ends on what it has rather than on a question that throws it away.
+UNREADABLE_RETRY = ("Your last reply could not be read as a step. Reply with the JSON object only — "
+                    "{\"tool\": …, \"args\": …, \"why\": …} — and nothing around it.")
 #: What a turn that ran out of steps, having changed nothing, is told.
 OUT_OF_STEPS = ("You have run out of steps for this turn and nothing has been changed. End NOW "
                 "with `answer`: in the person's words, what you found so far — what the tries "
@@ -190,31 +226,87 @@ def turn(ctx: Ctx, *, choose: Choose, history: list | None = None,
     bench = trials.Bench(ctx.out)
     # THE PERSON'S WORDS GO WITH EVERY BRIEF THIS TURN HANDS ON (`asked`).
     from services.smith.asked import ASKED
-    asked = ctx.ask or ctx.message or ""
-    if ctx.asked_from and ctx.asked_from not in asked:
-        asked = f"{ctx.asked_from}\n(This turn does one part of it: {asked})"
+    asked = asked_text(ctx)
     token = ASKED.set(asked)
     from services.smith import file_edit
     started = {p.get("id") for p in file_edit.load_patches(ctx.out)}
     try:
+        # A CALLER'S OWN BUDGET IS A BUDGET; the chat's default is a floor the
+        # turn keeps at it past while it is getting somewhere.
         out = _run(ctx, choose, list(history or []), observations,
-                   max_steps or loop_mod.MAX_STEPS, bench)
+                   max_steps or loop_mod.MAX_STEPS, bench, keep_at_it=max_steps is None)
     finally:
         ASKED.reset(token)
         bench.close()
+    # THE TURN LEAVES A LINE IN THE NOTEBOOK: what it read, tried, changed and
+    # left — so the next turn starts where this one stopped instead of at the
+    # slice and the catalogue (2026-10-17).
+    from services.smith import notebook
+    notebook.record(ctx.out, asked, observations, out)
     out.steps = [o.tool for o in observations]
     # A PLATFORM PATCH IS KEPT ONLY ON PROOF: a try after the last edit that
     # passed, and nothing that failed before still failing.
-    pending = [p["id"] for p in file_edit.load_patches(ctx.out)
-               if p.get("id") not in started and p.get("status") == "pending"]
-    if pending:
-        edits = [i for i, o in enumerate(observations) if o.tool == "edit_file" and _is_change(o)]
-        after = [o for o in observations[(edits[-1] + 1 if edits else 0):] if tools.is_trial(o.tool)]
-        proven = bool(after) and not trials.failed(after[-1].said or "") and not _still_failing(observations)
-        said = file_edit.settle(ctx.out, pending, proven)
+    patches = file_edit.load_patches(ctx.out)
+    pending = [p["id"] for p in patches if p.get("id") not in started and p.get("status") == "pending"]
+    older = [p["id"] for p in patches if p.get("id") in started and p.get("status") == "pending"]
+    if pending or older:
+        verdict = patch_verdict(observations)
+        said: list[str] = []
+        if pending and verdict == "inconclusive":
+            # A TRY THAT COULD NOT RUN DECIDES NOTHING. Personal Finance's engine
+            # patch fixed the date fault; the try after it met the server
+            # restarting, read as "failed the same way", and the patch was taken
+            # back — the next turn papered over four pages instead (pcn4owv7,
+            # 2026-10-15). It stays pending until a try that ran decides it.
+            said.append("The try after the change could not run to the end (the app's server was not "
+                        "there to answer), so it decides nothing: the change stays, untried, until a "
+                        "try that runs says whether it works.")
+            # AND THE CHANGE IS SAID AS MADE. A turn whose only change was this
+            # patch opened with "Nothing needed doing." and self-heal reported
+            # "no fix produced" above "the change stays" (pah7lhfz, 2026-10-21).
+            out.untried = True
+            made = [p for p in patches if p.get("id") in pending]
+            for p in made:
+                path = f"app/{p.get('path')}"
+                if p.get("path") and path not in out.touched:
+                    out.touched.append(path)
+            lead = "Nothing needed doing."
+            if out.said.strip().startswith(lead):
+                out.said = " ".join(
+                    f"Changed the platform's `{p.get('path')}` for this app"
+                    + (f": {str(p.get('why')).rstrip('.')}" if p.get("why") else "") + "."
+                    for p in made) + out.said.strip()[len(lead):]
+        elif pending:
+            said += file_edit.settle(ctx.out, pending, verdict == "proven")
+        if older and verdict == "proven":
+            said += file_edit.settle(ctx.out, older, True)
         if said:
             out.said = (out.said + "\n\n" if out.said else "") + " ".join(said)
     return out
+
+
+def inconclusive(said: str) -> bool:
+    """A try that never reached the app: the server restarting or gone, or
+    the copy that could not start. It says nothing about the change."""
+    text = said or ""
+    return (trials.SERVER_RESTARTED in text or bool(trials._SERVER_GONE.search(text))
+            or text.startswith("The app could not be started"))
+
+
+def patch_verdict(observations: list[Observation]) -> str:
+    """What the tries after the last edit say about it: `proven` (the last
+    one ran and passed, nothing that failed before still fails), `failed`,
+    `inconclusive` (the last one could not run), or `untried`."""
+    edits = [i for i, o in enumerate(observations) if o.tool == "edit_file" and _is_change(o)]
+    after = [o for o in observations[(edits[-1] + 1 if edits else 0):] if tools.is_trial(o.tool)]
+    if not after:
+        return "untried"
+    last = after[-1].said or ""
+    if inconclusive(last):
+        return "inconclusive"
+    if trials.failed(last) or _still_failing(observations):
+        return "failed"
+    return "proven"
 
 
 def _trial_key(o: Observation) -> str:
@@ -376,24 +468,45 @@ def _before_done(observations: list[Observation], landed: list[str]) -> str:
     if landed and changes and (not tries or tries[-1] < changes[-1]) \
             and TRY_AFTER.split(",", 1)[0] not in said:
         return TRY_AFTER
+    # NOT DONE WHILE THE TRY STILL FAILS. "Say carry on and I will keep at it"
+    # ended turns that had the fault in hand and steps left (97l5iqsp,
+    # cxz95dd1, 2026-10). Once: a turn that cannot fix it says why instead.
+    # (A try failing the way it did before the change is `_unproven`'s nudge
+    # above; this is the failure that is new after the change.)
+    failing = last_try_failed(observations)
+    if landed and failing and not _still_failing(observations) and FINISH_FIRST.split(":", 1)[0] not in said:
+        return FINISH_FIRST.format(what=failing)
     return ""
 
 
-def _failing_note(observations: list[Observation]) -> str:
+def kept_at_it(observations: list[Observation], elapsed_s: float | None = None) -> str:
+    """"I kept at this for 31 minutes (57 steps)" — what an ending on a
+    failing try owes the person: that the time was spent, not that it was
+    not. Empty when the turn was short."""
+    steps = len([o for o in observations if o.said not in _NOT_RUN and o.status != "error"])
+    minutes = int((elapsed_s or 0) // 60)
+    if minutes < 5 and steps < 20:
+        return ""
+    when = f"{minutes} minutes" if minutes >= 1 else "a while"
+    return f"I kept at this for {when} ({steps} steps). "
+
+
+def _failing_note(observations: list[Observation], elapsed_s: float | None = None) -> str:
     """Said after what landed when a turn ends with a try still failing: a
     change is reported, and so is that it did not fix what it was for."""
+    kept = kept_at_it(observations, elapsed_s)
     still = _still_failing(observations)
     if still:
-        return ("\n\nIt still does not work: I tried it again after the change and it failed "
-                "the same way. Say “carry on” and I will keep at it.")
+        return ("\n\n" + kept + "It still does not work: I tried it again after the change and it failed "
+                "the same way. Say “carry on” and I will continue from here.")
     fresh = _new_failures(observations)
     if fresh:
-        return ("\n\nAfter the change, this was tried and does not work: " + "; ".join(fresh[:4])
-                + ". Say “carry on” and I will look at it.")
+        return ("\n\n" + kept + "After the change, this was tried and does not work: " + "; ".join(fresh[:4])
+                + ". Say “carry on” and I will continue from here.")
     return ""
 
 
-def standing_faults(doc: dict | None) -> list[str]:
+def standing_faults(doc: dict | None, output_dir: str = "") -> list[str]:
     """Faults the platform's own checks see in a built application: a page
     handed something it never reads, pages of one module disagreeing on who
     may open them. Best-effort — a check that cannot run says nothing."""
@@ -421,11 +534,18 @@ def standing_faults(doc: dict | None) -> list[str]:
             out.append(f"{routes.get(str(row.get('page')), row.get('page'))} signs people in through "
                        "next-auth itself, so it decides where each person lands instead of their role "
                        "— rewrite it with SignInForm/useSignIn (or SignUpForm/useSignUp) from @/sdk/client.")
+    # A CALL TO AN OUTSIDE SERVICE THAT ITS DOCUMENTATION, OR THE SERVICE
+    # ITSELF, SAYS IS WRONG — the live call made once its key is stored.
+    try:
+        from services.blueprint import api_reference
+        out += api_reference.standing(output_dir, doc)
+    except Exception:  # noqa: BLE001
+        logger.debug("[smith] service check failed", exc_info=True)
     return out
 
 
 def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation],
-         max_steps: int, bench: "trials.Bench | None" = None) -> Outcome:
+         max_steps: int, bench: "trials.Bench | None" = None, *, keep_at_it: bool = False) -> Outcome:
     bench = bench or trials.Bench(ctx.out)
     if ctx.engine_refreshed and not observations:
         # SAID, SO A PASSING TRY IS BELIEVED. F&B's duplicate check passed on
@@ -438,7 +558,14 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
             f"out again from its definition on the current one ({len(ctx.engine_refreshed)} "
             f"file(s): {shown}). A fault they reported may already be fixed by that: try it before "
             "changing anything, and if the try passes, say it works now and why.")))
-    faults = standing_faults(ctx.doc()) if not observations else []
+    if not observations and not ctx.unattended:
+        # A CALL SHOWN LAST TURN, ANSWERED NOW. The yes sends exactly what was
+        # shown — not whatever the model would write again — and anything
+        # else drops it, said, so the model knows it did not go.
+        replied = act.answer_held(ctx.out, ctx.message, said=web.person_said(ctx.ask, history))
+        if replied:
+            observations.append(Observation(tool=replied[0], args=replied[1], status="read", said=replied[2]))
+    faults = standing_faults(ctx.doc(), ctx.out) if not observations else []
     if faults:
         # WHAT THE PLATFORM ALREADY KNOWS IS WRONG, SAID BEFORE ANYTHING ELSE.
         # F&B's order page dropped the basket the menu handed it, and its
@@ -450,16 +577,76 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
             + "\n- ".join(faults[:8])
             + "\nFix any that bear on what they asked as part of this turn, and try the fix. "
               "Leave the rest unchanged and name them in your answer as found, not fixed.")))
+    if not observations:
+        # WHAT THE BUILD SETTLED FOR TO FINISH (`AuthorRefusal.settle`): each
+        # the safe choice where a check refused the author's work twice — a
+        # screen the administrator alone may open, charts short of the house
+        # standard. Not faults: the person's decisions, waiting to be made.
+        try:
+            from services.blueprint.orchestrator import settled_for
+            settled = settled_for(ctx.out)
+        except Exception:  # noqa: BLE001
+            settled = []
+        if settled:
+            observations.append(Observation(tool="settled_in_build", status="read", said=(
+                "To finish the build, Forge settled for these where a check kept refusing the work — each "
+                "the safe choice, none of them a fault:\n- " + "\n- ".join(settled[:10])
+                + "\nWhen what they ask touches one, say what was settled and change it as they ask; "
+                  "otherwise leave them unmentioned. One the application already does differently is done.")))
     landed: list[str] = []
     touched: list[str] = []
     last: Outcome | None = None
 
     import time as _time
     turn_started = _time.monotonic()
-    for _step in range(1, max_steps + 1):
+    from services.smith import narrate
+    try:
+        from services.smith import notebook as _nb0
+        _known = bool(_nb0.entries(ctx.out))
+    except Exception:  # noqa: BLE001
+        _known = False
+    tell(ctx, narrate.opening(_known, _app_exists(ctx), defined=bool(ctx.doc())))
+    told_up_to = 0
+    unreadable = 0
+    budget, since, _step = max_steps, 0, 0
+    # THE PAGE IS READ ONCE, AND AGAIN ONLY AFTER A CHANGE. It is the second
+    # cached block of every call; rebuilt each step its top moved ("N min so
+    # far", the turn's own checkpoint) and all of it was written to the cache
+    # again, 32k tokens a call (pah7lhfz, 2026-10-21). A read or a try changes
+    # nothing the page says, so the next call reads it back for a tenth.
+    head = turn_head(ctx.out)
+    page: str | None = None
+    page_at = 0
+    while True:
+        if _step >= budget:
+            more = more_steps(observations, since=since, steps=_step,
+                              elapsed_s=_time.monotonic() - turn_started,
+                              unattended=ctx.unattended or not keep_at_it)
+            if not more:
+                break
+            budget, since = budget + more, len(observations)
+            logger.info("[smith-step] keeping at it: %d more steps at step %d, %.0fs in",
+                        more, _step, _time.monotonic() - turn_started)
+            observations.append(Observation(tool="done", status="error", said=KEEP_AT_IT.format(n=more)))
+            tell(ctx, "My steps were up, but this is getting somewhere, so I am carrying on…")
+        _step += 1
         from services.smith4.definition import brief_of
+        # WHAT THE LAST STEP SHOWED, IN PLAIN WORDS, BEFORE THE NEXT IS CHOSEN.
+        for _o in observations[told_up_to:]:
+            if _o.said in _NOT_RUN or _o.status == "error":
+                continue
+            tell(ctx, narrate.seen(_o.tool, _o.args, _o.status, _o.said or "",
+                                   after_change=any(_is_change(x) for x in observations[:observations.index(_o)])))
+        told_up_to = len(observations)
+        if _step > 1:
+            # WHAT THIS TURN KNOWS SO FAR, KEPT IN CASE IT IS LOST. A turn the
+            # process loses never reaches the notebook's end-of-turn line.
+            from services.smith import notebook as _nb
+            _nb.checkpoint(ctx.out, ctx.ask or ctx.message or "", observations)
         t0 = _time.monotonic()
-        page = opening(ctx.project_id, ctx.out, ctx.ask, brief=brief_of(ctx))
+        if page is None or any(_is_change(o) for o in observations[page_at:]):
+            page = opening(ctx.project_id, ctx.out, ctx.ask, brief=brief_of(ctx), head=head)
+            page_at = len(observations)
         t1 = _time.monotonic()
         chosen = choose(ctx.ask, page, observations, history) or {}
         t2 = _time.monotonic()
@@ -475,6 +662,7 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
         if tool == "ask_user" and not ctx.unattended:
             from services.smith4.definition import canonical_platform_ask
             args = canonical_platform_ask(ctx, args)
+        tell(ctx, narrate.starting(tool, args))
         # SAID TO THE LEDGER, so a long turn can be reported on while it runs.
         try:
             from services import run_registry as _rr
@@ -482,6 +670,26 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
         except Exception:  # noqa: BLE001 — a note, never the turn
             pass
 
+        if tool == "ask_user" and str(args.get("question") or "").startswith(UNREADABLE_HEAD):
+            # A REPLY NOBODY COULD READ IS NOT THE END OF THE TURN'S WORK. Four
+            # of TCommerce's turns had read the code and tried the cart, then
+            # ended on "I could not turn that into a change I am sure of" and
+            # the person retyped the report three times (ihf6pjga, 2026-10-06).
+            # Asked once more for a readable step; failing that, the turn ends
+            # on what it did and found, and the next one carries on from it.
+            unreadable += 1
+            if unreadable == 1:
+                observations.append(Observation(tool=tool, args=args, status="error", said=UNREADABLE_RETRY))
+                continue
+            if landed:
+                return _finished(landed, touched, last, note=(
+                    "\n\nI stopped there: my next step could not be worked out. Say “carry on” "
+                    "and I will pick up from what is above."))
+            seen = what_was_seen(observations)
+            if seen:
+                return Outcome(status="no_op", touched=list(touched), said=(
+                    seen + "\n\nI stopped there: my next step could not be worked out. Say “carry "
+                           "on” and I will pick up from what is above."))
         if ctx.unattended and tool in ("ask_user", "propose_plan"):
             observations.append(Observation(tool=tool, args=args, status="error", said=NOBODY_TO_ASK))
             continue
@@ -510,7 +718,10 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
                 "I could not reach my reasoning service just now, so I stopped here"
                 + (" — what is above is done and kept." if landed else " and nothing was changed.")
                 + " Please try again in a few minutes.")))
-        if tool == "answer" and not landed and _app_exists(ctx):
+        if tool == "answer" and not landed and _app_exists(ctx) \
+                and not any(tools.is_act(o.tool) and o.status == "read" for o in observations):
+            # An answer after a call to a service reports that call; it is not
+            # about what the application does, so nothing there needs trying.
             heard = [o.said or "" for o in observations if o.tool == "answer" and o.status == "error"]
             if not any(tools.is_trial(o.tool) for o in observations):
                 # AN ANSWER ABOUT WHAT THE APP DOES COMES FROM USING IT. TCommerce's
@@ -533,7 +744,16 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
         if tool in tools.TERMINAL_NAMES or not tool:
             ended = _ended(tool, args, landed, touched, last, observations)
             if tool != "answer" and ended.status not in ("asked",):
-                ended.said += _failing_note(observations)
+                ended.said += _failing_note(observations, _time.monotonic() - turn_started)
+            if tool == "done" and landed and ended.status == "resolved":
+                # A FIX ENDS WITH ITS ACCOUNT — what was happening, what changed,
+                # what proved it — and leaves a guard the checks run again.
+                from services.smith import account, guards
+                try:
+                    ended.said = account.compose(ctx.ask or ctx.message or "", observations, ended.said)
+                except Exception:  # noqa: BLE001 — the receipt stands without the account
+                    logger.debug("[smith] the fix's account could not be composed", exc_info=True)
+                guards.record(ctx.out, ctx.ask or ctx.message or "", observations)
             return ended
         if not tools.is_tool(tool):
             observations.append(Observation(tool=tool, args=args, status="error", said=tools.unknown(tool)))
@@ -570,6 +790,17 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
             seen = web.run(tool, args, said=web.person_said(ctx.ask, history), output_dir=ctx.out)
             logger.info("[smith-web] %s %s -> %s", tool, args, " | ".join(seen.splitlines()[:2])[:300])
             observations.append(Observation(tool=tool, args=args, status="read", said=seen))
+            continue
+
+        if tools.is_act(tool):
+            step_ = act.run(tool, args, said=web.person_said(ctx.ask, history), output_dir=ctx.out,
+                            unattended=ctx.unattended, doc=ctx.doc())
+            logger.info("[smith-act] %s %s -> %s", tool, {k: str(v)[:80] for k, v in args.items()},
+                        " | ".join(step_.said.splitlines()[:2])[:300])
+            if step_.ask:
+                return _finished(landed, touched, Outcome(status="asked", said=step_.ask,
+                                                          options=list(step_.options)))
+            observations.append(Observation(tool=tool, args=args, status="read", said=step_.said))
             continue
 
         if tools.is_definition(tool):
@@ -622,6 +853,13 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
                         tools.is_trial(o.tool) and trials.failed(o.said or "") for o in observations):
                     observations.append(Observation(tool=tool, args=args, status="error", said=PATCH_NEEDS_PROOF))
                     continue
+            # SEEN FIRST, SIZED SECOND. Once the fault has been seen (or the change
+            # is the one they asked for), a whole-page rewrite still says why an
+            # edit will not do — once a turn — before it runs.
+            held = size_first(tool, args, observations)
+            if held is not None:
+                observations.append(held)
+                continue
         if tools.is_write(tool):
             out = writes.run(tool, args, output_dir=ctx.out, reasoning=ctx.reasoning)
             step = Outcome(status="resolved" if out.get("applied") and not out.get("finding") else "needs_user",
@@ -684,7 +922,8 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
         try:
             observations.append(Observation(tool="done", status="error", said=OUT_OF_STEPS))
             for _ask in range(2):
-                final = choose(ctx.ask, opening(ctx.project_id, ctx.out, ctx.ask), observations, history) or {}
+                final = choose(ctx.ask, page or opening(ctx.project_id, ctx.out, ctx.ask, head=head),
+                               observations, history) or {}
                 if str(final.get("tool") or "") == "answer":
                     said = str((final.get("args") or {}).get("text") or "").strip()
                     break
@@ -694,31 +933,109 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
         except Exception:  # noqa: BLE001 — the fallback below is still true
             logger.warning("smith4: the out-of-steps answer could not be had", exc_info=True)
         if not said:
-            last = next((o for o in reversed(observations) if o.status == "finding" and o.said), None)
-            if last is not None:
-                said = f"The last thing I tried did not work: {' '.join(last.said.split())[:600]}"
-        if not said:
-            # WHAT THE TRIES SHOWED, IN THEIR OWN WORDS. Asked why images did
-            # not show, Smith uploaded one, saved a dish with it and opened the
-            # list — all of it worked — and the reply was "I have not changed
-            # anything yet" (F&B live test, 2026-10-02).
-            tried = [o.said.split("\n", 1)[0][:200] for o in observations
-                     if tools.is_trial(o.tool) and o.status == "read" and o.said]
-            if tried:
-                said = "What I tried, and what it showed:\n" + "\n".join(f"- {t}" for t in tried[-6:])
-        tail = (f"\n\nThis turn ran out of steps ({max_steps}) before I changed anything. "
-                "Say “carry on” and I will pick up from there.")
+            said = what_was_seen(observations)
+        spent = kept_at_it(observations, _time.monotonic() - turn_started) or f"This turn ran out of steps ({budget}). "
+        tail = (f"\n\n{spent}I changed nothing: I was still working out where the fault is. "
+                "Say “carry on” and I will continue from here — what I read and tried is kept.")
         return Outcome(status="no_op", touched=list(touched), said=(said + tail) if said else (
-            f"I have not changed anything yet — this turn ran out of steps ({max_steps}) "
-            "while I was still looking into it. Say “carry on” and I will pick up from there."))
-    failing = _failing_note(observations)
+            f"{spent}I have not changed anything yet — I was still looking into it. "
+            "Say “carry on” and I will continue from here; what I read and tried is kept."))
+    failing = _failing_note(observations, _time.monotonic() - turn_started)
     if not failing and _unproven(observations).startswith(UNPROVEN):
         # The change landed on the last step the cap allowed, untried.
         failing = ("\n\nI have not yet tried it again since the change, so I cannot say it works "
                    "yet — this turn ran out of steps. Say “carry on” and I will try it.")
     note = failing or loop_mod.remaining_note(observations, capped=True).replace(
-        f"{loop_mod.MAX_STEPS} steps", f"{max_steps} steps")
+        f"{loop_mod.MAX_STEPS} steps", f"{budget} steps")
     return _finished(landed, touched, last, note=note)
+
+
+def tell(ctx: Ctx, text: str) -> None:
+    """One plain-words line to the panel's thinking trail while the turn
+    runs (`thought`, kind `step`). Never raises; a turn without a listener
+    (tests, the platform's own turns) says nothing."""
+    if not text or ctx.unattended or not callable(getattr(ctx, "reasoning", None)):
+        return
+    try:
+        ctx.reasoning(text, kind="step")
+    except TypeError:
+        try:
+            ctx.reasoning(text)
+        except Exception:  # noqa: BLE001
+            pass
+    except Exception:  # noqa: BLE001 — a line to the panel never costs the turn
+        logger.debug("[smith] could not narrate a step", exc_info=True)
+
+
+def asked_text(ctx: Ctx) -> str:
+    """The person's words, as every brief this turn hands on gets them. A
+    plan step says which part it does; a repair the platform runs after a
+    change says what the person asked for and that this is the repair of
+    what doing it broke — so the repair stays inside their ask instead of
+    becoming a change nobody asked for (F2, qpqhdugb 2026-10-16)."""
+    asked = ctx.ask or ctx.message or ""
+    if ctx.asked_from and ctx.asked_from not in asked:
+        if ctx.unattended:
+            return (f"{ctx.asked_from}\n(The person asked for that. This turn repairs what making that "
+                    f"change broke, and nothing else: {asked})")
+        return f"{ctx.asked_from}\n(This turn does one part of it: {asked})"
+    return asked
+
+
+def last_try_failed(observations: list[Observation]) -> str:
+    """The first line of the last try after the last change when it failed
+    (a failure that ran — a try that could not run decides nothing); ""
+    otherwise."""
+    changes = [i for i, o in enumerate(observations) if _is_change(o)]
+    if not changes:
+        return ""
+    after = [o for o in observations[changes[-1] + 1:] if tools.is_trial(o.tool) and o.status == "read"]
+    if not after:
+        return ""
+    said = after[-1].said or ""
+    if inconclusive(said) or not trials.failed(said):
+        return ""
+    return " ".join(said.split("\n", 1)[0].split())[:200]
+
+
+def progressed(observations: list[Observation], since: int) -> bool:
+    """Whether the steps since `since` got anywhere: a read or a try that ran
+    (status `read`), a change that landed (`resolved` with files) or a
+    finding — anything but refused steps and errors."""
+    for o in observations[since:]:
+        if o.status == "read" or o.status == "finding" or (o.status == "resolved" and _is_change(o)):
+            return True
+    return False
+
+
+def more_steps(observations: list[Observation], *, since: int, steps: int, elapsed_s: float,
+               unattended: bool = False) -> int:
+    """How many steps a turn whose budget is up may still have: a slice of
+    `FINISH_STEPS` while it is making progress and under the hard limits;
+    0 when it is going round in circles, too old, or run by the platform."""
+    if unattended:
+        return 0
+    if elapsed_s > KEEP_AT_IT_TIME_S or steps >= HARD_MAX_STEPS:
+        return 0
+    if not progressed(observations, since):
+        return 0
+    return min(FINISH_STEPS, HARD_MAX_STEPS - steps)
+
+
+def what_was_seen(observations: list[Observation]) -> str:
+    """What a turn that changed nothing can still say: the last finding, or
+    what its tries showed in their own words. Asked why images did not show,
+    Smith uploaded one, saved a dish with it and opened the list — all of it
+    worked — and the reply was "I have not changed anything yet" (F&B live
+    test, 2026-10-02)."""
+    last = next((o for o in reversed(observations) if o.status == "finding" and o.said), None)
+    if last is not None:
+        return f"The last thing I tried did not work: {' '.join(last.said.split())[:600]}"
+    tried = [o.said.split("\n", 1)[0][:200] for o in observations
+             if tools.is_trial(o.tool) and o.status == "read" and o.said]
+    if tried:
+        return "What I tried, and what it showed:\n" + "\n".join(f"- {t}" for t in tried[-6:])
+    return ""
 
 
 def _understanding_for(ctx: Ctx, verb: str, args: dict) -> dict:
@@ -820,15 +1137,33 @@ def _ended(tool: str, args: dict, landed: list[str], touched: list[str],
     return _finished(landed, touched, last)
 
 
+def size_first(tool: str, args: dict, observations: list) -> Observation | None:
+    """The observation a whole-page rewrite without a `because` gets, once a
+    turn; None when the call may run. A reason given, or the rule already
+    heard this turn, lets it through — the rule is a question asked once,
+    not a gate."""
+    if tool not in SIZED or str(args.get("because") or "").strip():
+        return None
+    if any(o.said == SIZE_FIRST for o in observations):
+        return None
+    return Observation(tool=tool, args=args, status="error", said=SIZE_FIRST)
+
+
 def step_line(n: int, tool: str, args: dict) -> str:
-    """One short line for a step: the tool and what it is about."""
+    """One short line for a step: the tool, what it is about, and — for a
+    change — why that change: the `because` of a rewrite, the `why` of an
+    edit. "step 6: write_page_code /" told the person nothing they could
+    object to; the reason is what lets them say "no, just the background"
+    at minute one rather than minute seventeen (Mark 8, 2026-10-16)."""
     about = ""
     for key in ("route", "path", "name", "workflow", "entity", "page"):
         if args.get(key):
             about = str(args[key])[:60]
             break
     who = f" as {args['as']}" if args.get("as") else ""
-    return f"step {n}: {tool or '-'}" + (f" {about}" if about else "") + who
+    reason = str(args.get("because") or (args.get("why") if tool in ("edit_file", "edit_definition") else "") or "").strip()
+    reason = " ".join(reason.split())[:140]
+    return f"step {n}: {tool or '-'}" + (f" {about}" if about else "") + who + (f" — {reason}" if reason else "")
 
 
 def _finished(landed: list[str], touched: list[str], last: Outcome | None, *,
@@ -850,4 +1185,4 @@ def _finished(landed: list[str], touched: list[str], last: Outcome | None, *,
                    diff_summary=last.diff_summary, touched=list(touched), finding=last.finding)
 
 
-__all__ = ["turn", "Choose", "LOOK_FIRST", "NOTHING_TRIED", "UNPROVEN", "STILL_FAILING"]
+__all__ = ["turn", "Choose", "LOOK_FIRST", "NOTHING_TRIED", "UNPROVEN", "STILL_FAILING", "SIZE_FIRST", "SIZED"]

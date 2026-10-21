@@ -118,10 +118,11 @@ def test_two_dry_turns_stop_the_loop_and_what_is_left_is_said(tmp_path, monkeypa
     said = []
     out = ftg.run_checks_to_green(svc, str(tmp_path), str(tmp_path / "app"), None,
                                   emit=lambda e, d: said.append((e, d)), run_turn=run_turn, record=False)
-    # Three dry turns in a row end it (DRY_STOP): a list that yields nothing
-    # is not worked for the whole time cap.
-    assert out["turns"] == 3 and out["yield"] == [0, 0, 0] and out["stopped"] == "yield"
-    assert len(turns) == 3
+    # One cause that will not move gets its turn and one more, then the loop
+    # ends on "tried" rather than paying for the same attempt again — FitTrackr
+    # was given the same three reds in all three turns (qpqhdugb, 2026-10-19).
+    assert out["turns"] == 2 and out["yield"] == [0, 0] and out["stopped"] == "tried"
+    assert len(turns) == 2
     closing = [d["text"] for e, d in said if e == "message"][-1]
     assert "Still not right (1): Checkout" in closing
     assert sc.read(svc.doc)["criteria"]["smith"]["red"][0]["id"] == "PAGE-002"
@@ -130,9 +131,10 @@ def test_two_dry_turns_stop_the_loop_and_what_is_left_is_said(tmp_path, monkeypa
 def test_the_cap_and_the_person_both_end_the_loop(tmp_path, monkeypatch):
     svc = _Svc(tmp_path, DOC)
     sc.seed_from_boot(svc)
-    # Every turn turns one page green and leaves the rest: a yield of one each time.
-    rounds = [{"pages": [sc.item(f"PAGE-{i:03d}", f"Q{i}", "500", f"PAGE-{i:03d}") for i in range(10, 20 - k)]}
-              for k in range(0, 10)]
+    # Every turn turns one page green and leaves the rest: a yield of one each
+    # time, on a list long enough that no cause runs out of tries first.
+    rounds = [{"pages": [sc.item(f"PAGE-{i:03d}", f"Q{i}", "500", f"PAGE-{i:03d}") for i in range(10, 40 - k)]}
+              for k in range(0, 30)]
     turns, run_turn = _wire(monkeypatch, svc, rounds)
     monkeypatch.setattr(ftg, "FIX_TURNS", 6)      # the ceiling behind the time cap
     out = ftg.run_checks_to_green(svc, str(tmp_path), str(tmp_path / "app"), None,
@@ -200,3 +202,67 @@ def test_a_stop_is_written_as_the_ledgers_reason(tmp_path, monkeypatch):
     ledger = next((tmp_path / ".forge" / "runs").glob("*-checks.jsonl"))
     last = json.loads(ledger.read_text().splitlines()[-1])
     assert last["event"] == "run:end" and last["pausedBecause"] == "stopped by the person"
+
+
+def test_a_cause_is_tried_once_then_again_only_after_every_other_has_had_its_turn(tmp_path, monkeypatch):
+    """Batches move through the list instead of repeating its head: five pages
+    that will not move are given turns 1-2 (first tries) and 3-4 (second
+    tries), then the loop says what is still not right and stops."""
+    svc = _Svc(tmp_path, DOC)
+    sc.seed_from_boot(svc)
+    stuck = {"pages": [sc.item(f"PAGE-{i:03d}", f"P{i}", "500", f"PAGE-{i:03d}") for i in range(10, 15)]}
+    turns, run_turn = _wire(monkeypatch, svc, [stuck] * 10)
+    picked = []
+    orig = ftg._next_batch
+
+    def spy(groups, tries=None):
+        batch = orig(groups, tries)
+        picked.append([g["cause"] for g in batch])
+        return batch
+    monkeypatch.setattr(ftg, "_next_batch", spy)
+    monkeypatch.setattr(ftg, "DRY_STOP", 99)        # this test is about tries, not yield
+    out = ftg.run_checks_to_green(svc, str(tmp_path), str(tmp_path / "app"), None, emit=None,
+                                  run_turn=run_turn, record=False)
+    assert picked[:4] == [["PAGE-010", "PAGE-011", "PAGE-012"], ["PAGE-013", "PAGE-014"],
+                          ["PAGE-010", "PAGE-011", "PAGE-012"], ["PAGE-013", "PAGE-014"]]
+    assert picked[4] == [] and out["turns"] == 4 and out["stopped"] == "tried"
+
+
+def test_a_turn_the_clock_cannot_fit_is_not_started(tmp_path, monkeypatch):
+    """The cap was read only between turns, so a turn begun just before it ran
+    on past it (Mark 8: 60 minutes on a 45-minute cap, 2026-10-16). The
+    longest turn so far is the estimate; a running turn is never cut off."""
+    svc = _Svc(tmp_path, DOC)
+    sc.seed_from_boot(svc)
+    rounds = [{"pages": [sc.item(f"PAGE-{i:03d}", f"Q{i}", "500", f"PAGE-{i:03d}") for i in range(10, 40 - k)]}
+              for k in range(0, 30)]
+    _turns, _ = _wire(monkeypatch, svc, rounds)
+
+    clock = {"now": 1000.0}
+
+    class FakeTime:
+        @staticmethod
+        def time():
+            return clock["now"]
+
+    def slow_turn(pid, output_dir, ask, **k):
+        clock["now"] += 20 * 60 / 3      # a turn of three pages takes 20 minutes on the fake clock
+        return {"answer": "fixed", "edited_paths": ["src/x.tsx"]}
+    monkeypatch.setattr(ftg, "time", FakeTime)
+    monkeypatch.setattr(ftg, "PAGE_PARALLEL", 3)
+    monkeypatch.setattr(ftg, "_fix", lambda batch, output_dir, **k: [slow_turn("", output_dir, "") for _ in batch])
+    out = ftg.run_checks_to_green(svc, str(tmp_path), str(tmp_path / "app"), None, emit=None,
+                                  run_turn=slow_turn, record=False)
+    # 45-minute cap, 20-minute turns: turn 2 starts at minute 20 (20 + 20 fits);
+    # turn 3 would start at minute 40 and end at 60, so it is not started.
+    # The old rule (40 < 45) started it and ran to minute 60.
+    assert out["turns"] == 2 and out["stopped"] == "time"
+
+
+def test_the_closing_says_what_was_not_tried_beside_each_count(tmp_path):
+    svc = _Svc(tmp_path, DOC)
+    sc.seed_from_boot(svc)
+    untried = [sc.item(f"PAGE-{i:03d}", f"P{i}", "the check could not sign in", f"PAGE-{i:03d}") for i in range(1, 20)]
+    sc.write(svc, "pages", green=0, red=[sc.item("PAGE-020", "Audit", "500", "PAGE-020")], untried=untried, total=20)
+    closing = sc.closing(svc.doc)
+    assert "pages built and working 0 of 20 (19 not tried)" in closing

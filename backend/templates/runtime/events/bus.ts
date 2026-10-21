@@ -29,7 +29,7 @@ import {
   buildTimeoutResumeInput,
   WAITING_EVENT_VAR,
 } from "./triggers";
-import { buildTimerResumeInput } from "./triggers";
+import { buildTimerResumeInput, eventRunInput } from "./triggers";
 
 /** The person a paused run was acting as, as the pause stored them. */
 function _actorOf(pv: Record<string, unknown> | undefined): { id: string; role?: string; email?: string } | undefined {
@@ -213,14 +213,7 @@ async function _dispatchEvent(
   for (const wf of matching) {
     const payload =
       evt.payload && typeof evt.payload === "object" ? evt.payload : {};
-    // Payload fields at the top level (so {{entity.id}}-style bindings
-    // resolve), plus the event envelope for explicit reads.
-    const input: Record<string, unknown> = {
-      ...payload,
-      event: evt.type,
-      entityType: evt.entity ?? undefined,
-      entityId: evt.entity_id ?? (payload as any)?.entity?.id ?? undefined,
-    };
+    const input = eventRunInput(evt);
     const user = (payload as { user?: { id: string; role?: string; email?: string } }).user;
     // triggerWorkflow persists a pending task itself if the run pauses.
     const result = await wfmod.triggerWorkflow(wf.id, input, user);

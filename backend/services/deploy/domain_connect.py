@@ -146,6 +146,10 @@ def plan_apply(kind: str, name: str, root: str, records: list[dict],
     if kind == "apex" and not groups:
         return None
     host = "" if name == root else name[: -len(root) - 1]
+    if kind == "subdomain" and not host:
+        # Providers may not enforce hostRequired (Cloudflare does not): without a
+        # host the CNAME lands on the bare domain and replaces its records.
+        return None
     return service, host, values, groups
 
 

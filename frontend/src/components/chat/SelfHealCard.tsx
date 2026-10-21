@@ -1,32 +1,38 @@
 "use client";
 
+import { useState, type ReactNode } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
-  Wrench,
-  CheckCircle2,
-  AlertTriangle,
-  HelpCircle,
+  Check,
   FileCode2,
   GitCommit,
+  HelpCircle,
+  Hourglass,
   Loader2,
+  RotateCcw,
+  TriangleAlert,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 /**
- * SelfHealCard — SH-1
+ * SelfHealCard — an error the running app hit, and what Smith did about it.
  *
- * Rich variant of the plain-markdown self-heal bubble. Renders one of four
- * states from `metadata.status`:
- *   • in_progress → "🔧 fixing…" with a spinner (shown the moment heal
- *     starts, before Smith produces any output).
- *   • resolved    → files touched, commit sha, revert hint.
- *   • asked       → Smith needed clarification; question shown verbatim.
- *   • failed      → attempt count, why-not, "will retry" note if attempts remain.
+ * One card per heal, updated in place: it opens as "Fixing…" the moment the
+ * heal starts and becomes the outcome when Smith finishes. Read top to
+ * bottom it answers four questions in order — what broke, where, what Smith
+ * did, and what happens next — so the outcome never contradicts itself
+ * ("no fix produced" above "nothing needed doing" above "still open").
  *
- * Wired in ChatMessage.tsx when `metadata.self_heal === true` AND
- * `metadata.status` is present. Backwards-compatible: heal messages
- * without a status field still fall through to the classic markdown bubble.
+ * Drawn from `metadata.status`:
+ *   • in_progress → spinner, "Fixing an error in …"
+ *   • resolved    → tick, the files changed and the commit
+ *   • asked       → Smith's question
+ *   • untried     → a change made that no try has proven yet
+ *   • failed      → not fixed yet; whether another try will come
  */
 
-type SelfHealStatus = "in_progress" | "resolved" | "asked" | "failed";
+type SelfHealStatus = "in_progress" | "resolved" | "untried" | "asked" | "failed";
 
 export interface SelfHealMetadata {
   self_heal: true;
@@ -43,220 +49,237 @@ export interface SelfHealMetadata {
   edited_paths?: string[];
   commit?: string | null;
   question?: string;
+  /** Smith's own account of what it found or did. */
+  summary?: string;
+  /** The other errors this one heal took with the first. */
+  others?: {
+    exception_id?: string;
+    error_message?: string;
+    workflow_id?: string | null;
+    node_id?: string | null;
+    page_route?: string | null;
+  }[];
 }
 
 interface Props {
   metadata: SelfHealMetadata;
-  createdAt?: string;
+  createdAt?: string | number;
 }
 
+/** Where the error happened, in the words the app uses for it. */
+export function healPlace(m: SelfHealMetadata): string {
+  if (m.page_route) return `the ${m.page_route} screen`;
+  if (m.workflow_id) return `the ${m.workflow_id} process`;
+  if (m.source_file) return m.source_file.split("/").pop() || m.source_file;
+  if (m.node_id) return m.node_id;
+  return "the app";
+}
+
+/** What the card is about: "an error in the reject-case process", or "3 errors in the app". */
+function subject(m: SelfHealMetadata): string {
+  const n = 1 + (m.others?.length ?? 0);
+  return n > 1 ? `${n} errors in the app` : `an error in ${healPlace(m)}`;
+}
+
+const TONE: Record<SelfHealStatus, { badge: string; icon: ReactNode; title: (about: string) => string }> = {
+  in_progress: {
+    badge: "bg-sky-500 text-white",
+    icon: <Loader2 className="h-3.5 w-3.5 animate-spin" />,
+    title: (a) => `Fixing ${a}`,
+  },
+  resolved: {
+    badge: "bg-emerald-500 text-white",
+    icon: <Check className="h-3.5 w-3.5" />,
+    title: (a) => `Fixed ${a}`,
+  },
+  untried: {
+    badge: "bg-amber-500 text-white",
+    icon: <Hourglass className="h-3.5 w-3.5" />,
+    title: (a) => `Changed, not yet proven: ${a}`,
+  },
+  asked: {
+    badge: "bg-amber-500 text-white",
+    icon: <HelpCircle className="h-3.5 w-3.5" />,
+    title: (a) => `A question before fixing ${a}`,
+  },
+  failed: {
+    badge: "bg-rose-500 text-white",
+    icon: <TriangleAlert className="h-3.5 w-3.5" />,
+    title: (a) => `Not fixed yet: ${a}`,
+  },
+};
+
 export function SelfHealCard({ metadata, createdAt }: Props) {
-  const status = metadata.status;
-  const theme = _themeFor(status);
-  const anchorLabel =
-    metadata.node_id ||
-    metadata.source_file ||
-    metadata.workflow_id ||
-    metadata.page_route ||
-    "the app";
+  const status: SelfHealStatus = metadata.status in TONE ? metadata.status : "failed";
+  const tone = TONE[status];
+  const [errorOpen, setErrorOpen] = useState(false);
+  const [filesOpen, setFilesOpen] = useState(false);
+
+  const files = metadata.edited_paths ?? [];
+  const attempt = metadata.attempt ?? null;
+  const max = metadata.max_attempts ?? null;
+  const triesLeft = attempt != null && max != null ? Math.max(0, max - attempt) : null;
+  const where = [
+    metadata.workflow_id && { label: "Process", value: metadata.workflow_id },
+    metadata.node_id && { label: "Step", value: metadata.node_id },
+    metadata.page_route && { label: "Screen", value: metadata.page_route },
+    metadata.source_file && { label: "File", value: metadata.source_file },
+  ].filter(Boolean) as { label: string; value: string }[];
+  const when =
+    createdAt != null
+      ? new Date(createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+      : null;
+  const errors = [
+    { message: (metadata.error_message || "").trim(), where: metadata.workflow_id || metadata.page_route || "" },
+    ...(metadata.others ?? []).map((o) => ({
+      message: (o.error_message || "").trim(),
+      where: o.workflow_id || o.page_route || "",
+    })),
+  ].filter((e) => e.message);
+  const several = errors.length > 1;
 
   return (
-    <div className="my-2 rounded-lg border bg-card shadow-sm">
-      {/* Header — status + anchor + attempt */}
-      <div className={`border-b ${theme.headerBg} px-4 py-3`}>
-        <div className="flex items-center gap-2">
-          {theme.icon}
-          <h3 className={`font-semibold text-sm ${theme.headerText}`}>
-            {theme.title}
-          </h3>
-          {metadata.attempt != null && metadata.max_attempts != null && (
-            <span className="ml-auto text-[10px] text-muted-foreground">
-              attempt {metadata.attempt} of {metadata.max_attempts}
-            </span>
-          )}
+    <div data-testid="self-heal-card" data-status={status}>
+      {/* What happened, in one line. */}
+      <div className="flex items-start gap-3">
+        <span className={cn("mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full", tone.badge)}>
+          {tone.icon}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="text-[15px] font-semibold leading-tight">{tone.title(subject(metadata))}</div>
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+            <span>Self-heal</span>
+            {attempt != null && max != null && (
+              <>
+                <span aria-hidden>·</span>
+                <span>Try {attempt} of {max}</span>
+              </>
+            )}
+            {when && (
+              <>
+                <span aria-hidden>·</span>
+                <time>{when}</time>
+              </>
+            )}
+          </div>
         </div>
-        {metadata.error_message && (
-          <p className="mt-1 text-xs text-muted-foreground line-clamp-2">
-            {metadata.error_message}
-          </p>
-        )}
       </div>
 
-      <div className="divide-y text-xs">
-        {/* Anchor row — where the error happened */}
-        <div className="px-4 py-2.5">
-          <div className="mb-1 flex items-center gap-1.5 font-medium text-muted-foreground">
-            <FileCode2 className="h-3 w-3" />
-            Location
+      {/* What broke. */}
+      {errors.length > 0 && (
+        <button
+          type="button"
+          onClick={() => setErrorOpen((o) => !o)}
+          className="mt-3 block w-full rounded-lg border border-rose-200/70 bg-rose-50/60 px-3 py-2 text-left dark:border-rose-900/60 dark:bg-rose-950/30"
+          title={errorOpen ? "Show less" : "Show the whole error"}
+        >
+          <div className="text-[11px] font-medium uppercase tracking-wide text-rose-700/80 dark:text-rose-300/80">
+            {several ? `The errors (${errors.length})` : "The error"}
           </div>
-          <div className="space-y-0.5">
-            {metadata.node_id && (
-              <div className="flex items-center gap-1.5">
-                <span className="text-muted-foreground">Node:</span>
-                <code className="rounded bg-muted px-1.5 py-0.5 text-[10px]">
-                  {metadata.node_id}
-                </code>
-              </div>
-            )}
-            {metadata.workflow_id && (
-              <div className="flex items-center gap-1.5">
-                <span className="text-muted-foreground">Workflow:</span>
-                <code className="rounded bg-muted px-1.5 py-0.5 text-[10px]">
-                  {metadata.workflow_id}
-                </code>
-              </div>
-            )}
-            {metadata.source_file && (
-              <div className="flex items-center gap-1.5">
-                <span className="text-muted-foreground">File:</span>
-                <code className="rounded bg-muted px-1.5 py-0.5 text-[10px]">
-                  {metadata.source_file}
-                </code>
-              </div>
-            )}
-            {metadata.page_route && (
-              <div className="flex items-center gap-1.5">
-                <span className="text-muted-foreground">Route:</span>
-                <code className="rounded bg-muted px-1.5 py-0.5 text-[10px]">
-                  {metadata.page_route}
-                </code>
-              </div>
-            )}
-            {!metadata.node_id &&
-              !metadata.workflow_id &&
-              !metadata.source_file &&
-              !metadata.page_route && (
-                <span className="text-muted-foreground">{anchorLabel}</span>
+          {(several && !errorOpen ? errors.slice(0, 3) : errors).map((e, i) => (
+            <div key={i} className={cn(several && "mt-1 flex gap-2")}>
+              {several && e.where && (
+                <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{e.where}</span>
               )}
-          </div>
-        </div>
-
-        {/* In-progress state — just the note */}
-        {status === "in_progress" && (
-          <div className="px-4 py-2.5">
-            <div className="flex items-center gap-1.5 text-muted-foreground">
-              <Loader2 className="h-3 w-3 animate-spin" />
-              Smith is reading the error, loading the offending file, and
-              planning a targeted edit…
-            </div>
-          </div>
-        )}
-
-        {/* Asked state — Smith needs input */}
-        {status === "asked" && metadata.question && (
-          <div className="px-4 py-2.5 bg-amber-50/40">
-            <div className="mb-1 flex items-center gap-1.5 font-medium text-amber-800">
-              <HelpCircle className="h-3 w-3" />
-              Smith needs your input
-            </div>
-            <p className="text-amber-900">{metadata.question}</p>
-          </div>
-        )}
-
-        {/* Resolved / failed — files touched + commit */}
-        {(status === "resolved" || status === "failed") &&
-          metadata.edited_paths &&
-          metadata.edited_paths.length > 0 && (
-            <div className="px-4 py-2.5">
-              <div className="mb-1.5 flex items-center gap-1.5 font-medium text-muted-foreground">
-                <FileCode2 className="h-3 w-3" />
-                Files changed ({metadata.edited_paths.length})
-              </div>
-              <ul className="space-y-0.5">
-                {metadata.edited_paths.slice(0, 6).map((p) => (
-                  <li key={p} className="flex items-start gap-1.5">
-                    <span className="text-muted-foreground">•</span>
-                    <code className="rounded bg-muted px-1.5 py-0.5 text-[10px] break-all">
-                      {p}
-                    </code>
-                  </li>
-                ))}
-                {metadata.edited_paths.length > 6 && (
-                  <li className="text-[10px] text-muted-foreground pl-3">
-                    …and {metadata.edited_paths.length - 6} more
-                  </li>
-                )}
-              </ul>
-            </div>
-          )}
-
-        {status === "failed" &&
-          (!metadata.edited_paths || metadata.edited_paths.length === 0) && (
-            <div className="px-4 py-2.5 bg-red-50/40">
-              <div className="flex items-center gap-1.5 text-red-800">
-                <AlertTriangle className="h-3 w-3" />
-                Smith could not localize a fix on this attempt.
-                {metadata.attempt != null &&
-                  metadata.max_attempts != null &&
-                  metadata.attempt < metadata.max_attempts && (
-                    <span className="text-red-700/80">
-                      Will retry (up to {metadata.max_attempts}).
-                    </span>
-                  )}
-              </div>
-            </div>
-          )}
-
-        {/* Commit footer — only when a commit landed */}
-        {metadata.commit && (
-          <div className="px-4 py-2.5">
-            <div className="flex items-center gap-1.5 text-muted-foreground">
-              <GitCommit className="h-3 w-3" />
-              Committed as
-              <code className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] text-emerald-800">
-                {metadata.commit.slice(0, 8)}
+              <code className={cn(
+                "mt-0.5 block min-w-0 whitespace-pre-wrap break-words font-mono text-xs text-foreground",
+                !errorOpen && (several ? "line-clamp-1" : "line-clamp-2"),
+              )}>
+                {e.message}
               </code>
-              <span className="text-[10px]">
-                — <code className="text-[10px]">git revert</code> to undo
-              </span>
             </div>
-          </div>
-        )}
-      </div>
+          ))}
+          {several && !errorOpen && errors.length > 3 && (
+            <div className="mt-1 text-[11px] text-muted-foreground">and {errors.length - 3} more</div>
+          )}
+        </button>
+      )}
 
-      {createdAt && (
-        <div className="border-t px-4 py-2 text-[10px] text-muted-foreground">
-          {new Date(createdAt).toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-          })}
+      {/* Where. */}
+      {!several && where.length > 0 && (
+        <div className="mt-2.5 flex flex-wrap gap-1.5">
+          {where.map((w) => (
+            <span
+              key={w.label}
+              className="inline-flex max-w-full items-center gap-1 rounded-md border bg-background px-2 py-0.5 text-[11px]"
+            >
+              <span className="text-muted-foreground">{w.label}</span>
+              <code className="truncate font-mono text-foreground">{w.value}</code>
+            </span>
+          ))}
         </div>
+      )}
+
+      {/* What Smith did, or is doing. */}
+      {status === "in_progress" && (
+        <p className="mt-3 text-sm text-muted-foreground">
+          Smith is reading the error and the code it came from. This card updates when it is done.
+        </p>
+      )}
+      {status === "asked" && metadata.question && (
+        <div className="mt-3 rounded-lg bg-amber-50 px-3 py-2.5 text-sm dark:bg-amber-950/30">
+          <div className="text-xs font-semibold text-amber-800 dark:text-amber-200">Smith asks</div>
+          <p className="mt-0.5 text-foreground">{metadata.question}</p>
+        </div>
+      )}
+      {status !== "in_progress" && metadata.summary && (
+        <div className="prose prose-sm mt-3 max-w-none text-sm leading-relaxed text-foreground [&_p]:my-1 [&_p:first-child]:mt-0 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:text-[0.85em] [&_code]:before:content-none [&_code]:after:content-none">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{metadata.summary}</ReactMarkdown>
+        </div>
+      )}
+
+      {files.length > 0 && (
+        <div className="mt-3 flex gap-3 rounded-lg bg-blue-50 px-3 py-2.5 dark:bg-blue-950/40">
+          <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200">
+            <FileCode2 className="h-3.5 w-3.5" />
+          </span>
+          <div className="min-w-0 flex-1 text-xs">
+            <div className="flex items-center gap-2">
+              <span className="font-semibold text-foreground">
+                {files.length === 1 ? "1 file changed" : `${files.length} files changed`}
+              </span>
+              {metadata.commit && (
+                <span className="inline-flex items-center gap-1 text-muted-foreground">
+                  <GitCommit className="h-3 w-3" />
+                  <code className="font-mono">{metadata.commit.slice(0, 8)}</code>
+                </span>
+              )}
+            </div>
+            <ul className="mt-0.5 space-y-0.5 text-muted-foreground">
+              {(filesOpen ? files : files.slice(0, 3)).map((f) => (
+                <li key={f} className="truncate font-mono" title={f}>{f}</li>
+              ))}
+            </ul>
+            {files.length > 3 && (
+              <button
+                type="button"
+                onClick={() => setFilesOpen((o) => !o)}
+                className="mt-1 text-[11px] font-medium text-blue-700 hover:underline dark:text-blue-300"
+              >
+                {filesOpen ? "Show fewer" : `Show all ${files.length}`}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* What happens next. */}
+      {status === "untried" && (
+        <p className="mt-3 flex items-start gap-1.5 text-xs text-muted-foreground">
+          <RotateCcw className="mt-0.5 h-3 w-3 shrink-0" />
+          The change is in place. The error stays open until the app runs this again without it.
+        </p>
+      )}
+      {status === "failed" && (
+        <p className="mt-3 flex items-start gap-1.5 text-xs text-muted-foreground">
+          <RotateCcw className="mt-0.5 h-3 w-3 shrink-0" />
+          {triesLeft == null
+            ? "The error is still open. Smith tries again if it happens again."
+            : triesLeft > 0
+            ? `The error is still open. Smith tries again if it happens again (${triesLeft} ${triesLeft === 1 ? "try" : "tries"} left).`
+            : "That was the last automatic try. The error stays open; ask Smith in chat to look at it."}
+        </p>
       )}
     </div>
   );
-}
-
-
-function _themeFor(status: SelfHealStatus) {
-  switch (status) {
-    case "in_progress":
-      return {
-        headerBg: "bg-gradient-to-r from-sky-50 to-blue-50",
-        headerText: "text-sky-900",
-        icon: <Loader2 className="h-4 w-4 text-sky-500 animate-spin" />,
-        title: "Self-heal in progress",
-      };
-    case "resolved":
-      return {
-        headerBg: "bg-gradient-to-r from-emerald-50 to-green-50",
-        headerText: "text-emerald-900",
-        icon: <CheckCircle2 className="h-4 w-4 text-emerald-600" />,
-        title: "Runtime error healed",
-      };
-    case "asked":
-      return {
-        headerBg: "bg-gradient-to-r from-amber-50 to-yellow-50",
-        headerText: "text-amber-900",
-        icon: <HelpCircle className="h-4 w-4 text-amber-600" />,
-        title: "Self-heal needs input",
-      };
-    case "failed":
-    default:
-      return {
-        headerBg: "bg-gradient-to-r from-red-50 to-rose-50",
-        headerText: "text-red-900",
-        icon: <Wrench className="h-4 w-4 text-red-600" />,
-        title: "Self-heal could not fix",
-      };
-  }
 }

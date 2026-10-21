@@ -3413,8 +3413,9 @@ def seed_in_dependency_order(seed: dict[str, list[dict]]) -> dict[str, list[dict
     """The tables parents first (a row's `ref:<table>[i]` names its parent), each row's keys sorted. The file was
     written with every key sorted, so tables came out alphabetically: invoices before the owners they point at,
     and the seeder, which reads them in the file's order, gave a child a made-up parent (pawsco01, 2026-10-14)."""
-    parents = {t: {m for row in rows for v in row.values() if isinstance(v, str)
-                   for m in re.findall(r"^ref:([A-Za-z0-9_]+)\[", v) if m != t and m in seed}
+    parents = {t: {m for row in rows for v in row.values()
+                   for one in (v if isinstance(v, list) else [v]) if isinstance(one, str)
+                   for m in re.findall(r"^ref:([A-Za-z0-9_]+)\[", one) if m != t and m in seed}
                for t, rows in seed.items()}
     ordered: list[str] = []
     seen: set[str] = set()
@@ -3492,6 +3493,76 @@ def _ref_by_label(field: dict, row: int, tables_by_id: dict, labels_by_id: dict)
     return f"ref:{tables_by_id[target]}[{labels.index(want)}]"
 
 
+_LIST_TYPES = frozenset({"json", "jsonb", "array", "list", "string[]", "text[]", "uuid[]"})
+
+
+def _example_names(example: Any) -> list[str] | None:
+    """The names in one example of a list field — `'["A","B"]'` or `["A","B"]`; None when it is not a list."""
+    if isinstance(example, str):
+        try:
+            example = json.loads(example)
+        except (TypeError, ValueError):
+            return None
+    if not isinstance(example, list):
+        return None
+    return [str(x).strip() for x in example if str(x).strip()]
+
+
+def _refs_by_labels(field: dict, row: int, tables_by_id: dict, labels_by_id: dict) -> list[str] | None:
+    """A list field whose examples name records of ONE record type, as those records.
+
+    Refund And Chargeback's staff held `assignedPropertyIds` given as hotel names; the
+    seed wrote filler in their place, so nobody held a property and no case could be
+    seen (pah7lhfz, 2026-10-21). The names become `ref:<table>[i]`, which the seeder
+    turns into the ids. Every name must be a record's, or the examples stay as written.
+    """
+    if str(field.get("type") or "").lower() not in _LIST_TYPES:
+        return None
+    lists = [_example_names(x) for x in field.get("examples") or []]
+    if not lists or any(names is None for names in lists):
+        return None
+    every = {n.lower() for names in lists for n in names or []}
+    if not every:
+        return None
+    target = str(field.get("references") or "")
+    if target not in tables_by_id:
+        hits = [eid for eid, labels in labels_by_id.items() if every <= {x.lower() for x in labels}]
+        target = hits[0] if len(hits) == 1 else ""
+    labels = [x.lower() for x in labels_by_id.get(target) or []]
+    if not target or not every <= set(labels):
+        return None
+    want = lists[(row - 1) % len(lists)] or []
+    return [f"ref:{tables_by_id[target]}[{labels.index(n.lower())}]" for n in want]
+
+
+def _give_reach(doc: dict, seed: dict[str, list[dict]]) -> None:
+    """Every sample person holds the scope values that reach sample records.
+
+    A person reaches a row when the row's scope column is among their own
+    (`account_model.scope_reach`). A person left with none — no example named a
+    record, or none could be read — is given one, in turn, so each sees some
+    records; one whose examples named records keeps them, even an empty list.
+    """
+    from services.blueprint.account_model import login_record, scope_reach
+    login = login_record(doc)
+    if login is None:
+        return
+    people = seed.get(str(login.get("table") or to_snake(str(login.get("name") or "")))) or []
+    for reach in scope_reach(doc):
+        n = len(seed.get(reach["table"]) or [])
+        if not n:
+            continue
+        mine = re.compile(rf"^ref:{re.escape(reach['table'])}\[\d+\]$")
+        for i, person in enumerate(people):
+            held = person.get(reach["column"])
+            if reach["many"] and isinstance(held, list) and all(isinstance(v, str) and mine.match(v) for v in held):
+                continue
+            if not reach["many"] and isinstance(held, str) and mine.match(held):
+                continue
+            ref = f"ref:{reach['table']}[{i % n}]"
+            person[reach["column"]] = [ref] if reach["many"] else ref
+
+
 def seed_rows(doc: dict, rows: int = SEED_ROWS, *, as_described: bool = True) -> dict[str, list[dict]]:
     """The demo rows, by table — what `project_seed` writes, without writing
     it. `services.smith.sample_data` compares the rows a definition seeds
@@ -3541,7 +3612,9 @@ def seed_rows(doc: dict, rows: int = SEED_ROWS, *, as_described: bool = True) ->
                 # plus an embedding that fails; the vector is the platform's.
                 if is_image_field(field) or is_file_field(field) or is_embedding_field(field):
                     continue
-                value = (_ref_by_label(field, row, tables_by_id, labels_by_id)
+                listed = _refs_by_labels(field, row, tables_by_id, labels_by_id)
+                value = listed if listed is not None else (
+                         _ref_by_label(field, row, tables_by_id, labels_by_id)
                          or _seed_value(field, name, row, tables_by_id, period=period,
                                         person=bool(entity.get("account"))))
                 if (name, str(field.get("name"))) in owned and isinstance(value, str) and value.startswith("ref:"):
@@ -3549,6 +3622,7 @@ def seed_rows(doc: dict, rows: int = SEED_ROWS, *, as_described: bool = True) ->
                 record[field.get("name")] = value
             out_rows.append(years_within_age(record, entity.get("fields") or []))
         seed[table] = out_rows
+    _give_reach(doc, seed)
     return seed
 
 
@@ -4109,6 +4183,10 @@ _ALWAYS_OPEN: tuple[str, ...] = (
     # The stand-in checkout: a signed-out buyer (a guest cart) is sent here
     # too; it shows an amount by a session id and charges nothing.
     "pay", "api/pay",
+    # AN ASSISTANT HOLDS A TOKEN, NOT A SESSION. The MCP route checks the
+    # person's token itself (and answers 404 unless the owner turned it on);
+    # its token routes ask for the session themselves.
+    "api/mcp",
 )
 
 

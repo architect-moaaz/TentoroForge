@@ -168,7 +168,12 @@ def define_application(ctx: Ctx, args: dict) -> dict:
     from services.blueprint.service import BlueprintService
     from services.smith.smith import domain_nodes
 
-    brief = str(args.get("brief") or "").strip() or brief_of(ctx)
+    # THE PERSON'S WORDS ARE THE DESCRIPTION; THE DOCUMENTS ARE STORED BESIDE
+    # IT. `brief_of` adds every supplied document's text, which is right for
+    # the clarifier reading this turn and wrong for `application.description`:
+    # every agent reads the description, so a BRD written into it was read
+    # twice by the two that read documents and paid for by every other.
+    brief = str(args.get("brief") or "").strip() or brief_mod.brief_from(ctx.history, ctx.message)
     if not brief:
         return _finding("There is nothing to define: the person has not said what the application is for.")
     if brief_mod.is_functionless(brief):

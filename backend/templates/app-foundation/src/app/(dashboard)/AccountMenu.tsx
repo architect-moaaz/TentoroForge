@@ -9,7 +9,7 @@
 // every frame carries it.
 
 import * as React from "react";
-import { LogOut, User } from "lucide-react";
+import { Bot, LogOut, User } from "lucide-react";
 import { signOut } from "next-auth/react";
 
 function initials(name: string): string {
@@ -27,6 +27,15 @@ export function AccountMenu({ name, email, role, compact = false, extras }: {
   const [open, setOpen] = React.useState(false);
   const box = React.useRef<HTMLDivElement>(null);
   const who = (name || email || "").trim();
+  // "Connect an AI assistant" only where the owner turned the app's MCP
+  // server on: asked once, the first time the menu opens.
+  const [assistants, setAssistants] = React.useState<boolean | null>(null);
+  React.useEffect(() => {
+    if (!open || assistants !== null) return;
+    const base = (process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/+$/, "");
+    fetch(`${base}/api/mcp/tokens`, { cache: "no-store" })
+      .then((r) => setAssistants(r.ok)).catch(() => setAssistants(false));
+  }, [open, assistants]);
 
   React.useEffect(() => {
     if (!open) return;
@@ -59,6 +68,12 @@ export function AccountMenu({ name, email, role, compact = false, extras }: {
             <div data-account-extras="" className="flex flex-col gap-2 border-b border-border/60 px-3 py-2">
               {extras}
             </div>
+          )}
+          {assistants && (
+            <a role="menuitem" href={`${(process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/+$/, "")}/connect-ai`}
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-foreground hover:bg-muted/50">
+              <Bot size={14} aria-hidden /> Connect an AI assistant
+            </a>
           )}
           <button type="button" role="menuitem"
             onClick={() => {

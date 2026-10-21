@@ -44,6 +44,13 @@ def _design(colors):
     }
 
 
+@pytest.fixture(autouse=True)
+def _unscoped(monkeypatch):
+    """The small model that reads which roles a request names is not called in
+    these tests; "could not tell" is the unscoped behaviour they were written for."""
+    monkeypatch.setattr(rs, "roles_named", lambda change, roles: None)
+
+
 @pytest.fixture()
 def svc(tmp_path):
     s = BlueprintService.create(output_dir=tmp_path, app_id="t", name="Med Registration", domain="health")
@@ -156,3 +163,65 @@ def test_an_unchanged_first_attempt_can_still_succeed_on_the_second(svc, tmp_pat
         return _executor([], colors=LAVENDER if calls["n"] == 1 else GREEN)(spec)
     out = rs.restyle(svc, "green theme", app_root=str(tmp_path / "app"), executor=flaky)
     assert out["applied"] and out["after"]["primary"] == "#2E7D5B" and calls["n"] == 2
+
+
+# --------------------------------------------------------------------------- #
+# One role asked for is one role changed (Mark 8, cxz95dd1, 2026-10-16)
+# --------------------------------------------------------------------------- #
+
+WHITE_EVERYTHING = {**GREEN, "background": "#FFFDF9", "text-primary": "#1A1D21", "surface": "#F6F1E6"}
+
+
+def test_the_scope_of_a_request_is_the_roles_it_names_and_their_dependants():
+    roles = sorted(LAVENDER)
+    assert rs.scope_of(["primary"], roles) == {"primary", "primary-hover", "primary-subtle"}
+    assert rs.scope_of(["background"], roles) == {"background", "text-primary", "text-secondary", "border"}
+    assert rs.scope_of(["accent"], roles) == {"accent"}
+    assert rs.scope_of([rs.ALL_ROLES], roles) is None and rs.scope_of(None, roles) is None
+    colors, kept = rs.kept_in_scope(LAVENDER, WHITE_EVERYTHING, rs.scope_of(["background"], roles))
+    assert colors["background"] == "#FFFDF9" and colors["text-primary"] == "#1A1D21" and colors["border"] == GREEN["border"]
+    assert colors["primary"] == LAVENDER["primary"] and colors["accent"] == LAVENDER["accent"]
+    assert kept == ["accent", "primary", "primary-hover", "primary-subtle", "surface"]
+
+
+def test_a_request_for_the_background_changes_the_background_and_keeps_the_rest(svc, tmp_path, monkeypatch):
+    """"Change the background colour to white" came back with a new accent, a
+    new primary and fourteen more roles: the agent re-derived a scheme. The
+    agent's answer is held to the role the request names."""
+    monkeypatch.setattr(rs, "roles_named", lambda change, roles: ["background"])
+    seen = []
+    out = rs.restyle(svc, "change the background colour to white", app_root=str(tmp_path / "app"),
+                     executor=_executor(seen, colors=WHITE_EVERYTHING))
+    assert "THE REQUEST NAMES: background. Change that role and nothing else." in seen[0].brief
+    assert out["after"]["background"] == "#FFFDF9" and out["after"]["text-primary"] == "#1A1D21"
+    assert out["after"]["primary"] == LAVENDER["primary"] and out["after"]["accent"] == LAVENDER["accent"]
+    # The border sits on the background, so it may follow it; the accent and the primary may not.
+    assert set(out["changed"]) == {"background", "text-primary", "border"}
+    assert out["kept"] == ["accent", "primary", "primary-hover", "primary-subtle", "surface"]
+    fresh = BlueprintService.load(output_dir=str(tmp_path))
+    assert fresh.doc["designSystem"]["colors"]["accent"] == LAVENDER["accent"]
+    text = rs.summary_of(out, "change the background colour to white")
+    assert "background #FFFFFF → #FFFDF9" in text and "every other role kept as it was" in text
+    assert "accent" in text and "14 more" not in text
+
+
+def test_a_request_about_the_whole_palette_still_re_derives_the_scheme(svc, tmp_path, monkeypatch):
+    monkeypatch.setattr(rs, "roles_named", lambda change, roles: [rs.ALL_ROLES])
+    seen = []
+    out = rs.restyle(svc, "a green theme", app_root=str(tmp_path / "app"), executor=_executor(seen))
+    assert "THE REQUEST NAMES" not in seen[0].brief and "re-derive primary-hover" in seen[0].brief
+    assert out["kept"] == [] and out["after"]["accent"] == GREEN["accent"]
+
+
+def test_an_agent_that_changed_only_what_was_not_asked_is_asked_again(svc, tmp_path, monkeypatch):
+    monkeypatch.setattr(rs, "roles_named", lambda change, roles: ["background"])
+    calls = {"n": 0}
+
+    off_scope = {**LAVENDER, "accent": GREEN["accent"], "primary": GREEN["primary"]}
+
+    def flaky(spec):
+        calls["n"] += 1
+        # First answer: a new accent and primary, the background untouched — nothing in scope changed.
+        return _executor([], colors=off_scope if calls["n"] == 1 else WHITE_EVERYTHING)(spec)
+    out = rs.restyle(svc, "change the background colour to white", app_root=str(tmp_path / "app"), executor=flaky)
+    assert calls["n"] == 2 and out["after"]["background"] == "#FFFDF9" and out["after"]["accent"] == LAVENDER["accent"]

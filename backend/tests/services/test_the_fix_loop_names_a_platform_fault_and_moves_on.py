@@ -59,7 +59,7 @@ def test_a_platform_fault_is_said_recorded_marked_and_left_alone(tmp_path, monke
     assert "Still not right (1): Calendar" in closing
     rows = incidents.recent()
     assert rows and rows[0]["kind"] == "platform_fault" and rows[0]["app"] == "pcn4owv7" and rows[0]["path"] == "src/lib/data-engine.ts"
-    assert out_["stopped"] in ("yield", "turns", "time")
+    assert out_["stopped"] in ("yield", "turns", "time", "tried")
 
 
 def test_the_words_alone_name_a_platform_fault(tmp_path):

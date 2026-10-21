@@ -232,4 +232,79 @@ describe("DomainsPanel", () => {
     expect(host.textContent).toContain("How to add this at Cloudflare");
     expect(host.textContent).toContain("DNS only (grey cloud)");
   });
+
+  it("leads with the main address, and says what the first address does", async () => {
+    const intro = () => host.querySelector("p")?.textContent?.replace(/\s+/g, " ") ?? "";
+    await render();
+    expect(intro()).toContain("Your app is at shop.vercel.app.");
+    expect(intro()).not.toContain("first address");
+
+    act(() => root.unmount());
+    root = createRoot(host);
+    apiGet.mockImplementation(async () => ({ ...tentoro, mainAddress: "https://shop.apps.tentoro.ai" }));
+    await render();
+    expect(intro()).toContain("Your app is at shop.apps.tentoro.ai (its first address, shop.vercel.app, sends people there).");
+
+    act(() => root.unmount());
+    root = createRoot(host);
+    apiGet.mockImplementation(async () => ({ ...tentoro, mainAddress: "https://shop.apps.tentoro.ai", oldAddress: "keep" }));
+    await render();
+    expect(intro()).toContain("(its first address, shop.vercel.app, opens it too)");
+    apiGet.mockImplementation(async () => waiting);
+  });
+
+  it("says one minute, not one minutes", async () => {
+    const at = (sec: number) => new Date(Date.now() - sec * 1000).toISOString();
+    apiGet.mockImplementation(async () => ({ ...waiting, domains: [
+      { ...waiting.domains[0], checkedAt: at(60) },
+      { ...waiting.domains[0], name: "b.acme.com", checkedAt: at(3600) },
+      { ...waiting.domains[0], name: "c.acme.com", checkedAt: at(7200) },
+    ] }));
+    await render();
+    const text = host.textContent ?? "";
+    expect(text).toContain("checked 1 minute ago");
+    expect(text).toContain("checked 1 hour ago");
+    expect(text).toContain("checked 2 hours ago");
+    expect(text).not.toMatch(/\b1 (second|minute|hour|day)s ago/);
+    apiGet.mockImplementation(async () => waiting);
+  });
+
+  it("says the app is being updated while it is republished, then that it is done", async () => {
+    const now = new Date().toISOString();
+    apiGet.mockImplementation(async () => ({ ...live, updating: { to: "https://app.acme.com", since: now, state: "building" } }));
+    await render();
+    expect(host.textContent).toContain("Updating the app.");
+    expect(host.textContent).toContain("moving to app.acme.com");
+
+    act(() => root.unmount());
+    root = createRoot(host);
+    apiGet.mockImplementation(async () => ({ ...live, updating: { to: "https://app.acme.com", since: now, state: "done", finishedAt: now } }));
+    await render();
+    expect(host.textContent).toContain("Done. The app now uses app.acme.com");
+
+    act(() => root.unmount());
+    root = createRoot(host);
+    apiGet.mockImplementation(async () => ({ ...live, updating: { to: "https://app.acme.com", since: now, state: "failed", reason: "Vercel could not build the app.", finishedAt: now } }));
+    await render();
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain("The app was not updated.");
+    apiGet.mockImplementation(async () => waiting);
+  });
+
+  it("shows the address being added while it is added", async () => {
+    await render();
+    let finish: (v: unknown) => void = () => {};
+    apiPost.mockImplementationOnce(() => new Promise((r) => { finish = r; }));
+    const input = host.querySelector("input") as HTMLInputElement;
+    await act(async () => {
+      const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+      set.call(input, "shop.acme.com");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => { button("Add domain").click(); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(apiPost).toHaveBeenCalledWith("/api/projects/p1/domains", { name: "shop.acme.com" });
+    expect(host.textContent).toContain("Adding — attaching it to the app");
+    await act(async () => { finish(live); });
+  });
 });
+

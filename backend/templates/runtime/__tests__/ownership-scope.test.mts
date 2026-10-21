@@ -223,12 +223,16 @@ function writeBuilder(kind: "update" | "delete", table: any) {
     if (kind === "delete") {
       ROWS[state.table.__name] = rows.filter((r) => !hit.includes(r));
     } else {
-      for (const r of hit) Object.assign(r, state.patch);
+      // A raw SQL value (`id = id`) is the database's to evaluate; here it
+      // leaves the column as it is, which is what `id = id` does.
+      const plain = Object.fromEntries(Object.entries(state.patch ?? {})
+        .filter(([, v]) => !(v && typeof v === "object" && (v as any).op === "raw")));
+      for (const r of hit) Object.assign(r, plain);
     }
     return hit.map((r) => ({ ...r }));
   };
   const b: any = {
-    set(p: any) { state.patch = p; return b; },
+    set(p: any) { state.patch = p; (globalThis as any).__LAST_SET__ = p; return b; },
     where(c: Cond) { state.where = c; return b; },
     returning() { return b; },
     then(res: any, rej: any) { return Promise.resolve(apply()).then(res, rej); },
@@ -428,6 +432,48 @@ console.log("query(): a workspace scope reads the actor column the rule names");
   eqJson(ids(x.data), [], "workspaceId is not the column the rule named → no rows");
   const finance = await engine.query(refundCases.__name, {}, { user: { id: "user-fin", role: "finance" } });
   eqJson(ids(finance.data), ["r1", "r2", "r3"], "finance is unscoped, as declared");
+}
+
+console.log("query()/create()/update(): a person of several workspaces reaches all of theirs, and only theirs");
+{
+  // Refund And Chargeback (pah7lhfz): staff hold a LIST of properties. Compared
+  // with `=`, a list matched no case at all.
+  const both = { user: { id: "user-hoh", role: "member", homePropertyId: [ST_GILES, ROYAL] } };
+  const asText = { user: { id: "user-hoh2", role: "member", homePropertyId: JSON.stringify([ROYAL]) } };
+  const none = { user: { id: "user-new", role: "member", homePropertyId: [] } };
+  eqJson(ids((await engine.query(refundCases.__name, {}, both)).data), ["r1", "r2", "r3"],
+    "a list reaches every property in it");
+  eqJson(ids((await engine.query(refundCases.__name, {}, asText)).data), ["r3"],
+    "the list's JSON text reads the same as the list");
+  eqJson(ids((await engine.query(refundCases.__name, {}, none)).data), [],
+    "an empty list reaches nothing");
+  const made = await engine.create(refundCases.__name, { guestName: "Ng" }, asText);
+  eqJson(made.data.propertyId, ROYAL, "with one property, a new case is filed there");
+  const chosen = await engine.create(refundCases.__name, { guestName: "Diaz", propertyId: ST_GILES }, both);
+  eqJson(chosen.data.propertyId, ST_GILES, "with several, the one the request names, if theirs");
+  await throwsNamed(
+    () => engine.create(refundCases.__name, { guestName: "Ruiz" }, both),
+    "ValidationError", "with several and none named, the person is asked which");
+  await throwsNamed(
+    () => engine.create(refundCases.__name, { guestName: "Kim", propertyId: ST_GILES }, asText),
+    "ValidationError", "never a property they do not hold");
+  await throwsNamed(
+    () => engine.update(refundCases.__name, "r3", { propertyId: ST_GILES }, asText),
+    "ValidationError", "nor can a case be moved to one");
+  ROWS[refundCases.__name] = ROWS[refundCases.__name].filter((r) => ["r1", "r2", "r3"].includes(r.id));
+}
+
+console.log("update(): a save with nothing of the table's own to change is still a valid statement");
+{
+  // `updatedAt` was set on every save; on a table without it the statement
+  // became `set where` — the audit check's 500 (pah7lhfz).
+  const stGiles = { user: { id: "user-fom", role: "member", homePropertyId: ST_GILES } };
+  const same = await engine.update(refundCases.__name, "r1", { notAColumn: 1 }, stGiles);
+  eqJson(same.data.id, "r1", "the row comes back unchanged");
+  const set = (globalThis as any).__LAST_SET__ ?? {};
+  ok(Object.keys(set).some((k) => k in refundCases), "the SET names a column of the table");
+  ok(!("updatedAt" in same.data) || same.data.updatedAt === undefined,
+    "and no updatedAt is written to a table that has none");
 }
 
 console.log("query(): a rule naming a column the table lacks fails closed");

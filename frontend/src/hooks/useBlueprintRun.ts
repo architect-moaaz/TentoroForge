@@ -119,6 +119,9 @@ export interface RunMessage {
   text: string;
   options?: string[];
   diffSummary?: string;
+  /** The server's word for the message: "progress" is a line said while a
+   *  turn runs, drawn quieter than an answer. */
+  status?: string;
 }
 
 /**
@@ -247,6 +250,9 @@ export interface StartOptions {
   gate?: "requirements" | "product_model";
   /** At the product model's review: the modules to build. Omitted is all. */
   modules?: string[] | null;
+  /** Requirements documents attached to this message (BRD, PRD as .docx/.pdf/.md/.txt),
+   *  already uploaded and read; the server adds their text to the evidence. */
+  attachmentIds?: string[];
 }
 
 export function useBlueprintRun(projectId: string | null) {
@@ -528,9 +534,11 @@ export function useBlueprintRun(projectId: string | null) {
               // holding is the only place the exchange exists.
               history: opts.history ?? [],
               approved: opts.approved ?? false,
-              // §14 — the documents attached on /blueprint/new. Carried on
+              // §14 — text of documents supplied with the brief. Carried on
               // every turn: the definition re-reads the whole brief each time.
+              // Files attached in the composer travel as attachment_ids.
               evidence: opts.evidence ?? [],
+              ...(opts.attachmentIds?.length ? { attachment_ids: opts.attachmentIds } : {}),
               ...(opts.gate ? { gate: opts.gate } : {}),
               ...(opts.modules ? { modules: opts.modules } : {}),
             }),
@@ -726,11 +734,14 @@ export function reduce(
       // turn out of the next.
       return {
         ...prev,
-        thoughts: [],
+        // A progress post ("Still at it (12 min): …") is not the answer: the
+        // trail of steps the person is following stays until the turn ends.
+        thoughts: data.status === "progress" ? prev.thoughts : [],
         messages: [...prev.messages, {
           text: String(data.text ?? ""),
           options: (data.options as string[]) ?? undefined,
           diffSummary: (data.diffSummary as string) || undefined,
+          status: (data.status as string) || undefined,
         }].filter((m) => m.text),
       };
 

@@ -40,6 +40,80 @@ class RestyleError(Exception):
     """The restyle could not be made, with the reason a user can act on."""
 
 
+#: The small model that reads which colour roles a request names, on its own:
+#: the acting agent naming its own scope was no guard (see `smith4.turn.asked_for`).
+ROLES_MODEL = "claude-haiku-4-5-20251001"
+#: What `roles_named` answers when the request is about the palette as a whole.
+ALL_ROLES = "ALL"
+
+
+def roles_named(change: str, roles: list[str]) -> list[str] | None:
+    """The colour roles the person's words name, from the palette's own role
+    names; `[ALL_ROLES]` for the whole palette ("a green theme", "make it
+    warmer"); None when it cannot be told — the restyle then runs unscoped,
+    as before, and says so. "Change the background colour to white" was
+    answered with a new accent, a new primary, a new surface and fourteen
+    more roles (Mark 8, cxz95dd1, 2026-10-16): the agent re-derived a scheme
+    when one role was asked for."""
+    words = " ".join(str(change or "").split())[:800]
+    if not words or not roles:
+        return None
+    try:
+        from services.llm_client import complete
+        reply = complete(model=ROLES_MODEL, max_tokens=120, temperature=0, content=(
+            f"A person asked for a colour change in their application:\n\"{words}\"\n\n"
+            f"The application's colour roles are: {', '.join(roles)}.\n\n"
+            "Answer with a JSON array of the role names the request names — only those, spelled exactly as "
+            "listed. The theme, the brand colour or the main colour is \"primary\". The page or the backdrop "
+            "is \"background\". A request about the palette or the look as a whole, or a mood with no role "
+            "named (\"warmer\", \"a green theme\"), is [\"ALL\"]. Nothing but the array."))
+        text = str(getattr(reply, "text", reply) or "").strip()
+        start, end = text.find("["), text.rfind("]")
+        named = json.loads(text[start:end + 1]) if start >= 0 and end > start else None
+    except Exception:  # noqa: BLE001 — not knowing is "unscoped", never a guess
+        logger.warning("[restyle] which roles the request names could not be read", exc_info=True)
+        return None
+    if not isinstance(named, list):
+        return None
+    if any(str(n).strip().upper() == ALL_ROLES for n in named):
+        return [ALL_ROLES]
+    known = {r.lower(): r for r in roles}
+    out = [known[str(n).strip().lower()] for n in named if str(n).strip().lower() in known]
+    return out or None
+
+
+def scope_of(named: list[str] | None, roles: list[str]) -> set[str] | None:
+    """The roles a restyle may change for what the request names: the named
+    roles, their variants (`primary-hover`, `primary-subtle` for `primary`),
+    and — when a surface the text sits on changes — the text and border
+    roles, which may have to move to stay readable. None means unscoped."""
+    if not named or ALL_ROLES in named:
+        return None
+    allowed: set[str] = set()
+    for r in named:
+        allowed.add(r)
+        allowed |= {x for x in roles if x.startswith(f"{r}-") or x.startswith(f"{r}_")}
+        if r in ("background", "surface"):
+            allowed |= {x for x in roles if x.startswith("text") or x in ("border", "foreground", "muted-foreground")}
+    return allowed
+
+
+def kept_in_scope(before: dict, proposed: dict, scope: set[str] | None) -> tuple[dict, list[str]]:
+    """`proposed` with every role outside `scope` put back as it was; the
+    roles put back, by name. Unscoped, nothing is put back."""
+    if scope is None:
+        return dict(proposed), []
+    colors = dict(proposed)
+    kept: list[str] = []
+    for role, was in before.items():
+        if role in scope:
+            continue
+        if str(colors.get(role) or "").lower() != str(was or "").lower():
+            colors[role] = was
+            kept.append(role)
+    return colors, sorted(kept)
+
+
 def _slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", (text or "").lower()).strip("-")[:60] or "restyle"
 
@@ -93,7 +167,7 @@ def record_decision(svc: Any, change: str) -> dict:
     return written
 
 
-def brief_for(change: str, design: dict, previous: dict | None) -> str:
+def brief_for(change: str, design: dict, previous: dict | None, named: list[str] | None = None) -> str:
     """What this call is for. The standing task tells the agent to use the
     colour the application description names — and the description still
     names the old palette, so briefed only "the user asked for green" the
@@ -111,11 +185,20 @@ def brief_for(change: str, design: dict, previous: dict | None) -> str:
         "use it, do not keep it, and do not answer that the description decided — the user has "
         "changed their mind, and returning the current colours unchanged is a refusal of the "
         "request, not a reading of the description.\n\n"
-        "Change only what the request needs. Re-decide the colour roles so the primary honours "
-        "it, and re-derive primary-hover, primary-subtle, border, surface and the accent from "
-        "the new primary as a considered scheme — the accent a true complement or near-triad, "
-        "status colours still distinguishable for red-green deficiency, text roles keeping "
-        "their contrast on the new surfaces. Keep every other decision exactly as it is: "
+        + (
+            # ONE ROLE ASKED FOR IS ONE ROLE CHANGED. The scheme is re-derived
+            # only when the request is about the palette as a whole.
+            f"THE REQUEST NAMES: {', '.join(named)}. Change {'that role' if len(named) == 1 else 'those roles'} "
+            "and nothing else. A variant of a changed role (its hover, its subtle) follows it; a text or "
+            "border role moves only if the changed surface leaves it unreadable, and then by as little "
+            "as readability needs. Every other role keeps its exact value — the accent, the primary and "
+            "the status colours are not re-decided because one role changed. "
+            if named and ALL_ROLES not in named else
+            "Re-decide the colour roles so the primary honours it, and re-derive primary-hover, "
+            "primary-subtle, border, surface and the accent from the new primary as a considered scheme "
+            "— the accent a true complement or near-triad, status colours still distinguishable for "
+            "red-green deficiency, text roles keeping their contrast on the new surfaces. ")
+        + "Keep every other decision exactly as it is: "
         "typography, spacing, radius, elevation, information density, navigation approach, "
         "interaction and accessibility conventions. Keep the SAME colour role names — every "
         "page and every token reads them, and a renamed role is a broken app. Say in "
@@ -154,7 +237,9 @@ def restyle(svc: Any, change: str, *, app_root: str | None = None,
                            "there is nothing to restyle until then.")
     before = copy.deepcopy(design.get("colors") or {})
     previous = palette_decision(svc.doc)
-    brief = brief_for(change, design, previous)
+    named = roles_named(change, sorted(before))
+    scope = scope_of(named, sorted(before))
+    brief = brief_for(change, design, previous, named)
     agent = DAG[NODE].agent
     run = executor or make_executor(svc, tiered_router(reasoning=reasoning),
                                     usage=RunUsage.for_app(svc, phase="change"),
@@ -171,6 +256,16 @@ def restyle(svc: Any, change: str, *, app_root: str | None = None,
         if not proposals:
             raise RestyleError("the design agent returned no design system. Nothing has been changed.")
         proposed = _proposed_colors(proposals)
+        # HELD TO WHAT WAS ASKED. Roles the request did not name go back to
+        # their values before the proposal is judged or committed; what was
+        # put back is said. The agent's scheme is advice; the scope is the ask.
+        proposed, kept = kept_in_scope(before, proposed, scope)
+        if kept:
+            body = getattr(proposals[0], "body", None)
+            if isinstance(body, dict):
+                body["colors"] = dict(proposed)
+            logger.info("[restyle] attempt %d: %d role(s) kept as they were (outside the request): %s",
+                        attempt, len(kept), ", ".join(kept)[:300])
         logger.info("[restyle] attempt %d: %d role(s) differ: %s", attempt,
                     len(_changed(before, proposed)), json.dumps(_changed(before, proposed))[:400])
         if not _changed(before, proposed):
@@ -181,8 +276,11 @@ def restyle(svc: Any, change: str, *, app_root: str | None = None,
             out = None
             feedback = ("Every colour role came back exactly as it was, so the request was not "
                         "honoured. The application description's colour wording is superseded by "
-                        f"the user's request — \"{change}\" — and the primary, its hover and subtle "
-                        "variants, the border, the surface and the accent must change to honour it.")
+                        f"the user's request — \"{change}\" — and "
+                        + (f"the role(s) it names ({', '.join(named)}) must change to honour it."
+                           if named and ALL_ROLES not in named else
+                           "the primary, its hover and subtle variants, the border, the surface and the "
+                           "accent must change to honour it."))
             if attempt == MAX_ATTEMPTS:
                 raise RestyleError(f"the design agent kept the palette unchanged {MAX_ATTEMPTS} times, "
                                    f"so nothing has been changed. It was asked for: {change}.")
@@ -210,6 +308,7 @@ def restyle(svc: Any, change: str, *, app_root: str | None = None,
     if app_root:
         files = list(project_design_tokens(svc.doc, app_root).get("files") or [])
     return {"applied": True, "before": before, "after": after, "changed": _changed(before, after),
+            "named": list(named or []), "kept": kept,
             "decision": decision.get("id"), "supersedes": (previous or {}).get("id"),
             "edited_paths": files, "version": getattr(out, "version", svc.doc.get("version", 1))}
 
@@ -217,11 +316,18 @@ def restyle(svc: Any, change: str, *, app_root: str | None = None,
 def summary_of(out: dict, change: str) -> str:
     """One sentence a user can read: what moved, and what it supersedes."""
     changed = out.get("changed") or {}
-    lead = [f"{k} {v[0]} → {v[1]}" for k, v in changed.items() if k in _LEAD_ROLES]
+    named = [n for n in (out.get("named") or []) if n != ALL_ROLES]
+    lead = [f"{k} {v[0]} → {v[1]}" for k, v in changed.items() if k in _LEAD_ROLES or k in named]
     rest = len(changed) - len(lead)
     what = (", ".join(lead) if lead else f"{len(changed)} colour role(s)")
     if rest > 0:
         what += f" and {rest} more role(s)"
+    kept = out.get("kept") or []
+    if named:
+        others = len((out.get("before") or {})) - len(changed)
+        what += (f"; every other role kept as it was"
+                 + (f" ({', '.join(kept[:4])}{' and more' if len(kept) > 4 else ''} were put back)" if kept else "")
+                 if others > 0 else "")
     return (f"Restyled the design system for \"{change}\": {what}. "
             f"Recorded as {out.get('decision')}"
             + (f", superseding {out.get('supersedes')}" if out.get("supersedes") else "")
@@ -256,4 +362,5 @@ def run(output_dir: str, change: str, *, reasoning: Any = None) -> dict:
             "changed": out["changed"], "decision": out["decision"], "reason": ""}
 
 
-__all__ = ["restyle", "run", "record_decision", "palette_decision", "brief_for", "summary_of", "RestyleError"]
+__all__ = ["restyle", "run", "record_decision", "palette_decision", "brief_for", "summary_of", "RestyleError",
+           "roles_named", "scope_of", "kept_in_scope", "ALL_ROLES"]

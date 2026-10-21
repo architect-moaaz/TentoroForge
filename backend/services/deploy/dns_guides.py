@@ -170,6 +170,17 @@ async def diagnose(name: str, kind: str, root: str, records: list[dict],
                 found.append({"code": "in-the-way", "says":
                               f"{name} still points at {', '.join(a[:2])}. Delete those A records (often a parking "
                               f"page) and add the A record to {', '.join(sorted(wanted_a))}."})
+            # AN OLD IPv6 RECORD stays when only the A record is replaced (a
+            # Domain Connect apply at Cloudflare keeps it): visitors on IPv6 still
+            # reach the old host, and Vercel may not issue the certificate.
+            # Behind a CNAME the AAAA answers are the target's, not in the way.
+            if not cname and not any(f["code"] == "proxied" for f in found):
+                aaaa = [d for t, d in await _doh(c, name, "AAAA") if t == 28]
+                if aaaa:
+                    found.append({"code": "ipv6-in-the-way", "says":
+                                  f"{name} also has an AAAA (IPv6) record ({', '.join(aaaa[:2])}). Delete it: "
+                                  "visitors on IPv6 still reach the old host, and Vercel may not issue the "
+                                  "certificate while it is there."})
             if kind == "subdomain" and not cname and not a:
                 doubled = f"{name}.{root}"
                 if [d for t, d in await _doh(c, doubled, "CNAME") if t == 5]:

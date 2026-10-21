@@ -129,17 +129,22 @@ def sign_in_through(app: Any, entry: dict, claims: dict[str, Any]) -> tuple[dict
     csrf = _csrf(b, base)
     status, body = b.json("POST", f"{base}/api/auth/signin/{entry['id']}",
                           form={"csrfToken": csrf, "callbackUrl": f"{base}/login", "json": "true"})
-    url = str(body.get("url") or "")
+    # A RELATIVE ANSWER IS THE APP'S OWN ADDRESS. Personal Finance answered
+    # "/login?callbackUrl=…" — sent back to its own sign-in page — and the
+    # check crashed on "unknown url type" instead of saying no session came
+    # of it (u8w3uw4j, 2026-10-21).
+    from urllib.parse import urljoin, urlsplit
+    url = urljoin(f"{base}/", str(body.get("url") or "")) if body.get("url") else ""
     if status != 200 or not url:
         return None, f"the sign-in could not be started ({status}: {str(body)[:160]})"
-    if "/login?error=" in url or url.rstrip("/").endswith("/login"):
+    if urlsplit(url).path.rstrip("/").endswith("/login"):
         return None, url
     # Out to the issuer and back: the issuer answers with a redirect to the
     # application's callback, which exchanges the code and sets the session.
     status, location, text = b.go("GET", url)
     if status not in (302, 303, 307) or not location:
         return None, f"the issuer did not send the person back ({status}: {text[:160]})"
-    status, location, text = b.go("GET", location)
+    status, location, text = b.go("GET", urljoin(url, location))
     if status not in (302, 303, 307):
         return None, f"the callback did not finish ({status}: {text[:200]})"
     where = location

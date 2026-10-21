@@ -177,29 +177,35 @@ _PLATFORM_REFRESH_FOUNDATION_FILES = (
 )
 
 
+_RIBBON = "\n        <TestRibbon />"
+_RIBBON_IMPORT = 'import { TestRibbon } from "@/components/TestRibbon";\n'
+#: The ribbon once put after a `<body>` written in a comment
+#: ("onto <html>/<body> before React hydrates") instead of the tag.
+_RIBBON_IN_COMMENT = re.compile(r"(//[^\n]*<body\b[^>\n]*>)\n        <TestRibbon />")
+
+
 def _ensure_test_ribbon(output_dir: Path) -> bool:
     """An app whose root layout predates the test version gets the ribbon in
-    its <body>, as a newly built one has it. True when the layout changed."""
+    its <body>, as a newly built one has it — the real tag, never a `<body>`
+    named in a comment; a ribbon once put into a comment is taken back out.
+    True when the layout changed."""
     layout = output_dir / "src" / "app" / "layout.tsx"
     if not layout.is_file():
         return False
-    text = layout.read_text("utf-8")
-    if "TestRibbon" in text:
+    before = layout.read_text("utf-8")
+    text = _RIBBON_IN_COMMENT.sub(r"\1", before)
+    if "<TestRibbon />" not in text:
+        for m in re.finditer(r"<body\b[^>]*>", text):
+            line = text[text.rfind("\n", 0, m.start()) + 1: m.start()].lstrip()
+            if line.startswith(("//", "*", "/*", "{/*")):
+                continue
+            text = text[: m.end()] + _RIBBON + text[m.end():]
+            break
+    if "<TestRibbon />" in text and _RIBBON_IMPORT.strip() not in text:
+        text = _RIBBON_IMPORT + text
+    if text == before:
         return False
-    # The real <body ...> tag, not the word in a comment: a layout may say "<html>/<body>" in a comment above it, and the
-    # first "<body" in the file is then inside that comment (the ribbon went there and the build failed on a syntax error).
-    found = None
-    for match in re.finditer(r"<body(?=[ >/])[^>]*>", text):
-        before = text[text.rfind(chr(10), 0, match.start()) + 1: match.start()]
-        if "//" in before or "/*" in before or before.lstrip().startswith("*"):
-            continue
-        found = match
-        break
-    if found is None:
-        return False
-    head, sep, body_open, after = text[: found.start()], "", found.group(0), text[found.end():]
-    import_line = 'import { TestRibbon } from "@/components/TestRibbon";\n'
-    layout.write_text(import_line + head + sep + body_open + "\n        <TestRibbon />" + after, "utf-8")
+    layout.write_text(text, "utf-8")
     return True
 
 
@@ -386,6 +392,12 @@ class VercelDeployProvider:
                 else:
                     r = await self.neon.create_project(name=snapshot.project_slug)
                     neon_project_id = r["project_id"]
+                    # THE PROJECT IS ON THE ROW BEFORE ANYTHING ELSE IS ASKED OF
+                    # IT: a failure in the next step must leave a row that names
+                    # it, so the retry reuses it instead of making another.
+                    row.neon_project_id = neon_project_id
+                    row.neon_branch_id = r.get("branch_id")
+                    await self._flush()
                 if snapshot.reset_test_data:
                     yield DeployEvent("provision_db", "Starting the test data again from demo data…")
                     await self.neon.drop_database(neon_project_id, envs.TEST_DATABASE)
@@ -458,15 +470,31 @@ class VercelDeployProvider:
             # Vercel environment are this side's; a row shared with the other
             # side is split first, so a test publish never changes production.
             targets = envs.env_targets(side)
-            mine = targets[0]
+            if side == envs.TEST and not await self._production_ready(vercel_project_id):
+                # A FIRST PUBLISH TO TEST IS BUILT AS PRODUCTION. Vercel makes a
+                # project's first deployment its production one whatever the
+                # request says; Personal Finance's first publish, to Test, was
+                # built without its test settings — "[reset-schema]
+                # DATABASE_URL missing" (u8w3uw4j, 2026-10-21). Until production
+                # has a version of its own, the test settings are both sides';
+                # the first production publish splits them off.
+                targets = ["preview", "production"]
             existing_by_key: dict[str, dict] = {}
             for e in existing_env:
                 k = e.get("key")
                 t = list(e.get("target") or [])
-                if not k or mine not in t:
+                if not k or not set(t) & set(targets):
+                    continue
+                if len(targets) > 1:
+                    # One row per setting for both sides: a second row of the
+                    # same name would be refused, so it goes.
+                    if k in existing_by_key and e.get("id"):
+                        await self.vercel.delete_env(vercel_project_id, e["id"])
+                    else:
+                        existing_by_key[k] = e
                     continue
                 if len(t) > 1 and e.get("id"):
-                    await self.vercel.set_env_target(vercel_project_id, e["id"], [x for x in t if x != mine])
+                    await self.vercel.set_env_target(vercel_project_id, e["id"], [x for x in t if x != targets[0]])
                     continue
                 existing_by_key[k] = e
 
@@ -716,6 +744,20 @@ class VercelDeployProvider:
                 f"Deployment timed out after {_POLL_CEILING_S} seconds",
             )
 
+        except asyncio.CancelledError:
+            # THE PLATFORM STOPPED UNDER IT (a restart, a cutover). The row is
+            # closed as interrupted rather than left at its last stage forever.
+            if row is not None and row.status not in ("succeeded", "succeeded_with_warnings", "failed"):
+                from services.deploy.runs import INTERRUPTED
+                row.status = "failed"
+                row.error = INTERRUPTED
+                row.finished_at = datetime.now(timezone.utc)
+                try:
+                    await self._flush()
+                except Exception:  # noqa: BLE001 — the restart wins; close_stale finishes the job
+                    pass
+            raise
+
         except Exception as exc:
             # Never let a raw traceback leak to the SSE stream.
             if row is not None:
@@ -788,6 +830,15 @@ class VercelDeployProvider:
         except Exception:
             await self.db.rollback()
             raise
+
+    async def _production_ready(self, vercel_project_id: str) -> bool:
+        """Whether the Vercel project has a production deployment that built."""
+        try:
+            proj = await self.vercel.get_project(vercel_project_id) or {}
+        except Exception:  # noqa: BLE001 — unknown is treated as none: both sides get the settings
+            return False
+        prod = (proj.get("targets") or {}).get("production") or {}
+        return str(prod.get("readyState") or "").upper() == "READY"
 
     async def _latest_prior_with_neon(
         self, snapshot: DeploySnapshot, environment: str | None = None

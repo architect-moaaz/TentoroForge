@@ -195,6 +195,11 @@ async def publish(
             raise HTTPException(400, "There is no live test version to promote. Publish to Test first.")
         side, promote_from = envs.PRODUCTION, str(tested.id)
     integrations = await _collect_integrations(project.org_id, db)
+    # The app's own switches go with it (`app_settings`): a publish is when a
+    # deployment's environment is set, so turning one on or off reaches the
+    # live app here.
+    from services import app_settings
+    integrations.update(app_settings.env_for(project.output_dir))
     snapshot = DeploySnapshot(
         project_id=str(project.id),
         project_slug=project.short_id,
@@ -207,35 +212,28 @@ async def publish(
         test_recipients=await _member_emails(project.org_id, db) if side == envs.TEST else (),
     )
 
-    provider = VercelDeployProvider(db=db)
+    # THE PUBLISH IS THE SERVER'S TO FINISH. It runs on its own task and its
+    # own session (the request's closes with the response); this response only
+    # relays its progress, so a dialog closed half-way no longer cancels the
+    # publish and strands its row at "snapshot" (`services.deploy.runs`).
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    from services.deploy import runs
 
-    async def stream():
+    async def publish_then_phone_app(own):
         went_live = False
-        try:
-            async for evt in provider.publish(snapshot):
-                went_live = went_live or evt.stage == "done"
-                payload = {
-                    "stage": evt.stage,
-                    "message": evt.message,
-                    "progress": evt.progress,
-                    "data": evt.data,
-                }
-                yield f"data: {json.dumps(payload)}\n\n"
-            if went_live and side == envs.PRODUCTION:
-                # A PWA's phone app is built once, when it first reaches production, and the Mobile tab offers the install.
-                # It never fails the publish: the app is live whatever happens here.
-                from services import mobile_autobuild
-                await mobile_autobuild.start_phone_app(project.id, user.id)
-        except Exception as exc:
-            # Belt-and-suspenders — the provider promises to catch its
-            # own errors, but if something slips through, emit a final
-            # error frame so the UI doesn't hang on a dead stream.
-            log.exception("publish stream leaked exception")
-            err = {"stage": "error", "message": str(exc)}
-            yield f"data: {json.dumps(err)}\n\n"
+        async for evt in VercelDeployProvider(db=own).publish(snapshot):
+            went_live = went_live or evt.stage == "done"
+            yield evt
+        if went_live and side == envs.PRODUCTION:
+            # A PWA's phone app is built once, when it first reaches production, and the Mobile tab offers the install.
+            # It never fails the publish: the app is live whatever happens here.
+            from services import mobile_autobuild
+            await mobile_autobuild.start_phone_app(project.id, user.id)
+
+    queue = runs.start(publish_then_phone_app, async_sessionmaker(db.bind, expire_on_commit=False))
 
     return StreamingResponse(
-        stream(),
+        runs.frames(queue),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache, no-transform",
@@ -278,6 +276,8 @@ async def latest_deployment(
     SSE stream closes (to reconcile if the network dropped the terminal
     frame). DB is source of truth — SSE is best-effort progress."""
     await _require_project(project_id, user, db)
+    from services.deploy.runs import close_stale
+    await close_stale(db, project_id)
     conditions = [Deployment.project_id == project_id]
     if environment:
         conditions.append(Deployment.environment == environment)
@@ -314,6 +314,8 @@ async def list_deployments(
     a human, not a uuid). `duration_seconds` is null while a row is
     still running."""
     await _require_project(project_id, user, db)
+    from services.deploy.runs import close_stale
+    await close_stale(db, project_id)
     res = await db.execute(
         select(Deployment)
         .where(Deployment.project_id == project_id)
@@ -390,7 +392,9 @@ async def publish_status(
     has changed since it was tried on Test (`untested_changes`) or Test runs a
     newer version than production (`test_ahead`)."""
     from services.deploy import environments as envs
+    from services.deploy.runs import close_stale
     project = await _require_project(project_id, user, db)
+    await close_stale(db, project.id)
     test = await _latest_live(db, project.id, envs.TEST)
     prod = await _latest_live(db, project.id, envs.PRODUCTION)
     current = None

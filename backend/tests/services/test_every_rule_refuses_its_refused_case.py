@@ -63,10 +63,14 @@ def test_a_refusal_is_green_an_acceptance_is_red(monkeypatch):
     seen = []
     bench = SimpleNamespace(app=lambda: SimpleNamespace(base="http://x"))
     out = rt.refuse_rules(DOC, bench, _client(seen), records={"Product": [{"id": "p-1", "label": "Lamp"}]})
-    assert out["total"] == 3
+    # Two rules gate a process and are tried; the third gates none, so no
+    # trial can judge it: skipped with the reason, outside the total — not
+    # "untried", which would read as the check's own failure (Mark 8, 2026-10-16).
+    assert out["total"] == 2
     assert [g["id"] for g in out["green"]] == ["RULE-001"] and "refuses it" in out["green"][0]["why"]
     assert [r["id"] for r in out["red"]] == ["RULE-002"] and "accepts what the rule says to refuse" in out["red"][0]["why"]
-    assert [u["id"] for u in out["untried"]] == ["RULE-003"]
+    assert out["untried"] == []
+    assert [u["id"] for u in out["skipped"]] == ["RULE-003"] and "gates no process" in out["skipped"][0]["why"]
     assert runs[0] == {"workflow": "FLOW-001", "input": {"product": "p-1", "quantity": 999}, "as": "Buyer"}
     shown = seen[0]["rules"]
     assert shown[0]["refusedCase"] == "quantity 999 of a product with stock 3"    # the reference's case is used
@@ -83,4 +87,5 @@ def test_a_process_that_breaks_instead_of_refusing_is_red_and_a_down_app_is_untr
         raise trials.TrialUnavailable("next dev would not start")
     out = rt.refuse_rules(DOC, SimpleNamespace(app=down), _client([]))
     assert out["green"] == [] and out["red"] == []
-    assert sorted(u["id"] for u in out["untried"]) == ["RULE-001", "RULE-002", "RULE-003"]
+    assert sorted(u["id"] for u in out["untried"]) == ["RULE-001", "RULE-002"]   # the two a trial could reach
+    assert [u["id"] for u in out["skipped"]] == ["RULE-003"]                      # gates no process: nothing to try

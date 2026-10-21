@@ -16,7 +16,7 @@ export function when(iso: string | null | undefined): string {
 }
 
 export function PeopleTable({
-  rows, selfId, onDisable, onEnable, onGrant, onRevoke, onImpersonate, onWatchLive,
+  rows, selfId, onDisable, onEnable, onGrant, onRevoke, onImpersonate, onWatchLive, onRemove,
 }: {
   rows: AdminPerson[];
   selfId: string;
@@ -26,6 +26,8 @@ export function PeopleTable({
   onRevoke: (p: AdminPerson) => void;
   onImpersonate: (p: AdminPerson) => void;
   onWatchLive?: (p: AdminPerson) => void;
+  /** Remove the login for good (typed confirmation in the page). */
+  onRemove?: (p: AdminPerson) => void;
 }) {
   return (
     <Table>
@@ -76,6 +78,14 @@ export function PeopleTable({
                       {p.platform_role === "super_admin"
                         ? <DropdownMenuItem onClick={() => onRevoke(p)}>Revoke super admin</DropdownMenuItem>
                         : <DropdownMenuItem onClick={() => onGrant(p)}>Grant super admin</DropdownMenuItem>}
+                      {onRemove && p.platform_role !== "super_admin" && (
+                        <>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => onRemove(p)}>
+                            Remove login…
+                          </DropdownMenuItem>
+                        </>
+                      )}
                     </DropdownMenuContent>
                   </DropdownMenu>
                 )}

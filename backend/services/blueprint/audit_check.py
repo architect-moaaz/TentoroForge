@@ -77,7 +77,9 @@ def check_audit(app: Any, doc: dict, *, cancelled: Callable[[], bool] = lambda: 
     else:
         ent, slug, rid, row = picked
         label = str(ent.get("labelField") or "")
-        body = {label: row.get(label)} if label and label in row else {}
+        # The label set to the value it holds. Never `id` — the API strips it,
+        # and an empty save was the engine's `set where` 500 (pah7lhfz).
+        body = {label: row.get(label)} if label and label != "id" and row.get(label) is not None else {}
         before = _rows(app, "select count(*) from forge_audit")
         status, _loc, text = _http(app, "PUT", f"/api/data/{slug}/{rid}", body, admin)
         if status == 422 and "reason is required" in text:

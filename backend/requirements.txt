@@ -118,3 +118,5 @@ openpyxl>=3.1.0
 # The IANA zone database. Windows and slim containers have none of their own, and without it every zone name (even UTC) is
 # "not an IANA zone": a workflow with a schedule is refused and the app's pages are never composed.
 tzdata>=2024.1
+# Requirements documents attached as PDF (services/document_text.py). Pure Python.
+pypdf>=4.2.0

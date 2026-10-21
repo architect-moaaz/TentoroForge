@@ -48,9 +48,25 @@ import {
   Send,
   SkipForward,
   XCircle,
+  Check,
+  FileCode2,
+  FileText,
+  MessageSquare,
+  X,
 } from "lucide-react";
+import { toast } from "sonner";
+import {
+  defaultPicturePurpose,
+  documentChipLabel,
+  isDocumentFile,
+  nextDesignation,
+  purposeLabel,
+  type AttachedDocument,
+  type AttachedPicture,
+} from "./attachedDocuments";
 import ReactMarkdown from "react-markdown";
 import { MarkdownLink } from "@/components/chat/MarkdownLink";
+import { SelfHealCard, type SelfHealMetadata } from "@/components/chat/SelfHealCard";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 import { ReviewWindow } from "@/components/smith/ReviewWindow";
@@ -160,6 +176,9 @@ function notifyDone(awaitingApproval: boolean, ranAnything: boolean): void {
 interface Message {
   role: "user" | "smith";
   text: string;
+  /** The server's word for the message: "progress" is said while a turn
+   *  runs and is drawn quieter than an answer. */
+  status?: string;
   /** When the turn arrived, so the transcript reads as a conversation.
    *  Client-side: the server persists no turn, so there is no other clock. */
   at?: number;
@@ -176,6 +195,30 @@ interface Message {
   options?: string[];
   /** What the turn changed in the Blueprint, if anything. */
   diffSummary?: string;
+  /** The transcript row's id: a row the server rewrites (a self-heal that
+   *  started and then finished) replaces what is shown, never sits beside it. */
+  id?: string;
+  /** A self-heal of an error the running app hit — drawn as its own card. */
+  selfHeal?: SelfHealMetadata;
+}
+
+/** A transcript row as the panel shows it. */
+function messageOf(r: Record<string, unknown>): Message {
+  const meta = (r.metadata ?? {}) as Record<string, unknown>;
+  const heal = meta.self_heal === true && typeof meta.status === "string"
+    ? (meta as unknown as SelfHealMetadata) : undefined;
+  return {
+    id: r.id != null ? String(r.id) : undefined,
+    role: r.role === "user" ? ("user" as const) : ("smith" as const),
+    text: String(r.content ?? ""),
+    options: (meta.options as string[]) ?? undefined,
+    diffSummary: (meta.diffSummary as string) || undefined,
+    // A heal's status is its own (in_progress, resolved…), not the
+    // transcript's "progress"; it lives on `selfHeal`.
+    status: heal ? undefined : (meta.status as string) || undefined,
+    at: r.created_at ? Date.parse(String(r.created_at)) : Date.now(),
+    selfHeal: heal,
+  };
 }
 
 interface ArchitectTurn {
@@ -198,6 +241,8 @@ export interface SmithPanelProps {
   /** Told when a run finishes, so the preview pane can refresh itself. */
   onRunComplete?: () => void;
   className?: string;
+  /** False where the page names Smith itself (the project workspace). */
+  showHeader?: boolean;
 }
 
 /**
@@ -210,6 +255,74 @@ export interface SmithPanelProps {
  * visible. Compact on purpose — the bubble is a chat message, not a
  * document — so headings are flattened to bold and lists sit tight.
  */
+function clock(at: number): string {
+  return new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+/** How a message is drawn: the person's, a line said while a turn runs, a
+ *  change with the files it touched, or Smith's words. */
+/** A receipt line — "Changed `src/app/globals.css`: …", "Removed **Tax**…" —
+ *  is a change even when no file list came with it. */
+const RECEIPT = /^(Changed|Added|Removed|Rewrote|Renamed|Restyled|Laid out|Edited)\b/;
+
+function kindOf(m: Message): "user" | "progress" | "update" | "heal" | "smith" {
+  if (m.role === "user") return "user";
+  if (m.selfHeal) return "heal";
+  if (m.status === "progress" || /^Still (at it|working on it|checking)/.test(m.text)) return "progress";
+  if (m.diffSummary || RECEIPT.test(m.text)) return "update";
+  return "smith";
+}
+
+/** The files a receipt names in code spans: `src/app/globals.css`. */
+function filesNamed(text: string): string[] {
+  const out: string[] = [];
+  for (const m of text.matchAll(/`([^`\s]+\/[^`\s]+\.[a-z0-9]+)`/gi)) if (!out.includes(m[1])) out.push(m[1]);
+  return out;
+}
+
+/** A change as a card: a tick, its first line as the title, the rest as
+ *  prose, and the files it touched in their own box (§71). */
+function UpdateCard({ text, files }: { text: string; files: string }) {
+  const [first, ...rest] = text.split("\n");
+  // "Changed `globals.css`: make the background dark blue." → title "Changed
+  // globals.css", body "Make the background dark blue."
+  const m = /^((?:Changed|Added|Removed|Rewrote|Renamed|Restyled|Laid out|Edited)\b[^:]{0,80}):\s*([\s\S]*)$/.exec(first);
+  const title = (m ? m[1] : first).replace(/\*\*/g, "").replace(/`/g, "").replace(/[.:]\s*$/, "");
+  const lead = m ? m[2].charAt(0).toUpperCase() + m[2].slice(1) : "";
+  const body = [lead, ...rest].join("\n").trim();
+  const list = files.split(/,\s*|\n/).map((f) => f.trim()).filter(Boolean);
+  return (
+    <div>
+      <div className="flex items-start gap-3">
+        <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white">
+          <Check className="h-3.5 w-3.5" />
+        </span>
+        <div className="min-w-0">
+          <div className="text-[15px] font-semibold leading-tight">{title}</div>
+        </div>
+      </div>
+      {body && (
+        <div className="mt-3">
+          <SmithProse text={body} />
+        </div>
+      )}
+      {list.length > 0 && (
+        <div className="mt-3 flex gap-3 rounded-lg bg-blue-50 px-3 py-2.5 dark:bg-blue-950/40">
+          <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200">
+            <FileCode2 className="h-3.5 w-3.5" />
+          </span>
+          <div className="min-w-0 text-xs">
+            <div className="font-semibold text-foreground">Files changed</div>
+            <ul className="mt-0.5 space-y-0.5 text-muted-foreground">
+              {list.map((f) => <li key={f} className="truncate font-mono">{f}</li>)}
+            </ul>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SmithProse({ text }: { text: string }) {
   return (
     <div
@@ -244,6 +357,7 @@ export function SmithPanel({
   blueprint,
   onRunComplete,
   className,
+  showHeader = true,
 }: SmithPanelProps) {
   const { run, start, stop } = useBlueprintRun(projectId);
   // THE TWO REVIEWS — requirements, then the product model. Re-read whenever
@@ -275,21 +389,21 @@ export function SmithPanel({
       const rows = (await res.json()) as Array<Record<string, unknown>>;
       if (!Array.isArray(rows)) return;
       setMessages((cur) => {
-        const seen = new Set(cur.map((m) => `${m.role}\u0000${m.text}`));
-        const add = rows
-          .filter((r) => String(r.content ?? "").trim())
-          .map((r) => {
-            const meta = (r.metadata ?? {}) as Record<string, unknown>;
-            return {
-              role: r.role === "user" ? ("user" as const) : ("smith" as const),
-              text: String(r.content ?? ""),
-              options: (meta.options as string[]) ?? undefined,
-              diffSummary: (meta.diffSummary as string) || undefined,
-              at: r.created_at ? Date.parse(String(r.created_at)) : Date.now(),
-            };
-          })
-          .filter((m) => !seen.has(`${m.role}\u0000${m.text}`));
-        return add.length ? [...cur, ...add] : cur;
+        const fresh = rows.filter((r) => String(r.content ?? "").trim()).map(messageOf);
+        const byId = new Map(fresh.filter((m) => m.id).map((m) => [m.id!, m]));
+        // A row shown already is replaced by what the server says now: the
+        // "Fixing…" heal card becomes its outcome in place.
+        let changed = false;
+        const next = cur.map((m) => {
+          const now = m.id ? byId.get(m.id) : undefined;
+          if (!now || (now.text === m.text && now.selfHeal?.status === m.selfHeal?.status)) return m;
+          changed = true;
+          return { ...m, ...now };
+        });
+        const shown = new Set(next.map((m) => m.id).filter(Boolean));
+        const seen = new Set(next.map((m) => `${m.role}\u0000${m.text}`));
+        const add = fresh.filter((m) => !(m.id && shown.has(m.id)) && !seen.has(`${m.role}\u0000${m.text}`));
+        return add.length ? [...next, ...add] : changed ? next : cur;
       });
     } catch {
       /* a missed sync is not an error — a reload still recovers it */
@@ -300,15 +414,21 @@ export function SmithPanel({
   // read it every few seconds so each "fixed" line arrives as it is said;
   // once more when they end, for the closing line.
   const checksActive = Boolean(run.checks?.active);
+  // A SELF-HEAL STARTS ON ITS OWN — the running app hit an error — so the
+  // transcript is read now and then even when nothing here is running, and
+  // every few seconds while a heal is under way, so its card turns into the
+  // outcome without a reload.
+  const healing = messages.some((m) => m.selfHeal?.status === "in_progress");
   useEffect(() => {
     if (!projectId) return;
-    if (!checksActive) {
+    if (!checksActive && !healing) {
       void syncTranscript();
-      return;
+      const idle = setInterval(() => void syncTranscript(), 45000);
+      return () => clearInterval(idle);
     }
     const timer = setInterval(() => void syncTranscript(), 10000);
     return () => clearInterval(timer);
-  }, [projectId, checksActive, syncTranscript]);
+  }, [projectId, checksActive, healing, syncTranscript]);
 
   // Fire `onRunComplete` once per run, not on every render that follows it.
   useEffect(() => {
@@ -484,16 +604,7 @@ export function SmithPanel({
         if (!live || !Array.isArray(rows) || rows.length === 0) return;
         const past: Message[] = rows
           .filter((r) => String(r.content ?? "").trim())
-          .map((r) => {
-            const meta = (r.metadata ?? {}) as Record<string, unknown>;
-            return {
-              role: r.role === "user" ? ("user" as const) : ("smith" as const),
-              text: String(r.content ?? ""),
-              at: r.created_at ? Date.parse(String(r.created_at)) : undefined,
-              options: (meta.options as string[]) ?? undefined,
-              diffSummary: (meta.diffSummary as string) || undefined,
-            };
-          });
+          .map(messageOf);
         setMessages((m) => (m.length ? m : past));
       })
       .catch(() => undefined);
@@ -525,48 +636,99 @@ export function SmithPanel({
   // changed by talking, so the button brings the cursor here.
   const composerRef = useRef<HTMLTextAreaElement>(null);
 
-  const [shown, setShown] = useState<{ id: string; name: string }[]>([]);
+  // PICTURES — screenshots, reference designs — sent with the next message.
+  // Each says whether it is a design to follow or a picture of a problem.
+  const [pictures, setPictures] = useState<AttachedPicture[]>([]);
+  // REQUIREMENTS DOCUMENTS — a BRD, a PRD — read on upload and sent with the
+  // next message, where their text joins what the definition reads.
+  const [docs, setDocs] = useState<AttachedDocument[]>([]);
   const [listening, setListening] = useState(false);
+
+  const authHeaders = (): Record<string, string> => {
+    const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  };
+
+  // DESIGNATED, not merely uploaded. Designation is how someone says a file
+  // is direction rather than a bug report, and it is what the build's design
+  // agents read. Merged into what the project already holds, so a reload or a
+  // second message does not drop the references chosen before.
+  const syncDesignation = async (changed: { id: string; purpose?: string }[]) => {
+    if (!projectId || changed.length === 0) return;
+    const url = `${API_BASE}/api/projects/${projectId}/design-references`;
+    try {
+      const now = await authFetch(url, { headers: authHeaders(), credentials: "include" })
+        .then((r) => (r.ok ? r.json() : { attachment_ids: [] }))
+        .catch(() => ({ attachment_ids: [] }));
+      await authFetch(url, {
+        method: "PUT",
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ attachment_ids: nextDesignation(now.attachment_ids ?? [], changed) }),
+      });
+    } catch {
+      /* the upload survived; changing the chip's purpose tries again */
+    }
+  };
 
   const attach = async (files: File[]) => {
     if (!projectId || files.length === 0) return;
-    const token =
-      typeof window !== "undefined" ? localStorage.getItem("token") : null;
-    const headers: Record<string, string> = token
-      ? { Authorization: `Bearer ${token}` }
-      : {};
-    const added: { id: string; name: string }[] = [];
+    const headers = authHeaders();
+    const appBuilt = Boolean(
+      ((blueprint ?? {}) as { runtime?: { build?: unknown } }).runtime?.build,
+    );
+    const added: AttachedPicture[] = [];
+    const read: AttachedDocument[] = [];
     for (const f of files) {
       const body = new FormData();
       body.append("file", f);
+      // A document is read before the upload answers; a scanned PDF is
+      // transcribed, which can take a minute, so the wait is said.
+      const reading = isDocumentFile(f.name) ? toast.loading(`Reading ${f.name}…`) : undefined;
       try {
         const r = await fetch(
           `${API_BASE}/api/projects/${projectId}/attachments`,
           { method: "POST", headers, credentials: "include", body },
         );
-        if (!r.ok) continue;
+        // A REFUSAL IS SAID. It used to be skipped in silence, so a file the
+        // server would not take looked, from the composer, like one it had.
+        if (!r.ok) {
+          const why = await r.json().catch(() => null);
+          toast.error(typeof why?.detail === "string" ? why.detail : `${f.name} could not be attached.`);
+          continue;
+        }
         const rec = await r.json();
-        if (rec?.id) added.push({ id: String(rec.id), name: f.name });
+        if (!rec?.id) continue;
+        if (rec.document) {
+          const pdf = rec.kind === "pdf";
+          if (rec.unreadable) toast.warning(String(rec.unreadable));
+          if (rec.unreadable && !pdf) continue;
+          read.push({ id: String(rec.id), name: f.name, pages: rec.pages ?? null, truncated: !!rec.truncated,
+                      transcribed: !!rec.transcribed, canBeDesign: pdf, unreadable: !!rec.unreadable,
+                      purpose: rec.looks_like_design ? "design" : "requirements" });
+          continue;
+        }
+        if (rec.kind === "image") {
+          added.push({ id: String(rec.id), name: f.name, purpose: defaultPicturePurpose(appBuilt) });
+        }
       } catch {
-        /* one attachment that will not upload is not a failed conversation */
+        toast.error(`${f.name} could not be attached.`);
+      } finally {
+        if (reading !== undefined) toast.dismiss(reading);
       }
     }
-    if (added.length === 0) return;
-    const next = [...shown, ...added];
-    setShown(next);
-    // DESIGNATED, not merely uploaded. Most attachments are bug reports;
-    // designation is how someone says this one is direction, and it is what
-    // the generation reads.
-    try {
-      await authFetch(`${API_BASE}/api/projects/${projectId}/design-references`, {
-        method: "PUT",
-        headers: { ...headers, "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ attachment_ids: next.map((a) => a.id) }),
-      });
-    } catch {
-      /* the upload survived; the designation can be retried by re-attaching */
-    }
+    if (read.length) setDocs((d) => [...d, ...read]);
+    if (added.length) setPictures((p) => [...p, ...added]);
+    await syncDesignation([...added, ...read]);
+  };
+
+  const setPicturePurpose = (id: string, purpose: AttachedPicture["purpose"]) => {
+    setPictures((all) => all.map((p) => (p.id === id ? { ...p, purpose } : p)));
+    void syncDesignation([{ id, purpose }]);
+  };
+  const setDocumentPurpose = (id: string, purpose: "requirements" | "design") => {
+    setDocs((all) => all.map((d) => (d.id === id ? { ...d, purpose } : d)));
+    void syncDesignation([{ id, purpose }]);
   };
 
   /**
@@ -624,6 +786,7 @@ export function SmithPanel({
         text: x.text,
         options: x.options,
         diffSummary: x.diffSummary,
+        status: x.status,
         at: Date.now(),
       })),
     ]);
@@ -670,9 +833,14 @@ export function SmithPanel({
       // with every message and was dropped there.
       const prior = messages.slice(-SENT_HISTORY).map((m) => ({ role: m.role, text: m.text }));
       setMessages((m) => [...m, { role: "user", text, at: Date.now() }]);
-      void start({ description: text, evidence, history: prior });
+      const attachmentIds = [...docs.map((d) => d.id), ...pictures.map((p) => p.id)];
+      void start({ description: text, evidence, history: prior, attachmentIds });
+      // Sent: the server keeps the documents beside the app, and the designs
+      // among the references, from here on.
+      if (docs.length) setDocs([]);
+      if (pictures.length) setPictures([]);
     },
-    [projectId, messages, evidence, start],
+    [projectId, messages, evidence, start, docs, pictures],
   );
 
   const send = () => {
@@ -827,15 +995,20 @@ export function SmithPanel({
         at what it built; renders nothing until a review starts. */}
     <ReviewWindow review={run.review} />
     <div className="flex h-full min-w-0 flex-1 flex-col border-l bg-background">
-      <header className="flex items-center justify-between border-b px-4 py-3">
-        <div>
-          <h2 className="text-sm font-semibold">Smith</h2>
-          <p className="text-xs text-muted-foreground">Application architect</p>
-        </div>
+      {/* THE PANEL'S OWN HEADER is for the pages that mount Smith as a side
+          column. The project workspace names Smith on every turn instead
+          (`showHeader={false}`) and keeps only the Stop control. */}
+      <header className={cn("flex items-center justify-between px-4", showHeader ? "border-b py-3" : "py-0")}>
+        {showHeader ? (
+          <div>
+            <h2 className="text-sm font-semibold">Smith</h2>
+            <p className="text-xs text-muted-foreground">Application architect</p>
+          </div>
+        ) : <span />}
         {(busy || run.checks?.active) && (
           <button
             onClick={stop}
-            className="text-xs text-muted-foreground hover:text-foreground"
+            className={cn("text-xs text-muted-foreground hover:text-foreground", !showHeader && "mt-2 rounded-md border px-2 py-1")}
           >
             Stop
           </button>
@@ -907,7 +1080,7 @@ export function SmithPanel({
         {messages.map((m, i) => (
           <div
             key={i}
-            className={cn("max-w-[90%]", m.role === "user" && "ml-auto")}
+            className={cn("max-w-[90%]", m.role === "user" && "ml-auto w-fit")}
           >
             {/*
               WHO SAID IT AND WHEN. The transcript was bare bubbles, so a
@@ -917,24 +1090,25 @@ export function SmithPanel({
               not relabelled — a run of Smith's turns reads as one voice.
             */}
             {!m.plan && (i === 0 || messages[i - 1].role !== m.role) && (
-              <div
-                className={cn(
-                  "mb-1 flex items-baseline gap-2 text-xs",
-                  m.role === "user" && "justify-end",
-                )}
-              >
-                <span className="font-medium">
-                  {m.role === "user" ? "You" : "Smith"}
-                </span>
-                {m.at && (
-                  <span className="tabular-nums text-muted-foreground">
-                    {new Date(m.at).toLocaleTimeString([], {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
+              m.role === "user" ? (
+                <div className="mb-1 flex items-baseline justify-end gap-2 text-xs">
+                  <span className="font-medium">You</span>
+                  {m.at && <span className="tabular-nums text-muted-foreground">{clock(m.at)}</span>}
+                </div>
+              ) : (
+                // SMITH, AS A COLLEAGUE: a mark, a name, what it is, and when.
+                <div className="mb-1.5 flex items-center gap-3">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-900 text-white shadow-sm dark:bg-white dark:text-slate-900">
+                    <MessageSquare className="h-4 w-4" />
                   </span>
-                )}
-              </div>
+                  <span className="leading-tight">
+                    <span className="block text-sm font-semibold">Smith</span>
+                    <span className="block text-xs text-muted-foreground">
+                      Application architect{m.at ? ` · ${clock(m.at)}` : ""}
+                    </span>
+                  </span>
+                </div>
+              )
             )}
             {m.plan?.awaitingApproval ? (
               // THE BLUEPRINT'S CARD. A definition is the one plan whose
@@ -994,23 +1168,22 @@ export function SmithPanel({
             ) : (
             <div
               className={cn(
-                "rounded-lg px-3 py-2 text-sm",
-                m.role === "user"
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-muted",
+                "text-sm",
+                kindOf(m) === "user" && "rounded-xl bg-blue-600 px-4 py-2.5 text-white shadow-sm",
+                kindOf(m) === "progress" && "ml-[52px] rounded-lg bg-muted/60 px-3 py-2 text-[13px] text-muted-foreground",
+                (kindOf(m) === "update" || kindOf(m) === "heal") && "ml-[52px] rounded-xl border bg-card p-4 shadow-sm",
+                kindOf(m) === "smith" && "ml-[52px] rounded-xl bg-muted/60 px-4 py-3",
               )}
             >
-            {m.role === "user" ? (
+            {kindOf(m) === "user" ? (
               <p className="whitespace-pre-wrap">{m.text}</p>
+            ) : kindOf(m) === "heal" && m.selfHeal ? (
+              <SelfHealCard metadata={m.selfHeal} createdAt={m.at} />
+            ) : kindOf(m) === "update" ? (
+              // A CHANGE, AS A CARD: what it did, then the files it touched.
+              <UpdateCard text={m.text} files={m.diffSummary || filesNamed(m.text).join(", ")} />
             ) : (
               <SmithProse text={m.text} />
-            )}
-
-            {m.diffSummary && (
-              // §71 — what the change touched, before it is believed.
-              <p className="mt-1 border-t border-current/15 pt-1 text-xs opacity-80">
-                {m.diffSummary}
-              </p>
             )}
 
             {m.options && m.options.length > 0 && (
@@ -1069,26 +1242,69 @@ export function SmithPanel({
       </div>
 
       <div className="border-t p-3">
-        {shown.length > 0 && (
-          <div className="mb-2 flex flex-wrap gap-1">
-            {shown.map((a) => (
+        {docs.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-1" data-attached-documents="">
+            {docs.map((d) => (
               <span
-                key={a.id}
+                key={d.id}
                 className="flex items-center gap-1 rounded bg-muted px-2 py-0.5 text-xs"
-                title="Read as design direction by the next generation"
+                title={d.purpose === "design" ? "A design — its pages are shown to Smith and the design agents"
+                                              : "Read — goes with your next message"}
               >
-                <ImageIcon className="h-3 w-3" />
-                {a.name}
+                {d.purpose === "design" ? <ImageIcon className="h-3 w-3" /> : <FileText className="h-3 w-3" />}
+                {documentChipLabel(d)}
+                {d.canBeDesign && (
+                  <button type="button" data-purpose={d.purpose}
+                          className="rounded border px-1 text-[10px] text-muted-foreground hover:bg-background"
+                          title="Is this PDF requirements to read, or a design to follow? Click to change."
+                          onClick={() => setDocumentPurpose(d.id, d.purpose === "design" ? "requirements" : "design")}>
+                    {purposeLabel(d.purpose ?? "requirements")}
+                  </button>
+                )}
+                <button type="button" aria-label={`Remove ${d.name}`} className="ml-0.5 opacity-60 hover:opacity-100"
+                        onClick={() => {
+                          setDocs((all) => all.filter((x) => x.id !== d.id));
+                          void syncDesignation([{ id: d.id }]);
+                        }}>
+                  <X className="h-3 w-3" />
+                </button>
               </span>
             ))}
           </div>
         )}
-        <div className="flex items-end gap-2">
+        {pictures.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-1" data-attached-pictures="">
+            {pictures.map((a) => (
+              <span
+                key={a.id}
+                className="flex items-center gap-1 rounded bg-muted px-2 py-0.5 text-xs"
+                title="Shown to Smith with your next message"
+              >
+                <ImageIcon className="h-3 w-3" />
+                {a.name}
+                <button type="button" data-purpose={a.purpose}
+                        className="rounded border px-1 text-[10px] text-muted-foreground hover:bg-background"
+                        title="A design to follow (the app is built to look like it), or a picture of a problem? Click to change."
+                        onClick={() => setPicturePurpose(a.id, a.purpose === "design" ? "problem" : "design")}>
+                  {purposeLabel(a.purpose)}
+                </button>
+                <button type="button" aria-label={`Remove ${a.name}`} className="ml-0.5 opacity-60 hover:opacity-100"
+                        onClick={() => {
+                          setPictures((all) => all.filter((x) => x.id !== a.id));
+                          void syncDesignation([{ id: a.id }]);
+                        }}>
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        <div className="flex items-center gap-2">
           <label
-            className="cursor-pointer rounded-md border p-2 text-muted-foreground hover:bg-muted"
-            title="Attach a screenshot, a design, or a spreadsheet to load in"
+            className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-xl border text-muted-foreground hover:bg-muted"
+            title="Attach a requirements document (Word, PDF), a screenshot, a design, or a spreadsheet to load in"
           >
-            <Paperclip className="h-4 w-4" />
+            <Paperclip className="h-[18px] w-[18px]" />
             {/* A SPREADSHEET IS THE POINT OF THE PAPERCLIP for an owner who
                 already has a business: they attach customers.xlsx and say
                 "load it in" (services/smith/data_import.py). Leaving the sheet
@@ -1097,7 +1313,7 @@ export function SmithPanel({
             <input
               type="file"
               multiple
-              accept="image/png,image/jpeg,image/webp,image/gif,.txt,.md,.markdown,.csv,.tsv,.xlsx"
+              accept="image/png,image/jpeg,image/webp,image/gif,.txt,.md,.markdown,.csv,.tsv,.xlsx,.docx,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
               className="hidden"
               disabled={busy}
               onChange={(e) => {
@@ -1114,13 +1330,13 @@ export function SmithPanel({
               aria-label="Dictate"
               title="Speak instead of typing"
               className={cn(
-                "rounded-md border p-2 hover:bg-muted",
+                "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border hover:bg-muted",
                 listening
                   ? "animate-pulse border-primary text-primary"
                   : "text-muted-foreground",
               )}
             >
-              <Mic className="h-4 w-4" />
+              <Mic className="h-[18px] w-[18px]" />
             </button>
           )}
           <textarea
@@ -1133,20 +1349,20 @@ export function SmithPanel({
                 void send();
               }
             }}
-            rows={2}
+            rows={1}
             disabled={busy}
             placeholder={
-              busy ? "Building…" : "Describe the application, or a change to it"
+              busy ? "Building…" : "Describe the application, or a change to it…"
             }
-            className="flex-1 resize-none rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
+            className="min-h-11 flex-1 resize-none rounded-xl border bg-background px-4 py-[11px] text-sm leading-5 outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
           />
           <button
             onClick={() => void send()}
             disabled={busy || !draft.trim()}
-            className="rounded-md bg-primary p-2 text-primary-foreground disabled:opacity-40"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm hover:bg-blue-700 disabled:opacity-40"
             aria-label="Send"
           >
-            <Send className="h-4 w-4" />
+            <Send className="h-[18px] w-[18px]" />
           </button>
         </div>
       </div>
@@ -1240,6 +1456,10 @@ export function SmithPanel({
             status={summaryStatus}
             onBuild={approve}
             onEdit={() => composerRef.current?.focus()}
+            onAddPage={() => {
+              setDraft((d) => d || "Add a page that ");
+              composerRef.current?.focus();
+            }}
             className="min-h-0 flex-1"
           />
         </>
@@ -1527,6 +1747,7 @@ export function ThinkingTrail({
   // labelled from the same table the build stage list uses.
   const steps = thoughts.filter((t) => t.kind === "step");
   const last = thoughts[thoughts.length - 1];
+  const SHOWN_STEPS = 6;
 
   // THE THINKING, SHOWN AS THINKING. The model's reasoning streams in as
   // fragments; joined, it is what Smith is weighing right now. It was hidden
@@ -1560,9 +1781,14 @@ export function ThinkingTrail({
   // describe the wrong half of the turn.
   const running = nodes.find((n) => n.state === "running");
   const stepNode = last?.kind === "step" ? last.node : undefined;
+  // A narrated step ("Opening /orders as Manager…", "Checking the pages this
+  // change reaches…") is already the action, in the present tense; the header
+  // says it rather than "Thinking" over it.
+  const stepText = last?.kind === "step" && !last.node ? last.text.replace(/[.…]+$/, "").trim() : "";
   const activity =
     (running && (STAGE_VERB[running.key] ?? labelFor(running.key))) ||
     (stepNode && (STAGE_VERB[stepNode] ?? labelFor(stepNode))) ||
+    stepText ||
     "Thinking";
 
   return (
@@ -1588,7 +1814,15 @@ export function ThinkingTrail({
           )}
         </div>
       )}
-      {steps.map((t, i) => (
+      {/* A long turn narrates every step; the trail keeps the last few in
+          view so the compose bar is never pushed off-screen, and says how
+          many came before. */}
+      {steps.length > SHOWN_STEPS + 2 && (
+        <p className="text-xs text-muted-foreground/70">
+          … {steps.length - SHOWN_STEPS} earlier steps
+        </p>
+      )}
+      {steps.slice(steps.length > SHOWN_STEPS + 2 ? -SHOWN_STEPS : 0).map((t, i) => (
         // Deterministic work, so it reads as status rather than thought —
         // upright, and labelled from the same table the stage list uses.
         <p key={i} className="flex items-center gap-1.5 text-xs text-muted-foreground">

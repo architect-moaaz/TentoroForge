@@ -73,11 +73,34 @@ class NeedsWorkflowError(ComposeError):
             "only changes records through a workflow, so nothing was faked in the meantime.")
 
 
+_ROUTE_TOKEN = re.compile(r"(/[A-Za-z0-9_\-\[\]/]*)")
+
+
+def split_route(text: str) -> tuple[str, str]:
+    """`("/tax", "a new Indian income tax calculator screen …")` from
+    `"/tax — a new Indian income tax calculator screen …"`.
+
+    A ROUTE IS A PATH. The model filled `route` with the whole sentence it
+    had been asked for, a page was made whose route WAS that sentence, and the
+    turn spent a step composing it and another removing it (Mark 8,
+    2026-10-17). The first path in the text is the route; what is around it
+    is the ask, handed back to be part of the request."""
+    raw = (text or "").strip()
+    m = _ROUTE_TOKEN.search(raw)
+    if not m:
+        return raw, ""
+    route = m.group(1).rstrip("/") or "/"
+    rest = " ".join((raw[:m.start()] + " " + raw[m.end():]).split()).strip(" -—–:,.")
+    return route, rest
+
+
 def _page_for_route(doc: dict, route: str) -> dict | None:
     """The page contract for a route, tolerant about how a user typed it."""
     want = (route or "").strip()
     if not want:
         return None
+    if " " in want or "—" in want:
+        want = split_route(want)[0]
     if not want.startswith("/"):
         want = "/" + want
     pages = [p for p in (doc.get("pages") or []) if p.get("status") != "DEPRECATED"]
@@ -143,6 +166,10 @@ def _ensure_page(svc: Any, route: str, request: str = "", entity: str = "") -> d
     want = (route or "").strip()
     if not want:
         raise ComposeError("no route was named, so there is nothing to compose.")
+    if " " in want or "—" in want:
+        want, said = split_route(want)
+        if said and said not in (request or ""):
+            request = f"{request} {said}".strip() if request else said
     if not want.startswith("/"):
         want = "/" + want
 
@@ -238,6 +265,7 @@ def compose_route(
     # FOR (DEFECT C-03/B-09/F-07). `_ensure_page` is idempotent, so an existing
     # route is returned unchanged and only a genuinely new one grows the
     # definition before it is laid out.
+    was_new = _page_for_route(svc.doc, route) is None
     page = _ensure_page(svc, route, request)
 
     # A PAGE WRITTEN AS CODE IS CHANGED AS CODE. The verb path already sent
@@ -254,9 +282,10 @@ def compose_route(
                           request=request or f"compose {route}", reasoning=reasoning)
         if not out.get("applied"):
             raise ComposeError(f"{route} was not changed: {out.get('reason') or 'the rewrite was refused'}")
+        placed = place_in_flows(svc, page, request, app_root=root, reasoning=reasoning) if was_new else []
         return SimpleNamespace(committed=list(out.get("committed") or []),
                                version=out.get("version"), missing=list(out.get("missing") or []),
-                               coded=True)
+                               coded=True, flows=placed)
 
     # The composition is the slow part of the turn — around a minute behind a
     # single message. `reasoning` is how that minute becomes legible: the
@@ -295,7 +324,7 @@ def compose_route(
         # regenerating is exactly the divergence §115 refuses, arrived at by
         # omitting an argument.
         try:
-            return apply_change(
+            done = apply_change(
                 svc,
                 request or f"compose the screen at {page.get('route')}",
                 proposals=list(result.proposals),
@@ -305,6 +334,13 @@ def compose_route(
                 app_root=app_root,
                 executor=_traced(run, reasoning),
             )
+            if was_new:
+                try:
+                    done.flows = place_in_flows(svc, page, request, app_root=app_root,
+                                                executor=run, reasoning=reasoning)
+                except Exception:  # noqa: BLE001 — the screen is made; its place in the flows is best effort
+                    logger.exception("[smith] flows for %s", page.get("route"))
+            return done
         except (BlueprintInvalid, AuthorRefusal) as exc:
             feedback = f"{type(exc).__name__}: {exc}".replace("\n", " ")[:400]
             from services.blueprint.refusals import record_refusal
@@ -321,6 +357,55 @@ def compose_route(
                  "step")
 
     raise ComposeError(f"no composition was produced for {page.get('route')}.")
+
+
+def place_in_flows(svc: Any, page: dict, request: str, *, app_root: str | None = None,
+                   executor: Any = None, reasoning: Any = None) -> list[str]:
+    """The flows a screen added from chat belongs in, written by the same
+    agent that wrote them at the build.
+
+    A SCREEN ADDED AFTER THE BUILD HAD NO PLACE IN THE FLOWS. The build's
+    `app_flows` node writes every path a person takes; a page Smith added
+    later was laid out, put on the menu and never reached by any flow, so the
+    App Flow view went on showing the app as it was (Mark 8's tax
+    calculator, 2026-10-17). The node is asked once more, for this screen:
+    a new flow when the screen is a goal of its own, or the existing flow it
+    belongs in, changed under the same name. Returns the names of the flows
+    that were written; empty when none was. Never raises past its caller's
+    best-effort guard — the screen itself is already made."""
+    from services.blueprint.agent_contract import AuthorRefusal
+    from services.blueprint.executors import make_executor, tiered_router, RunUsage
+    from services.blueprint.orchestrator import TaskSpec
+    from services.blueprint.service import BlueprintInvalid
+    from services.smith.change import apply_change
+
+    route = str(page.get("route") or "")
+    if not svc.doc.get("roles") and not svc.doc.get("flows"):
+        return []
+    run = executor or make_executor(svc, tiered_router(reasoning=reasoning),
+                                    usage=RunUsage.for_app(svc, phase="change"), reasoning=reasoning)
+    brief = (f"A screen was just added: {page.get('name')} at {route} — {page.get('purpose') or request}. "
+             "Write the flow a person takes to reach it and through it: a NEW flow when the screen is a goal of "
+             "its own (give it a name), or the existing flow it belongs in, CHANGED and returned under the same "
+             "`name`. Return only the flows that are new or changed; every other flow stays as it is.")
+    tell(reasoning, f"Placing {route} in the app's flows.", "step")
+    feedback = ""
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        spec = TaskSpec(task_id=f"smith-flows-{page.get('id')}-{attempt}", node="app_flows", agent="page_design",
+                        attempt=attempt, subject="", feedback=feedback or None, brief=brief)
+        result = run(spec)
+        proposals = [p for p in (getattr(result, "proposals", None) or []) if p.section == "flows"]
+        if not proposals:
+            return []
+        try:
+            apply_change(svc, request or f"the flows that reach {route}", proposals=proposals,
+                         interpretation=f"flows for {route}", agent="page_design", app_root=app_root,
+                         executor=None, regenerate=False)
+            return [str((p.body or {}).get("name") or p.natural_key) for p in proposals]
+        except (BlueprintInvalid, AuthorRefusal) as exc:
+            feedback = f"{type(exc).__name__}: {exc}".replace("\n", " ")[:400]
+    logger.warning("[smith] the flows for %s were refused: %s", route, feedback)
+    return []
 
 
 def _traced(executor: Any, reasoning: Any) -> Any:
@@ -1424,6 +1509,9 @@ def run(output_dir: str, verb: str, *, route: str = "",
             result = compose_route(svc, route, app_root=app_root,
                                    request=request, reasoning=reasoning)
             did = f"I laid out {_where(svc, route)} again{extra}"
+            flows = list(getattr(result, "flows", None) or [])
+            if flows:
+                did += " and placed it in the app's flows: " + ", ".join(f"**{f}**" for f in flows)
     except ComposeError as exc:
         # The composer declining is a real outcome and says so.
         return {"applied": False, "edited_paths": [], "reason": str(exc)}

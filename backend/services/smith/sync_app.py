@@ -94,6 +94,17 @@ SIGN_IN_FILES: tuple[tuple[str, bool], ...] = (
     ("src/hooks/useLogin.ts", False),
 )
 
+#: The application as an MCP server (`services.blueprint.app_mcp`): the
+#: platform's files, written into every app whether or not it had them — the
+#: owner's switch decides whether they answer. The tool catalogue beside them
+#: is projected, not copied.
+MCP_FILES: tuple[str, ...] = (
+    "src/lib/mcp/protocol.ts", "src/lib/mcp/tokens.ts", "src/lib/mcp/session.ts",
+    "src/db/schema/_forge_mcp_tokens.ts",
+    "src/app/api/mcp/route.ts", "src/app/api/mcp/tokens/route.ts",
+    "src/app/(dashboard)/connect-ai/page.tsx",
+)
+
 #: The signup route: the platform's, with the app's account types written in.
 SIGNUP_ROUTE = "src/app/api/auth/signup/route.ts"
 
@@ -224,6 +235,39 @@ def refresh_engine(app_root: str | Path, doc: dict | None = None, *, complete: b
             continue
         shutil.copyfile(src, dst)
         changed.append(rel)
+    # AN APP PEOPLE SIGN IN TO, read from its definition when there is one: the
+    # sign-in file is written later in the same sync, and waiting for it put
+    # these files (and the token table's line in the schema barrel) a sync
+    # behind, so a second sync was never "already matches".
+    if doc is not None:
+        security = doc.get("security") if isinstance(doc.get("security"), dict) else {}
+        signs_in = str(security.get("authentication") or "").lower() != "none" \
+            and (root / "package.json").is_file()
+    else:
+        signs_in = (root / "src" / "auth.ts").is_file()
+    if signs_in:
+        for rel in MCP_FILES:
+            src, dst = foundation / rel, root / rel
+            try:
+                if not src.is_file() or (dst.is_file() and dst.read_bytes() == src.read_bytes()):
+                    continue
+            except OSError:
+                pass
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(src, dst)
+            changed.append(rel)
+        catalog = root / "src" / "lib" / "mcp" / "catalog.json"
+        try:
+            before = catalog.read_text("utf-8") if catalog.is_file() else None
+            if doc is not None:
+                from services.blueprint.app_mcp import project_app_mcp
+                project_app_mcp(doc, root)
+            elif before is None:
+                shutil.copyfile(foundation / "src" / "lib" / "mcp" / "catalog.json", catalog)
+            if catalog.read_text("utf-8") != before:
+                changed.append("src/lib/mcp/catalog.json")
+        except Exception:  # noqa: BLE001 — the route serves an empty catalogue rather than none
+            logger.debug("[engine] the MCP catalogue could not be written", exc_info=True)
     for tmpl, rel in RUNTIME_FILES:
         src, dst = _TEMPLATE_DIR / tmpl, root / rel
         if not src.is_file() or not dst.is_file() or dst.read_bytes() == src.read_bytes():

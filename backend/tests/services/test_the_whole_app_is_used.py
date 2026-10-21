@@ -8,6 +8,7 @@ customers' menu, a child page that 404'd, slots dated 2001, "Phone 1".
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -170,8 +171,14 @@ def test_what_still_fails_is_recorded_by_name(monkeypatch, tmp_path):
     assert out["working"] == 0 and out["left"][0]["route"] == "/slots"
     runtime = svc.doc["runtime"]
     assert runtime["check"]["failing"] == ["/slots"]
-    assert runtime["issues"] == [{"kind": "page_check", "page": "PAGE-003", "name": "Slots", "route": "/slots",
-                                  "detail": "as Parent: it answers HTTP 500"}]
+    # Each entry also says when it was found (the app's version and the time), so a
+    # partial check's older entries can be told apart page by page (2e34492a).
+    stable = ("kind", "page", "name", "route", "detail")
+    assert [{k: i[k] for k in stable} for i in runtime["issues"]] == [
+        {"kind": "page_check", "page": "PAGE-003", "name": "Slots", "route": "/slots",
+         "detail": "as Parent: it answers HTTP 500"}]
+    assert runtime["issues"][0]["version"] == 0
+    assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", runtime["issues"][0]["at"])
 
 
 def test_the_record_of_the_check_is_declared_in_the_contract():

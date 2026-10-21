@@ -115,6 +115,14 @@ export function PublishDialog({
 
   const publish = (body?: { environment?: Side; promote?: boolean; reset_test_data?: boolean }) => {
     if (started) return;
+    // A NEW PUBLISH SHOWS ITS OWN PROGRESS, NOT THE LAST RESULT. The summary
+    // above the button is read from /latest when the dialog opens; left in
+    // place it made every stage read as done and "live at" name the previous
+    // address the moment Publish was pressed (Mark 8, 2026-10-17 — people
+    // closed and reopened the dialog to get a real publish).
+    setReconciledUrl(null);
+    setReconciledError(null);
+    setPriorFinishedAt(null);
     setStarted(true);
     setConfirmProduction(false);
     setPublishedSide(body?.promote ? "production" : body?.environment ?? side);
@@ -148,7 +156,9 @@ export function PublishDialog({
   }, [open, projectId]);
 
   useEffect(() => {
-    if (!open || !projectId) return;
+    // A publish this dialog started is followed by its own stream; reading
+    // the latest row again must not touch it.
+    if (!open || !projectId || started) return;
     let cancelled = false;
     (async () => {
       try {
@@ -159,14 +169,17 @@ export function PublishDialog({
           `/api/projects/${projectId}/deployments/latest?environment=${side}`,
         );
         if (cancelled || !latest) return;
-        // In-flight deploys started elsewhere → attach the stream so
-        // the user sees live progress rather than a stale idle state.
+        // A PUBLISH ALREADY RUNNING is followed, never started again:
+        // `started` with no stream lets the poll below read /latest until it
+        // ends. (Calling publish() here began a second publish that cancelled
+        // the first — Mark 8, 2026-10-16.)
         const inFlight =
           latest.status !== "succeeded" &&
           latest.status !== "succeeded_with_warnings" &&
           latest.status !== "failed";
         if (inFlight) {
-          publish();
+          setPublishedSide(side);
+          setStarted(true);
           return;
         }
         if (
@@ -190,8 +203,11 @@ export function PublishDialog({
     return () => {
       cancelled = true;
     };
+    // `started` is a dependency so that pressing Publish while /latest is
+    // still answering cancels that read: its late answer must not paint the
+    // previous publish over the one just begun.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, projectId, side]);
+  }, [open, projectId, side, started]);
 
   // When SSE ends without a terminal frame, reconcile against /latest.
   // Poll every 3s until succeeded/failed or 10 min. Only runs after the

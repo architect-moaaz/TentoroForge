@@ -38,13 +38,27 @@ const MAX_SHOT_PX = 7800;
 const ctx = await browser.newContext({ viewport });
 
 // NextAuth's own credentials endpoint; the session cookie lands in this context.
-const { csrfToken } = await (await ctx.request.get(`${cfg.baseUrl}/api/auth/csrf`)).json();
-await ctx.request.post(`${cfg.baseUrl}/api/auth/callback/credentials`, {
-  form: { csrfToken, email: cfg.email, password: cfg.password, json: "true" },
-});
-const session = await (await ctx.request.get(`${cfg.baseUrl}/api/auth/session`)).json().catch(() => ({}));
+// TRIED AGAIN BEFORE IT IS A FAILURE. A dev server compiling its auth route
+// drops the first connection ("socket hang up"), and that ended the run
+// before one page was opened: three of Refund And Chargeback's Administrator
+// screens were never looked at (pah7lhfz, 2026-10-21).
+let session = null, signInError = "";
+for (const pause of [0, 5000, 15000]) {
+  if (pause) await new Promise((r) => setTimeout(r, pause));
+  try {
+    const { csrfToken } = await (await ctx.request.get(`${cfg.baseUrl}/api/auth/csrf`, { timeout: 120000 })).json();
+    await ctx.request.post(`${cfg.baseUrl}/api/auth/callback/credentials`, {
+      form: { csrfToken, email: cfg.email, password: cfg.password, json: "true" }, timeout: 120000,
+    });
+    session = await (await ctx.request.get(`${cfg.baseUrl}/api/auth/session`, { timeout: 60000 })).json().catch(() => ({}));
+    if (session?.user) break;
+    signInError = "the app did not return a session";
+  } catch (e) {
+    signInError = String(e?.message || e).split("\n")[0].slice(0, 200);
+  }
+}
 if (!session?.user) {
-  console.log(JSON.stringify({ error: "could not sign in" }));
+  console.log(JSON.stringify({ error: `could not sign in: ${signInError}` }));
   process.exit(2);
 }
 // The same session, reading an application with no rows.
@@ -79,6 +93,27 @@ async function contextsFor(p) {
 
 const MISSING_ID = "00000000-0000-4000-8000-000000000000";
 const MAX_CONTROLS = 24;
+// CONTROLS ARE PRESSED A FEW AT A TIME. One at a time, each from a fresh
+// load on a dev server, a screen took one to three minutes and a Smith turn
+// that checked Personal Finance's fifteen screens spent 56 of its 72 minutes
+// pressing (u8w3uw4j, 2026-10-21). What worked in the parallel round is what
+// it did; anything that looked broken is pressed again ALONE afterwards, so
+// two presses meeting on the same data never make a working control read as
+// broken.
+const PRESS_PARALLEL = Math.max(1, Number(cfg.pressParallel ?? 3) || 1);
+const WORKED = new Set(["navigated", "changed", "workflow", "refused"]);
+
+async function inTurns(items, n, fn) {
+  const results = new Array(items.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => {
+    while (next < items.length) {
+      const k = next++;
+      results[k] = await fn(items[k]).catch((e) => ({ outcome: "error", detail: String(e?.message || e) }));
+    }
+  }));
+  return results;
+}
 
 async function firstRow(context, entity) {
   if (!entity) return null;
@@ -108,6 +143,23 @@ function fillRoute(url, row) {
 // The shell scrolls its main column, so a full-page screenshot would stop at
 // the viewport. Let every scroll container grow to its content first.
 async function unclip(page) {
+  // A PAGE THAT MOVES ITSELF is waited for, not crashed on: a screen that
+  // redirects after it loads destroys the context this runs in, and that one
+  // exception ended the run for every page after it (pah7lhfz, Finance, seven
+  // screens never looked at, 2026-10-21). Tried once more on the page it
+  // landed on; failing that, the picture is taken as the page stands.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      await _unclip(page);
+      return;
+    } catch {
+      await page.waitForLoadState("load", { timeout: 15000 }).catch(() => {});
+      await page.waitForTimeout(500);
+    }
+  }
+}
+
+async function _unclip(page) {
   await page.evaluate(() => {
     for (const el of document.querySelectorAll("body *")) {
       const s = getComputedStyle(el);
@@ -139,12 +191,27 @@ function watch(page) {
   return errors;
 }
 
+// THE FIRST PAGE OF A RUN COMPILES BEFORE IT ANSWERS. A dev server builds a
+// route on its first request — Mark 8's one page took 35 s the first time and
+// a quarter of a second after (2026-10-16) — and a timeout spent compiling is
+// the check's, not the page's. The first navigation that times out is given
+// one longer second attempt before anything is recorded against the page.
+let warmed = false;
+
 async function open(context, url, { shot } = {}) {
   const page = await context.newPage();
   const errors = watch(page);
   let status = null;
   try {
-    const res = await page.goto(cfg.baseUrl + url, { waitUntil: "load", timeout: 120000 });
+    let res;
+    try {
+      res = await page.goto(cfg.baseUrl + url, { waitUntil: "load", timeout: 120000 });
+    } catch (e) {
+      if (warmed || !/Timeout|timeout/.test(String(e.message))) throw e;
+      warmed = true;
+      res = await page.goto(cfg.baseUrl + url, { waitUntil: "load", timeout: 240000 });
+    }
+    warmed = true;
     status = res?.status() ?? null;
     await page.waitForTimeout(1000);
   } catch (e) {
@@ -353,6 +420,20 @@ async function press(context, url, control, firstIndex = null) {
 const out = [];
 const pressedIn = new Set();          // `${group}|${control}` — a screen's control is pressed once
 for (const p of cfg.pages) {
+  // ONE PAGE'S FAILURE IS THAT PAGE'S. Anything this script cannot do on a
+  // page is said as that page being unavailable — the check's failure, never
+  // the app's — and the next page is opened as if nothing had happened.
+  try {
+    await visit(p);
+  } catch (e) {
+    out.push({ id: p.id, route: p.route, as: p.as ?? null,
+               unavailable: String(e?.message || e).split("\n")[0].slice(0, 300) });
+  }
+}
+console.log(JSON.stringify(out));
+await browser.close();
+
+async function visit(p) {
   if (p.signIn) {
     // SIGNING IN, THROUGH THE FORM, as a person does: where it lands is the
     // app's answer to "the admin lands on the customers' menu", and only the
@@ -389,15 +470,21 @@ for (const p of cfg.pages) {
     out.push({ id: p.id, route: p.route, url: p.route, as: p.as ?? null, status, landed, text,
                signedIn: true, errors: [...new Set(errors)].slice(0, 12), states: {} });
     await fresh.close();
-    continue;
+    return;
   }
   let url = p.route;
   const who = await contextsFor(p);
   const isRecord = /\[[^\]]+\]/.test(url);
   if (isRecord) {
     const row = await firstRow(who.ctx, p.entity);
-    if (!row?.id) { out.push({ id: p.id, route: p.route, skipped: "no record to open" }); continue; }
+    if (!row?.id) { out.push({ id: p.id, route: p.route, skipped: "no record to open" }); return; }
     url = fillRoute(url, row);
+  }
+  // NEVER A LITERAL `[id]`. A route left holding its placeholder opens the
+  // not-found screen, or one that throws, and that is a look at nothing.
+  if (/\[[^\]]+\]|%5B[^/]*%5D/i.test(url)) {
+    out.push({ id: p.id, route: p.route, skipped: "no record to open" });
+    return;
   }
   const t0 = Date.now();
   const file = path.join(cfg.outDir, `${p.id}.png`);
@@ -432,12 +519,20 @@ for (const p of cfg.pages) {
       pressedIn.add(key);
       return true;
     });
-    for (const c of fresh.slice(0, MAX_CONTROLS)) {
+    const picked = fresh.slice(0, MAX_CONTROLS);
+    const first = PRESS_PARALLEL > 1 ? await inTurns(picked, PRESS_PARALLEL, (c) => press(who.ctx, url, c)) : [];
+    for (const [k, c] of picked.entries()) {
+      if (first[k] && WORKED.has(first[k].outcome)) {
+        result.controls.push(first[k]);
+        continue;
+      }
       // A DEAD CONTROL IS DEAD TWICE. The first press of a link on a cold dev
       // server compiles the page it opens, and F&B's working Edit link read
       // as "does nothing when pressed" (2026-10-01) — a false finding that
       // sends Smith to fix what works. Pressed again, the page is compiled.
-      let outcome = await press(who.ctx, url, c);
+      // A parallel press that did nothing is the first of the two; one that
+      // errored is pressed again alone, where nothing else can have caused it.
+      let outcome = first[k]?.outcome === "nothing" ? first[k] : await press(who.ctx, url, c);
       if (outcome.outcome === "nothing") outcome = await press(who.ctx, url, c);
       if (outcome.outcome === "nothing" && c.chosen) {
         outcome = { ...outcome, outcome: "chosen", detail: "the option already chosen" };
@@ -453,5 +548,3 @@ for (const p of cfg.pages) {
   result.ms = Date.now() - t0;
   out.push(result);
 }
-console.log(JSON.stringify(out));
-await browser.close();

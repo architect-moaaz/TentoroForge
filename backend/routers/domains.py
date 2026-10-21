@@ -107,6 +107,17 @@ async def list_domains(project_id: uuid.UUID, user: PlatformUser = Depends(get_c
     return svc.view()
 
 
+@router.get("/api/projects/{project_id}/domains/updating")
+async def domains_updating(project_id: uuid.UUID, user: PlatformUser = Depends(get_current_user),
+                           db: AsyncSession = Depends(get_db)):
+    """How the republish a change of main address started is going (asks
+    Vercel), with the addresses as they stand."""
+    async def act(svc):
+        await svc.check_updating()
+        return svc.view()
+    return await _run(project_id, user, db, act)
+
+
 @router.post("/api/projects/{project_id}/domains", dependencies=_PUBLISH)
 async def add_domain(project_id: uuid.UUID, body: AddDomain, user: PlatformUser = Depends(get_current_user),
                      db: AsyncSession = Depends(get_db)):

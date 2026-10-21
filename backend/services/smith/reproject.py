@@ -51,6 +51,11 @@ def _data_manifests() -> tuple:
             ("append_only", project_append_only_entities))
 
 
+def _app_mcp() -> Any:
+    from services.blueprint.app_mcp import project_app_mcp
+    return project_app_mcp
+
+
 def everything(svc: Any, app_root: str | None) -> list[str]:
     """Re-project every part of the application from `svc.doc`."""
     if not app_root:
@@ -108,7 +113,9 @@ def everything(svc: Any, app_root: str | None) -> list[str]:
                      # a session long after the document stopped saying so.
                      ("public_routes", project_public_routes),
                      ("entity_access", project_entity_access),
-                     ("launch_roles", project_launch_roles)):
+                     ("launch_roles", project_launch_roles),
+                     # What an assistant may use: from the two gates above.
+                     ("app_mcp", _app_mcp())):
         _run(name, lambda fn=fn: fn(svc.doc, app_root))
     # AN UNDONE IMPORT MUST STOP BEING LOADED. The declaration is gone from
     # the restored document; its payload file has to go from the app tree too,

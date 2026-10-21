@@ -1799,8 +1799,12 @@ export function registerDefaultActions(): void {
         (config as any).headers && typeof (config as any).headers === "object"
           ? (resolveDeep((config as any).headers) as Record<string, string>)
           : {};
+      // FORM FIELDS WHEN THE SERVICE TAKES THEM. Stripe and many older APIs
+      // read `application/x-www-form-urlencoded`, not JSON; the step says so
+      // with `encoding: "form"` (its documentation said so first).
+      const asForm = String((config as any).encoding || "json") === "form";
       const headers: Record<string, string> = {
-        "Content-Type": "application/json",
+        "Content-Type": asForm ? "application/x-www-form-urlencoded" : "application/json",
         ...authorHeaders,
       };
       let url = String(resolvedUrl);
@@ -1828,7 +1832,11 @@ export function registerDefaultActions(): void {
       const res = await fetch(url, {
         method: String(config.method || "GET"),
         headers,
-        body: resolvedBody !== undefined ? JSON.stringify(resolvedBody) : undefined,
+        body: resolvedBody === undefined ? undefined
+          : asForm && resolvedBody && typeof resolvedBody === "object"
+            ? new URLSearchParams(Object.entries(resolvedBody as Record<string, unknown>)
+                .map(([k, v]) => [k, typeof v === "string" ? v : JSON.stringify(v)])).toString()
+            : JSON.stringify(resolvedBody),
         signal: controller.signal,
       });
       clearTimeout(timeout);

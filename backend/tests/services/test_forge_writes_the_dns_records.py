@@ -278,6 +278,49 @@ def test_godaddy_adds_beside_what_is_there_with_names_relative_to_the_domain():
     assert patch.headers["authorization"] == "sso-key gd-key:gd-secret"
 
 
+def test_godaddy_refusing_its_api_to_the_account_is_said_as_that():
+    """GoDaddy offers its DNS API only to some accounts; the rest get 403
+    ACCESS_DENIED on every call. That is not "the domain is not here"."""
+    def denied(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, json={"code": "ACCESS_DENIED", "message": "Authenticated user is not allowed access"})
+
+    def elsewhere(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, json={"code": "FORBIDDEN"})
+
+    async def zone(handler):
+        gd = dp.GoDaddy("gd-key", "gd-secret", transport=httpx.MockTransport(handler))
+        try:
+            return await gd.zone_for("app.acme.com")
+        finally:
+            await gd.close()
+    with pytest.raises(dp.DnsAccessDenied) as e:
+        asyncio.run(zone(denied))
+    assert "only to some accounts" in str(e.value)
+    assert asyncio.run(zone(elsewhere)) is None, "any other 403 still means: not in this account"
+
+
+class _DeniedGoDaddy(FakeDns):
+    label = "GoDaddy"
+
+    async def zone_for(self, name):
+        raise dp.DnsAccessDenied("GoDaddy does not let Forge use its DNS API with this account.")
+
+
+def test_an_account_godaddy_refuses_is_not_told_the_domain_is_elsewhere(tmp_path):
+    root = _project(tmp_path)
+    fake = FakeVercel()
+    svc = _service(root, fake)
+    run(svc.connect("app.acme.com"))
+    svc.dns = [_DeniedGoDaddy(fake)]
+    with pytest.raises(DomainRefused) as e:
+        run(svc.write_records("app.acme.com"))
+    said = str(e.value)
+    assert "does not let Forge use its DNS API" in said and "Add the records yourself" in said
+    assert "holds app.acme.com" not in said
+    svc.dns = [_DeniedGoDaddy(fake), FakeDns(fake)]
+    assert run(svc.write_records("app.acme.com"))["written"], "another connected account that holds it still writes"
+
+
 class FakeRoute53:
     def __init__(self):
         self.sets = [{"Name": "acme.com.", "Type": "MX", "TTL": 300, "ResourceRecords": [{"Value": "10 mx.acme.com"}]}]

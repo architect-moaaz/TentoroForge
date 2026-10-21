@@ -50,6 +50,10 @@ PAGE_PARALLEL = 3
 STEPS = 12
 #: How long to wait on a person's own Smith turn before fixing on the same tree.
 TURN_WAIT_S = 600
+#: Turns a cause may be given: one, and one more once every other cause has
+#: had its first. The same three reds were picked in every turn of FitTrackr's
+#: checks and all three turns turned nothing green (qpqhdugb, 2026-10-19).
+TRIES_PER_CAUSE = 2
 
 
 def _say(emit: Callable | None) -> Callable[[str], None]:
@@ -86,6 +90,8 @@ def run_checks_to_green(svc: Any, output_dir: str, app_root: str, report: Any, *
             emit("scorecard", {"summary": sc.summary(svc.doc), "phase": phase})
 
     turns, yields, stopped = 0, [], None
+    tries: dict[str, int] = {}
+    took: list[float] = []
     ledger_ctx = _ledger(output_dir if record else None, 1, node="checks", phase="checking")
     with ledger_ctx as ledger:
         sc.set_status(svc, "checking")
@@ -94,7 +100,7 @@ def run_checks_to_green(svc: Any, output_dir: str, app_root: str, report: Any, *
                           app_factory=app_factory, bench_factory=bench_factory, client=client,
                           cancelled=cancelled, record=record)
         scorecard_event("checking")
-        reds = _ours(sc.reds(svc.doc))
+        reds = _ours(sc.reds(svc.doc)) + settled_reds(output_dir)
         if reds and not cancelled():
             sc.set_status(svc, "fixing")
             scorecard_event("fixing")
@@ -106,9 +112,22 @@ def run_checks_to_green(svc: Any, output_dir: str, app_root: str, report: Any, *
             if cancelled():
                 stopped = "stopped by the person"
                 break
+            # A TURN THE CLOCK CANNOT FIT IS NOT STARTED. The cap was only read
+            # between turns, so a turn begun at minute 44 ran to minute 60 (Mark
+            # 8, 2026-10-16). The longest turn so far is the estimate; a turn in
+            # progress is never cut off, which could leave a page half-changed.
+            if took and (time.time() - t0) + max(took) > FIX_MINUTES * 60:
+                stopped = "time"
+                break
             _wait_for_the_person(output_dir, cancelled)
             groups = by_cause(reds)
-            batch = _next_batch(groups)
+            batch = _next_batch(groups, tries)
+            if not batch:
+                stopped = "tried"
+                break
+            for g in batch:
+                tries[str(g["cause"])] = tries.get(str(g["cause"]), 0) + 1
+            started = time.time()
             turns += 1
             before = {(r["criterion"], r["id"]): r for r in reds}
             ledger.node_subject("checks", f"turn {turns}", turns, FIX_TURNS, True)
@@ -126,11 +145,12 @@ def run_checks_to_green(svc: Any, output_dir: str, app_root: str, report: Any, *
                 sc.restore(svc, card_before)
             _check_again(svc, output_dir, app_root, report, batch, run_turn=run_turn, app_factory=app_factory,
                          bench_factory=bench_factory, client=client, cancelled=cancelled, record=record)
-            reds = _ours(sc.reds(svc.doc))
+            reds = _ours(sc.reds(svc.doc)) + settled_reds(output_dir)
             after = {(r["criterion"], r["id"]) for r in reds}
             turned = [(key[0], before[key]) for key in sorted(set(before) - after)]
             yields.append(len(turned))
             dry = 0 if turned else dry + 1
+            took.append(time.time() - started)
             for criterion, it in turned:
                 say(sc.green_line(criterion, it))
             scorecard_event("fixing")
@@ -199,8 +219,16 @@ def _check_everything(svc: Any, output_dir: str, app_root: str, report: Any, *, 
     say(f"Checked {total} page{'s' if total != 1 else ''}: {max(total - len(reds) - len(untried), 0)} work, "
         f"{len(reds)} don't" + (f", {len(untried)} I couldn't open" if untried else "") + ".")
     rules = _on_a_bench(svc, output_dir, bench_factory=bench_factory, client=client, cancelled=cancelled,
-                        what=("routes", "access", "rules", "systems", "audit", "domain"))
+                        what=("routes", "access", "rules", "systems", "audit", "domain", "guards"))
     _write_logic(svc, processes, rules.get("rules"))
+    if (rules.get("guards") or {}).get("total"):
+        # EARLIER FIXES, HELD. Each fix Smith made left the try that proved it;
+        # a later change that undoes one is said here, by the ask it was for.
+        say("\n".join(rules["guards"]["lines"]).replace("checks · ", ""))
+    if rules.get("causes"):
+        # ONE CAUSE, SAID AS ONE, BEFORE THE ITEMS. The headline of "2 of 106
+        # served" was the sign-in nobody could do (fyuhs16i, 2026-10-06).
+        say(causes_line(rules["causes"]))
     say(_logic_line(svc))
 
 
@@ -248,6 +276,8 @@ def _on_a_bench(svc: Any, output_dir: str, *, bench_factory: Any, client: Any, c
                             out[k] = list(out[k]) + list(part[k])
                         out["total"] = int(out["total"]) + int(part["total"])
                 _merge(svc, "routes", out, only_pages)
+                if out.get("causes"):
+                    results["causes"] = [str(c) for c in out["causes"]]
             except Exception as exc:  # noqa: BLE001
                 logger.warning("[fix-to-green] the route check failed", exc_info=True)
                 sc.write(svc, "routes", green=0, red=[], untried=[sc.item("routes", sc.LABELS["routes"], f"the check failed: {exc}"[:200], "routes")])
@@ -276,6 +306,12 @@ def _on_a_bench(svc: Any, output_dir: str, *, bench_factory: Any, client: Any, c
                 logger.warning("[fix-to-green] the rule trials failed", exc_info=True)
                 results["rules"] = {"total": 0, "green": [], "red": [],
                                     "untried": [sc.item("rules", "Rules", f"the check failed: {exc}"[:200], "rules")]}
+        if "guards" in what:
+            try:
+                from services.smith import guards as _guards
+                results["guards"] = _guards.run(bench, svc.doc)
+            except Exception:  # noqa: BLE001
+                logger.warning("[fix-to-green] the guards could not be run", exc_info=True)
         if "systems" in what:
             try:
                 from services.blueprint.clock_check import check_clock
@@ -341,18 +377,42 @@ def _write_logic(svc: Any, processes: dict, rules: dict | None) -> None:
     green = len(processes.get("passed") or []) + len(processes.get("fixed") or [])
     red = [sc.item(t["workflow"], t["name"], t["reason"], t["workflow"]) for t in processes.get("left") or []]
     untried = [sc.item(t["workflow"], t["name"], t["reason"], t["workflow"]) for t in processes.get("untried") or []]
+    skipped: list[dict] = []
     if rules:
         green += len(rules.get("green") or [])
         red += list(rules.get("red") or [])
         untried += list(rules.get("untried") or [])
-    sc.write(svc, "logic", green=green, red=red, untried=untried)
+        skipped += list(rules.get("skipped") or [])
+    sc.write(svc, "logic", green=green, red=red, untried=untried, skipped=skipped)
+
+
+def causes_line(causes: list[str]) -> str:
+    return ("Behind the screens I could not try there is one cause each, not a fault per screen: "
+            + "; ".join(str(c) for c in causes[:4]) + ". That is what to fix first.")
 
 
 def _logic_line(svc: Any) -> str:
+    """What the checks could judge, said as such; what nothing here can judge
+    said apart, so "0 of 7 hold, 7 I couldn't try" never stands for seven
+    rules no process carries (Mark 8, 2026-10-16)."""
     v = (sc.read(svc.doc) or {}).get("criteria", {}).get("logic") or {}
-    return (f"Ran the processes and tried the rules: {v.get('green', 0)} of {v.get('total', 0)} hold"
-            + (f", {len(v.get('red') or [])} don't" if v.get("red") else "")
-            + (f", {len(v.get('untried') or [])} I couldn't try" if v.get("untried") else "") + ".")
+    skipped = len(v.get("skipped") or [])
+    total = int(v.get("total") or 0)
+    if not total and not v.get("untried"):
+        head = "No process or rule a trial could run here"
+    else:
+        untried = list(v.get("untried") or [])
+        # WHY IT COULD NOT BE TRIED, NOT JUST THAT. "16 could not be tried" in a
+        # parenthesis, "7 I couldn't try — my own check failed" with no cause
+        # (qi0wldnl, cxz95dd1, 2026-10): the first reason is the headline.
+        why = str((untried[0] or {}).get("why") or "").strip() if untried and isinstance(untried[0], dict) else ""
+        head = (f"Ran the processes and tried the rules: {v.get('green', 0)} of {total} hold"
+                + (f", {len(v.get('red') or [])} don't" if v.get("red") else "")
+                + (f", {len(untried)} I couldn't try" + (f" ({why[:140]})" if why else "") if untried else ""))
+    if skipped:
+        head += (f"; {skipped} rule{'s' if skipped != 1 else ''} gate{'s' if skipped == 1 else ''} no process, "
+                 f"so there is nothing to try {'them' if skipped != 1 else 'it'} in")
+    return head + "."
 
 
 def _write_smith(svc: Any, turns: int, yields: list[int], *, before_total: int) -> None:
@@ -365,6 +425,22 @@ def _write_smith(svc: Any, turns: int, yields: list[int], *, before_total: int) 
 # --------------------------------------------------------------------------- #
 # The fix loop
 # --------------------------------------------------------------------------- #
+
+def settled_reds(output_dir: str) -> list[dict]:
+    """What the build shipped in its safe, closed version (`AuthorRefusal.settle`),
+    as reds the loop works on like any other: a screen open to the
+    administrator alone, a process switched off, a rule not yet enforced.
+    One cause per build step; cleared once a turn has changed the
+    application for it (`orchestrator.clear_settled`)."""
+    from services.blueprint.orchestrator import settled_rows
+    from services.office_events import NODE_LABEL
+    out: list[dict] = []
+    for node, lines in settled_rows(output_dir).items():
+        for i, line in enumerate(lines):
+            out.append({"criterion": "settled", "id": f"settled:{node}:{i}", "cause": f"settled:{node}",
+                        "label": NODE_LABEL.get(node, node.replace("_", " ")), "why": line})
+    return out
+
 
 def _ours(reds: list[dict]) -> list[dict]:
     """The reds that are the app's to fix: a red marked the platform's is
@@ -380,22 +456,33 @@ def by_cause(reds: list[dict]) -> list[dict]:
     groups: dict[str, dict] = {}
     for r in reds:
         cause = str(r.get("cause") or r.get("id"))
-        kind = ("process" if cause.startswith("FLOW-") else "rule" if cause.startswith("RULE-")
+        kind = ("settled" if cause.startswith("settled:")
+                else "process" if cause.startswith("FLOW-") else "rule" if cause.startswith("RULE-")
                 else "access" if cause.startswith("ENTITY-") else "integration" if cause.startswith("INT-")
                 else "audit" if cause == "audit" else "tenancy" if cause == "tenancy"
                 else "sign_in" if cause.startswith("sso:") or cause in ("magic_link", "sign_up")
                 else "mobile" if cause == "mobile" else "page")
         g = groups.setdefault(cause, {"cause": cause, "kind": kind, "items": []})
         g["items"].append(r)
-    order = {"page": 0, "process": 1, "rule": 2, "access": 3, "integration": 4, "audit": 5, "tenancy": 6, "sign_in": 7, "mobile": 8}
+    order = {"page": 0, "process": 1, "rule": 2, "access": 3, "integration": 4, "audit": 5, "tenancy": 6, "sign_in": 7,
+             "mobile": 8, "settled": 9}
     return sorted(groups.values(), key=lambda g: (order[g["kind"]], g["cause"]))
 
 
-def _next_batch(groups: list[dict]) -> list[dict]:
-    pages = [g for g in groups if g["kind"] == "page"]
-    if pages:
-        return pages[:PAGE_PARALLEL]
-    return groups[:1]
+def _next_batch(groups: list[dict], tries: dict[str, int] | None = None) -> list[dict]:
+    """The next causes to fix: pages first (three at once), else one other.
+    A cause already given a turn waits until every cause has had its first,
+    then gets one more; a cause given `TRIES_PER_CAUSE` turns is not picked
+    again — it is said in the closing as still not right. Empty when every
+    cause has had its tries."""
+    tries = tries or {}
+    for round_ in range(TRIES_PER_CAUSE):
+        fresh = [g for g in groups if tries.get(str(g["cause"]), 0) == round_]
+        if not fresh:
+            continue
+        pages = [g for g in fresh if g["kind"] == "page"]
+        return pages[:PAGE_PARALLEL] if pages else fresh[:1]
+    return []
 
 
 def ask_for(group: dict, doc: dict) -> str:
@@ -408,6 +495,13 @@ def ask_for(group: dict, doc: dict) -> str:
         item = {"name": str(page.get("name") or items[0].get("label")), "route": str(page.get("route") or ""),
                 "findings": [(str(r.get("criterion") or "check"), str(r.get("why") or "")) for r in items]}
         return page_ask(group["cause"], item)
+    if group["kind"] == "settled":
+        lines = "\n".join(f"- {r.get('why')}" for r in items[:12])
+        return ("To finish the build, Forge shipped these in their safe, closed version, because the step that "
+                f"writes them ({items[0].get('label')}) could not get past its own checks:\n{lines}\n\n"
+                "Make each what the application was meant to be — from the requirements and the definition — "
+                "and try it as the people it is for: it is fixed only when it works for them and stays as "
+                "closed as it should be. Nobody is waiting to answer questions: decide from the definition and act.")
     seen = "\n".join(f"- {r.get('label')}: {r.get('why')}" for r in items[:12])
     what = {"process": "process", "rule": "rule", "access": "record type", "integration": "outside system",
             "audit": "audit trail", "tenancy": "organisations", "sign_in": "way in", "mobile": "application on a phone"}[group["kind"]]
@@ -459,6 +553,11 @@ def _fix(batch: list[dict], output_dir: str, *, run_turn: Callable, say: Callabl
         except Exception as exc:  # noqa: BLE001 — one repair never ends the loop
             logger.warning("[fix-to-green] %s: %s", group["cause"], exc)
             return
+        if group["kind"] == "settled" and (result or {}).get("edited_paths") \
+                and str((result or {}).get("status")) == "resolved":
+            # Changed and tried by the turn: the settlement is dealt with.
+            from services.blueprint.orchestrator import clear_settled
+            clear_settled(output_dir, str(group["cause"]).split(":", 1)[1])
         # NOT THE APP'S TO FIX. A repair that had to reach into the engine
         # is a platform fault: said as such, on the record, and left alone —
         # thirty reds were worked twice and fixed zero times because every
@@ -470,7 +569,8 @@ def _fix(batch: list[dict], output_dir: str, *, run_turn: Callable, say: Callabl
                 "from inside the app. Recorded for the platform team; moving on.")
             from services import incidents
             incidents.record("platform_fault", app=Path(output_dir).name, detail=f"{label}: {why}",
-                             path=where, cause=str(group["cause"]))
+                             path=where, cause=str(group["cause"]),
+                             signature=incidents.signature("platform_fault", where, ""))
     if len(batch) > 1 and all(g["kind"] == "page" for g in batch):
         with ThreadPoolExecutor(max_workers=min(PAGE_PARALLEL, len(batch)), thread_name_prefix="forge-fix") as pool:
             list(pool.map(carrying(one), batch))
@@ -534,8 +634,10 @@ def _check_again(svc: Any, output_dir: str, app_root: str, report: Any, batch: l
             out = results["rules"]
             red = [r for r in prior["red"] if str(r.get("cause")) not in rules] + list(out["red"])
             untried = [u for u in prior["untried"] if str(u.get("cause")) not in rules] + list(out["untried"])
+            skipped = [u for u in prior.get("skipped") or [] if str(u.get("cause")) not in rules] + list(out.get("skipped") or [])
             total = int(prior["total"])
-            sc.write(svc, "logic", green=max(total - len(red) - len(untried), 0), red=red, untried=untried, total=total)
+            sc.write(svc, "logic", green=max(total - len(red) - len(untried), 0), red=red, untried=untried, total=total,
+                     skipped=skipped)
 
 
 def _wait_for_the_person(output_dir: str, cancelled: Callable[[], bool]) -> None:

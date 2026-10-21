@@ -47,8 +47,15 @@ def item(id_: str, label: str, why: str, cause: str = "") -> dict:
     return {"id": str(id_), "label": str(label), "why": str(why)[:400], "cause": str(cause or id_)}
 
 
-def _criterion(total: int = 0, green: int = 0, red: Iterable[dict] = (), untried: Iterable[dict] = ()) -> dict:
-    return {"total": int(total), "green": int(green), "red": list(red), "untried": list(untried)}
+def _criterion(total: int = 0, green: int = 0, red: Iterable[dict] = (), untried: Iterable[dict] = (),
+               skipped: Iterable[dict] = ()) -> dict:
+    """`skipped`: what no check can judge here — a rule that gates no process,
+    a trail nobody declared — said with its reason and counted nowhere. It is
+    not `untried`, which is a check's own failure to run, and never a red."""
+    out = {"total": int(total), "green": int(green), "red": list(red), "untried": list(untried)}
+    if list(skipped):
+        out["skipped"] = list(skipped)
+    return out
 
 
 def empty(doc: dict) -> dict:
@@ -118,16 +125,18 @@ def read(doc: dict) -> dict | None:
 
 
 def write(svc: Any, criterion: str, *, green: int | Iterable[Any], red: Iterable[dict] = (),
-          untried: Iterable[dict] = (), total: int | None = None) -> dict:
+          untried: Iterable[dict] = (), total: int | None = None, skipped: Iterable[dict] = ()) -> dict:
     """Replace one criterion with what a check measured. `green` is a count
-    or the green items themselves; `total` defaults to green + red + untried."""
+    or the green items themselves; `total` defaults to green + red + untried.
+    `skipped` is what no check can judge here: kept with its reason, outside
+    the total."""
     if criterion not in CRITERIA:
         raise ValueError(f"no such criterion: {criterion}")
     card = read(svc.doc) or empty(svc.doc)
     reds, tried_not = list(red), list(untried)
     g = green if isinstance(green, int) else len(list(green))
     t = total if total is not None else g + len(reds) + len(tried_not)
-    card.setdefault("criteria", {})[criterion] = _criterion(t, g, reds, tried_not)
+    card.setdefault("criteria", {})[criterion] = _criterion(t, g, reds, tried_not, skipped)
     card["at"] = _now()
     card["version"] = int(svc.doc.get("version") or 0)
     _save(svc, card)
@@ -211,7 +220,12 @@ def closing(doc: dict) -> str:
         v = (card.get("criteria") or {}).get(c) or {}
         total, green = int(v.get("total") or 0), int(v.get("green") or 0)
         if total:
-            parts.append(f"{LABELS[c].lower()} {green} of {total}")
+            # WHAT WAS NOT TRIED IS SAID BESIDE THE COUNT. "Pages built and
+            # working 0 of 20" read as twenty broken pages when nineteen could
+            # not be opened by the check (qpqhdugb, 2026-10-19).
+            not_tried = len([u for u in v.get("untried") or []
+                             if isinstance(u, dict) and "not checked" not in str(u.get("why") or "")])
+            parts.append(f"{LABELS[c].lower()} {green} of {total}" + (f" ({not_tried} not tried)" if not_tried else ""))
         if c != "smith":                      # its reds are the others', said once
             left += [str(r.get("label") or r.get("id")) for r in v.get("red") or []
                      if isinstance(r, dict) and not r.get("platform")]

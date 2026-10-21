@@ -87,6 +87,8 @@ logger = logging.getLogger(__name__)
 #: FORGE_ONESHOT_MODEL default, which is still pinned to an older Sonnet.
 AGENT_MODEL = os.environ.get("FORGE_AGENT_MODEL", "").strip() or "claude-sonnet-5"
 SMITH_MODEL = os.environ.get("FORGE_SMITH_MODEL", "").strip() or "claude-opus-5"
+#: The model for the last try at a reply a check refused twice (`escalated`).
+ESCALATION_MODEL = os.environ.get("FORGE_ESCALATION_MODEL", "").strip() or SMITH_MODEL
 
 #: What `AnthropicModel()` and `tiered_router()` run on when not told: the
 #: specialists' model. Kept under its old name because the router, the
@@ -470,16 +472,23 @@ def image_block(path: str | Path) -> dict[str, Any]:
     import base64
 
     p = Path(path)
+    data = base64.standard_b64encode(p.read_bytes()).decode()
+    # A DESIGN SHOWN AS A PDF — a Figma export, a designer's deck — goes as a
+    # document block: Claude reads each page as a picture as well as its text,
+    # so the pages arrive as the design they are, not as the words on them.
+    if p.suffix.lower() == ".pdf":
+        return {"type": "document",
+                "source": {"type": "base64", "media_type": "application/pdf", "data": data},
+                "cache_control": _CACHE_CONTROL}
     media = IMAGE_MEDIA_TYPES.get(p.suffix.lower())
     if media is None:
         raise ValueError(
             f"{p.name}: not an image Anthropic accepts "
-            f"({', '.join(sorted(IMAGE_MEDIA_TYPES))})"
+            f"({', '.join(sorted(IMAGE_MEDIA_TYPES))}) nor a PDF"
         )
     return {
         "type": "image",
-        "source": {"type": "base64", "media_type": media,
-                   "data": base64.standard_b64encode(p.read_bytes()).decode()},
+        "source": {"type": "base64", "media_type": media, "data": data},
         "cache_control": _CACHE_CONTROL,
     }
 
@@ -487,6 +496,10 @@ def image_block(path: str | Path) -> dict[str, Any]:
 def _content(shown: Sequence[str | Path], user: str) -> Any:
     """Images first (the stable half of the prefix), then the user text."""
     text = _user_blocks(user)
+    # A PDF is read only by Anthropic's own endpoint; an Anthropic-compatible
+    # host (`ANTHROPIC_BASE_URL`) is shown the pictures alone.
+    if not _endpoint_enforces_schema():
+        shown = [p for p in shown if Path(p).suffix.lower() != ".pdf"]
     if not shown:
         return text
     return [*image_blocks(shown), *(text if isinstance(text, list) else [{"type": "text", "text": text}])]
@@ -2004,7 +2017,7 @@ NODE_TASKS: dict[str, str] = {
         "(`{{extract_listings.output[0].images ?? inputImage}}`). A field each item "
         "brings itself (its currency, its unit) is read from the item, never written as "
         "one literal for all of them.\n\n"
-        + 'Conditions and gateway expressions are FEEL, read by the engine\'s parser: `=` (never `==`), `and`, `or`, `not`, names without braces (`caseType = "Refund" and refundAmount > 0`), membership as `stage in ["A", "B"]` with square brackets, never parentheses. Values in step config are templates over what the engine holds: the trigger\'s input fields by name (`{{title}}`, never `{{input.title}}`), a step\'s output under its key (`{{insert_case.id}}`), a variable a set_variable step set by its `variableName`; the current time and actor are the whole-value sentinels `$now`, `$today`, `$user.id`. The `where` of a lookup maps a field to a value, which means equals; any other comparison is that field mapped to its comparisons — `{"id": {"ne": "{{customer.id}}"}}` (`ne`, `gt`, `gte`, `lt`, `lte`, `in`, `notIn`), several ANDed, so a range is `{"submittedAt": {"gte": "{{dateFrom}}", "lte": "{{dateTo}}"}}` and a bound left blank is no bound; never `id__neq`. A signed-out visitor is `$guest`, their guest token — a record a rule gives a `guestColumn` is stamped with it on insert by itself; `$guest` is for finding theirs (an open cart whose guest column is `$guest`). There is no `now`, `currentUser`, `vars`, `steps` or `sequence` root; a template naming one is refused. The expression functions the engine has are sum, count, min, max, avg, abs, floor, ceiling, round, contains, starts with, ends with, matches, string, number, date, now, duration — nothing else (no concat, substring, uuid, upper, format); a reference number nothing supplies is `$uuid`, a fresh identifier, written in the insert itself. A db_insert supplies every field the data model marks required — an input by name, `$now`, `$user.id`, `$uuid`, or a literal starting state; one that omits a required field is refused, and a later db_update cannot rescue it.'
+        + 'Conditions and gateway expressions are FEEL, read by the engine\'s parser: `=` (never `==`), `and`, `or`, `not`, names without braces (`caseType = "Refund" and refundAmount > 0`), membership as `stage in ["A", "B"]` with square brackets, never parentheses. Values in step config are templates over what the engine holds: the trigger\'s input fields by name (`{{title}}`, never `{{input.title}}`), a step\'s output under its key (`{{insert_case.id}}`), a variable a set_variable step set by its `variableName`; the current time and actor are the whole-value sentinels `$now`, `$today`, `$user.id`. A process a record change starts (`trigger.kind: db_change`) is handed that record and takes no inputs of its own: its fields are `{{entity.<field>}}` (`{{entity.guestName}}`, never `{{guestName}}`), its id `{{entityId}}`, on an update its values before the change `{{previousEntity.<field>}}`, and who changed it `{{user.id}}`. The `where` of a lookup maps a field to a value, which means equals; any other comparison is that field mapped to its comparisons — `{"id": {"ne": "{{customer.id}}"}}` (`ne`, `gt`, `gte`, `lt`, `lte`, `in`, `notIn`), several ANDed, so a range is `{"submittedAt": {"gte": "{{dateFrom}}", "lte": "{{dateTo}}"}}` and a bound left blank is no bound; never `id__neq`. A signed-out visitor is `$guest`, their guest token — a record a rule gives a `guestColumn` is stamped with it on insert by itself; `$guest` is for finding theirs (an open cart whose guest column is `$guest`). There is no `now`, `currentUser`, `vars`, `steps` or `sequence` root; a template naming one is refused. The expression functions the engine has are sum, count, min, max, avg, abs, floor, ceiling, round, contains, starts with, ends with, matches, string, number, date, now, duration — nothing else (no concat, substring, uuid, upper, format); a reference number nothing supplies is `$uuid`, a fresh identifier, written in the insert itself. A db_insert supplies every field the data model marks required — an input by name, `$now`, `$user.id`, `$uuid`, or a literal starting state; one that omits a required field is refused, and a later db_update cannot rescue it.'
         + "\n\nTELL THE OTHER PERSON. When a step changes something another person "
         "must act on or would want to know — a request arrives for them, their "
         "request is approved or declined, a case is opened against them, a job "
@@ -2080,7 +2093,9 @@ NODE_TASKS: dict[str, str] = {
     ),
     "integrations": (
         "Declare each outside system this application talks to, from the "
-        "requirements and the domain reference: `name`, `kind` (email, "
+        "requirements, the domain reference and any documents the person "
+        "supplied — name a documented system as its documentation names it: "
+        "`name`, `kind` (email, "
         "storage, payment, auth, webhook, mcp, other), `provider` (the product, "
         "in lower case) and `secretRefs` — the NAMES of the variables its "
         "credentials live in, UPPER_SNAKE (`XERO_API_KEY`), never a value. "
@@ -3187,6 +3202,8 @@ def _workflow_steps_prompt(doc: dict, system: str, subject: str,
     system += WORKFLOW_CATALOG_ADDENDUM.format(catalog=workflow_nodes().digest())
     from services.blueprint.mcp_catalog import load as _mcp_servers, prompt_block
     system += prompt_block(_mcp_servers(output_dir))
+    from services.blueprint import api_reference as _api_reference
+    system += _api_reference.prompt_block(_api_reference.load(output_dir))
 
     row = declared_workflow(doc, subject) or {"id": subject}
     context = context_for(doc, "workflow")
@@ -3392,6 +3409,12 @@ _DECLARED_PAGE_FIELDS: frozenset[str] = frozenset({
     "name", "route", "purpose", "pattern", "module", "data", "access", "entry",
     "presentation", "figmaFrame", "requirements", "confidence", "status",
     "addsHere", "sections", "menuEntry",
+    # WHO MAY OPEN IT. The brief asks for `users` on every restricted page and
+    # `check_page_access` refuses a restricted page without them — and this
+    # list dropped them, so every page arrived nameless however the writer
+    # answered: Refund And Chargeback (0qtb9jiy, forge-v3 2026-10-20) was
+    # refused twice for fifteen pages and the build stopped with no screens.
+    "users",
 })
 
 #: What the declaration decided and the contract author may not move.
@@ -4115,6 +4138,21 @@ def after_refusal(client: Any, spec: Any) -> Any:
     return dataclasses.replace(client, effort="high")
 
 
+def escalated(client: Any, spec: Any) -> Any:
+    """The client for the LAST TRY at a reply a check refused the same way
+    twice (`TaskSpec.escalate`): the strongest model, at high effort. Asking
+    the same model the same way a third time gets the same answer; the build
+    used to stop there (Refund And Chargeback and three before it,
+    2026-10-20). Any other call is left as it is."""
+    import dataclasses
+
+    if not getattr(spec, "escalate", False) or not dataclasses.is_dataclass(client) \
+            or not hasattr(client, "model") or not hasattr(client, "effort"):
+        return client
+    return dataclasses.replace(client, model=ESCALATION_MODEL,
+                               effort="high" if str(client.effort) not in ("xhigh", "max") else client.effort)
+
+
 #: One notch down, never below `low`.
 _LOWER_EFFORT = {"max": "xhigh", "xhigh": "high", "high": "medium", "medium": "low", "low": "low"}
 
@@ -4498,8 +4536,8 @@ def make_executor(
         from services.blueprint.artifact_patch import patch_node_output
         from services.blueprint.orchestrator import DAG
 
-        client = for_repair(model.for_task(spec.node, spec.agent)
-                            if isinstance(model, ModelRouter) else model, spec)
+        client = escalated(for_repair(model.for_task(spec.node, spec.agent)
+                                      if isinstance(model, ModelRouter) else model, spec), spec)
         try:
             with svc.lock:
                 system, context = build_prompt(
@@ -4728,12 +4766,12 @@ def make_executor(
             composed = _compose_via_a2ui(spec)
             if composed is not None:
                 return composed
-        client = for_repair(after_refusal(after_no_answer(
+        client = escalated(for_repair(after_refusal(after_no_answer(
             model.for_task(spec.node, spec.agent)
             if isinstance(model, ModelRouter)
             else model,
             spec.feedback,
-        ), spec), spec)
+        ), spec), spec), spec)
         # §5 — an application can be described by showing as well as by
         # telling. Resolved per call rather than threaded through `run`,
         # because the references belong to the application and `svc` is the

@@ -209,9 +209,15 @@ export const FEATURE_GROUP_NAMES: Record<AdminFeature["group"], string> = {
 /** Something that went wrong on the platform, as the backend recorded it (services/incidents.py). */
 export interface Incident {
   at: string;
-  kind: "turn_lost" | "build_lost" | "check_lost" | "platform_fault" | string;
+  kind: "turn_lost" | "build_lost" | "check_lost" | "platform_fault" | "build_stuck" | string;
   app: string;
   detail: string;
+  /** The same fault, matched across applications. */
+  signature?: string;
+  /** Seen in another application too — almost certainly the platform's. */
+  recurring?: boolean;
+  apps?: string[];
+  node?: string;
   why?: string;
   ledger?: string;
   path?: string;

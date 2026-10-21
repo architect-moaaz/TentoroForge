@@ -375,9 +375,9 @@ def test_the_current_page_scope_is_a_route_list():
 
 
 def test_the_chat_request_carries_the_supplied_documents_into_the_brief():
-    """A-03/B-08: the requirements file attached on /blueprint/new is read in
-    the browser and posted with the first turn. It reached only the legacy
-    generate request; the panel posts to smith/chat, which dropped it."""
+    """A-03/B-08: document text posted with a turn reaches the brief. It
+    reached only the legacy generate request; the panel posts to smith/chat,
+    which dropped it."""
     from routers.blueprint_generate import SmithChatRequest, _brief_with_documents
     req = SmithChatRequest(message="a clinic visit tracker", evidence=["1. Reception registers a patient."])
     assert req.evidence == ["1. Reception registers a patient."]

@@ -1,6 +1,12 @@
 "use client";
 
 /**
+ * The App Map: the whole application on one canvas — every screen, how a
+ * person reaches it (menu, landing, links), and the paths people take
+ * through it, with what nothing reaches named underneath. It replaced two
+ * views that each showed half: Pages & Nav (screens and links) and App Flow
+ * (only the screens a path touched).
+ *
  * The App Flow view: the paths people take through the application, drawn.
  *
  * Every flow on one map of screens — a card per screen (or the tab or panel of
@@ -19,7 +25,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
-  AlertTriangle, AppWindow, ArrowRight, CheckCircle2, ChevronRight, Flag, Map as MapIcon, Monitor,
+  AlertTriangle, AppWindow, ArrowRight, CheckCircle2, ChevronRight, Flag, Home, LogIn, Map as MapIcon, Menu as MenuIcon, Monitor,
   PanelRight, Route, SquareStack, Zap,
 } from "lucide-react";
 import { api } from "@/lib/api";
@@ -29,7 +35,8 @@ import { cn } from "@/lib/utils";
 // The shape `app_flows.graph` returns
 // --------------------------------------------------------------------------
 
-import type { Flow, FlowNode, FlowsResponse } from "@/lib/appFlows";
+import type { AppMap, Flow, FlowNode, FlowsResponse, MapGap } from "@/lib/appFlows";
+import { NavigationPanel } from "@/components/navigation/NavigationPanel";
 import { useAppFlowStore } from "@/stores/appFlow";
 
 // --------------------------------------------------------------------------
@@ -70,6 +77,8 @@ const NODE_H = 112;
 type PlaceData = {
   screen: string; route: string; part: string; placement: string;
   ends: boolean; actions: string[]; step: number | null; hue: Hue | null; start: boolean;
+  /** From the app map, on the whole map only: how a person reaches the screen. */
+  menu?: string; landing?: string[]; afterSignup?: boolean; gap?: MapGap["kind"] | ""; offPath?: boolean;
 };
 
 function PlaceNode({ data }: NodeProps<Node<PlaceData>>) {
@@ -81,7 +90,10 @@ function PlaceNode({ data }: NodeProps<Node<PlaceData>>) {
         "group relative overflow-hidden rounded-2xl border bg-white/95 shadow-[0_8px_24px_-12px_rgba(15,23,42,0.28)]",
         "backdrop-blur transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_16px_34px_-14px_rgba(15,23,42,0.4)]",
         "dark:bg-slate-900/95 dark:shadow-black/40",
-        data.ends ? "border-emerald-300/80 dark:border-emerald-700" : "border-slate-200/80 dark:border-slate-700/80",
+        data.ends ? "border-emerald-300/80 dark:border-emerald-700"
+          : data.gap ? "border-dashed border-amber-400 dark:border-amber-600"
+          : "border-slate-200/80 dark:border-slate-700/80",
+        data.offPath && !data.gap && "opacity-80",
       )}
       style={{ width: NODE_W }}
     >
@@ -120,6 +132,30 @@ function PlaceNode({ data }: NodeProps<Node<PlaceData>>) {
           <div className="mt-0.5 truncate font-mono text-[10px] text-slate-400 dark:text-slate-500">{data.route}</div>
         </div>
       </div>
+      {(data.menu || data.landing?.length || data.afterSignup || data.gap) && (
+        <div className="flex flex-wrap gap-1 px-3.5 pb-2">
+          {data.menu && (
+            <span title="On the menu" className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-1.5 py-px text-[10px] text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+              <MenuIcon className="h-2.5 w-2.5" />{short(data.menu, 18)}
+            </span>
+          )}
+          {data.landing?.map((r) => (
+            <span key={r} title={`${r} lands here after signing in`} className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-1.5 py-px text-[10px] text-sky-700 dark:bg-sky-950 dark:text-sky-300">
+              <Home className="h-2.5 w-2.5" />{short(r, 16)}
+            </span>
+          ))}
+          {data.afterSignup && (
+            <span title="Where a new account goes first" className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-1.5 py-px text-[10px] text-violet-700 dark:bg-violet-950 dark:text-violet-300">
+              <LogIn className="h-2.5 w-2.5" />after sign-up
+            </span>
+          )}
+          {data.gap && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-1.5 py-px text-[10px] font-medium text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+              <AlertTriangle className="h-2.5 w-2.5" />{data.gap === "unreachable" ? "nothing leads here" : "on no path"}
+            </span>
+          )}
+        </div>
+      )}
       {data.actions.length > 0 && (
         <div className="flex flex-wrap gap-1 px-3.5 pb-3">
           {data.actions.slice(0, 2).map((a) => (
@@ -147,7 +183,9 @@ function PlaceNode({ data }: NodeProps<Node<PlaceData>>) {
 // A move between screens
 // --------------------------------------------------------------------------
 
-type MoveData = { label: string; process: boolean; then: "go" | "offer" | "menu"; color: string; lit: boolean };
+type MoveData = { label: string; process: boolean; then: "go" | "offer" | "menu"; color: string; lit: boolean;
+  /** A link between screens from the app map, not a step of a path. */
+  link?: boolean };
 
 function MoveEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, data, markerEnd }:
   EdgeProps<Edge<MoveData>>) {
@@ -155,6 +193,10 @@ function MoveEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targ
     sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, borderRadius: 18, offset: 22,
   });
   const d = data!;
+  if (d.link) {
+    return <BaseEdge id={id} path={path} markerEnd={markerEnd}
+      style={{ stroke: "#94a3b8", strokeWidth: 1.1, strokeDasharray: "3 4", opacity: 0.75 }} />;
+  }
   const dash = d.then === "offer" ? "7 5" : d.then === "menu" ? "2 6" : undefined;
   return (
     <>
@@ -222,8 +264,8 @@ export function hueFor(roles: string[], role: string): Hue {
  * names it — shared by the App Flow tab and Smith's side panel. `compact`
  * leaves out the zoom controls, for a panel a third of the screen wide.
  */
-export function FlowCanvas({ flows: allFlows, chosen, compact = false }:
-  { flows: Flow[]; chosen: string | null; compact?: boolean }) {
+export function FlowCanvas({ flows: allFlows, chosen, compact = false, map }:
+  { flows: Flow[]; chosen: string | null; compact?: boolean; map?: AppMap }) {
   const roles = useMemo(() => rolesOf(allFlows), [allFlows]);
   const [placed, setPlaced] = useState<Node<PlaceData>[]>([]);
   const { rawNodes, rawEdges } = useMemo(() => {
@@ -259,8 +301,36 @@ export function FlowCanvas({ flows: allFlows, chosen, compact = false }:
         });
       });
     }
+    // THE WHOLE MAP, when no single path is chosen: every screen the paths do
+    // not touch joins them, every link between screens is drawn thin and
+    // grey, and each screen says how a person reaches it.
+    if (map && chosen === null) {
+      const gapOf = new Map(map.gaps.map((g) => [g.page, g.kind]));
+      const byPage = new Map<string, string>();
+      for (const k of places.keys()) { const pg = k.split("#")[0]; if (!byPage.has(pg)) byPage.set(pg, k); }
+      for (const sc of map.screens) {
+        const key = byPage.get(sc.id) ?? `${sc.id}#`;
+        const was = places.get(key);
+        places.set(key, {
+          id: key, type: "place", position: { x: 0, y: 0 },
+          data: {
+            ...(was?.data ?? { screen: sc.name, route: sc.route, part: "", placement: "", ends: false, actions: [],
+                               step: null, hue: null, start: false, offPath: true }),
+            menu: sc.menu, landing: sc.landing, afterSignup: !!sc.afterSignup, gap: gapOf.get(sc.id) ?? "",
+          },
+        });
+        byPage.set(sc.id, key);
+      }
+      map.links.forEach((l, i) => {
+        const a = byPage.get(l.from), b = byPage.get(l.to);
+        if (!a || !b || a === b) return;
+        edges.push({ id: `link-${i}`, type: "move", source: a, target: b,
+          markerEnd: { type: MarkerType.ArrowClosed, width: 10, height: 10, color: "#94a3b8" },
+          data: { label: "", process: false, then: "go", color: "#94a3b8", lit: false, link: true } });
+      });
+    }
     return { rawNodes: [...places.values()], rawEdges: edges };
-  }, [allFlows, roles, chosen]);
+  }, [allFlows, roles, chosen, map]);
 
   useEffect(() => {
     let live = true;
@@ -275,6 +345,10 @@ export function FlowCanvas({ flows: allFlows, chosen, compact = false }:
         <ReactFlow key={`${chosen ?? "all"}-${placed.length}`} nodes={placed} edges={rawEdges}
           nodeTypes={nodeTypes} edgeTypes={edgeTypes}
           fitView fitViewOptions={{ padding: compact ? 0.1 : 0.18, duration: 400 }} minZoom={0.1} maxZoom={1.6}
+          // THE WHOLE MAP OPENS WHOLE. `fitView` alone ran before the cards were
+          // measured and left a big map at full size, a corner of it showing;
+          // fitting again once they are laid out frames all of it.
+          onInit={(rf) => { window.requestAnimationFrame(() => { void rf.fitView({ padding: compact ? 0.1 : 0.18, duration: 300 }); }); }}
           nodesDraggable={false} nodesConnectable={false} proOptions={{ hideAttribution: true }}
           zoomOnScroll={!compact} panOnScroll={compact}>
           <Background variant={BackgroundVariant.Dots} gap={22} size={1.2} color="#cbd5e1" />
@@ -304,6 +378,9 @@ export function AppFlowPanel({ projectId }: { projectId: string }) {
   // "Show me this path" from Smith's side panel.
   useEffect(() => { if (requested) setChosen(focus); }, [requested, focus]);
   const [showFindings, setShowFindings] = useState(true);
+  // Folded at first: the canvas is the map, the list is the detail.
+  const [showGaps, setShowGaps] = useState(false);
+  const map = data?.map;
 
   const allFlows = useMemo(() => data?.flows ?? [], [data]);
   const roles = useMemo(() => rolesOf(allFlows), [allFlows]);
@@ -317,8 +394,9 @@ export function AppFlowPanel({ projectId }: { projectId: string }) {
       </div>
     );
   }
-  if (error) return <div className="p-6 text-sm text-muted-foreground">This project has no definition yet.</div>;
-  if (!allFlows.length) {
+  // A project with no Blueprint keeps the old screen map and its editor.
+  if (error) return <NavigationPanel projectId={projectId} />;
+  if (!allFlows.length && !map?.screens.length) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 bg-gradient-to-b from-orange-50/60 to-transparent p-6 text-center dark:from-orange-950/20">
         <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-orange-400 to-rose-500 text-white shadow-lg">
@@ -348,8 +426,9 @@ export function AppFlowPanel({ projectId }: { projectId: string }) {
               <Route className="h-[18px] w-[18px]" />
             </div>
             <div>
-              <h2 className="text-sm font-semibold tracking-tight">App Flow</h2>
+              <h2 className="text-sm font-semibold tracking-tight">App Map</h2>
               <p className="text-[11px] text-muted-foreground">
+                {map ? `${map.screens.length} screen${map.screens.length === 1 ? "" : "s"} · ` : ""}
                 {allFlows.length} path{allFlows.length === 1 ? "" : "s"} · {roles.length} {roles.length === 1 ? "person" : "people"}
               </p>
             </div>
@@ -365,7 +444,7 @@ export function AppFlowPanel({ projectId }: { projectId: string }) {
             <div>
               <div className="text-[13px] font-semibold">The whole map</div>
               <div className={cn("text-[11px]", chosen === null ? "opacity-70" : "text-muted-foreground")}>
-                Every path, and where they meet
+                Every screen, how people reach it, and every path
               </div>
             </div>
           </button>
@@ -469,13 +548,30 @@ export function AppFlowPanel({ projectId }: { projectId: string }) {
               <span className="flex items-center gap-1.5"><svg width="22" height="6"><line x1="0" y1="3" x2="22" y2="3" stroke="#64748b" strokeWidth="2" /></svg>taken there</span>
               <span className="flex items-center gap-1.5"><svg width="22" height="6"><line x1="0" y1="3" x2="22" y2="3" stroke="#64748b" strokeWidth="2" strokeDasharray="5 3" /></svg>shown the way</span>
               <span className="flex items-center gap-1.5"><svg width="22" height="6"><line x1="0" y1="3" x2="22" y2="3" stroke="#64748b" strokeWidth="2" strokeDasharray="1.5 4" /></svg>by the menu</span>
+              {map && <span className="flex items-center gap-1.5"><svg width="22" height="6"><line x1="0" y1="3" x2="22" y2="3" stroke="#94a3b8" strokeWidth="1.2" strokeDasharray="3 4" /></svg>linked screens</span>}
             </div>
           </div>
         )}
 
         <div className="relative min-h-0 flex-1 bg-[radial-gradient(ellipse_at_top,rgba(251,146,60,0.09),transparent_60%)] dark:bg-[radial-gradient(ellipse_at_top,rgba(251,146,60,0.06),transparent_60%)]">
-          <FlowCanvas flows={allFlows} chosen={chosen} />
+          <FlowCanvas flows={allFlows} chosen={chosen} map={map} />
         </div>
+
+        {!!map?.gaps.length && (
+          <div data-map-gaps="" className="border-t border-amber-200 bg-amber-50/90 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/60 dark:text-amber-200">
+            <button type="button" onClick={() => setShowGaps((v) => !v)}
+              className="flex w-full items-center gap-2 px-4 py-2 font-medium">
+              <AlertTriangle className="h-3.5 w-3.5" />
+              {map.gaps.length} screen{map.gaps.length === 1 ? "" : "s"} people may not find — ask Smith to connect {map.gaps.length === 1 ? "it" : "them"}
+              <ChevronRight className={cn("ml-auto h-3.5 w-3.5 transition", showGaps && "rotate-90")} />
+            </button>
+            {showGaps && (
+              <div className="max-h-28 space-y-1 overflow-auto px-4 pb-2">
+                {map.gaps.map((g) => <div key={g.page}>• {g.text}</div>)}
+              </div>
+            )}
+          </div>
+        )}
 
         {!!data?.findings?.length && (
           <div className="border-t border-amber-200 bg-amber-50/90 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/60 dark:text-amber-200">

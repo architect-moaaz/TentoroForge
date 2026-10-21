@@ -226,14 +226,18 @@ def test_a_finding_the_loop_cannot_settle_is_still_shown(tmp_path):
     assert result.status == "needs_user" and "nothing actually changed" in result.said
 
 
-def test_the_cap_is_said(tmp_path, monkeypatch):
+def test_the_cap_is_a_floor_while_the_turn_gets_somewhere(tmp_path, monkeypatch):
+    """The cap used to end the turn; a turn that keeps landing changes keeps
+    its steps, up to the hard limit, and the ending says how far it went."""
     import services.smith.loop as loop_mod
+    from services.smith4 import turn as turn_mod
     monkeypatch.setattr(loop_mod, "MAX_STEPS", 3)
+    monkeypatch.setattr(turn_mod, "HARD_MAX_STEPS", 5)
     _repo(tmp_path)
     writes = _Writes(tmp_path)
-    chooser = _Chooser(*[_rename(f"src/{i}.json", f"L{i}") for i in range(6)])
+    chooser = _Chooser(*[_rename(f"src/{i}.json", f"L{i}") for i in range(8)])
     result = _turn(tmp_path, chooser, "many things", move=writes)
-    assert len(writes.calls) == 3 and "3 steps" in result.said
+    assert len(writes.calls) == 5 and "5 steps" in result.said
 
 
 def test_propose_plan_is_in_the_catalogue():

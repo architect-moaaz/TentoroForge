@@ -22,14 +22,20 @@ def handle(**kwargs: Any) -> Outcome:
     """One Smith turn, its model calls written to the usage ledger, and the
     pages its change reaches used again before it answers."""
     from services.build_usage import usage_scope
+    # THE ANSWER FIRST, THE CHECK AFTER. A caller that can post two messages
+    # (`check_after=False`) tells the person the change landed, then runs the
+    # check and posts what it found; a two-minute colour change was held
+    # twelve minutes behind the check of the page it reached (cxz95dd1,
+    # 2026-10-17).
+    check_after = bool(kwargs.pop("check_after", True))
     with usage_scope(agent="smith", output_dir=str(kwargs.get("output_dir") or ""), kind="smith"):
         out = _handle(**kwargs)
-    if not kwargs.get("unattended"):
-        out = _checked(str(kwargs.get("output_dir") or ""), out)
+    if check_after and not kwargs.get("unattended"):
+        out = _checked(str(kwargs.get("output_dir") or ""), out, asked=str(kwargs.get("message") or ""))
     return out
 
 
-def _checked(output_dir: str, out: Outcome) -> Outcome:
+def _checked(output_dir: str, out: Outcome, *, asked: str = "") -> Outcome:
     """A CHANGE IS CHECKED WHERE IT REACHES. Smith tries what it changed; the
     pages it did not touch but did reach — a list of a record type whose
     fields moved, a page that starts a process that changed — are opened as
@@ -43,7 +49,11 @@ def _checked(output_dir: str, out: Outcome) -> Outcome:
         return out
     try:
         from services.blueprint.app_check import check_change
-        checked = check_change(output_dir, list(out.touched))
+        # THE REPAIR HEARS THE ASK. The turn the check starts used to know only
+        # the fault; it rewrote a page to take a parameter nobody asked for
+        # (qpqhdugb F2, 2026-10-16). It is told what the person asked for and
+        # that it repairs what doing that broke.
+        checked = check_change(output_dir, list(out.touched), asked=asked)
     except Exception:  # noqa: BLE001 — the change landed; its check is a bonus
         import logging
         logging.getLogger(__name__).exception("[smith4] checking the pages a change reaches failed")
@@ -65,7 +75,8 @@ def _handle(*, project_id: str, output_dir: str, message: str,
            attachments: list[dict] | None = None,
            evidence: list[str] | None = None,
            app_name: str = "",
-           unattended: bool = False) -> Outcome:
+           unattended: bool = False,
+           asked_from: str = "") -> Outcome:
     """One turn on a built application. `choose` decides each step; absent,
     `services.smith.loop.next_step` on the real model. `move` is the tree
     editor for layout pages; absent, `move_dispatcher`."""
@@ -84,7 +95,7 @@ def _handle(*, project_id: str, output_dir: str, message: str,
                    attachments=list(attachments or []), history=list(history or []),
                    evidence=[str(e) for e in (evidence or []) if str(e).strip()],
                    app_name=str(app_name or ""), engine_refreshed=_once(refreshed),
-                   unattended=unattended, asked_from=planned_from if step else "")
+                   unattended=unattended, asked_from=asked_from or (planned_from if step else ""))
 
     # A TURN THE PLATFORM STARTED is the fault and nothing else: the person's
     # waiting plan or held question is theirs, not something to clear or join.
@@ -106,9 +117,10 @@ def _handle(*, project_id: str, output_dir: str, message: str,
     # answered never happened — twice (F&B live test, 2026-10-02). With a
     # confirmation waiting, a yes goes to it: the held step runs again with
     # the yes, and the rest of the plan stays waiting.
+    from services.smith import act as _act
     from services.smith import confirm as confirm_mod
     if answers_plan and typed not in (plan_mod.ALL_LABEL, plan_mod.FIRST_LABEL) \
-            and confirm_mod.waiting(output_dir) and confirm_mod.is_yes(typed):
+            and (confirm_mod.waiting(output_dir) or _act.held(output_dir)) and confirm_mod.is_yes(typed):
         answers_plan = False
     if plan_mod.peek(output_dir):
         if answers_plan:
@@ -288,12 +300,14 @@ def _with_done(step: str, said: list[str]) -> str:
 
 
 def _image_paths(attachments: list[dict] | None) -> list[str]:
-    """The pictures attached to this turn, by path — what the person sees."""
+    """The pictures attached to this turn, by path — what the person sees — and
+    a design PDF, which the builder chat passes only when it was marked as one."""
     out = []
     for a in attachments or []:
-        kind = str(a.get("mime") or a.get("content_type") or "")
+        kind = str(a.get("mime") or a.get("content_type") or a.get("media_type") or "")
         name = str(a.get("filename") or a.get("path") or "").lower()
-        if (kind.startswith("image/") or name.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp"))) and a.get("path"):
+        if (kind.startswith("image/") or kind == "application/pdf"
+                or name.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf"))) and a.get("path"):
             out.append(str(a["path"]))
     return out
 

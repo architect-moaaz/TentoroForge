@@ -18,6 +18,10 @@ function profileOf(row: Record<string, unknown>): Record<string, unknown> {
   for (const [k, v] of Object.entries(row)) {
     if (["password", "passwordHash", "id", "email", "name", "role", "accountType"].includes(k)) continue;
     if (v === null || ["string", "number", "boolean"].includes(typeof v)) out[k] = v;
+    // A LIST OF IDS rides along too — the properties a person is assigned to
+    // are an `actorColumn` of their own; left behind, a person of several
+    // properties reached none (pah7lhfz, 2026-10-21).
+    else if (Array.isArray(v) && v.length <= 200 && v.every((x) => ["string", "number"].includes(typeof x))) out[k] = v;
   }
   return out;
 }
@@ -257,10 +261,13 @@ export const authOptions: NextAuthOptions = {
       const stale = Date.now() - Number((token as any).refreshedAt ?? 0) > 15 * 60_000;
       if (token.id && (trigger === "update" || stale)) {
         try {
+          const [row] = await db.select().from(users).where(eq(users.id, String(token.id))).limit(1);
+          // WHAT THE PERSON'S ROW SAYS NOW — the properties they were given
+          // since signing in reach the session too, tenancy or not.
+          if (row) (token as any).profile = { ...profileOf(row as Record<string, unknown>), activeOrgId: (token as any).activeOrgId ?? null };
           const tenancy = await import("@/lib/tenancy");
           await tenancy.policy();
           if (tenancy.tenancyOn()) {
-            const [row] = await db.select().from(users).where(eq(users.id, String(token.id))).limit(1);
             if (row) {
               const stored = (row as any).role || (row as any).accountType || "user";
               const inOrg = await tenancy.resolve({ id: String(row.id), role: stored, activeOrgId: (row as any).activeOrgId ?? null });

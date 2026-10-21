@@ -353,7 +353,7 @@ def _entries(app: Any, doc: dict, batch: list[dict]) -> list[dict]:
 
 def check_pages(app: Any, doc: dict, todo: list[dict], out_dir: Path, *,
                 server_said: Callable[[], list[str]] = lambda: [],
-                cancelled: Callable[[], bool] = lambda: False) -> dict[str, dict]:
+                cancelled: Callable[[], bool] = lambda: False, probe: bool = True) -> dict[str, dict]:
     """Open `todo` (from `visits`) and read what happened: `{page: {name,
     route, findings: [(as, finding)]}}` for every page visited."""
     from services.blueprint.page_review import ReviewUnavailable, run_shots
@@ -370,7 +370,7 @@ def check_pages(app: Any, doc: dict, todo: list[dict], out_dir: Path, *,
             return role, [{"id": visit_id(v), "unavailable": "stopped by the person"} for v in batch]
         try:
             shots = run_shots(app, _entries(app, doc, batch), out_dir / safe,
-                              probe=role != "signed out", states=role != "signed out")
+                              probe=probe and role != "signed out", states=role != "signed out")
         except ReviewUnavailable as exc:
             shots = [{"id": visit_id(v), "unavailable": str(exc)} for v in batch]
         return role, shots
@@ -436,11 +436,29 @@ def check_app(svc: Any, output_dir: str, *args: Any, **kwargs: Any) -> dict:
         return _check_app(svc, output_dir, *args, **kwargs)
 
 
+def known_findings(doc: dict) -> dict[str, str]:
+    """page id -> what the last check already recorded as not working on it."""
+    out: dict[str, str] = {}
+    for i in (doc.get("runtime") or {}).get("issues") or []:
+        if isinstance(i, dict) and i.get("kind") == "page_check" and i.get("page"):
+            out[str(i["page"])] = str(i.get("detail") or "")
+    return out
+
+
+def _already_known(item: dict, known: dict[str, str], pid: str) -> bool:
+    """Every finding on the page was on record before this change."""
+    detail = known.get(pid) or ""
+    if not detail or not item.get("findings"):
+        return False
+    return all(f"as {w}: {f}" in detail for w, f in item["findings"])
+
+
 def _check_app(svc: Any, output_dir: str, *, emit: Callable[[str, dict], None] | None = None,
-               run_turn: Callable[..., dict] | None = None,
+               run_turn: Callable[..., dict] | None = None, asked: str = "",
                app_factory: Callable[[Path], Any] | None = None,
                rounds: int = ROUNDS, record: bool = True, only: set[str] | None = None,
-               cancelled: Callable[[], bool] = lambda: False) -> dict:
+               cancelled: Callable[[], bool] = lambda: False, known_ok: bool = False,
+               probe: bool = True) -> dict:
     """Use every page as every role — or only the pages `only` names — repair
     what fails; returns the check's summary (also written to `runtime.check`,
     merged over the last one when only some pages were looked at). The summary
@@ -448,6 +466,8 @@ def _check_app(svc: Any, output_dir: str, *, emit: Callable[[str, dict], None] |
     from services.blueprint.page_repair import _ledger
 
     say = emit or (lambda _e, _d: None)
+    known_before: dict[str, str] = known_findings(svc.doc) if known_ok else {}
+    known_left: dict[str, dict] = {}
     if run_turn is None:
         from services.smith4.platform import smith_result as run_turn
     if app_factory is None:
@@ -496,7 +516,7 @@ def _check_app(svc: Any, output_dir: str, *, emit: Callable[[str, dict], None] |
                     return [l.strip() for l in fresh.decode("utf-8", "replace").splitlines() if l.strip()]
 
                 report = check_pages(running, svc.doc, todo, Path(output_dir) / ".forge" / "check" / f"round-{round_}",
-                                     server_said=server_said, cancelled=cancelled)
+                                     server_said=server_said, cancelled=cancelled, probe=probe)
             except Exception as exc:  # noqa: BLE001 — a check that cannot run is said, not fatal
                 logger.warning("[app-check] the app could not be run: %s", exc)
                 report = {v["page"]: {"name": v["name"], "route": v["route"], "findings": [],
@@ -511,6 +531,15 @@ def _check_app(svc: Any, output_dir: str, *, emit: Callable[[str, dict], None] |
                     pass
             last.update(report)
             failing = {pid: item for pid, item in report.items() if item["findings"]}
+            if known_ok:
+                # WHAT WAS NOT WORKING BEFORE THE CHANGE IS NOT THIS CHANGE'S TO
+                # REPAIR. A background change (one CSS gradient) opened the
+                # calculator, met its old "Clear does nothing" and spent ten
+                # minutes rewriting the view while the person waited for a
+                # colour (cxz95dd1, 2026-10-17). Known faults are reported as
+                # known; only what is new after the change is repaired here.
+                for pid in [pid for pid, item in failing.items() if _already_known(item, known_before, pid)]:
+                    known_left[pid] = failing.pop(pid)
             for pid, item in report.items():
                 if not item["findings"] and round_ > 1:
                     fixed.append(item["route"])
@@ -525,7 +554,8 @@ def _check_app(svc: Any, output_dir: str, *, emit: Callable[[str, dict], None] |
                 say("message", {"text": f"{item['name']} ({item['route']}) does not work yet — "
                                         f"{item['findings'][0][1][:160]}. Fixing it."})
                 try:
-                    done = run_turn("", output_dir, fault_ask(pid, item), max_steps=STEPS, unattended=True) or {}
+                    done = run_turn("", output_dir, fault_ask(pid, item), max_steps=STEPS, unattended=True,
+                                    **({"asked_from": asked} if asked else {})) or {}
                     touched += [t for t in done.get("edited_paths") or [] if t not in touched]
                 except Exception as exc:  # noqa: BLE001 — one repair never ends the build
                     logger.warning("[app-check] %s: %s", item["route"], exc)
@@ -535,7 +565,10 @@ def _check_app(svc: Any, output_dir: str, *, emit: Callable[[str, dict], None] |
 
     left = [{"page": pid, "name": item["name"], "route": item["route"],
              "findings": [f"as {w}: {f}" for w, f in item["findings"][:8]]}
-            for pid, item in last.items() if item["findings"]]
+            for pid, item in last.items() if item["findings"] and pid not in known_left]
+    known = [{"page": pid, "name": item["name"], "route": item["route"],
+              "findings": [f"as {w}: {f}" for w, f in item["findings"][:8]]}
+             for pid, item in known_left.items()]
     untried = [{"page": pid, "name": item["name"], "route": item["route"],
                 "reasons": [f"as {w}: {f}" for w, f in (item.get("untried") or [])[:8]]}
                for pid, item in last.items() if item.get("untried") and not item["findings"]]
@@ -544,9 +577,12 @@ def _check_app(svc: Any, output_dir: str, *, emit: Callable[[str, dict], None] |
     for item in left:
         ledger_note = "; ".join(item["findings"][:3])[:600]
         logger.info("[app-check] still failing %s: %s", item["route"], ledger_note)
-    summary = {"pages": pages_total, "working": pages_total - len(left) - len(untried),
+    summary = {"pages": pages_total, "working": pages_total - len(left) - len(known) - len(untried),
                "fixed": sorted(set(fixed)), "left": left, "untried": untried, "touched": touched}
-    _record(svc, last, left, fixed, pages_total, partial=only is not None, untried=untried)
+    if known_ok:
+        summary["known"] = known
+    # Known faults stay on the record as they were: still not working.
+    _record(svc, last, left + known, fixed, pages_total, partial=only is not None, untried=untried)
     if only is not None:
         check = (svc.doc.get("runtime") or {}).get("check", {})
         failing = list(check.get("failing") or [t["route"] for t in left])
@@ -651,7 +687,8 @@ def affected_pages(doc: dict, touched: list[str]) -> set[str]:
 
 
 def check_change(output_dir: str, touched: list[str], *, run_turn: Callable[..., dict] | None = None,
-                 app_factory: Callable[[Path], Any] | None = None) -> dict | None:
+                 app_factory: Callable[[Path], Any] | None = None, asked: str = "",
+                 emit: Callable[[str, dict], None] | None = None) -> dict | None:
     """After a change: check the pages it could have reached, as the people
     they are for; repair once what it broke. None when it reached no page.
     `said` is the sentence for the reply; `touched` what the repair changed."""
@@ -674,18 +711,31 @@ def check_change(output_dir: str, touched: list[str], *, run_turn: Callable[...,
             return None
         order = [v["page"] for v in visits(svc.doc) if v["page"] in reached]
         only = set(list(dict.fromkeys(order))[:MAX_CHANGE_PAGES])
-        out = _check_app(svc, output_dir, run_turn=run_turn, app_factory=app_factory, rounds=1,
-                         record=False, only=only)
+        # A STYLESHEET CANNOT CHANGE WHAT A CONTROL DOES. A change to .css alone
+        # has the pages opened as each person to see they still render, not
+        # every control pressed (four minutes a page for a background colour,
+        # cxz95dd1 2026-10-17).
+        style_only = bool(rel) and all(t.lower().endswith((".css", ".scss")) for t in rel)
+        out = _check_app(svc, output_dir, run_turn=run_turn, app_factory=app_factory, rounds=1, asked=asked,
+                         record=False, only=only, emit=emit, known_ok=True, probe=not style_only)
     routes = sorted({v["route"] for v in visits(svc.doc) if v["page"] in only})
+    pages = f"the {len(routes)} page{'' if len(routes) == 1 else 's'} this change reaches"
+    known = out.get("known") or []
+    known_note = ""
+    if known:
+        names = "; ".join(f"{t['route']} — {t['findings'][0]}" for t in known[:3])
+        known_note = (f" Not working, as before this change (not caused by it, left as it was): {names}. "
+                      "Say “fix it” and I will take that on.")
     if out["left"]:
         names = "; ".join(f"{t['route']} — {t['findings'][0]}" for t in out["left"][:4])
-        said = (f"I then opened the {len(routes)} page{'' if len(routes) == 1 else 's'} this change reaches, as the "
-                f"people they are for. Still not working: {names}. Tell me to carry on and I will keep at it.")
+        said = (f"I then opened {pages}, as the people they are for. Still not working: {names}. "
+                "Tell me to carry on and I will keep at it." + known_note)
     else:
-        said = (f"I then opened the {len(routes)} page{'' if len(routes) == 1 else 's'} this change reaches, as the "
-                f"people they are for, and used them: they work"
-                + (f" (fixed on the way: {', '.join(out['fixed'])})" if out["fixed"] else "") + ".")
-    return {"checked": routes, "left": out["left"], "fixed": out["fixed"], "touched": out["touched"], "said": said}
+        said = (f"I then opened {pages}, as the people they are for, and used them: "
+                + ("nothing this change touched is worse" if known else "they work")
+                + (f" (fixed on the way: {', '.join(out['fixed'])})" if out["fixed"] else "") + "." + known_note)
+    return {"checked": routes, "left": out["left"], "known": known, "fixed": out["fixed"],
+            "touched": out["touched"], "said": said}
 
 
 def publish_note(output_dir: str) -> dict:

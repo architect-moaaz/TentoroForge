@@ -1972,3 +1972,34 @@ def test_the_page_composer_inherits_the_apps_conventions(svc):
     assert "composition.sketch" in user and "composition.sketch" not in plain_user
     other, _ = build_prompt(svc.doc, "page_layouts", subject="PAGE-002", agent="a2ui_pages")
     assert other == system, "the prefix must stay identical across the fan-out"
+
+
+def test_a_restricted_pages_roles_survive_the_declaration_and_its_check():
+    """The brief asks for `users` on every restricted page and the check refuses
+    one without them; the declaration dropped them, so every page arrived
+    nameless and Refund And Chargeback (0qtb9jiy, forge-v3 2026-10-20) was
+    refused twice for fifteen pages, ending its build with no screens."""
+    from services.blueprint.agent_contract import AgentResult, ArtifactProposal, check_page_access
+    from services.blueprint.executors import pin_page_set
+
+    def page(route: str, users: list[str] | None) -> ArtifactProposal:
+        body = {"name": route, "route": route, "purpose": "p", "pattern": "list", "module": "MODULE-002",
+                "access": "role_restricted", "sections": [{"key": "main", "label": "Main"}]}
+        if users is not None:
+            body["users"] = users
+        return ArtifactProposal(section="pages", natural_key=route, body=body)
+
+    doc = {"roles": [{"id": "ROLE-001", "name": "Front Office Agent"}, {"id": "ROLE-004", "name": "Finance"}],
+           "pages": []}
+    result = AgentResult(task_id="t", agent="page_design",
+                         proposals=[page("/cases", ["ROLE-001", "ROLE-004"]), page("/approvals", ["ROLE-004"])])
+    pin_page_set(result)
+    assert [p.body["users"] for p in result.proposals] == [["ROLE-001", "ROLE-004"], ["ROLE-004"]]
+    check_page_access(result, doc)  # nothing refused
+
+    # A restricted page the writer really left nameless is still refused, with the reason.
+    nameless = AgentResult(task_id="t", agent="page_design", proposals=[page("/reports", None)])
+    pin_page_set(nameless)
+    with pytest.raises(Exception) as refused:
+        check_page_access(nameless, doc)
+    assert "/reports" in str(refused.value) and "names no role" in str(refused.value)

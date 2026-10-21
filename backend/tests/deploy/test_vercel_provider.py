@@ -142,7 +142,9 @@ async def test_publish_full_flow_first_deploy(
 
     final = events[-1]
     assert final.data is not None
-    assert final.data["url"].startswith("https://acme-a1b2.vercel.app")
+    # The app's own address, the same after every publish (00a68bc8); the
+    # per-build Vercel address is kept beside it.
+    assert final.data["url"] == "https://acme.vercel.app"
 
     # Deployment row landed as succeeded
     res = await db_session.execute(
@@ -151,7 +153,8 @@ async def test_publish_full_flow_first_deploy(
     row = res.scalars().first()
     assert row is not None
     assert row.status == "succeeded"
-    assert row.url == "https://acme-a1b2.vercel.app"
+    assert row.url == "https://acme.vercel.app"
+    assert row.deployment_url == "https://acme-a1b2.vercel.app"
     assert row.vercel_project_id == "prj_abc"
     assert row.vercel_deployment_id == "dpl_xyz"
     assert row.neon_project_id == "np_123"

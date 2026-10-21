@@ -48,3 +48,19 @@ def test_a_released_turn_posts_its_step_then_that_it_stopped(tmp_path):
     asyncio.run(scenario())
     assert posted and posted[0].startswith("Still at it (0 min): step 3: write_page_code /transactions")
     assert "That turn stopped at" in posted[-1] and "Say “carry on”" in posted[-1]
+
+
+def test_a_build_s_progress_line_names_its_stage_and_count():
+    snap = {"active": True, "elapsedMs": 33 * 60000, "stage": "page_contracts", "nodesDone": 4, "nodesTotal": 12}
+    assert progress_line(snap) == "Still building (33 min) at page_contracts, 4 of 12 steps done."
+    assert progress_line({"active": True, "elapsedMs": 60000}) == "Still at it (1 min)."
+
+
+def test_a_hand_over_with_nothing_served_does_not_say_everything_else_works():
+    from routers.blueprint_generate import _build_complete_message
+    doc = {"pages": [{"id": "p1", "name": "Home", "route": "/"}, {"id": "p2", "name": "Register", "route": "/register"}],
+           "runtime": {"build": {"at": "2026-10-09T10:00:00Z"},
+                       "issues": [{"kind": "page", "page": "p1", "detail": "/ did not compose"},
+                                  {"kind": "page", "page": "p2", "detail": "/register did not compose"}]}}
+    text = _build_complete_message(doc) or ""
+    assert "everything else works" not in text and "not usable yet" in text and "nothing is served" in text
