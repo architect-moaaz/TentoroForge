@@ -1650,7 +1650,8 @@ export async function POST(
     // Every scalar column of the session user rides into the workflow — a
     // gate compares the case's property to the actor's home property.
     const user = su?.id
-      ? { ...Object.fromEntries(Object.entries(su).filter(([, v]) => v === null || ["string", "number", "boolean"].includes(typeof v))),
+      ? { ...Object.fromEntries(Object.entries(su).filter(([, v]) => v === null || ["string", "number", "boolean"].includes(typeof v)
+            || (Array.isArray(v) && v.every((x) => ["string", "number"].includes(typeof x))))),
           id: String(su.id), role: su.role, email: su.email ?? undefined }
       : undefined;
     // NOBODY ACTS AS SOMEONE ELSE BY SAYING SO. The body used to carry a
