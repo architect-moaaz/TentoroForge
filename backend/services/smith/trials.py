@@ -982,11 +982,16 @@ def run(name: str, args: dict, *, bench: Bench, doc: dict) -> str:
     """Carry out one trial. The observation is returned, never raised."""
     args = {k: v for k, v in (args or {}).items() if v not in (None, "")}
     as_ = str(args.get("as") or "")
-    bench.begin()
+    # The idle stop's bookkeeping, where the bench keeps it: a stand-in bench
+    # (a test's, a caller's own) has none and needs none.
+    begin, end = getattr(bench, "begin", None), getattr(bench, "end", None)
+    if callable(begin):
+        begin()
     try:
         return _run(name, args, as_, bench=bench, doc=doc)
     finally:
-        bench.end()
+        if callable(end):
+            end()
 
 
 def _run(name: str, args: dict, as_: str, *, bench: Bench, doc: dict) -> str:
