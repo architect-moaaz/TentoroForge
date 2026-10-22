@@ -512,30 +512,26 @@ def ask_for(group: dict, doc: dict) -> str:
             "holds for them. Nobody is waiting to answer questions: decide from the definition and act.")
 
 
-def platform_fault(output_dir: str, result: Any) -> str | None:
+def platform_fault(output_dir: str, result: Any, *, before: set[str] | None = None) -> str | None:
     """The engine file a repair turn had to change — the fault is the
-    platform's, not the app's — or None. Read off the paths the turn edited
-    (`file_edit.classify`) and, failing that, off its own words."""
-    import re
-    from pathlib import Path as _P
+    platform's, not the app's — or None.
+
+    A platform patch THIS TURN MADE (`file_edit`'s record, not among the
+    patches there were `before` it) is the one sign. Neither the files the turn touched nor its
+    words are: a change to the definition writes the app out again, platform
+    files included, and Personal Finance's Create Category — fixed in its own
+    rule, tried and passing — was reported as a fault in `src/sdk/widget-view.tsx`,
+    a file an earlier turn had patched (u8w3uw4j, 2026-10-22)."""
     if not isinstance(result, dict):
         return None
     try:
-        from services.blueprint.service import BlueprintService
-        from services.smith.file_edit import classify
-        doc = BlueprintService.load(output_dir=output_dir).doc
-        root = str(_P(output_dir)).rstrip("/") + "/"
-        for raw in result.get("edited_paths") or []:
-            rel = str(raw).replace("\\", "/")
-            rel = rel[len(root):] if rel.startswith(root) else rel
-            rel = rel[4:] if rel.startswith("app/") else rel
-            if classify(doc, rel).get("kind") == "platform":
-                return rel
-    except Exception:  # noqa: BLE001 — the words below still tell
-        logger.debug("[fix-to-green] could not classify the paths a repair touched", exc_info=True)
-    text = str(result.get("answer") or result.get("finding") or "")
-    m = re.search(r"platform's `([^`]+)`", text)
-    return m.group(1) if m else None
+        from services.smith.file_edit import load_patches
+        made = [p for p in load_patches(output_dir)
+                if p.get("kind") == "platform" and str(p.get("id")) not in (before or set())]
+    except Exception:  # noqa: BLE001 — unknown is not a platform fault
+        logger.debug("[fix-to-green] could not read the platform patches", exc_info=True)
+        return None
+    return str(made[-1].get("path")) if made and before is not None else None
 
 
 def _fix(batch: list[dict], output_dir: str, *, run_turn: Callable, say: Callable) -> None:
@@ -548,6 +544,8 @@ def _fix(batch: list[dict], output_dir: str, *, run_turn: Callable, say: Callabl
         label = str(group["items"][0].get("label") or group["cause"])
         why = str(group["items"][0].get("why") or "")[:160]
         say(f"{label} — {why}. Fixing it.")
+        from services.smith.file_edit import load_patches
+        before = {str(p.get("id")) for p in load_patches(output_dir)}
         try:
             result = run_turn("", output_dir, ask_for(group, doc), max_steps=STEPS, unattended=True)
         except Exception as exc:  # noqa: BLE001 — one repair never ends the loop
@@ -562,7 +560,7 @@ def _fix(batch: list[dict], output_dir: str, *, run_turn: Callable, say: Callabl
         # is a platform fault: said as such, on the record, and left alone —
         # thirty reds were worked twice and fixed zero times because every
         # one of them was the engine's (pcn4owv7, 2026-10-14).
-        where = platform_fault(output_dir, result)
+        where = platform_fault(output_dir, result, before=before)
         if where:
             group["platform"] = where
             say(f"{label} — the fault is in the platform's engine (`{where}`), not in the app; I cannot fix it "
