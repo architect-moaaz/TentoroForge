@@ -89,3 +89,23 @@ def write_preview_env(output_dir: str | Path) -> bool:
 
 
 __all__ = ["MCP_ENV", "env_for", "mcp_enabled", "read", "set_mcp", "write_preview_env"]
+
+
+def deploy_region(output_dir: str | Path | None) -> str | None:
+    """The region the app chose to be published in (`services.deploy.regions`),
+    or None — then its organisation's default is used at its first publish."""
+    value = (read(output_dir).get("deployRegion") or {}).get("region")
+    return str(value) if value else None
+
+
+def set_deploy_region(output_dir: str | Path, region: str, *, by: str = "") -> dict[str, Any]:
+    """Record the app's region. Written by the Publish dialog before the first
+    publish, and by the first publish itself, which fixes it."""
+    import time
+
+    data = read(output_dir)
+    data["deployRegion"] = {"region": str(region), "changedAt": time.time(), "changedBy": by}
+    path = Path(output_dir) / PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2), "utf-8")
+    return data["deployRegion"]

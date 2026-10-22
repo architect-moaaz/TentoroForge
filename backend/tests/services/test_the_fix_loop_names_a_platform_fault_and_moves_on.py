@@ -23,7 +23,14 @@ def _wire(monkeypatch, svc, reds, answers):
 
     def run_turn(pid, output_dir, ask, **k):
         asked.append(ask)
-        return answers.pop(0) if answers else {"answer": "nothing", "edited_paths": []}
+        answer = answers.pop(0) if answers else {"answer": "nothing", "edited_paths": []}
+        # A turn that reaches into the engine leaves a platform patch on record.
+        for path in answer.get("patched", []):
+            from services.smith import file_edit
+            file_edit._save_patches(output_dir, file_edit.load_patches(output_dir) + [
+                {"id": f"p{len(asked)}", "kind": "platform", "path": path, "status": "pending",
+                 "at": file_edit._now()}])
+        return answer
     return asked, run_turn
 
 
@@ -36,7 +43,7 @@ def test_a_platform_fault_is_said_recorded_marked_and_left_alone(tmp_path, monke
                       sc.item("PAGE-003", "Calendar", "button errors", "PAGE-003")]}
     # The first repair edits the engine; the second edits the app and still fails.
     answers = [{"answer": "Changed the platform's `src/lib/data-engine.ts` for this app: Dates to strings.",
-                "edited_paths": ["src/lib/data-engine.ts"]},
+                "edited_paths": ["src/lib/data-engine.ts"], "patched": ["src/lib/data-engine.ts"]},
                {"answer": "Rewrote /calendar", "edited_paths": ["src/app/(dashboard)/calendar/view.tsx"]}]
     # The app's classifier: the engine's file is the platform's, a page file is the app's.
     monkeypatch.setattr("services.smith.file_edit.classify",
@@ -62,9 +69,19 @@ def test_a_platform_fault_is_said_recorded_marked_and_left_alone(tmp_path, monke
     assert out_["stopped"] in ("yield", "turns", "time", "tried")
 
 
-def test_the_words_alone_name_a_platform_fault(tmp_path):
-    (tmp_path / ".forge" / "blueprint").mkdir(parents=True)
-    (tmp_path / ".forge" / "blueprint" / "current.json").write_text(json.dumps(DOC))
-    assert ftg.platform_fault(str(tmp_path), {"answer": "Took back the change to the platform's `src/lib/x.ts`.", "edited_paths": []}) == "src/lib/x.ts"
-    assert ftg.platform_fault(str(tmp_path), {"answer": "Rewrote /calendar", "edited_paths": []}) is None
-    assert ftg.platform_fault(str(tmp_path), None) is None
+def test_only_a_patch_the_turn_made_names_a_platform_fault(tmp_path):
+    """Personal Finance's Create Category was fixed in its own rule and passed,
+    and was reported as a fault in `src/sdk/widget-view.tsx`: a definition
+    change writes the app out again, and an earlier turn had patched that file
+    (u8w3uw4j, 2026-10-22). Neither touched files nor words name a fault."""
+    from services.smith import file_edit
+    file_edit._save_patches(str(tmp_path), [{"id": "old", "kind": "platform", "path": "src/sdk/widget-view.tsx",
+                                            "status": "active", "at": "2026-10-21T06:23:24+00:00"}])
+    rewritten = {"answer": "Fixed RULE-002; Create Category passes. The platform's `src/sdk/widget-view.tsx` was written out again.",
+                 "edited_paths": ["app/src/sdk/widget-view.tsx", ".forge/blueprint/current.json"]}
+    assert ftg.platform_fault(str(tmp_path), rewritten, before={"old"}) is None
+    file_edit._save_patches(str(tmp_path), file_edit.load_patches(str(tmp_path)) + [
+        {"id": "new", "kind": "platform", "path": "src/lib/data-engine.ts", "status": "pending",
+         "at": "2026-10-22T08:25:00+00:00"}])
+    assert ftg.platform_fault(str(tmp_path), {"answer": "x"}, before={"old"}) == "src/lib/data-engine.ts"
+    assert ftg.platform_fault(str(tmp_path), None, before={"old"}) is None

@@ -991,10 +991,17 @@ def database_url(output_dir: str | Path) -> str:
 
     The preview's, when one is running — reached exactly the way
     `preview_manager` builds it, because a second spelling of the same URL is
-    a second thing to keep right. Otherwise whatever the operator has put in
-    the environment, which is how a UAT host or a developer points at theirs.
+    a second thing to keep right. Otherwise the one the application itself
+    opens, as its own `.env.local` says.
+
+    NEVER THE PLATFORM'S. This used to fall back to the process's own
+    DATABASE_URL — on forge-v3 the platform's database. Refreshing Personal
+    Finance's sample rows reached for it and failed only because it was
+    written for the async driver ("invalid dsn: missing '=' after
+    'postgresql+asyncpg:/'", u8w3uw4j, 2026-10-22); in the plain form it
+    would have rewritten rows in Forge's own database.
     """
-    import os
+    import re
 
     short = Path(output_dir).name
     try:
@@ -1005,7 +1012,11 @@ def database_url(output_dir: str | Path) -> str:
     port = running.get("db_port")
     if port:
         return f"postgresql://postgres:postgres@localhost:{port}/{short}"
-    return os.environ.get("DATABASE_URL", "")
+    from services.blueprint.assembly import app_database_url
+    url = app_database_url(Path(output_dir) / "app")
+    # A driver named in the scheme (`postgresql+asyncpg://`) is for that
+    # driver; every reader here is psycopg2.
+    return re.sub(r"^postgres(?:ql)?\+\w+://", "postgresql://", url) if url else ""
 
 
 def _seed_now(output_dir: str | Path, *, reasoning: Any = None) -> str:

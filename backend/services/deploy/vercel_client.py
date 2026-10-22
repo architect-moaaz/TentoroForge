@@ -142,6 +142,15 @@ class VercelClient:
 
     # ── Env vars ────────────────────────────────────────────────────
 
+    async def set_function_region(self, project_id: str, region: str) -> None:
+        """Run the project's functions in `region` (e.g. "sin1")."""
+        r = await self._client.patch(
+            f"{BASE}/v9/projects/{project_id}",
+            params=self._params(),
+            json={"serverlessFunctionRegion": region},
+        )
+        _raise_with_body(r, f"set_function_region project={project_id!r} region={region!r}")
+
     async def list_env(self, project_id: str) -> list[dict[str, Any]]:
         """Return every env var already set on the project. Used to
         decide POST-vs-PATCH when reconciling our desired env-var map
