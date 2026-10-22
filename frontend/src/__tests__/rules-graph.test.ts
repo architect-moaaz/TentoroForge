@@ -77,3 +77,22 @@ describe("the rules map", () => {
     expect(light.edges.get(g.edges.find((x) => x.target.startsWith("refuse:"))!.id)).toBe(0);
   });
 });
+
+describe("the rules map draws the workflows that use a rule", () => {
+  const linked = view({ id: "RULE-011", name: "Positive amount", when: "amount <= 0",
+                        then: [{ type: "show_error", message: "Above zero." }] }, "condition_action",
+                      { usages: { steps: [], starts: [], saves: [], links: [
+                        { workflow: "FLOW-001", name: "Log an expense", step: "insert", stepName: "Save", event: "create", touches: true },
+                        { workflow: "FLOW-002", name: "Approve", step: "upd", stepName: "Approve it", event: "update", touches: false },
+                      ] } });
+  it("shows the workflows whose save changes what the rule reads, labelled used in", () => {
+    const g = buildRuleGraph([linked], catalogue, "Expense");
+    const flows = g.nodes.filter((n) => n.kind === "workflow").map((n) => n.label);
+    expect(flows).toEqual(["Log an expense"]);
+    expect(g.edges.find((e) => e.target === "wf:FLOW-001")?.label).toBe("used in");
+  });
+  it("draws no workflow for a rule that is switched off", () => {
+    const off = { ...linked, enabled: false } as StudioView;
+    expect(buildRuleGraph([off], catalogue, "Expense").nodes.some((n) => n.kind === "workflow")).toBe(false);
+  });
+});
