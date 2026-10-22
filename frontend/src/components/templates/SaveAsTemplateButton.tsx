@@ -64,10 +64,21 @@ export function SaveAsTemplateButton({
   return (
     <>
       <button
-        onClick={() => {
+        onClick={async () => {
+          // A NEW VERSION STARTS FROM THE LAST ONE: this app's newest template
+          // gives the name and description (written and reviewed for the
+          // Gallery); the first template of an app is named after it.
           setName(projectName ? `${projectName} template` : "");
           setDescription("");
           setOpen(true);
+          try {
+            const res = await api.get<{ templates: Array<{ name: string; description?: string; version: number;
+                                                           source_project_id?: string | null }> }>(
+              `/api/orgs/${orgId}/project-templates`);
+            const mine = (res.templates ?? []).filter((t) => t.source_project_id === projectId)
+              .sort((a, b) => b.version - a.version)[0];
+            if (mine) { setName(mine.name); setDescription(mine.description ?? ""); }
+          } catch { /* the app's own name is a fine start */ }
         }}
         aria-label="Save as template"
         title="Save as template"
