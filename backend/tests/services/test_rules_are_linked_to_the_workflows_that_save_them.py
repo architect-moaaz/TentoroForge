@@ -223,3 +223,11 @@ def test_a_field_one_rule_requires_is_required_whatever_another_rules_otherwise_
     note = [h for h in hints if h["field"] == "managerNote"]
     assert note and all(h.get("required") is True for h in note), note
     assert any(h.get("message") == "Travel above 2000 needs a note." for h in note)
+
+
+def test_a_rule_made_without_a_sentence_reads_its_condition_in_words():
+    from services.business_rules import _when_said
+    assert _when_said('category = "meals" and amount > 500') == "category is meals and amount is more than 500"
+    assert _when_said('previous.status = "rejected"') == "the old status is rejected"
+    assert _when_said("managerNote = null") == "manager note is empty"
+    assert _when_said('not(category in ["a"])') == 'not(category in ["a"])'

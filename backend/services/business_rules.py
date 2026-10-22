@@ -1031,7 +1031,33 @@ def _describe(rule: dict, doc: dict) -> str:
             effects.append(f"a notification is sent: “{a.get('message')}”")
         else:
             effects.append(f"{str(t).replace('_', ' ')} {f or ''}".strip())
-    return f"{ent}: when {rule.get('when')}, {', and '.join(effects) or 'nothing happens'}."
+    return f"{ent}: when {_when_said(str(rule.get('when') or ''))}, {', and '.join(effects) or 'nothing happens'}."
+
+
+_SAID_OPS = [(r"\s*>=\s*", " is at least "), (r"\s*<=\s*", " is at most "), (r"\s*!=\s*", " is not "),
+             (r"\s*>\s*", " is more than "), (r"\s*<\s*", " is less than "), (r"\s*=\s*", " is ")]
+
+
+def _when_said(when: str) -> str:
+    """A simple condition in words ("category is meals and amount is more than
+    500"); anything with brackets or functions is left as it is written."""
+    if not when or re.search(r"[()\[\]]", when):
+        return when
+    parts = re.split(r"(\s+and\s+|\s+or\s+)", when)
+    out = []
+    for p in parts:
+        if re.fullmatch(r"\s+(and|or)\s+", p):
+            out.append(f" {p.strip()} ")
+            continue
+        p = re.sub(r"\bprevious\.(\w+)", lambda m: f"the old {_human(m.group(1))}", p.strip())
+        p = re.sub(r"\s*(=|!=)\s*null\b", lambda m: " is empty" if m.group(1) == "=" else " is filled in", p)
+        for pat, said in _SAID_OPS:
+            if re.search(pat, p):
+                p = re.sub(pat, said, p, count=1)
+                break
+        p = re.sub(r'"([^"]*)"', r"\1", p)
+        out.append(re.sub(r"\b[a-z]+(?:[A-Z][a-z0-9]*)+\b", lambda m: _human(m.group(0)), p))
+    return "".join(out)
 
 
 def normalise(payload: dict, doc: dict, *, existing: dict | None = None) -> dict:
