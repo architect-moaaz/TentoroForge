@@ -400,6 +400,36 @@ def stopped_line(run: dict[str, Any]) -> str:
             + (f" — {why}" if why else "") + ".")
 
 
+def _process_started(pid: int) -> float | None:
+    """When process `pid` began (epoch seconds), or None when there is no
+    such process or it cannot be read (outside Linux)."""
+    try:
+        ticks = int(open(f"/proc/{pid}/stat").read().rsplit(")", 1)[1].split()[19])
+        boot = next(int(line.split()[1]) for line in open("/proc/stat") if line.startswith("btime "))
+        return boot + ticks / os.sysconf("SC_CLK_TCK")
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _writer_alive(path: Path) -> bool:
+    """Whether the process that opened this ledger is still running: the pid
+    its `run:start` names exists, and began before the run did (a pid is
+    reused by a new process after a restart)."""
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            first = json.loads(fh.readline() or "{}")
+        pid = int(first.get("pid") or 0)
+    except (OSError, ValueError, TypeError):
+        return False
+    if pid <= 0 or pid == os.getpid():
+        return False
+    began = _process_started(pid)
+    if began is None:
+        return False
+    run_started = _epoch(first.get("at")) or 0.0
+    return began <= run_started + 1
+
+
 def close_orphaned_ledgers(root: str | Path) -> list[str]:
     """A RESTART CLOSES WHAT IT KILLED. Every ledger is written by this
     process; one still open when the process starts belonged to the one
@@ -424,6 +454,13 @@ def close_orphaned_ledgers(root: str | Path) -> list[str]:
             except (OSError, ValueError):
                 continue
             if not last or str(last.get("event") or "") in ("run:end", "run:crashed"):
+                continue
+            if _writer_alive(path):
+                # A WORKER RESTARTING IS NOT THE PLATFORM RESTARTING. The
+                # backend runs two workers; when one is replaced, the other's
+                # runs — and the checks a separate process runs — go on. Closed
+                # here, Personal Finance's checks, alive and heartbeating, were
+                # told to its owner as lost (u8w3uw4j, 2026-10-22).
                 continue
             try:
                 with path.open("a", encoding="utf-8") as fh:
