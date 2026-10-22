@@ -476,6 +476,7 @@ function RuleSheet({ projectId, draft, setDraft, views, catalogue, model, buildi
   };
   const showProblems = !!draft.id || touched || saveProblems.length > 0;
   const problems = saveProblems.length ? saveProblems : showProblems ? check?.problems ?? [] : [];
+  const gentle = !draft.id && saveProblems.length === 0;
   const entityName = draft.kind === "condition_action" ? draft.ca.model_name : draft.kind === "decision_table" ? draft.model : null;
   const fields = (catalogue?.entities.find((e) => e.name === entityName)?.fields) ?? [];
   const asView = { ...(saved ?? {}), kind: draft.kind, entityName, rule: { ...(saved?.rule ?? {}), ...(payload ?? {}) } } as StudioView;
@@ -569,11 +570,20 @@ function RuleSheet({ projectId, draft, setDraft, views, catalogue, model, buildi
                 <span className="mr-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">In plain words</span>{sentence}
               </p>
             )}
-            {problems.length > 0 && (
+            {problems.length > 0 && (gentle ? (
+              // A NEW RULE BEING WRITTEN IS NOT WRONG, ONLY UNFINISHED: what is
+              // missing is a calm to-do list until the person presses Save.
+              <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-sm text-sky-950 dark:border-sky-900 dark:bg-sky-950/30 dark:text-sky-100" data-testid="problems" data-tone="todo">
+                <p className="mb-1 text-xs font-semibold">To finish this rule:</p>
+                <ul className="space-y-0.5">
+                  {problems.map((p, i) => <li key={i} className="flex gap-1.5"><span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-sky-500" />{p}</li>)}
+                </ul>
+              </div>
+            ) : (
               <ul className="space-y-1 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-900 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-200" data-testid="problems">
                 {problems.map((p, i) => <li key={i} className="flex gap-1.5"><AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />{p}</li>)}
               </ul>
-            )}
+            ))}
             {(check?.advice ?? []).length > 0 && (
               <ul className="space-y-1 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
                 {check!.advice!.map((a, i) => <li key={i} className="flex gap-1.5"><Lightbulb className="mt-0.5 h-3.5 w-3.5 shrink-0" />{a}</li>)}

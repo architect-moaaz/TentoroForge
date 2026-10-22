@@ -1379,6 +1379,24 @@ sentences:
     source: routing
     reaches: {verb: back_up, states: []}
 
+  - id: rule-link-1
+    say: "link the manager note rule to the Log an expense workflow"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: link_rule, states: [rule, workflow]}
+
+  - id: rule-link-2
+    say: "make Approve check the rejected expense rule"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: link_rule, states: [rule, workflow]}
+
+  - id: rule-unlink-1
+    say: "stop checking the positive amount rule in Approve"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: unlink_rule, states: [rule, workflow]}
+
   - id: template-1
     say: "save this app as a template"
     checked: {colour: acts, via: handler}

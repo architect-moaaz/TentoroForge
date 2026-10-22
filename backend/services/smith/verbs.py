@@ -125,6 +125,11 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     "add_rule": {"rule"},
     "edit_rule": {"rule", "change"},
     "remove_rule": {"rule"},
+    # A RULE AND A WORKFLOW, TOGETHER. "connect the note rule to Log an
+    # expense": often already linked (every step that saves the record checks
+    # it), which is said with the step; otherwise an extra check step.
+    "link_rule": {"rule", "workflow"},
+    "unlink_rule": {"rule", "workflow"},
     # The data model — a new entity, or one retired with everything on it.
     "add_entity": {"entity"},
     "remove_entity": {"entity"},
@@ -484,6 +489,20 @@ VERB_HELP: dict[str, str] = {
         "different."
     ),
     "remove_rule": ("Retire a business rule. Needs which rule."),
+    "link_rule": (
+        "Connect a business rule to a workflow, or make a workflow follow a rule: \"link the "
+        "manager-note rule to Log an expense\", \"make Approve check the rejected rule\", \"use the "
+        "positive-amount rule in Save changes\". A rule is checked AUTOMATICALLY by every workflow step "
+        "that saves its record, so it is often linked already — that is said, with the step; a workflow's "
+        "own older check that does not match is handed to the rule; otherwise the rule becomes an extra "
+        "check step at the start of the workflow. NOT a question about where a rule is used (read "
+        "`rule_links` and answer). Needs the rule and the workflow."
+    ),
+    "unlink_rule": (
+        "Take a rule's extra check step out of a workflow: \"stop checking the note rule in Approve\", "
+        "\"remove the rule step from Reject\". The automatic check when the workflow saves the record "
+        "stays while the rule is on (that is said). Needs the rule and the workflow."
+    ),
     "add_entity": (
         "Add a NEW ENTITY to the data model: \"add a Ward entity with a name and "
         "a capacity\". Declares it, authors its fields, projects the data layer. "
@@ -928,6 +947,13 @@ VERB_EXAMPLES: dict[str, tuple[str, ...]] = {
     'sync_app': (
         'I still cannot see it in the menu',
         'it says it is public but it still asks me to sign in',
+    ),
+    'link_rule': (
+        'link the manager note rule to the Log an expense workflow',
+        'make Approve check the rejected expense rule',
+    ),
+    'unlink_rule': (
+        'stop checking the positive amount rule in Approve',
     ),
     'save_as_template': (
         'save this app as a template',

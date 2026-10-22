@@ -218,6 +218,109 @@ def rule(ctx: Ctx, u: dict) -> Outcome:
                      fail=f"I could not {verb.replace('_', ' ')} and have changed nothing.")
 
 
+def _rule_and_flow(ctx: Ctx, u: dict):
+    """The rule and the workflow a link verb names, found the way the Rules tab
+    and `reads.rule_links` find them (id or name, any case)."""
+    from services import rule_links as L
+    from services.blueprint.service import BlueprintService
+    doc = BlueprintService.load(output_dir=ctx.out).doc
+    rref, wref = _s(u, "rule").strip().lower(), _s(u, "workflow").strip().lower()
+    rules, flows = L._live(doc.get("businessRules")), L._live(doc.get("workflows"))
+    pick = lambda items, ref: next((x for x in items if ref in (str(x.get("id")).lower(), str(x.get("name") or "").lower())), None) \
+        or next((x for x in items if ref and ref in str(x.get("name") or "").lower()), None)  # noqa: E731
+    return doc, pick(rules, rref), pick(flows, wref), rules, flows
+
+
+def link_rule(ctx: Ctx, u: dict) -> Outcome:
+    """\"Connect the manager-note rule to Log an expense\": the rule is often
+    linked already — every workflow step that saves its record checks it — and
+    that is said, with the step. A workflow's own check that no longer matches
+    the rule is handed to the rule. Otherwise the rule becomes an extra check
+    step at the start of the workflow (the Business Rules tab's "Check it
+    earlier in a workflow"), which stops the workflow with the rule's message."""
+    from services import business_rules as rules_svc
+    from services import rule_links as L
+    doc, rule, flow, rules, flows = _rule_and_flow(ctx, u)
+    if rule is None:
+        return Outcome(status="needs_user", said="Which rule? The rules are: "
+                       + "; ".join(f"“{r.get('name')}”" for r in rules) + ".")
+    if flow is None:
+        return Outcome(status="needs_user", said="Which workflow? The workflows are: "
+                       + "; ".join(f"“{w.get('name')}”" for w in flows) + ".")
+    name, wname = rule.get("name"), flow.get("name")
+    if rule.get("enabled") is False:
+        return Outcome(status="needs_user", said=f"“{name}” is turned off, so no workflow uses it. "
+                       "Turn it on first (Business Rules tab, or ask me to turn it on).")
+    if rule.get("kind") not in ("condition_action", "decision_table"):
+        return Outcome(status="needs_user", said=f"“{name}” is a written note the app does not check, so it "
+                       "cannot be used in a workflow yet. Ask me to make it a real rule first.")
+    here = [x for x in L.links(doc, rule) if x["workflow"] == str(flow.get("id"))]
+    copies = [c for c in L.review(doc, rule) if c["workflow"] == str(flow.get("id")) and c.get("same") is not True]
+    try:
+        if copies:
+            c = copies[0]
+            rules_svc.follow_rule(ctx.out, str(rule["id"]), workflow=str(flow["id"]), step=str(c["step"]),
+                                  actor="Smith")
+            return Outcome(status="resolved", said=(
+                f"Done. {wname} had its own older check, “{c['stepName']}” ({c['expression']}), that did not match "
+                f"“{name}”. I took it out, so {wname} now follows the rule itself"
+                + (f" — at “{here[0]['stepName']}”, every time it saves." if here else ".")))
+        if here and here[0]["touches"]:
+            return Outcome(status="resolved", said=(
+                f"“{name}” is already linked to {wname}: your app checks it automatically at the step "
+                f"“{here[0]['stepName']}”, every time it saves "
+                + ("a new " if here[0]["event"] == "create" else "a change to ")
+                + f"{(L._entities(doc).get(str(rule.get('entity'))) or {}).get('name', 'record').lower()}. "
+                "Nothing to connect — you can see it in the Business Rules tab under “Where this rule is used”, "
+                "and on that step in the Workflows tab."))
+        if not L.can_stop(rule) and rule.get("kind") == "condition_action":
+            return Outcome(status="needs_user", said=(
+                f"“{name}” only fills in values, and it already does that every time a workflow saves the record"
+                + (f" — including in {wname}." if here else
+                   f". It only acts when " + ("a new record is added" if L.rule_events(rule) == ("create",) else
+                                             "a record is changed" if L.rule_events(rule) == ("update",) else "a record is saved")
+                   + f", and {wname} never does that, so there is nothing for it to do there.")))
+        out = rules_svc.attach(ctx.out, str(rule["id"]), workflow=str(flow["id"]), after=None,
+                               on_refusal="stop", actor="Smith")
+    except rules_svc.RuleError as exc:
+        return Outcome(status="needs_user", said=str(exc))
+    return Outcome(status="resolved", said=(
+        f"Done. {wname} now checks “{name}” as its first step: if the rule is not met, the workflow stops and "
+        f"shows the rule's message. (Version {out.get('version')}.)"
+        + (" It was also checked when the workflow saves; now it is checked before anything else happens too." if here else "")))
+
+
+def unlink_rule(ctx: Ctx, u: dict) -> Outcome:
+    """Take a rule's extra check step out of a workflow. The automatic check
+    when the workflow saves the rule's record is the rule itself — it goes only
+    when the rule is turned off or deleted, and that is said."""
+    from services import business_rules as rules_svc
+    from services import rule_links as L
+    doc, rule, flow, rules, flows = _rule_and_flow(ctx, u)
+    if rule is None or flow is None:
+        return Outcome(status="needs_user", said="Which rule and which workflow? The rules: "
+                       + "; ".join(f"“{r.get('name')}”" for r in rules) + ". The workflows: "
+                       + "; ".join(f"“{w.get('name')}”" for w in flows) + ".")
+    has_step = any(s.get("type") == "decision" and str((s.get("config") or {}).get("rule")) == str(rule["id"])
+                   for s in flow.get("steps") or [] if isinstance(s, dict))
+    auto = [x for x in L.links(doc, rule) if x["workflow"] == str(flow.get("id"))]
+    if not has_step:
+        if auto:
+            return Outcome(status="needs_user", said=(
+                f"{flow.get('name')} has no extra check step for “{rule.get('name')}”. It checks the rule "
+                f"automatically at “{auto[0]['stepName']}” because that step saves the record the rule is about; "
+                "that stays as long as the rule is on. To stop it everywhere, turn the rule off; to stop it only "
+                "on new records or only on changes, change when the rule applies."))
+        return Outcome(status="resolved", said=f"{flow.get('name')} does not use “{rule.get('name')}” — nothing to remove.")
+    try:
+        out = rules_svc.detach(ctx.out, str(rule["id"]), workflow=str(flow["id"]), actor="Smith")
+    except rules_svc.RuleError as exc:
+        return Outcome(status="needs_user", said=str(exc))
+    return Outcome(status="resolved", said=(
+        f"Done. I removed the extra check of “{rule.get('name')}” from {flow.get('name')} (version {out.get('version')})."
+        + (f" The rule is still checked automatically at “{auto[0]['stepName']}” when it saves." if auto else "")))
+
+
 def entity(ctx: Ctx, u: dict) -> Outcome:
     from services.smith.entity_change import consequences, run
     verb = u["verb"]
@@ -940,6 +1043,7 @@ PERFORM: dict[str, Perform] = {
     "edit_mobile": mobile, "test_notification": mobile,
     "edit_access": access,
     "add_rule": rule, "edit_rule": rule, "remove_rule": rule,
+    "link_rule": link_rule, "unlink_rule": unlink_rule,
     "add_entity": entity, "remove_entity": entity,
     "add_field": add_field, "rename_field": definition, "remove_field": remove_field,
     "add_requirement": definition, "edit_requirement": definition, "remove_requirement": definition,

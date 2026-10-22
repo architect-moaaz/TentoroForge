@@ -419,6 +419,16 @@ _SYSTEM_FIELDS = frozenset({"id", "createdAt", "updatedAt", "created_at", "updat
 _NUM = r"-?\d+(?:\.\d+)?"
 
 
+#: An action as the editor names it (frontend/src/types/business-rules.ts ACTION_META).
+_ACTION_SAID = {
+    "set_field": "Fill in a value", "set_default": "Fill in if left empty", "clear_field": "Empty a field",
+    "show_error": "Stop and show a message", "set_visibility": "Show or hide a field",
+    "set_required": "Make a field required", "set_readonly": "Lock or unlock a field",
+    "set_options": "Limit the choices", "recommendation": "Suggest a value",
+    "trigger_workflow": "Start a workflow", "send_notification": "Send a notification",
+}
+
+
 def _human(field: str) -> str:
     return re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", field).lower()
 
@@ -829,7 +839,7 @@ def check(doc: dict, rule: dict) -> list[str]:
     if not str(rule.get("name") or "").strip():
         problems.append("Give the rule a name.")
     if not str(rule.get("statement") or "").strip():
-        problems.append("Say what the rule is, in a sentence.")
+        problems.append("Write what the rule is, in one sentence.")
     ents = _entities(doc)
     ent = ents.get(str(rule.get("entity") or ""))
     fields = {str(f.get("name")) for f in (ent or {}).get("fields") or []}
@@ -837,16 +847,16 @@ def check(doc: dict, rule: dict) -> list[str]:
     readable = fields | {"id", "createdAt", "updatedAt", "created_at", "updated_at"}
     flows = {str(w.get("id")) for w in _live(doc.get("workflows"))}
     if kind in ("condition_action", "decision_table") and ent is None:
-        problems.append("Choose the record this rule applies to.")
+        problems.append("Choose what this rule is about (for example, Expense).")
     if kind == "condition_action":
         if not str(rule.get("when") or "").strip():
-            problems.append("Say when the rule applies (its condition).")
+            problems.append("Add the “If” part: when should the rule apply?")
         acts = list(rule.get("then") or []) + list(rule.get("otherwise") or [])
         # "When the amount is at most 5000 or there is a note: fine; otherwise
         # refuse" acts only in its otherwise — a rule, as long as it does
         # something on one side.
         if not acts:
-            problems.append("Add at least one thing the rule does — when its condition holds, or otherwise.")
+            problems.append("Add what the rule does: under “Then”, press “Add an action”.")
         # Read by the engine's own parser now, beside whatever else is wrong —
         # not only once the rest is right.
         when = str(rule.get("when") or "").strip()
@@ -868,28 +878,28 @@ def check(doc: dict, rule: dict) -> list[str]:
             t = a.get("type")
             if t in ("set_field", "set_default", "clear_field", "set_visibility", "set_required",
                      "set_readonly", "set_options", "recommendation") and not a.get("field"):
-                problems.append(f"“{t.replace('_', ' ')}” needs a field.")
+                problems.append(f"“{_ACTION_SAID.get(t, t.replace('_', ' '))}” needs a field — choose which one.")
             if t in ("set_field", "set_default", "clear_field") and a.get("field"):
                 said = _write_problem(t, str(a["field"]), a, by_name)
                 if said:
                     problems.append(said)
             if t == "show_error" and not str(a.get("message") or "").strip():
-                problems.append("A refusal needs the message the person is shown.")
+                problems.append("“Stop and show a message” needs the message the person will see.")
             if t == "send_notification" and not str(a.get("message") or "").strip():
-                problems.append("A notification needs its message.")
+                problems.append("“Send a notification” needs the message to send.")
             if t == "trigger_workflow":
                 if not a.get("workflow"):
-                    problems.append("Choose the workflow the rule starts.")
+                    problems.append("Choose which workflow the rule starts.")
                 elif flows and str(a["workflow"]) not in flows:
                     problems.append(f"{a['workflow']} is not a workflow of this application.")
             if t == "set_options" and not a.get("options"):
-                problems.append("“set options” needs the options the field offers.")
+                problems.append("“Limit the choices” needs the choices to offer.")
     if kind == "decision_table":
         table = rule.get("table") or {}
         if not table.get("inputs") or not table.get("outputs"):
-            problems.append("A decision table needs at least one input and one output column.")
+            problems.append("A table rule needs at least one column to check and one column to fill in.")
         if not table.get("rules"):
-            problems.append("A decision table needs at least one row.")
+            problems.append("A table rule needs at least one row.")
         policy = str(table.get("hitPolicy") or "F").upper()
         if policy == "R" or (policy == "C" and not table.get("aggregation")):
             problems.append("A table that sets a record's fields needs one value per field: use First, Unique, "
@@ -912,10 +922,10 @@ def check(doc: dict, rule: dict) -> list[str]:
                                     "cannot fill it. Collect totals fill number fields; use First or Priority here.")
         outs = [str(c.get("variableBinding") or c.get("name") or "") for c in table.get("outputs") or []]
         if len(set(outs)) != len(outs):
-            problems.append("Each output column sets a different field.")
+            problems.append("Each “fill in” column must be a different field.")
         ins = [str(c.get("variableBinding") or c.get("name") or "") for c in table.get("inputs") or []]
         if len(set(ins)) != len(ins):
-            problems.append("Each field it reads is one column — put the conditions on it in one cell.")
+            problems.append("Each field to check is one column — put all its conditions in one cell.")
         by_name = {str(f.get("name")): f for f in (ent or {}).get("fields") or [] if isinstance(f, dict)}
         for ci, name in enumerate(outs):
             if name in _SYSTEM_FIELDS or (by_name.get(name) or {}).get("primaryKey"):
@@ -960,7 +970,7 @@ def check(doc: dict, rule: dict) -> list[str]:
             width_in, width_out = len(table.get("inputs") or []), len(table.get("outputs") or [])
             for i, row in enumerate(table.get("rules") or [], 1):
                 if len(row.get("inputEntries") or []) != width_in or len(row.get("outputEntries") or []) != width_out:
-                    problems.append(f"Row {i} does not have a cell for every column.")
+                    problems.append(f"Row {i} is missing a cell — fill in every column.")
     if kind == "decision_table" and not problems:
         # The cells, overlaps and typos — read by the app's own engine.
         problems += [f["message"] for f in table_findings(rule) if f.get("severity") == "error"]

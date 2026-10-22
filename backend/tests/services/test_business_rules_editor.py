@@ -301,7 +301,7 @@ def test_a_second_rule_setting_the_same_field_is_warned_about(app):
 
 def test_every_fault_is_said_at_once(app):
     said = br.try_rule(app, {**GATE, "when": "openingsCount >", "then": []})["problems"]
-    assert any("Add at least one thing" in p for p in said) and any("cannot be read" in p for p in said)
+    assert any("Add what the rule does" in p for p in said) and any("cannot be read" in p for p in said)
 
 
 # ---- what an attacker's requests found (adversarial API round, Oct 21) ---- #

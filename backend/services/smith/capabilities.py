@@ -47,8 +47,9 @@ GROUPS: tuple[tuple[str, str, frozenset[str]], ...] = (
      frozenset({"add_workflow", "edit_workflow", "remove_workflow",
                 "set_schedule", "pause_schedule", "resume_schedule", "set_deadline", "run_now"})),
     ("What it will not let people do",
-     "Add, change or drop a rule that stops a record being saved.",
-     frozenset({"add_rule", "edit_rule", "remove_rule"})),
+     "Add, change or drop a rule that stops a record being saved — and tell you which "
+     "workflows use each rule, or make a workflow check one.",
+     frozenset({"add_rule", "edit_rule", "remove_rule", "link_rule", "unlink_rule"})),
     ("Who is allowed to do what",
      "Roles, permissions, and which screens each kind of person can open.",
      frozenset({"edit_access", "show_audit", "export_audit", "verify_audit", "edit_audit"})),
