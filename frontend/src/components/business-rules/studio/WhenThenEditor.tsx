@@ -173,7 +173,7 @@ export function WhenThenEditor({
       {/* Meaning + advanced */}
       <section className="space-y-2">
         <label className="block space-y-1">
-          <span className="text-xs font-medium">Describe the rule in one sentence <span className="font-normal text-muted-foreground">(optional — if you leave it empty, Forge writes it for you)</span></span>
+          <span className="text-xs font-medium">Describe the rule in one sentence <span className="font-normal text-muted-foreground">(optional — if you leave it empty, or change the rule and leave this as it was, Forge writes it to match)</span></span>
           <Textarea className="min-h-[48px] text-sm" disabled={disabled} value={draft.statement ?? ""}
                     placeholder="An expense above 5000 needs a manager note."
                     onChange={(e) => onChange({ ...draft, statement: e.target.value })} />

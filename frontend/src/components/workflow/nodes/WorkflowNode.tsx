@@ -356,20 +356,17 @@ function WorkflowNodeComponent({
         </div>
       )}
 
-      {/* The business rules this step checks when it saves (read from the server). */}
+      {/* The business rules this step checks when it saves (read from the
+          server). One line: the canvas lays steps out one under another at
+          fixed heights, and a taller step ran into the next; the names are
+          all in the tooltip. */}
       {checks.length > 0 && (
-        <div className="border-t border-emerald-100 bg-emerald-50/70 px-3 py-2" data-testid="step-rule-checks">
-          <div className="mb-1 flex items-center gap-1 text-[11px] font-semibold text-emerald-800">
-            <ShieldCheck className="h-3 w-3" /> Checks {checks.length} business rule{checks.length === 1 ? "" : "s"}
-          </div>
-          <div className="flex flex-wrap gap-1">
-            {checks.map((c) => (
-              <span key={c.rule} title={c.rule}
-                    className="max-w-[240px] truncate rounded-full border border-emerald-200 bg-white px-2 py-0.5 text-[11px] text-emerald-800">
-                {c.name}
-              </span>
-            ))}
-          </div>
+        <div className="flex items-center gap-1 rounded-b-xl border-t border-emerald-100 bg-emerald-50 px-3 py-1 text-[11px] text-emerald-800"
+             data-testid="step-rule-checks"
+             title={`Every time this step saves, your app checks these business rules:\n${checks.map((c) => `• ${c.name}`).join("\n")}`}>
+          <ShieldCheck className="h-3 w-3 shrink-0" />
+          <span className="shrink-0 font-semibold">Checks {checks.length} rule{checks.length === 1 ? "" : "s"}:</span>
+          <span className="truncate">{checks.map((c) => c.name).join(", ")}</span>
         </div>
       )}
 

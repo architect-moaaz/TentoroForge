@@ -1,3 +1,4 @@
+from services.workflow_nodes import ROW_HEIGHT
 import json
 
 from services.workflow_completeness import (
@@ -42,7 +43,7 @@ def test_stub_and_inserted_trigger_carry_the_editor_type():
     stub = minimal_workflow("x")["definition"]["nodes"]
     assert [(n["type"], n["data"]["nodeType"]) for n in stub] == [
         ("trigger", "trigger"), ("end", "end")]
-    assert [n["position"]["y"] for n in stub] == [0, 120]
+    assert [n["position"]["y"] for n in stub] == [0, ROW_HEIGHT]
 
     repaired, _losses = salvage_workflow({"definition": {
         "nodes": [{"id": "a", "type": "action", "data": {"label": "A"}}],

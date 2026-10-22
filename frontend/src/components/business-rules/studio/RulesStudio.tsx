@@ -200,7 +200,7 @@ export function RulesStudio({ projectId, initial }: { projectId: string; initial
           <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <span className="flex-1">
             <b>Your workflows now use these rules directly.</b> {linkedNote.length} check{linkedNote.length === 1 ? "" : "s"} in your workflows
-            {" "}({Array.from(new Set(linkedNote.map((l) => l.name))).join(", ")}) repeated a rule word for word. They now follow the rule itself,
+            {" "}({Array.from(new Set(linkedNote.map((l) => l.name))).join(", ")}) repeated a rule word for word. {linkedNote.length === 1 ? "It now follows" : "They now follow"} the rule itself,
             so when you change a rule, your workflows change with it.
           </span>
           <button type="button" onClick={() => setLinkedNote(null)} aria-label="Close" className="hover:opacity-70"><X className="h-3.5 w-3.5" /></button>

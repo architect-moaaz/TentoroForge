@@ -185,7 +185,7 @@ export function ActionEditor({ branch, value, onChange, fields, fieldMeta, workf
             {meta.needsMessage && (
               <Textarea
                 className="min-h-[40px] text-xs"
-                placeholder="Message shown to the user"
+                placeholder="Message the person sees"
                 value={action.message ?? ""}
                 onChange={(e) => update(i, { message: e.target.value })}
               />
@@ -196,6 +196,15 @@ export function ActionEditor({ branch, value, onChange, fields, fieldMeta, workf
             )}
             {action.type === "set_required" && (
               <ToggleRow label="Required" checked={action.required ?? true} onChange={(required) => update(i, { required })} />
+            )}
+            {action.type === "set_required" && action.required !== false && (
+              <Textarea
+                className="min-h-[40px] text-xs"
+                aria-label="Message if it is left empty"
+                placeholder="Message shown if it is left empty (optional) — e.g. A manager note is needed for big expenses."
+                value={action.message ?? ""}
+                onChange={(e) => update(i, { message: e.target.value })}
+              />
             )}
             {action.type === "set_readonly" && (
               <ToggleRow label="Read-only (locked)" checked={action.readonly ?? true} onChange={(readonly) => update(i, { readonly })} />

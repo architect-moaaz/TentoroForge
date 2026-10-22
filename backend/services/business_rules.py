@@ -999,28 +999,29 @@ def _describe(rule: dict, doc: dict) -> str:
         return f"{ent}: {outs or 'values'} decided from {ins or 'nothing'} by a table{named}."
     effects = []
     for a in rule.get("then") or []:
-        t, f = a.get("type"), a.get("field")
+        t, f = a.get("type"), _human(str(a.get("field") or ""))
         if t == "show_error":
-            effects.append(f"refuse with “{a.get('message')}”")
+            effects.append(f"it is not saved and the person sees “{a.get('message')}”")
         elif t == "set_field":
-            effects.append(f"set {f} to {a.get('value')}")
+            effects.append(f"{f} is set to {a.get('value')}")
         elif t == "set_default":
-            effects.append(f"default {f} to {a.get('value')}")
+            effects.append(f"{f} is filled in with {a.get('value')} if it is empty")
         elif t == "clear_field":
-            effects.append(f"clear {f}")
+            effects.append(f"{f} is emptied")
         elif t == "set_required":
-            effects.append(f"require {f}")
+            msg = f" (“{a.get('message')}”)" if a.get("message") else ""
+            effects.append(f"{f} must be filled in{msg}" if a.get("required") is not False else f"{f} is optional")
         elif t == "set_visibility":
-            effects.append(f"{'show' if a.get('visible', True) else 'hide'} {f}")
+            effects.append(f"{f} is {'shown' if a.get('visible', True) else 'hidden'}")
         elif t == "set_readonly":
-            effects.append(f"lock {f}")
+            effects.append(f"{f} is locked")
         elif t == "trigger_workflow":
-            effects.append(f"start {a.get('workflow')}")
+            effects.append(f"the workflow {a.get('workflow')} starts")
         elif t == "send_notification":
-            effects.append(f"notify “{a.get('message')}”")
+            effects.append(f"a notification is sent: “{a.get('message')}”")
         else:
             effects.append(f"{str(t).replace('_', ' ')} {f or ''}".strip())
-    return f"{ent}: when {rule.get('when')}, {', '.join(effects) or 'nothing'}."
+    return f"{ent}: when {rule.get('when')}, {', and '.join(effects) or 'nothing happens'}."
 
 
 def normalise(payload: dict, doc: dict, *, existing: dict | None = None) -> dict:
@@ -1134,6 +1135,14 @@ def normalise(payload: dict, doc: dict, *, existing: dict | None = None) -> dict
     elif kind == "decision_table":
         for k in ("when", "then", "otherwise"):
             rule.pop(k, None)
+    # A SENTENCE THAT NO LONGER SAYS WHAT THE RULE DOES. The rule's If or
+    # Then was changed and its sentence left as it was ("above 5000" on a
+    # rule now about 7000): Smith and people read the sentence, so it is
+    # written again from the rule — unless the person wrote a new one.
+    if (existing is not None and kind in ("condition_action", "decision_table") and stored_kind == kind
+            and rule.get("statement") and rule.get("statement") == existing.get("statement")
+            and any(rule.get(k) != existing.get(k) for k in ("when", "then", "otherwise", "table", "entity"))):
+        rule.pop("statement", None)
     if not rule.get("statement") and kind != "statement":
         rule["statement"] = _describe(rule, doc)
     # What the rule touches, for impact analysis and the Rules↔Process edges.
