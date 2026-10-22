@@ -931,7 +931,8 @@ sentences:
 
   - id: design-figma-link-only
     say: "Use this Figma design https://www.figma.com/design/188b8l0s/Nurse-Roster"
-    checked: {colour: asks, via: none, missing: [token_env]}
+    # The organisation's Figma token is used; no variable name is asked for (2026-10-22).
+    checked: {colour: acts, via: handler}
     source: phrasebook
     reaches: {verb: connect_figma, states: [figma_url]}
 
@@ -1871,13 +1872,13 @@ sentences:
 
   - id: connect_figma-use-this-design-https-figma-com
     say: "use this design https://figma.com/design/abc/Nurse-Roster"
-    checked: {colour: asks, via: none, missing: [token_env]}
+    checked: {colour: acts, via: handler}
     source: routing
     reaches: {verb: connect_figma, states: [figma_url]}
 
   - id: connect_figma-our-designer-sent-me-this-can
     say: "our designer sent me this, can you use it"
-    checked: {colour: asks, via: none, missing: [figma_url, token_env]}
+    checked: {colour: asks, via: none, missing: [figma_url]}
     source: routing
     reaches: {verb: connect_figma, states: []}
 
