@@ -918,7 +918,8 @@ function dispatchActions(
         break;
       case "set_required":
         if (action.field) {
-          out.formHints.push({ field: action.field, required: action.required !== false });
+          out.formHints.push({ field: action.field, required: action.required !== false,
+                               ...(action.required !== false && action.message ? { message: String(action.message) } : {}) });
           // Required is a rule of the record, not only a red asterisk: a save
           // with the field empty while the rule holds is refused.
           if (serverSide && action.required !== false && isEmpty(working[action.field])) {

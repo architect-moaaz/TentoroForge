@@ -166,6 +166,8 @@ export interface FieldHint {
   field: string;
   hidden?: boolean;
   required?: boolean;
+  /** A required field's own sentence ("A manager note is needed above 7000."). */
+  message?: string;
   readonly?: boolean;
   recommendation?: { value?: string; message?: string
   /** set_options — the options the field offers while a rule holds. */

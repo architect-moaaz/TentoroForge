@@ -386,6 +386,14 @@ useWorkflow(workflows.x, { successMessage?, redirectTo?, silent? })
    When the workflow's own rules refuse the input, `ok` is false and `error` is the workflow's
    sentence, shown as an error toast — `successMessage` is only ever shown for a real success.
 
+useRuleHints(model, values) → { required(field), hidden(field), readonly(field), message(field), errors, pending }
+   What the app's BUSINESS RULES say about the values being typed, asked of the rules themselves. A
+   form that shows, hides or requires a field because of a rule ("a manager note above 5000") asks
+   here — `const rules = useRuleHints("Expense", { amount: Number(amount) })`, then
+   `rules.required("managerNote")` and `rules.message("managerNote")` — and NEVER writes the rule's
+   number or values into the page: the person changes rules in the Business Rules tab and the
+   screen must follow at once. The save checks every rule anyway; this is only what the form shows.
+
 <SignInForm submitLabel? className? />          // an `auth` login page: email, password, signs in, goes home
 <SignUpForm submitLabel? className? columns?={1 | 2} />   // an `auth` signup page: the person's details + login,
    creates both, signs in, and sends them where a new account goes first. `signupFields` lists what it asks.
@@ -672,7 +680,7 @@ view.tsx — "use client" on the first line.
     sliding in, a row arriving), "@/sdk/map" (MapView: places as pins, a path as a line —
     `<MapView points={[{ id, lat, lng, label }]} route={[{ lat, lng }, …]} onPointClick={…} />`),
     "@/sdk" (entity types, workflows, pages, widgets, href, fileUrl), "@/sdk/client" (useWorkflow,
-    WorkflowForm, WorkflowButton, WidgetView, ImageSearch, NearMe, formatDistance, distanceKm,
+    WorkflowForm, WorkflowButton, WidgetView, ImageSearch, NearMe, formatDistance, distanceKm, useRuleHints,
     useLive — `useLive(10)` in a view whose records change while someone watches: it re-reads
     the page every 10 seconds while the tab is open; a section marked `live` calls it),
     "@/sdk/camera" (CameraCapture, BarcodeScanner), "@/sdk/i18n" (useT, useLanguage, LanguageSwitch), and

@@ -60,6 +60,71 @@ function humanError(result: Json, status: number): string {
   return `Something went wrong (${status}).`;
 }
 
+/**
+ * WHAT THE BUSINESS RULES SAY ABOUT WHAT IS BEING TYPED — asked of the app's
+ * own rules (`/api/form-rules`), never written into the page. A screen that
+ * hard-coded "a note above 5000" kept asking for a note at 6000 after the rule
+ * was changed to 7000; a screen that asks the rules follows every change.
+ *
+ *   const rules = useRuleHints("Expense", { amount: Number(amountText) });
+ *   rules.required("managerNote")   // true when a rule makes it required now
+ *   rules.hidden("discount")        // true when a rule hides it now
+ *   rules.message("managerNote")    // the rule's own sentence, when it has one
+ *   rules.errors                    // what a save of these values would be stopped for
+ *
+ * Asked a moment after the values stop changing; until the first answer every
+ * question says "no" (the save still checks every rule).
+ */
+export interface RuleHints {
+  required: (field: string) => boolean;
+  hidden: (field: string) => boolean;
+  readonly: (field: string) => boolean;
+  message: (field: string) => string | undefined;
+  errors: string[];
+  patches: Json;
+  pending: boolean;
+}
+
+export function useRuleHints(model: string, values: Json, delayMs = 250): RuleHints {
+  const [answer, setAnswer] = React.useState<{ hints: Array<Record<string, unknown>>; errors: string[]; patches: Json }>(
+    { hints: [], errors: [], patches: {} });
+  const [pending, setPending] = React.useState(false);
+  const key = JSON.stringify(values ?? {});
+  React.useEffect(() => {
+    let live = true;
+    setPending(true);
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch(apiPath("/api/form-rules"), {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ model, values: JSON.parse(key) }),
+        });
+        const body = (await res.json().catch(() => ({}))) as Json;
+        if (live) setAnswer({
+          hints: Array.isArray(body.formHints) ? (body.formHints as Array<Record<string, unknown>>) : [],
+          errors: Array.isArray(body.errors) ? (body.errors as string[]) : [],
+          patches: (body.patches && typeof body.patches === "object" ? body.patches : {}) as Json,
+        });
+      } catch { /* no answer: the form behaves as if there were no hints; the save still checks */ }
+      finally { if (live) setPending(false); }
+    }, delayMs);
+    return () => { live = false; clearTimeout(t); };
+  }, [model, key, delayMs]);
+  const last = (field: string) => [...answer.hints].reverse().find((h) => h.field === field);
+  return {
+    required: (f) => last(f)?.required === true,
+    hidden: (f) => last(f)?.visible === false || last(f)?.hidden === true,
+    readonly: (f) => last(f)?.readonly === true,
+    message: (f) => {
+      const h = [...answer.hints].reverse().find((x) => x.field === f && typeof x.message === "string" && x.message);
+      return h ? String(h.message) : undefined;
+    },
+    errors: answer.errors,
+    patches: answer.patches,
+    pending,
+  };
+}
+
 /** Run a workflow from the page. The data the page shows is refreshed after
  *  it succeeds; `redirectTo` navigates instead. */
 export function useWorkflow<I extends Json>(
