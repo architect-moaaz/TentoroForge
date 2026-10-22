@@ -150,6 +150,13 @@ def _walk(tree: list) -> list[dict]:
     return out
 
 
+#: Entries of `initialRoute` that are not a role and are still the platform's own: where anyone lands (`default`), where someone signed in
+#: lands and where a visitor who is not signed in lands. The platform writes them itself (`authenticated` when a first page is composed) and
+#: reads them as "not a person's landing" (`account_model.landing_by_role`), so a menu is not refused for carrying them: saving the menu
+#: from the Editor said "'authenticated' is not a kind of user of this application" and saved nothing (2026-10-22).
+AUDIENCES = frozenset({"default", "authenticated", "unauthenticated"})
+
+
 def validate(doc: dict, nav: dict) -> list[str]:
     """The contract a revised navigation is held to."""
     problems: list[str] = []
@@ -182,7 +189,7 @@ def validate(doc: dict, nav: dict) -> list[str]:
     # user, and each entry is a door someone is sent through.
     initial = nav.get("initialRoute")
     landings = initial if isinstance(initial, dict) else ({"default": initial} if initial else {})
-    kinds = {"default"} | {k.lower() for k in _role_keys(doc)}
+    kinds = AUDIENCES | {k.lower() for k in _role_keys(doc)}
     for who, route in landings.items():
         if str(who).lower() not in kinds:
             problems.append(f"{who!r} is not a kind of user of this application, so it has no landing")

@@ -112,3 +112,43 @@ def test_the_phones_own_fixed_files_are_not_touched_by_an_edit(tmp_path, monkeyp
     pages.set_navigation(p, {"tree": [{"label": "Bought", "page": "PAGE-002"}]})
     theme.update(p, {"colors": {"primary": "#B91C1C"}})
     assert (native / "app.json").read_text(encoding="utf-8") == '{"expo": {"owner": "tentoro", "extra": {"appUrl": "https://live.example"}}}'
+
+
+# ---- saving the menu when the plan has the platform's own landing entries (2026-10-22) -------------------------------------
+
+def _landings(p, **held):
+    svc = service.load_blueprint(p)
+    svc.doc["navigation"]["initialRoute"] = {"default": "/", **held}
+    svc.save()
+
+
+def test_a_menu_is_saved_when_the_plan_has_signed_in_and_signed_out_landings(tmp_path, monkeypatch):
+    """"'authenticated' is not a kind of user of this application, so it has no landing" saved nothing, from a plan the platform wrote."""
+    p = project(tmp_path, monkeypatch)
+    _landings(p, authenticated="/", unauthenticated="/login")
+    out = pages.set_navigation(p, {"tree": [{"label": "Bought", "page": "PAGE-002"}, {"label": "My list", "page": "PAGE-001"}]})
+    assert [n["label"] for n in out["navigation"]["tree"]] == ["Bought", "My list"]
+    assert service.load_blueprint(p).doc["navigation"]["initialRoute"] == {"default": "/", "authenticated": "/", "unauthenticated": "/login"}
+
+
+def test_choosing_the_first_page_keeps_the_other_landings(tmp_path, monkeypatch):
+    p = project(tmp_path, monkeypatch)
+    _landings(p, authenticated="/", unauthenticated="/login")
+    pages.set_navigation(p, {"initialRoute": "/bought"})
+    assert service.load_blueprint(p).doc["navigation"]["initialRoute"] == {"default": "/bought", "authenticated": "/", "unauthenticated": "/login"}
+
+
+def test_a_landing_for_someone_who_is_not_a_kind_of_user_is_still_refused(tmp_path, monkeypatch):
+    p = project(tmp_path, monkeypatch)
+    _landings(p, guest="/")
+    with pytest.raises(service.EditorError) as e:
+        pages.set_navigation(p, {"tree": [{"label": "Bought", "page": "PAGE-002"}]})
+    assert e.value.code == "bad-menu" and "'guest' is not a kind of user" in str(e.value)
+
+
+def test_a_landing_that_leads_nowhere_is_still_refused_for_the_signed_in(tmp_path, monkeypatch):
+    p = project(tmp_path, monkeypatch)
+    _landings(p, authenticated="/nowhere")
+    with pytest.raises(service.EditorError) as e:
+        pages.set_navigation(p, {"tree": [{"label": "Bought", "page": "PAGE-002"}]})
+    assert "landing route" in str(e.value)

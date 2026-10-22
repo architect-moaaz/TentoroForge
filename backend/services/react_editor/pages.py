@@ -270,7 +270,10 @@ def set_navigation(project: Project, spec: dict[str, Any]) -> dict[str, Any]:
         nav["style"] = spec["style"]
     if "initialRoute" in spec:
         if spec["initialRoute"]:
-            nav["initialRoute"] = {"default": str(spec["initialRoute"])}
+            # The first page is `default`. Every other landing the app has (a role's, the signed-in and signed-out ones) is kept: this
+            # used to replace the whole map with `default` and lose them.
+            held = nav.get("initialRoute") if isinstance(nav.get("initialRoute"), dict) else {}
+            nav["initialRoute"] = {**held, "default": str(spec["initialRoute"])}
         else:
             nav.pop("initialRoute", None)
     problems = validate(doc, nav)
