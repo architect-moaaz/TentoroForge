@@ -80,7 +80,7 @@ function TemplateRequests() {
               <tr>
                 <th className="px-3 py-2 font-medium">Template</th>
                 <th className="px-3 py-2 font-medium">Built by</th>
-                <th className="hidden px-3 py-2 font-medium md:table-cell">Holds</th>
+                <th className="hidden px-3 py-2 font-medium md:table-cell">Includes</th>
                 <th className="px-3 py-2 font-medium">Submitted</th>
                 <th className="px-3 py-2 font-medium">Status</th>
               </tr>
