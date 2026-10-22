@@ -100,6 +100,16 @@ def _opens(doc: dict, page: dict, role: str) -> bool:
     return ids.get(who, who) in users or who in [u.lower() for u in users]
 
 
+#: Page patterns that do not show a record type's records one by one: a
+#: dashboard and an analytics page sum them, a wizard and a form collect an
+#: input, a tool works on one. Personal Finance's Create Category wrote
+#: "Travel" and was failed because the Financial Dashboard — its main record
+#: type Category, its charts drawn by category — did not list it; its
+#: onboarding wizard was read the same way (u8w3uw4j, 2026-10-22). Across
+#: forge-v3, 29 dashboards, 20 wizards and 8 analytics pages named one.
+NOT_A_LIST = frozenset({"dashboard", "analytics", "wizard", "form", "tool", "auth"})
+
+
 def pages_for(doc: dict, entity: dict, role: str) -> tuple[list[str], list[str]]:
     """`(list routes, detail routes)` that show `entity` to `role`."""
     lists, details = [], []
@@ -108,7 +118,7 @@ def pages_for(doc: dict, entity: dict, role: str) -> tuple[list[str], list[str]]
             continue
         if str((p.get("data") or {}).get("primaryEntity") or "") != str(entity.get("id")):
             continue
-        if p.get("pattern") == "auth" or not _opens(doc, p, role):
+        if str(p.get("pattern") or "") in NOT_A_LIST or not _opens(doc, p, role):
             continue
         route = str(p["route"])
         params = re.findall(r"\[[^\]]+\]", route)
