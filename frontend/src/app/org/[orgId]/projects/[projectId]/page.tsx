@@ -61,7 +61,8 @@ import { CostTrackingPanel } from "@/components/monitoring/CostTrackingPanel";
 import { DRDEditorPanel } from "@/components/decision/DRDEditorPanel";
 import { BusinessRulesPanel } from "@/components/business-rules/BusinessRulesPanel";
 import { ExportDialog } from "@/components/projects/ExportDialog";
-import { MORE_TABS, PRIMARY_TABS, TabRow, type Tab } from "@/components/projects/ProjectTabs";
+import { moreTabs, PRIMARY_TABS, TabRow, type Tab } from "@/components/projects/ProjectTabs";
+import { PhonePreview, phoneStatusKey } from "@/components/phone/PhonePreview";
 import { PublishButton } from "@/components/deploy/PublishButton";
 import { SaveAsTemplateButton } from "@/components/templates/SaveAsTemplateButton";
 import { DeleteProjectDialog } from "@/components/projects/DeleteProjectDialog";
@@ -260,6 +261,14 @@ function ProjectWorkspace({
     queryKey: ["project", projectId],
     queryFn: () => api.get<Project>(`/api/projects/${projectId}`),
   });
+
+  // The Phone tab exists for an app that has native screens; its own panel reads the same status and keeps it fresh.
+  const { data: phone } = useQuery({
+    queryKey: phoneStatusKey(projectId),
+    queryFn: () => api.get<{ state: string }>(`/api/projects/${projectId}/phone-preview/status`),
+    retry: false,
+  });
+  const hasPhone = !!phone && phone.state !== "unavailable";
 
   // §25/§109 — what Smith understood, so the approval gate can show it.
   //
@@ -523,7 +532,7 @@ function ProjectWorkspace({
             the left needed a tooltip to read. */}
         <TabRow
           tabs={PRIMARY_TABS}
-          more={MORE_TABS}
+          more={moreTabs(hasPhone)}
           active={activeTab}
           onPick={setActiveTab}
           allowed={(f) => !f || feat.allowed(f)}
@@ -555,6 +564,9 @@ function ProjectWorkspace({
           <PreviewFrame projectId={projectId} project={project || null} />
         )}
         {lockedName && <LockedPanel name={lockedName} />}
+        {activeTab === "phone" && hasPhone && (
+          <PhonePreview projectId={projectId} onAskSmith={() => setActiveTab("chat")} />
+        )}
         {activeTab === "code" && !lockedName && <CodePanel projectId={projectId} />}
         {activeTab === "data" && (
           <DataModelPanel

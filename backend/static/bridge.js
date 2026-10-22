@@ -15,6 +15,9 @@
   window.__design2ui_bridge = true;
 
   var PREFIX = "design2ui:";
+  // "select": a click selects an element (the editor's default). "use": the page behaves as it would for a person, so a
+  // phone preview can be tapped through; the parent switches it with `set-mode`.
+  var mode = "select";
   var MAX_TREE_DEPTH = 12;
   var OVERLAY_Z = 2147483640;
   var IGNORED_TAGS = { SCRIPT: 1, STYLE: 1, LINK: 1, META: 1, NOSCRIPT: 1, SVG: 1 };
@@ -83,10 +86,29 @@
     return "/body/" + parts.join("/");
   }
 
+  // A phone preview's screens are React Native: a custom component (a Button) does not hand a marker down to the page,
+  // but React still holds it on the component's props. Walk up from the element to the nearest one that carries it.
+  function fiberSource(el) {
+    var key = null;
+    for (var k in el) {
+      if (k.indexOf("__reactFiber$") === 0) { key = k; break; }
+    }
+    var fiber = key ? el[key] : null;
+    var guard = 0;
+    while (fiber && guard++ < 200) {
+      var ds = fiber.memoizedProps && fiber.memoizedProps.dataSet;
+      if (ds && ds.sourceFile) {
+        return { file: ds.sourceFile, line: parseInt(ds.sourceLine || "0", 10), component: ds.sourceComponent || null };
+      }
+      fiber = fiber.return;
+    }
+    return null;
+  }
+
   function getElementInfo(el) {
     var rect = el.getBoundingClientRect();
-    var source = null;
-    var srcFile = el.getAttribute("data-source-file");
+    var source = fiberSource(el);
+    var srcFile = source ? null : el.getAttribute("data-source-file");
     if (srcFile) {
       source = {
         file: srcFile,
@@ -217,6 +239,7 @@
 
   // --- Event handlers ---
   document.addEventListener("mousemove", function (e) {
+    if (mode !== "select") return;
     var el = document.elementFromPoint(e.clientX, e.clientY);
     if (!el || isBridgeElement(el) || el === document.documentElement) return;
 
@@ -229,6 +252,7 @@
   }, true);
 
   document.addEventListener("click", function (e) {
+    if (mode !== "select") return;
     var el = document.elementFromPoint(e.clientX, e.clientY);
     if (!el || isBridgeElement(el)) return;
 
@@ -294,6 +318,16 @@
         break;
       case "ping":
         send("pong", {});
+        break;
+
+      case "set-mode":
+        mode = payload.mode === "use" ? "use" : "select";
+        if (mode === "use") {
+          selectedElement = null;
+          hoveredElement = null;
+          hideOverlay(selectOverlay);
+          hideOverlay(hoverOverlay);
+        }
         break;
 
       case "edit-complete":
@@ -453,7 +487,22 @@
     subtree: true,
   });
 
+  // --- Where the page is: a single-page app (a phone preview) changes screen without loading a page ---
+  function sendRoute() {
+    send("route", { path: location.pathname + location.search });
+  }
+  ["pushState", "replaceState"].forEach(function (name) {
+    var original = history[name];
+    history[name] = function () {
+      var result = original.apply(this, arguments);
+      setTimeout(sendRoute, 0);
+      return result;
+    };
+  });
+  window.addEventListener("popstate", sendRoute);
+
   // --- Ready ---
   send("ready", {});
+  sendRoute();
   sendTree();
 })();

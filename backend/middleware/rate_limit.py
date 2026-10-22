@@ -62,6 +62,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # Counting each reopen against the bucket starves the whole chat
         # UI when the user only pinged the tab a few times. Skip.
         p = request.url.path
+        # The phone preview's built screens: a page is a dozen files at once, and an iframe has no way to wait and retry.
+        if "/phone/serve" in p:
+            return await call_next(request)
         if p.endswith("/events") or p.endswith("/verify/events") or p.endswith("/stream"):
             return await call_next(request)
 
