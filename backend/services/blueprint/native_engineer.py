@@ -311,6 +311,12 @@ _LISTVIEW = re.compile(r"<ListView\b")
 _SCROLLER = re.compile(r"import\s*\{[^}]*\b(?:ScrollView|FlatList|SectionList|VirtualizedList)\b[^}]*\}\s*from\s*[\"']react-native[\"']")
 _FETCH = re.compile(r"\bfetch\s*\(")
 _CONSOLE = re.compile(r"\bconsole\.(log|debug)\s*\(")
+#: `as any` SWITCHES THE COMPILER OFF FOR THAT LINE, which is the one thing the screen is held to. The Account screen read
+#: `account` off `useMe() as any` (it is `data.account`), drew nothing on every phone, and compiled.
+_AS_ANY = re.compile(r"\bas\s+any\b")
+#: A "Sign Out" workflow is a record of an end, not a sign-out: the session stays, and the sign-in screen sends the person
+#: straight back in. Signing out is the session's: `useSession().signOut()`.
+_SIGN_OUT_WORKFLOW = re.compile(r"\bworkflows\.(?:signOut|signout|logOut|logout)\b")
 
 
 def _native_findings(screen: str) -> list[str]:
@@ -355,6 +361,14 @@ def _native_findings(screen: str) -> list[str]:
                    "which carry the design's typefaces and colours.")
     if _CONSOLE.search(screen):
         out.append("Screen.tsx: a console.log is left in.")
+    if _AS_ANY.search(screen):
+        out.append("Screen.tsx: `as any` turns the compiler off for that line, and a wrong guess about a hook's shape then draws "
+                   "nothing. Give it its real type instead: `useMe()` is `{ data, loading, error, refetch }` - the person is "
+                   "`data?.user` and their own record is `data?.account`.")
+    if _SIGN_OUT_WORKFLOW.search(screen):
+        out.append("Screen.tsx: a \"Sign Out\" workflow does not sign anyone out - it only records an end, and the person stays "
+                   "signed in. Sign out with `const { signOut } = useSession(); await signOut();` (the app then returns to the "
+                   "sign-in screen by itself).")
     return out
 
 
@@ -532,6 +546,73 @@ def typecheck(doc: dict, native_root: Path, page_id: str, screen: str, *, timeou
 # The writer
 # ---------------------------------------------------------------------------
 
+_TS_ERROR = re.compile(r"^Screen\.tsx\((\d+),(\d+)\): error (TS\d+): (.*)$", re.S)
+_QUOTED = re.compile(r"'([^']+)'")
+_EXPORT_LIST = re.compile(r"export\s+(?:type\s+)?\{([^}]*)\}", re.S)
+_EXPORT_STAR = re.compile(r"""export\s+\*\s+from\s+["']\./([\w/.-]+)["']""")
+_EXPORT_DECL = re.compile(r"\bexport\s+(?:async\s+)?(?:function|const|class|interface|type|enum)\s+(\w+)")
+
+
+def _exports_of(index: Path) -> set[str]:
+    """The names a kit module hands to a screen: what its `index.ts` exports, listed or re-exported whole."""
+    try:
+        text = index.read_text(encoding="utf-8")
+    except OSError:
+        return set()
+    names: set[str] = set()
+    for m in _EXPORT_LIST.finditer(text):
+        for part in m.group(1).split(","):
+            part = re.sub(r"^\s*type\s+", "", part.strip())
+            if part:
+                names.add(part.split(" as ")[-1].strip())
+    for m in _EXPORT_STAR.finditer(text):
+        for ext in (".ts", ".tsx"):
+            try:
+                names |= set(_EXPORT_DECL.findall((index.parent / (m.group(1) + ext)).read_text(encoding="utf-8")))
+            except OSError:
+                continue
+    return names
+
+
+def explain_error(error: str, screen: str, native_root: Path) -> str:
+    """A compiler error as the writer should read it: the line it points at, with a mark under the spot, and — for the
+    mistakes a writer makes again and again — what to do about it.
+
+    The compiler says "(2,79): … has no exported member 'toast'" and the writer had to count to find the place and guess where
+    the name lives. This shows the line, and says where the name IS."""
+    m = _TS_ERROR.match(error)
+    if not m:
+        return error
+    line_no, col, code, message = int(m.group(1)), int(m.group(2)), m.group(3), m.group(4)
+    lines = screen.splitlines()
+    out = [error]
+    if 1 <= line_no <= len(lines):
+        shown = lines[line_no - 1].rstrip()
+        prefix = f"    line {line_no}: "
+        out.append(prefix + shown)
+        out.append(" " * (len(prefix) + max(col - 1, 0)) + "^")
+    names = _QUOTED.findall(message)
+    hint = ""
+    if code in ("TS2305", "TS2724", "TS2614") and len(names) >= 2 and "@/" in names[0]:
+        # "Module '"@/ui"' has no exported member 'toast'": the module is quoted first, the missing name second.
+        module, member = names[0], names[1]
+        homes = {mod: member in _exports_of(native_root / "src" / mod / "index.ts") for mod in ("sdk", "ui")}
+        where = [f'"@/{mod}"' for mod, has in homes.items() if has]
+        if where:
+            hint = f"`{member}` is exported from {' and '.join(where)}" + (f", not {module}." if module else ".")
+        else:
+            hint = f"`{member}` is exported from neither \"@/ui\" nor \"@/sdk\": use a part that exists (the guide lists them)."
+    elif code == "TS2353" and len(names) >= 2:
+        hint = (f"`{names[0]}` is not something {names[-1]} accepts: delete it. What a part accepts is in the guide; "
+                "a list handles loading more by itself (`<ListView list={list} …/>`).")
+    elif code == "TS2339" and len(names) >= 2:
+        hint = (f"`{names[0]}` is not a field of {names[-1]}: a record's own fields are the ones in the generated types "
+                "(`src/sdk/schema.ts`), and a hook's result has the fields its type names.")
+    if hint:
+        out.append("    hint: " + hint)
+    return "\n".join(out)
+
+
 def compose_screen(doc: dict, page: dict, native_root: Path, client: Any, *, feedback: str = "", brief: str = "",
                    current: dict | None = None, node: str = "native_code",
                    check: Any = None) -> tuple[dict, list[Any]]:
@@ -582,7 +663,7 @@ def compose_screen(doc: dict, page: dict, native_root: Path, client: Any, *, fee
         last_errors = errors
         current = {"screen": screen}
         note = ("The TypeScript compiler (strict) and the screen rules refused it:\n"
-                + "\n".join(f"- {e}" for e in errors[:40]))
+                + "\n".join(f"- {explain_error(e, screen, native_root)}" for e in errors[:40]))
         logger.warning("[native_engineer] %s round %d: %d error(s): %s", page.get("id"), round_, len(errors),
                        "; ".join(errors[:3])[:400])
     raise CompileError(f"{page.get('id')}: the native screen still does not compile after {rounds} rounds — "

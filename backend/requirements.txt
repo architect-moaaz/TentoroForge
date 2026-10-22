@@ -106,6 +106,9 @@ google-genai>=1.0.0
 
 # LangGraph migration (Phase 1 — agent-loop runner behind FORGE_LANGGRAPH=1).
 langgraph>=0.2.60
+# The pipeline's checkpoints (services/pipeline_graph.py imports langgraph.checkpoint.sqlite.aio). It is a package of its own
+# and was in no list, so a fresh install failed 10 pipeline tests with "No module named 'langgraph.checkpoint.sqlite'".
+langgraph-checkpoint-sqlite>=2.0.0
 langchain-anthropic>=0.3.0
 langchain-core>=0.3.30
 

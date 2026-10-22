@@ -201,6 +201,8 @@ async def _run_build_and_poll(
     try:
         build_dir = mobile_dir
         if kind in ("native", "shell"):
+            # Expo reads the app's plugins on this machine first, so the phone project's packages must be installed.
+            await native_build.ensure_packages(Path(mobile_dir))
             await native_build.ensure_eas_project(Path(mobile_dir), creds.expo_eas_token)
             # EAS is run in a clean copy of the phone project, alone: see `native_build.stage`.
             staged = native_build.stage(Path(mobile_dir))
@@ -215,7 +217,7 @@ async def _run_build_and_poll(
             google_env=_google_env(creds) if platform == "android" else None,
             extra_env=NO_VCS,
         )
-    except EasClientError as exc:
+    except (EasClientError, native_build.NativeBuildError) as exc:
         await _mark_failed(build_row_id, str(exc))
         return
     except OSError as exc:

@@ -3655,6 +3655,12 @@ def _compose_page_layouts(svc: BlueprintService) -> None:
     from services.blueprint import figma_layout
     from services.blueprint.template_page import template_layout
 
+    # A PHONE-ONLY APP HAS NO WEB PAGES TO LAY OUT. Only `page_code` (the model's pages) was emptied for it; this free node
+    # still made a tree for every page, and the `frontend` projection turned each into a real web page: a full Shopping List
+    # table at https://h5dgk5pm.vercel.app for an app that has no website (Cart Buddy, 2026-10-22).
+    if not _web_pages(svc.doc):
+        return
+
     have = {str(l.get("page")) for l in svc.doc.get("pageLayouts") or [] if isinstance(l, dict)}
     held = _deferred_pages(svc.doc)
     for page in list(svc.doc.get("pages") or []):

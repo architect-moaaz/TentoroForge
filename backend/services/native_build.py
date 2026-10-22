@@ -18,6 +18,7 @@ unique there. Two organisations each calling an app "Leafy" would otherwise be o
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -370,6 +371,41 @@ def project_id(native_dir: Path) -> str:
     return "" if value.startswith("__") else value.strip()
 
 
+async def _npm_run(argv: list[str], cwd: str, timeout: float) -> tuple[int, str]:
+    """`npm` as a subprocess: its return code and the end of what it said. (`npm` is `npm.cmd` on Windows; a bare name
+    is not found there.)"""
+    exe = shutil.which(argv[0]) or argv[0]
+    proc = await asyncio.create_subprocess_exec(
+        exe, *argv[1:], cwd=cwd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+    try:
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout)
+    except asyncio.TimeoutError:
+        proc.kill()
+        return 124, f"npm took longer than {int(timeout // 60)} minutes and was stopped"
+    return proc.returncode or 0, (out or b"").decode("utf-8", "replace")[-700:]
+
+
+async def ensure_packages(native_dir: Path, *, run: Any = None, timeout: float = 1500.0) -> bool:
+    """The phone project's packages, installed once, so Expo can read the app's config plugins on this machine.
+
+    `eas init` and `eas build` resolve plugins such as `expo-router` BEFORE anything is uploaded, and failed with "Failed to
+    resolve plugin for module expo-router ... Do you have node modules installed?" for any phone app whose packages nobody
+    had installed (the web app's `install` node installs the web app's, and the type-check toolchain is its own folder).
+    True when it had to install; False when they were there already."""
+    native_dir = Path(native_dir)
+    if (native_dir / "node_modules" / "expo").is_dir():
+        return False
+    if not (native_dir / "package.json").is_file():
+        raise NativeBuildError("the phone project has no package.json, so its packages cannot be installed")
+    run = run or _npm_run
+    rc, said = await run(["npm", "install", "--no-audit", "--no-fund"], str(native_dir), timeout)
+    if rc != 0:
+        raise NativeBuildError(f"installing the phone project's packages failed (npm exited {rc}): {said.strip()[-400:]}")
+    if not (native_dir / "node_modules" / "expo").is_dir():
+        raise NativeBuildError("the phone project's packages were installed but `expo` is not among them")
+    return True
+
+
 async def ensure_eas_project(native_dir: Path, expo_token: str, *, run: Any = None) -> str:
     """The folder linked to an EAS project, linking it when it is not: `eas init`, which writes the id AND the owning
     account into app.json. A robot token is refused without the owner, so a project that has its id but lost its owner
@@ -390,5 +426,5 @@ async def ensure_eas_project(native_dir: Path, expo_token: str, *, run: Any = No
     return linked
 
 
-__all__ = ["BUNDLE", "LOCAL_HOSTS", "SHELL_SURFACES", "NativeBuildError", "Report", "Target", "choose_target", "ensure_eas_project",
+__all__ = ["BUNDLE", "LOCAL_HOSTS", "SHELL_SURFACES", "NativeBuildError", "Report", "Target", "choose_target", "ensure_eas_project", "ensure_packages",
            "owner", "prepare", "prepare_shell", "preflight", "project_id", "stage", "unique_slug", "unstage", "uses_camera", "write_submit_keys"]

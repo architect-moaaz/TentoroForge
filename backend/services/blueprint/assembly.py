@@ -939,6 +939,11 @@ def page_funnel(doc: dict, app_root: str | Path) -> dict[str, Any]:
     # build, was counted as planned and reported "not served" (i3i950po).
     live = [p for p in (doc.get("pages") or [])
             if isinstance(p, dict) and p.get("route") and p.get("status") != "DEPRECATED"]
+    # A PHONE-ONLY APP PLANS NO WEB ROUTES: its pages are phone screens, and a shortfall of web pages it was never meant to
+    # have is not a shortfall ("4 of 7 planned pages are not served" on Cart Buddy, 2026-10-22).
+    from services.blueprint import app_target
+    if not app_target.web_pages_enabled(doc):
+        live = []
     planned = {str(p.get("route")) for p in live}
     registry = root / "src" / "schemas" / "registry.ts"
     served: set[str] = set()
@@ -1327,6 +1332,10 @@ def check_route_tree(app_root: str | Path) -> None:
                                        for url, files in clashes[:8]))
 
 
+#: The error Windows gives for ending a process that has already ended.
+_WINDOWS_KILL_RACE = re.compile(r"uncaughtException \[Error: kill EPERM\]|\bkill EPERM\b")
+
+
 def verify_build(app_root: str | Path, *, timeout: int = 900,
                  install: bool = True, build: bool = True, dispatches: bool = True) -> dict[str, Any]:
     """Install and build the assembled app; raise if it does not compile.
@@ -1366,6 +1375,13 @@ def verify_build(app_root: str | Path, *, timeout: int = 900,
     for name, cmd in steps:
         proc = subprocess.run(cmd, cwd=root, capture_output=True, text=True,
                               timeout=timeout, env=env)
+        # WINDOWS CAN FAIL A GOOD BUILD AT ITS END. `next build` ends its worker processes with a kill, and Windows
+        # sometimes answers `kill EPERM` for one that is already gone: the build failed with that and no compile error
+        # (Cart Buddy, 2026-10-22) and passed, exit 0, when the same command was run again. That one error is tried once
+        # more; a compile error never is.
+        if proc.returncode != 0 and _WINDOWS_KILL_RACE.search((proc.stdout or "") + (proc.stderr or "")):
+            proc = subprocess.run(cmd, cwd=root, capture_output=True, text=True,
+                                  timeout=timeout, env=env)
         out[name] = proc.returncode
         if proc.returncode != 0:
             raise BuildFailed(
