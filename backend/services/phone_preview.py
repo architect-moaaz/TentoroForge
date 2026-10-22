@@ -21,7 +21,10 @@ import json
 import logging
 import os
 import re
+import time
 import shutil
+import stat
+import sys
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -341,6 +344,35 @@ def _inject_scripts(dist: Path, short_id: str) -> None:
         index.write_text(html, encoding="utf-8")
 
 
+def _web_specs(modules: Path, missing: list[str]) -> list[str]:
+    """`name@version` for each web library, at the version this project's Expo SDK is made for (its own table says which)."""
+    try:
+        table = json.loads((modules / "expo" / "bundledNativeModules.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        table = {}
+    return [f"{name}@{table[name]}" if table.get(name) else name for name in missing]
+
+
+def _stage_here(real: Path, target: Path) -> Path:
+    """A clean copy of the phone project, in a folder that is THE SAME EVERY TIME.
+
+    The bundler remembers what it did to each file, and some of what it remembers has the project's folder written into it:
+    where the router looks for the app's screens. A new random folder for every redraw made the bundler reuse a memory that
+    pointed at the previous, deleted one, and the preview drew "Error: No routes found" in 8 seconds, with none of the app in
+    it (Cart Buddy, 2026-10-22). In one place every time, what it remembers is right, and a redraw only redoes what changed.
+
+    The packages are a link to the project's own: it is taken away as a link, never deleted through."""
+    from services import native_build
+
+    if target.exists():
+        native_build._unlink_packages(target / "node_modules")
+        _rmtree(target)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(real, target, ignore=native_build._stage_ignore(real))
+    native_build._link_packages(real / "node_modules", target / "node_modules")
+    return target
+
+
 def _packages_key(real: Path) -> str:
     """Changes when the phone project's dependencies do, so the shared packages are installed again only then."""
     h = hashlib.sha1()
@@ -363,9 +395,15 @@ async def _ensure_packages(output_dir: str, real: Path, staged: Path, env: dict)
 
     modules = real / "node_modules"
     if modules.is_dir():
-        if not all((modules / p).is_dir() for p in WEB_PACKAGES):
-            _write_status(output_dir, step="Adding the web libraries")
-            await _run(["npx", "expo", "install", *WEB_PACKAGES], staged, env, "Adding the web libraries")
+        missing = [p for p in WEB_PACKAGES if not (modules / p).is_dir()]
+        if missing:
+            # ONCE, INTO THE PROJECT'S OWN PACKAGES. `expo install` ran in the throwaway copy and its install did not
+            # reach the real folder, so every redraw added the web libraries again (about two minutes) and threw them away
+            # (Cart Buddy, 2026-10-22). `--no-save` keeps the project's package.json as it is: the web libraries are for
+            # the preview and are not something its Expo build needs.
+            _write_status(output_dir, step="Adding the web libraries (the first time only)")
+            await _run(["npm", "install", "--no-save", "--no-audit", "--no-fund", *_web_specs(modules, missing)], real, env,
+                       "Adding the web libraries")
         return
     cache = work_dir(output_dir) / "packages"
     stamp = cache / ".key"
@@ -373,7 +411,7 @@ async def _ensure_packages(output_dir: str, real: Path, staged: Path, env: dict)
     kept = (cache / "node_modules").is_dir() and stamp.is_file() and stamp.read_text(encoding="utf-8").strip() == key
     if not kept:
         _write_status(output_dir, step="Installing the phone project's packages (the first time only)")
-        shutil.rmtree(cache, ignore_errors=True)
+        _rmtree(cache)
         cache.mkdir(parents=True)
         for name in ("package.json", "package-lock.json", "app.json", ".npmrc"):
             source = staged / name if (staged / name).is_file() else real / name
@@ -387,6 +425,68 @@ async def _ensure_packages(output_dir: str, real: Path, staged: Path, env: dict)
         raise PhonePreviewError("The kept packages could not be linked into the preview build.")
 
 
+def _extended(path: Path) -> str:
+    """The path in the form that goes past Windows' 260-character limit (the extended-length prefix); other systems have no such limit."""
+    text = str(Path(path).resolve())
+    if os.name == "nt" and not text.startswith("\\\\?\\"):
+        return "\\\\?\\" + text
+    return text
+
+
+def _rmtree(path: Path) -> None:
+    """Remove a folder, read-only files included. Never raises.
+
+    The drawn picture holds copies of font files that come from the project's packages, and those are read-only: a plain
+    `shutil.rmtree(..., ignore_errors=True)` skipped all 19 of them, left the folder behind, and the next swap was refused
+    ("Access is denied") for as long as the leftover was there (Cart Buddy, 2026-10-22)."""
+    def writable_then_retry(func, failed, _exc):
+        try:
+            os.chmod(failed, stat.S_IWRITE)
+            func(failed)
+        except OSError:
+            pass
+
+    if not Path(path).exists():
+        return
+    # The drawn picture keeps each font under the whole path it came from, which is longer than the 260 characters Windows
+    # allows an ordinary path (280 here): the delete could not even find those files. The prefix lifts the limit.
+    target = _extended(path)
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(target, onexc=writable_then_retry)
+    else:
+        shutil.rmtree(target, onerror=lambda f, p, e: writable_then_retry(f, p, e))
+
+
+def _swap(new: Path, final: Path) -> None:
+    """Put the freshly drawn folder where the old one is, without ever leaving the preview without a folder.
+
+    Windows refuses to move or delete a folder that has a file open, and the editor has the picture open while it loads
+    (`WinError 5: Access is denied` after a good build, 2026-10-22). So the old folder is moved ASIDE, under a name of its
+    own each time (a leftover of an earlier swap can then never be in the way), a busy one is tried again for a few seconds,
+    and what is left of the old ones is removed when the new one is in."""
+    for leftover in final.parent.glob(final.name + ".old*"):
+        _rmtree(leftover)
+    aside = final.with_name(f"{final.name}.old-{time.time_ns()}")
+    last: OSError | None = None
+    for attempt in range(8):
+        try:
+            if final.exists():
+                os.replace(final, aside)
+            os.replace(new, final)
+            _rmtree(aside)
+            return
+        except OSError as exc:
+            last = exc
+            time.sleep(0.4 * (attempt + 1))
+    # The new picture could not be put in place: put the old one back, and say so.
+    try:
+        if aside.exists() and not final.exists():
+            os.replace(aside, final)
+    except OSError:
+        pass
+    raise PhonePreviewError(f"The new picture could not be put in place ({last}). Try again in a moment.")
+
+
 async def _build(output_dir: str, short_id: str) -> None:
     from services import native_build
     from services.blueprint.service import BlueprintService
@@ -396,29 +496,31 @@ async def _build(output_dir: str, short_id: str) -> None:
         _write_status(output_dir, state="building", step="Preparing the screens", error="", fingerprint=_fingerprint(output_dir))
         doc = BlueprintService.load(output_dir=output_dir).doc
         real = native_dir(output_dir)
-        staged = await asyncio.to_thread(native_build.stage, real)
+        stage_dir = work_dir(output_dir) / "stage"
+        # The first build in a place starts the bundler's memory over: what it holds from other places (the random folders
+        # of earlier redraws) points at folders that are gone.
+        fresh = not stage_dir.exists()
+        staged = await asyncio.to_thread(_stage_here, real, stage_dir)
         await asyncio.to_thread(_prepare_copy, staged, doc, short_id)
         env = {**os.environ, "CI": "1", "EXPO_NO_TELEMETRY": "1", "EXPO_NO_GIT_STATUS": "1"}
         await _ensure_packages(output_dir, real, staged, env)
         _write_status(output_dir, step="Drawing the screens")
         out = work_dir(output_dir) / "building"
-        shutil.rmtree(out, ignore_errors=True)
-        await _run(["npx", "expo", "export", "--platform", "web", "--output-dir", str(out)], staged, env, "Drawing the screens")
+        _rmtree(out)
+        await _run(["npx", "expo", "export", "--platform", "web", "--output-dir", str(out), *(["--clear"] if fresh else [])],
+                   staged, env, "Drawing the screens")
         if not (out / "index.html").is_file():
             raise PhonePreviewError("The export finished but produced no page.")
         _inject_scripts(out, short_id)
         final = dist_dir(output_dir)
-        shutil.rmtree(final, ignore_errors=True)
-        os.replace(out, final)
+        _swap(out, final)
         _write_status(output_dir, state="ready", step="", error="", builtAt=datetime.now(timezone.utc).isoformat())
     except PhonePreviewError as exc:
         _write_status(output_dir, state="failed", step="", error=str(exc))
     except Exception as exc:  # noqa: BLE001 - said as a reason, not a traceback
         logger.exception("phone preview build failed for %s", short_id)
         _write_status(output_dir, state="failed", step="", error=f"The preview could not be built ({type(exc).__name__}: {str(exc)[:160]}).")
-    finally:
-        if staged is not None:
-            native_build.unstage(staged)
+    # The copy is kept: the next redraw is made in the same place (see `_stage_here`).
 
 
 def start(output_dir: str | Path, short_id: str) -> dict:

@@ -7,6 +7,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, MousePointerClick, RefreshCw, Smartphone, Hand, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
+import { PHONE_GO, PLAN_CHANGED } from "@/components/react-editor/api";
+import { PartEditor } from "@/components/react-editor/PartEditor";
 import { useSmithDraftStore } from "@/stores/smithDraft";
 
 const PREFIX = "design2ui:";
@@ -42,7 +44,13 @@ export function requestFor(route: string, picked: Picked | null, change: string)
   return `On ${where}, ${what}: ${change.trim()}`;
 }
 
-export function PhonePreview({ projectId, onAskSmith }: { projectId: string; onAskSmith: () => void }) {
+/**
+ * `autoRedraw`: the Editor's phone side. A change to the pages, the menu or the look (the `PLAN_CHANGED` event) draws the
+ * phone again once the changes stop coming; the Phone tab on its own leaves that to the person.
+ * `editParts`: the Editor too. A part picked in the picture can be changed by hand (words, copy, delete), not only asked of Smith.
+ */
+export function PhonePreview({ projectId, onAskSmith, autoRedraw = false, editParts = false }:
+  { projectId: string; onAskSmith: () => void; autoRedraw?: boolean; editParts?: boolean }) {
   const queryClient = useQueryClient();
   const frame = useRef<HTMLIFrameElement>(null);
   const [mode, setMode] = useState<"use" | "select">("use");
@@ -52,6 +60,8 @@ export function PhonePreview({ projectId, onAskSmith }: { projectId: string; onA
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState("");
   const [frameKey, setFrameKey] = useState(0);
+  const [go, setGo] = useState("");
+  const [wantRedraw, setWantRedraw] = useState(0);
   const ask = useSmithDraftStore((s) => s.ask);
 
   const { data: status } = useQuery({
@@ -73,6 +83,25 @@ export function PhonePreview({ projectId, onAskSmith }: { projectId: string; onA
     }
   }, [projectId, queryClient]);
 
+  // The Editor changed the pages, the menu or the look: the phone is stale now, and (in the Editor) is drawn again.
+  useEffect(() => {
+    const changed = () => {
+      void queryClient.invalidateQueries({ queryKey: phoneStatusKey(projectId) });
+      if (autoRedraw) setWantRedraw((n) => n + 1);
+    };
+    const show = (e: Event) => setGo(String((e as CustomEvent).detail ?? ""));
+    window.addEventListener(PLAN_CHANGED, changed);
+    window.addEventListener(PHONE_GO, show);
+    return () => { window.removeEventListener(PLAN_CHANGED, changed); window.removeEventListener(PHONE_GO, show); };
+  }, [projectId, autoRedraw, queryClient]);
+
+  // Edits that come close together are one redraw, a moment after the last.
+  useEffect(() => {
+    if (!wantRedraw) return;
+    const t = setTimeout(() => void build(), 1500);
+    return () => clearTimeout(t);
+  }, [wantRedraw, build]);
+
   // A first visit builds it; there is nothing to look at until then.
   const autoStarted = useRef(false);
   useEffect(() => {
@@ -83,7 +112,10 @@ export function PhonePreview({ projectId, onAskSmith }: { projectId: string; onA
   }, [status?.state, build]);
 
   // A new build is a new page.
-  useEffect(() => { if (status?.state === "ready") setFrameKey((k) => k + 1); }, [status?.builtAt, status?.state]);
+  // The picture it was picked from is gone, and the part may be too.
+  useEffect(() => {
+    if (status?.state === "ready") { setFrameKey((k) => k + 1); setPicked(null); }
+  }, [status?.builtAt, status?.state]);
 
   useEffect(() => {
     function onMessage(e: MessageEvent) {
@@ -113,7 +145,7 @@ export function PhonePreview({ projectId, onAskSmith }: { projectId: string; onA
     onAskSmith();
   };
 
-  const src = status ? `${process.env.NEXT_PUBLIC_API_URL ?? ""}${status.servePath}/` : null;
+  const src = status ? `${process.env.NEXT_PUBLIC_API_URL ?? ""}${status.servePath}${go && go !== "/" ? go : "/"}` : null;
   const building = status?.state === "building" || starting;
 
   return (
@@ -190,7 +222,8 @@ export function PhonePreview({ projectId, onAskSmith }: { projectId: string; onA
                 {picked.source && <p className="mt-1 font-mono text-[11px] text-muted-foreground">{picked.source.file}:{picked.source.line}</p>}
               </div>
             )}
-            <label className="text-xs text-muted-foreground" htmlFor="phone-change">What should change?</label>
+            {editParts && picked?.source && <PartEditor projectId={projectId} source={picked.source} />}
+            <label className="text-xs text-muted-foreground" htmlFor="phone-change">{editParts && picked ? "Or ask Smith" : "What should change?"}</label>
             <textarea
               id="phone-change"
               value={change}

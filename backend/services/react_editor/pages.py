@@ -58,6 +58,9 @@ def _reproject(svc: Any, project: Project) -> list[str]:
     except Exception as exc:  # noqa: BLE001
         logger.warning("[react_editor.pages] public nav: %s", exc)
     files += project_code_pages(svc.doc, project.app_root)
+    # The phone app is projected from the same Blueprint: its theme, menu and route files follow the edit too.
+    from services.react_editor import phone
+    files += phone.reproject(svc.doc, project.root)
     return sorted(set(files))
 
 

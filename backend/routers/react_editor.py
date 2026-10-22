@@ -23,7 +23,7 @@ from database import get_db
 from models.auth import PlatformUser
 from services.project_paths import project_root
 from services.project_service import get_project_with_auth
-from services.react_editor import assets, jit, pages, service, smith, theme, widgets
+from services.react_editor import assets, jit, pages, phone_screens, service, smith, theme, widgets
 from services.react_editor.service import EditorError, Project
 
 router = APIRouter(tags=["react-editor"])
@@ -229,6 +229,46 @@ async def remove_widget(project_id: uuid.UUID, widget_id: str,
                         user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     project = await _project(project_id, user, db)
     return await _run(widgets.remove, project, widget_id)
+
+
+# ---------------------------------------------------------------------------
+# A phone screen: opened, changed and brought back, as a web page is
+# ---------------------------------------------------------------------------
+
+#: What a person can do to a phone screen from the picture. The rest of the editor's operations are for later steps.
+_PHONE_OPS = frozenset({"setText", "setProp", "remove", "duplicate"})
+
+
+class PhoneApplyRequest(BaseModel):
+    baseRevision: str
+    ops: list[dict[str, Any]] = Field(default_factory=list)
+    label: str = "Edit"
+
+
+@router.get("/api/projects/{project_id}/react-editor/phone/screens/{page_id}")
+async def open_phone_screen(project_id: uuid.UUID, page_id: str, user: PlatformUser = Depends(get_current_user),
+                            db: AsyncSession = Depends(get_db)):
+    project = await _project(project_id, user, db)
+    return await _run(phone_screens.open_screen, project, page_id)
+
+
+@router.post("/api/projects/{project_id}/react-editor/phone/screens/{page_id}/apply")
+async def apply_phone_screen(project_id: uuid.UUID, page_id: str, req: PhoneApplyRequest,
+                             user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    project = await _project(project_id, user, db)
+    refused = sorted({str(o.get("op")) for o in req.ops if o.get("op") not in _PHONE_OPS})
+    if refused:
+        raise HTTPException(status_code=422, detail={"code": "not-allowed", "message":
+                            f"The phone editor cannot do this yet: {', '.join(refused)}."})
+    return await _run(phone_screens.apply, project, page_id, base_revision=req.baseRevision, ops=req.ops,
+                      label=req.label[:120])
+
+
+@router.post("/api/projects/{project_id}/react-editor/phone/screens/{page_id}/restore")
+async def restore_phone_screen(project_id: uuid.UUID, page_id: str, req: RestoreRequest,
+                               user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    project = await _project(project_id, user, db)
+    return await _run(phone_screens.restore, project, page_id, revision=req.revision, expected=req.expectedRevision)
 
 
 @router.get("/api/projects/{project_id}/react-editor/pages/{page_id}/history")

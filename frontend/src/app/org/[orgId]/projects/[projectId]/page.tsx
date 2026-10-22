@@ -51,7 +51,7 @@ import { VisualEditor } from "@/components/visual-editor/VisualEditor";
 import { IREditor } from "@/components/ir-editor/IREditor";
 import { DesignEditor } from "@/components/design-editor/DesignEditor";
 import { VisualEditorWorkspace } from "@/components/visual-editor/VisualEditorWorkspace";
-import { ReactEditor } from "@/components/react-editor/ReactEditor";
+import { EditorSurfaces } from "@/components/react-editor/EditorSurfaces";
 import { AppFlowPanel } from "@/components/app-flow/AppFlowPanel";
 import { AppSettingsPanel } from "@/components/app-settings/AppSettingsPanel";
 import { useAppSettingsStore } from "@/stores/appSettings";
@@ -593,7 +593,7 @@ function ProjectWorkspace({
         {/* The Editor tab is the visual React editor over the Blueprint's coded
             pages. The schema-JSON editor stays reachable as "schema-editor"
             for apps built before pages were written as React. */}
-        {activeTab === "editor" && <ReactEditor projectId={projectId} />}
+        {activeTab === "editor" && <EditorSurfaces projectId={projectId} onAskSmith={() => setActiveTab("chat")} />}
         {activeTab === "schema-editor" && !lockedName && project?.short_id && (
           <VisualEditorWorkspace projectId={project.short_id} />
         )}

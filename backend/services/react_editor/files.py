@@ -68,36 +68,37 @@ def split_ops(ops: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
 
 
 def patch_all(view: str, load: str, parts: dict[str, str], ops: list[dict[str, Any]], *,
-              app_root: Path | None = None) -> tuple[str, str, dict[str, str]]:
+              app_root: Path | None = None, slots: bool = False) -> tuple[str, str, dict[str, str]]:
     """Every op applied to the file it edits."""
     parts = dict(parts)
     for target, file_ops in split_ops(ops).items():
         if target == "load":
             load = adapter.patch_load(load, file_ops, app_root=app_root)
         elif target == "view":
-            view = adapter.patch(view, file_ops, app_root=app_root)
+            view = adapter.patch(view, file_ops, app_root=app_root, slots=slots)
         else:
             key = target[5:]
             if key not in parts:
                 raise AdapterError("missing-target", f"This screen has no part {key} any more.")
-            parts[key] = adapter.patch(parts[key], file_ops, app_root=app_root)
+            parts[key] = adapter.patch(parts[key], file_ops, app_root=app_root, slots=slots)
     return view, load, parts
 
 
 _PART_IMPORT = re.compile(r'import\s+(\w+)\s+from\s+["\']\./parts/([\w-]+)["\']')
 
 
-def merged_model(view: str, load: str, parts: dict[str, str], *, app_root: Path | None = None) -> dict[str, Any]:
+def merged_model(view: str, load: str, parts: dict[str, str], *, app_root: Path | None = None,
+                 slots: bool = False) -> dict[str, Any]:
     """The screen's model: the frame's, with each part's tree under the frame
     element that renders it (or among the roots, when none does)."""
-    model = adapter.model(view, load, app_root=app_root)
+    model = adapter.model(view, load, app_root=app_root, slots=slots)
     for node in model["nodes"].values():
         node["file"] = "view"
     if not parts:
         return model
     host = {key: name for name, key in _PART_IMPORT.findall(view)}
     for key, code in parts.items():
-        sub = adapter.model(code, "", app_root=app_root)
+        sub = adapter.model(code, "", app_root=app_root, slots=slots)
         prefix = f"{key}{SEP}"
         at = next((nid for nid, n in model["nodes"].items() if n.get("type") == host.get(key)), None)
         for nid, node in sub["nodes"].items():

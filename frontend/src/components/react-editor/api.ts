@@ -7,7 +7,20 @@
  * a status text, which is exactly the wording (UX-004) the editor exists to
  * show.
  */
-import type { ApplyResult, DraftResult, Finding, HistoryEntry, Navigation, Op, PageDoc, PageListItem, Proposal, ThemeDoc, ThemePatch, WidgetRef, WidgetSpec } from "./types";
+import type { PhoneApplied, PhoneScreen, ApplyResult, DraftResult, Finding, HistoryEntry, Navigation, Op, PageDoc, PageListItem, Proposal, Surfaces, ThemeDoc, ThemePatch, WidgetRef, WidgetSpec } from "./types";
+
+/** The name of the event that says the application's pages, menu or look changed: the phone preview listens, and redraws. */
+export const PLAN_CHANGED = "forge:plan-changed";
+/** Show this screen (the route in the event's detail) in the phone. */
+export const PHONE_GO = "forge:phone-go";
+
+/** A change to the pages, the menu or the look: once it is saved, tell whoever is showing the app. */
+function announced<T>(done: Promise<T>): Promise<T> {
+  return done.then((value) => {
+    if (typeof window !== "undefined") window.dispatchEvent(new Event(PLAN_CHANGED));
+    return value;
+  });
+}
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
 
@@ -117,8 +130,14 @@ export const editorApi = {
     }
     return res.json();
   },
+  phoneScreen: (projectId: string, pageId: string) => call<PhoneScreen>(`${base(projectId)}/phone/screens/${pageId}`),
+  /** A change to what is on a phone screen. Saved into the plan at once; the picture is drawn again after (PLAN_CHANGED). */
+  applyPhoneScreen: (projectId: string, pageId: string, baseRevision: string, ops: Op[], label: string) =>
+    announced(call<PhoneApplied>(`${base(projectId)}/phone/screens/${pageId}/apply`, { method: "POST", body: JSON.stringify({ baseRevision, ops, label }) })),
+  restorePhoneScreen: (projectId: string, pageId: string, revision: string, expectedRevision: string) =>
+    announced(call<PhoneApplied>(`${base(projectId)}/phone/screens/${pageId}/restore`, { method: "POST", body: JSON.stringify({ revision, expectedRevision }) })),
   theme: (projectId: string) => call<ThemeDoc>(`${base(projectId)}/theme`),
-  setTheme: (projectId: string, patch: ThemePatch) => call<ThemeDoc>(`${base(projectId)}/theme`, { method: "PUT", body: JSON.stringify(patch) }),
+  setTheme: (projectId: string, patch: ThemePatch) => announced(call<ThemeDoc>(`${base(projectId)}/theme`, { method: "PUT", body: JSON.stringify(patch) })),
   listAssets: (projectId: string) => call<{ assets: { url: string; name: string }[] }>(`${base(projectId)}/assets`),
   vendor: (projectId: string, opts: { fresh?: boolean } = {}, signal?: AbortSignal) =>
     call<VendorBundle>(`${base(projectId)}/vendor${opts.fresh ? "?fresh=true" : ""}`, { signal }),
@@ -131,18 +150,18 @@ export const editorApi = {
     const qs = q.toString();
     return call<JitBundle>(`${base(projectId)}/pages/${pageId}/jit${qs ? `?${qs}` : ""}`, { signal });
   },
-  pages: (projectId: string) => call<{ entryPage: string; pages: PageListItem[]; navigation?: Navigation }>(`${base(projectId)}/pages`),
+  pages: (projectId: string) => call<{ entryPage: string; pages: PageListItem[]; navigation?: Navigation; surfaces?: Surfaces }>(`${base(projectId)}/pages`),
   createPage: (projectId: string, spec: { name: string; route?: string; access?: "public" | "authenticated"; menu?: boolean; purpose?: string }) =>
     post<{ page: { id: string; name: string; route: string; access: string; key: string | null } }>(`${base(projectId)}/pages`, { spec }),
   updatePage: (projectId: string, pageId: string, spec: { name?: string; route?: string; access?: "public" | "authenticated"; purpose?: string }) =>
-    call<{ page: { id: string; name: string; route: string }; renamed: { from: string; to: string } | null }>(`${base(projectId)}/pages/${pageId}`, { method: "PATCH", body: JSON.stringify({ spec }) }),
+    announced(call<{ page: { id: string; name: string; route: string }; renamed: { from: string; to: string } | null }>(`${base(projectId)}/pages/${pageId}`, { method: "PATCH", body: JSON.stringify({ spec }) })),
   pageConsequences: (projectId: string, pageId: string) =>
     call<{ refusal: string | null; links?: unknown[]; menu?: unknown[]; widgets?: number; landing?: boolean; [k: string]: unknown }>(`${base(projectId)}/pages/${pageId}/consequences`),
   deletePage: (projectId: string, pageId: string) =>
     call<{ removed: boolean; name: string; links: unknown[]; menu: unknown[]; opensOn: string }>(`${base(projectId)}/pages/${pageId}`, { method: "DELETE" }),
   navigation: (projectId: string) => call<Navigation>(`${base(projectId)}/navigation`),
   setNavigation: (projectId: string, spec: { tree?: NavItemSpec[]; style?: string; initialRoute?: string | null }) =>
-    call<{ navigation: Navigation }>(`${base(projectId)}/navigation`, { method: "PUT", body: JSON.stringify({ spec }) }),
+    announced(call<{ navigation: Navigation }>(`${base(projectId)}/navigation`, { method: "PUT", body: JSON.stringify({ spec }) })),
   open: (projectId: string, pageId: string) => call<PageDoc>(`${base(projectId)}/pages/${pageId}`),
   apply: (projectId: string, pageId: string, baseRevision: string, ops: Op[], label: string, source?: { view: string; load: string }) =>
     post<ApplyResult>(`${base(projectId)}/pages/${pageId}/apply`, source ? { baseRevision, ops, label, source } : { baseRevision, ops, label }),

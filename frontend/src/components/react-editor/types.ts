@@ -255,8 +255,48 @@ export interface PageListItem {
   pattern: string | null;
   access: string;
   coded: boolean;
+  /** A phone screen is written for this page: the Editor's phone side lists it. */
+  phone?: boolean;
   module: string | null;
   navigatesTo: string[];
+}
+
+/** Which surfaces the application has: the website, the phone app, or both. */
+export interface Surfaces { web: boolean; phone: boolean }
+
+/** One part of a phone screen, as the picture needs it (no character positions). */
+export interface PhonePart {
+  id: string;
+  parent: string | null;
+  children?: string[];
+  type: string;
+  kind: string;
+  line: number;
+  text?: string | null;
+  textEditable?: boolean;
+  repeat?: unknown;
+  file?: string;
+  /** Set when the screen hands this part to a component as a setting (`footer`, `renderItem`): it cannot be copied or deleted alone. */
+  slot?: string;
+  props: { name: string; kind: string; value: unknown }[];
+}
+
+/** A phone screen opened for editing: the parts it is made of, and the version they are. */
+export interface PhoneScreen {
+  page: { id: string; name: string; route: string };
+  revision: string;
+  model: { nodes: Record<string, PhonePart> };
+  /** The settings that hold words a person reads (title, label, placeholder…): the ones that can be typed over. */
+  words: string[];
+  history: HistoryEntry[];
+}
+
+export interface PhoneApplied {
+  revision: string;
+  model: { nodes: Record<string, PhonePart> };
+  unchanged: boolean;
+  checked: boolean;
+  history?: HistoryEntry;
 }
 
 export interface Finding {

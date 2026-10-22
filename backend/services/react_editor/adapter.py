@@ -80,12 +80,13 @@ def run(command: str, payload: dict[str, Any], *, app_root: Path | None = None,
     return result
 
 
-def model(view: str, load: str = "", *, app_root: Path | None = None) -> dict[str, Any]:
-    return run("model", {"view": view, "load": load}, app_root=app_root)
+def model(view: str, load: str = "", *, app_root: Path | None = None, slots: bool = False) -> dict[str, Any]:
+    """`slots`: also the parts a screen hands to a component as settings (a phone screen's `footer`, `renderItem`)."""
+    return run("model", {"view": view, "load": load, **({"slots": True} if slots else {})}, app_root=app_root)
 
 
-def patch(view: str, ops: list[dict[str, Any]], *, app_root: Path | None = None) -> str:
-    return str(run("patch", {"view": view, "ops": ops}, app_root=app_root)["view"])
+def patch(view: str, ops: list[dict[str, Any]], *, app_root: Path | None = None, slots: bool = False) -> str:
+    return str(run("patch", {"view": view, "ops": ops, **({"slots": True} if slots else {})}, app_root=app_root)["view"])
 
 
 def patch_load(load: str, ops: list[dict[str, Any]], *, app_root: Path | None = None) -> str:
