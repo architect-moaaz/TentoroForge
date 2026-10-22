@@ -226,6 +226,10 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     # keeps. Needs nothing; there is only ever one application to copy.
     "back_up": set(),
     "save_as_template": set(),
+    # Where this app's templates stand, and sending one for review — the
+    # Templates page's status and its Submit for review, from the chat.
+    "template_status": set(),
+    "submit_template": set(),
     # THE ASKS THAT REACH NOTHING, GIVEN SOMEWHERE TO LAND. Each of these is a
     # thing people ask for that Smith genuinely cannot do. Without a verb they
     # were classified as whatever was nearest — "delete the Wards page" as a
@@ -661,6 +665,19 @@ VERB_HELP: dict[str, str] = {
         "Tentoro that the person starts from Templates. Takes an optional name in "
         "`new_value`; changes nothing in this application."
     ),
+    "template_status": (
+        "Where the organisation's TEMPLATES stand: \"is my template approved?\", \"is it in the "
+        "gallery yet?\", \"what templates do we have?\", \"did Tentoro review it?\". Each template "
+        "with its status (private, waiting for review, in the Gallery, sent back with the reviewer's "
+        "note), version and how often it was used. Changes nothing. Needs nothing."
+    ),
+    "submit_template": (
+        "Send this app's template to Tentoro for review, to be published in the Templates Gallery: "
+        "\"submit my template for review\", \"publish the template to the gallery\", \"send it to "
+        "Tentoro\". The newest template of this app that is not already waiting or published; the "
+        "app's own page pictures are added first when it has none. Free unless they say otherwise. "
+        "NOT save_as_template (that makes the template). Takes an optional template name in `new_value`."
+    ),
     "back_up": (
         "A copy of the whole application the owner keeps: \"back it up "
         "somewhere\", \"what if I lose all this?\", \"can I take a backup?\". "
@@ -958,6 +975,14 @@ VERB_EXAMPLES: dict[str, tuple[str, ...]] = {
     'save_as_template': (
         'save this app as a template',
         'I want to reuse this app later for another client',
+    ),
+    'template_status': (
+        'is my template approved yet?',
+        'what templates do we have?',
+    ),
+    'submit_template': (
+        'submit my template for review',
+        'publish the template to the gallery',
     ),
     'back_up': (
         'what happens if I lose all this?',

@@ -112,8 +112,9 @@ GROUPS: tuple[tuple[str, str, frozenset[str]], ...] = (
     ("Reusing it as a template",
      "Save the whole application — screens, records, processes, rules, roles "
      "and look — to Templates, so a new app can start from it: the exact same "
-     "app again, or one like it for another purpose.",
-     frozenset({"save_as_template"})),
+     "app again, or one like it for another purpose — send it to Tentoro for review "
+     "for the Templates Gallery, and tell you where each template stands.",
+     frozenset({"save_as_template", "template_status", "submit_template"})),
     ("Putting it back",
      "Undo the last change — the application returns to how it stood before "
      "it, and saying it again goes back another. Nothing is deleted: the undo "

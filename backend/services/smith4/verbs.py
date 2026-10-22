@@ -876,6 +876,26 @@ def save_as_template(ctx: Ctx, u: dict) -> Outcome:
         "is unchanged."))
 
 
+def template_status(ctx: Ctx, u: dict) -> Outcome:
+    """\"Is my template approved?\", \"what templates do we have?\" — the
+    organisation's templates, each in the Templates page's words. Changes nothing."""
+    from services import project_templates as templates
+    from services.smith.template_ops import status_said
+    facts = templates.project_facts(str(ctx.project_id))
+    if not facts:
+        return Outcome(status="needs_user", said="I could not find which organisation this app belongs to.")
+    return Outcome(status="resolved", said=status_said(str(ctx.project_id), facts["org_id"]))
+
+
+def submit_template(ctx: Ctx, u: dict) -> Outcome:
+    """Send this app's template to Tentoro for review, as the Templates page's
+    Submit for review does: every check, the reviewers told."""
+    from services.smith.template_ops import submit
+    said = submit(ctx.out, str(ctx.project_id), name=_s(u, "new_value"))
+    sent = said.startswith("Sent ")
+    return Outcome(status="resolved" if sent else "needs_user", said=said)
+
+
 def rebuild(ctx: Ctx, u: dict) -> Outcome:
     """A chat turn cannot start a run itself; a build that stopped short is
     handed back to the router to start again (`follow_up`), with where it
@@ -1057,6 +1077,7 @@ PERFORM: dict[str, Perform] = {
     "import_data": import_data, "export_data": export_data,
     "add_login": accounts, "remove_login": accounts, "reset_login": accounts,
     "explain_crash": incident, "explain_slowness": incident, "back_up": records_out, "save_as_template": save_as_template,
+    "template_status": template_status, "submit_template": submit_template,
     "rebuild": rebuild,
     "add_section": screen, "edit_section": screen, "remove_section": screen, "reorder_sections": screen,
     "move_section": screen, "merge_screens": screen, "split_section": screen,
