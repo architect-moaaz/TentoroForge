@@ -24,6 +24,23 @@ interface PhoneStatus {
   builtAt?: string | null;
   stale?: boolean;
   servePath: string;
+  /** The live preview: a dev server the backend keeps for the project, so a change shows at once. */
+  live?: LiveStatus;
+}
+
+export interface LiveStatus {
+  state: "off" | "starting" | "ready" | "failed";
+  /** Where the picture is loaded from (through the backend). */
+  path: string;
+  error?: string;
+}
+
+/**
+ * Where the picture comes from. The live preview when it is running (a change shows in under a second); otherwise the built picture
+ * (about ten seconds per change). Only the Editor asks for the live one.
+ */
+export function pictureSource(status: PhoneStatus | undefined, wantsLive: boolean): "live" | "built" {
+  return wantsLive && status?.live?.state === "ready" ? "live" : "built";
 }
 
 interface Picked {
@@ -81,7 +98,9 @@ export function PhonePreview({ projectId, onAskSmith, autoRedraw = false, editPa
   const { data: status } = useQuery({
     queryKey: phoneStatusKey(projectId),
     queryFn: () => api.get<PhoneStatus>(`/api/projects/${projectId}/phone-preview/status`),
-    refetchInterval: (q) => (q.state.data?.state === "building" ? 2000 : false),
+    // While it builds or starts, often; while it is live, now and then, so a dev server that stopped is noticed and the build is shown.
+    refetchInterval: (q) => (q.state.data?.state === "building" || q.state.data?.live?.state === "starting" ? 2000
+      : q.state.data?.live?.state === "ready" ? 8000 : false),
   });
 
   const build = useCallback(async () => {
@@ -97,9 +116,29 @@ export function PhonePreview({ projectId, onAskSmith, autoRedraw = false, editPa
     }
   }, [projectId, queryClient]);
 
-  // The Editor changed the pages, the menu or the look: the phone is stale now, and (in the Editor) is drawn again.
+  // The Editor keeps a live preview running for the project. It is asked for once; until it is ready (the first time takes a little
+  // while) the built picture is shown, and if it cannot run the built picture stays.
+  const wantsLive = editParts;
+  const liveAsked = useRef(false);
+  const live = pictureSource(status, wantsLive) === "live";
+  useEffect(() => {
+    if (!wantsLive || liveAsked.current || !status || status.state === "unavailable" || status.live?.state !== "off") return;
+    liveAsked.current = true;
+    api.post<LiveStatus>(`/api/projects/${projectId}/phone-preview/live/start`)
+      .then((next) => queryClient.setQueryData(phoneStatusKey(projectId), (old: PhoneStatus | undefined) => (old ? { ...old, live: next } : old)))
+      .catch(() => undefined);
+  }, [wantsLive, status, projectId, queryClient]);
+
+  // The Editor changed the pages, the menu or the look. With the live preview the copy is brought up to date at once and the picture
+  // changes by itself; without it the phone is stale, and (in the Editor) is drawn again.
+  const syncLive = useCallback(() => {
+    void api.post(`/api/projects/${projectId}/phone-preview/live/sync`).catch(() => undefined);
+  }, [projectId]);
+  const liveRef = useRef(live);
+  liveRef.current = live;
   useEffect(() => {
     const changed = () => {
+      if (liveRef.current) { syncLive(); return; }
       void queryClient.invalidateQueries({ queryKey: phoneStatusKey(projectId) });
       if (autoRedraw) setWantRedraw((n) => n + 1);
     };
@@ -107,7 +146,7 @@ export function PhonePreview({ projectId, onAskSmith, autoRedraw = false, editPa
     window.addEventListener(PLAN_CHANGED, changed);
     window.addEventListener(PHONE_GO, show);
     return () => { window.removeEventListener(PLAN_CHANGED, changed); window.removeEventListener(PHONE_GO, show); };
-  }, [projectId, autoRedraw, queryClient]);
+  }, [projectId, autoRedraw, queryClient, syncLive]);
 
   // Edits that come close together are one redraw, a moment after the last.
   useEffect(() => {
@@ -116,14 +155,16 @@ export function PhonePreview({ projectId, onAskSmith, autoRedraw = false, editPa
     return () => clearTimeout(t);
   }, [wantRedraw, build]);
 
-  // A first visit builds it; there is nothing to look at until then.
+  // A first visit builds it; there is nothing to look at until then. The Editor waits to see whether the live preview comes up: it
+  // needs no build, and two bundlers at once would each be slow.
   const autoStarted = useRef(false);
   useEffect(() => {
-    if (status?.state === "none" && !autoStarted.current) {
+    const waitingForLive = wantsLive && (status?.live?.state === "off" || status?.live?.state === "starting" || status?.live?.state === "ready");
+    if (status?.state === "none" && !autoStarted.current && !waitingForLive) {
       autoStarted.current = true;
       void build();
     }
-  }, [status?.state, build]);
+  }, [status?.state, status?.live?.state, wantsLive, build]);
 
   // A new build is a new page.
   // The picture it was picked from is gone, and the part may be too.
@@ -137,7 +178,7 @@ export function PhonePreview({ projectId, onAskSmith, autoRedraw = false, editPa
       const type = typeof e.data?.type === "string" ? e.data.type : "";
       if (!type.startsWith(PREFIX)) return;
       const kind = type.slice(PREFIX.length);
-      if (kind === "route") setRoute(String(e.data.payload?.path ?? "/").replace(/^.*\/phone\/serve/, "") || "/");
+      if (kind === "route") setRoute(String(e.data.payload?.path ?? "/").replace(/^.*\/phone\/(?:serve|live)/, "") || "/");
       if (kind === "select") { setPicked(e.data.payload as Picked); setListed(null); }
       if (kind === "deselect") setPicked(null);
       if (kind === "drop" && editParts) {
@@ -174,10 +215,13 @@ export function PhonePreview({ projectId, onAskSmith, autoRedraw = false, editPa
     if (!editParts) return;
     setPick({ source: picked?.source ?? null, pageId });
   }, [editParts, setPick, picked, pageId]);
-  const src = status ? `${process.env.NEXT_PUBLIC_API_URL ?? ""}${status.servePath}${go && go !== "/" ? go : "/"}` : null;
+  const where = go && go !== "/" ? go : "/";
+  const api_ = process.env.NEXT_PUBLIC_API_URL ?? "";
+  const src = status ? `${api_}${live && status.live ? status.live.path : status.servePath}${where}` : null;
   const building = status?.state === "building" || starting;
-  // A picture is already drawn: keep it, and the tools beside it, on show while the next one is drawn.
-  const usable = status?.state === "ready" || (building && !!status?.builtAt);
+  const liveStarting = wantsLive && status?.live?.state === "starting";
+  // A picture is already drawn: keep it, and the tools beside it, on show while the next one is drawn. The live preview is one.
+  const usable = live || status?.state === "ready" || (building && !!status?.builtAt);
 
   return (
     <div className="flex h-full flex-col" data-testid="phone-preview">
@@ -193,12 +237,15 @@ export function PhonePreview({ projectId, onAskSmith, autoRedraw = false, editPa
           </Button>
         </div>
         <div className="flex items-center gap-2">
-          {status?.stale && !building && (
+          {live && <span className="text-xs text-emerald-600" title="Changes show as you make them">● Live</span>}
+          {liveStarting && !live && <span className="text-xs text-muted-foreground">Starting the live preview…</span>}
+          {status?.stale && !building && !live && (
             <span className="text-xs text-amber-600">The screens changed since this was drawn.</span>
           )}
-          <Button variant={status?.stale ? "default" : "ghost"} size="sm" className="h-8 text-xs" onClick={build} disabled={building}>
-            {building ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1 h-3.5 w-3.5" />}
-            {building ? "Drawing…" : "Redraw"}
+          <Button variant={status?.stale && !live ? "default" : "ghost"} size="sm" className="h-8 text-xs"
+                  onClick={live ? () => { syncLive(); setFrameKey((k) => k + 1); } : build} disabled={building && !live}>
+            {building && !live ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1 h-3.5 w-3.5" />}
+            {building && !live ? "Drawing…" : live ? "Reload" : "Redraw"}
           </Button>
         </div>
       </div>
@@ -207,6 +254,14 @@ export function PhonePreview({ projectId, onAskSmith, autoRedraw = false, editPa
         <div className="flex flex-1 items-center justify-center overflow-auto bg-muted/30 p-4">
           {status?.state === "unavailable" ? (
             <p className="max-w-xs text-center text-sm text-muted-foreground">{status.reason}</p>
+          ) : liveStarting && !usable ? (
+            <div className="flex flex-col items-center gap-2 text-center">
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">Starting the live preview…</p>
+              <p className="max-w-xs text-xs text-muted-foreground">
+                The first time takes about half a minute. After that a change shows as you make it.
+              </p>
+            </div>
           ) : building && !usable ? (
             <div className="flex flex-col items-center gap-2 text-center">
               <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -215,7 +270,7 @@ export function PhonePreview({ projectId, onAskSmith, autoRedraw = false, editPa
                 The first time takes a few minutes: the phone screens are drawn here with sample data, so nothing real is touched.
               </p>
             </div>
-          ) : status?.state === "failed" || startError ? (
+          ) : !usable && (status?.state === "failed" || startError) ? (
             <div className="flex max-w-sm flex-col items-center gap-3 text-center">
               <Smartphone className="h-10 w-10 text-muted-foreground" />
               <p className="text-sm text-red-600">{startError || status?.error}</p>
@@ -229,7 +284,7 @@ export function PhonePreview({ projectId, onAskSmith, autoRedraw = false, editPa
                 </span>
               )}
               <iframe
-                key={frameKey}
+                key={`${live ? "live" : "built"}-${frameKey}`}
                 ref={frame}
                 src={src}
                 title="Phone preview"

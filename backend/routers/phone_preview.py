@@ -22,7 +22,7 @@ from auth import get_current_user
 from database import get_db
 from models.auth import PlatformUser
 from models.project import Project
-from services import phone_preview
+from services import phone_live, phone_preview
 
 router = APIRouter()
 
@@ -50,7 +50,7 @@ async def preview_status(project_id: str, user: PlatformUser = Depends(get_curre
     if not project.output_dir:
         return {"state": "unavailable", "reason": "Nothing has been built into this project yet.",
                 "servePath": phone_preview.serve_path(project.short_id)}
-    return phone_preview.status(project.output_dir, project.short_id)
+    return {**phone_preview.status(project.output_dir, project.short_id), "live": phone_live.status(project.short_id)}
 
 
 @router.get("/api/projects/{short_id}/phone/serve/{path:path}", include_in_schema=False)

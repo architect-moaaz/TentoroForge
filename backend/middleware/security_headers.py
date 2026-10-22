@@ -23,7 +23,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # legitimately wants a same-origin iframe.
         path = request.url.path
         # The phone preview's built screens (`/phone/serve`) are framed by the same editor.
-        is_preview_serve = "/preview/serve" in path or "/phone/serve" in path
+        is_preview_serve = "/preview/serve" in path or "/phone/serve" in path or "/phone/live" in path
 
         # Security headers
         response.headers["X-Content-Type-Options"] = "nosniff"

@@ -298,7 +298,9 @@ def _patch_api(staged: Path) -> None:
     api.write_text(text, encoding="utf-8", newline=chr(10))
 
 
-def _prepare_copy(staged: Path, doc: dict, short_id: str) -> None:
+def _prepare_copy(staged: Path, doc: dict, short_id: str, base_url: Optional[str] = None) -> None:
+    """The preview's own additions to a copy of the phone project. `base_url`: where the page is served from (the built picture's
+    path unless it is the live preview's)."""
     sdk = staged / "src" / "sdk"
     shutil.copyfile(ASSETS / "preview.ts", sdk / "preview.ts")
     (sdk / "preview-data.json").write_text(json.dumps(sample_data(doc)), encoding="utf-8")
@@ -308,7 +310,7 @@ def _prepare_copy(staged: Path, doc: dict, short_id: str) -> None:
     app = json.loads((staged / "app.json").read_text(encoding="utf-8"))
     expo = app.setdefault("expo", {})
     expo.setdefault("web", {})["bundler"] = "metro"
-    expo.setdefault("experiments", {})["baseUrl"] = serve_path(short_id)
+    expo.setdefault("experiments", {})["baseUrl"] = base_url or serve_path(short_id)
     # Any address: the sample backend answers every `/api/*` call before it leaves the page.
     expo.setdefault("extra", {})["appUrl"] = "http://preview.local"
     (staged / "app.json").write_text(json.dumps(app, indent=2), encoding="utf-8", newline=chr(10))
