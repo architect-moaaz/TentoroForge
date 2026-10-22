@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { editorApi, failureOf } from "./api";
-import type { Op, PhoneKit, PhoneModel, PhoneScreen } from "./types";
+import type { GuideSpec, Op, PhoneKit, PhoneModel, PhoneScreen } from "./types";
 
 export interface Said {
   tone: "ok" | "bad";
@@ -24,6 +24,8 @@ export interface PhoneSession {
   canTakeBack: boolean;
   /** Makes the change. Resolves to the screen as it is after it, or null when the change was refused (`said` says why). */
   run: (ops: Op[], label: string, done: string) => Promise<PhoneModel | null>;
+  /** A guided part (form, button, list): the server builds it from the names in `spec`. Same result as `run`. */
+  guided: (spec: GuideSpec, done: string) => Promise<PhoneModel | null>;
   takeBack: () => Promise<void>;
   reload: () => Promise<void>;
 }
@@ -66,6 +68,26 @@ export function usePhoneScreen(projectId: string, pageId: string | null, refresh
     }
   }, [projectId, screen, reload]);
 
+  const guided = useCallback(async (spec: GuideSpec, done: string) => {
+    if (!screen) return null;
+    setBusy(true);
+    setSaid(null);
+    try {
+      const out = await editorApi.addGuidedPhonePart(projectId, screen.page.id, screen.revision, spec);
+      setScreen({ ...screen, revision: out.revision, model: out.model });
+      setBack(out.history?.parent ?? null);
+      setSaid({ tone: "ok", text: [done] });
+      return out.model;
+    } catch (err) {
+      const f = failureOf(err);
+      if (f.code === "stale") void reload();
+      setSaid({ tone: "bad", text: f.findings?.length ? f.findings.map((x) => x.plain) : [f.message] });
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  }, [projectId, screen, reload]);
+
   const takeBack = useCallback(async () => {
     if (!screen || !back) return;
     setBusy(true);
@@ -84,7 +106,7 @@ export function usePhoneScreen(projectId: string, pageId: string | null, refresh
     }
   }, [projectId, screen, back, reload]);
 
-  return { screen, loadError, busy, said, canTakeBack: back !== null, run, takeBack, reload };
+  return { screen, loadError, busy, said, canTakeBack: back !== null, run, guided, takeBack, reload };
 }
 
 /** What the kit lets a person choose, and the parts that can be added. Read once; it only changes when the kit does. */

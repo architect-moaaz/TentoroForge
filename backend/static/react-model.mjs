@@ -245,10 +245,14 @@ function buildNode(source, entry, id, parentId, nodes, index) {
       if (a.type !== "JSXAttribute" || !a.value || a.value.type !== "JSXExpressionContainer") continue;
       const held = [];
       collectFrom(a.value.expression, null, null, held);
+      // `renderItem={(item) => <ListItem/>}`: what the row is called inside it, for a part that acts on the row's record.
+      const fn = a.value.expression;
+      const rowVar = fn.type === "ArrowFunctionExpression" && fn.params[0] && fn.params[0].type === "Identifier" ? fn.params[0].name : null;
       held.forEach((k, i) => {
         const sid = `${id}@${attrName(a)}.${i}`;
         buildNode(source, k, sid, id, nodes, i);
         nodes[sid].slot = attrName(a);
+        if (rowVar) nodes[sid].rowVar = rowVar;
       });
     }
   }
@@ -859,6 +863,30 @@ function opDuplicate(source, m, op) {
   return insertInto(source, m, n.parent, n.index + 1, sourceOf(source, n));
 }
 
+/** A statement as the first line of the screen's own function: a hook (`const rows = useList("Job")`) the parts below read.
+ *  First, because a hook must run on every draw, whatever the screen returns early. Only the phone editor's guided parts ask. */
+function opAddStatement(source, m, op) {
+  if (typeof op.code !== "string" || !op.code.trim()) throw new PatchError("bad-value", "Nothing to add.");
+  const root = m.nodes[m.roots[0]?.id];
+  if (!root) throw new PatchError("no-screen", "The screen draws nothing, so there is nowhere to add it.");
+  const ast = parseTsx(source);
+  let body = null;
+  const visit = (node, fnBody) => {
+    if (body || !isNode(node)) return;
+    const own = (node.type === "FunctionDeclaration" || node.type === "ArrowFunctionExpression" || node.type === "FunctionExpression")
+      && node.body && node.body.type === "BlockStatement" ? node.body : fnBody;
+    if (node.type === "ReturnStatement" && node.argument && fnBody
+        && node.argument.start <= root.span[0] && root.span[1] <= node.argument.end) { body = fnBody; return; }
+    for (const c of children(node)) visit(c, own);
+  };
+  visit(ast.program, null);
+  const first = body && body.body[0];
+  if (!first) throw new PatchError("no-screen", "The screen's own function could not be found.");
+  const indent = lineIndent(source, first.start);
+  const lead = source.lastIndexOf("\n", first.start - 1) + 1;
+  return splice(source, lead, lead, `${indent}${op.code.trim()}\n`);
+}
+
 function opReplaceNode(source, m, op) {
   const n = need(m, op.id);
   const indent = lineIndent(source, n.span[0]);
@@ -1098,6 +1126,7 @@ function opUnwrapCondition(source, m, op) {
 }
 
 const OPS = {
+  addStatement: opAddStatement,
   wrap: opWrap,
   unwrap: opUnwrap,
   wrapRepeat: opWrapRepeat,

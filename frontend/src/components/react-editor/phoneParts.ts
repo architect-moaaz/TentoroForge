@@ -5,7 +5,7 @@
  * model of a screen lists its parts with the line each starts on, so the click names the part. Pure functions: what to show and
  * what to ask of the server for it is decided here, where it can be tested without a phone.
  */
-import type { Op, PalettePart, PhoneKit, PhonePart } from "./types";
+import type { GuideKind, GuideRefs, Op, PalettePart, PhoneKit, PhonePart } from "./types";
 
 export interface Source { file: string; line: number; component: string | null }
 
@@ -191,6 +191,34 @@ export function placeFor(nodes: Record<string, PhonePart>, imports: Record<strin
   return root ? { op: { parentId: root.id }, says: "at the end of the screen" } : null;
 }
 
+/** The three parts that ask a question first and are connected to the application's own workflows and data. They are not in the kit's
+ *  list: what they connect to is this application's, so the dialog asks. */
+export const GUIDED_PARTS: PalettePart[] = [
+  { id: "guided-form", label: "Form that saves", category: "Connected", description: "A form that runs one of the application's workflows",
+    search: ["workflow", "save", "submit", "create", "input"], jsx: "", imports: [], container: false, drawnOnly: false, guided: "form" },
+  { id: "guided-button", label: "Button that runs a workflow", category: "Connected", description: "A button that runs one of the application's workflows",
+    search: ["workflow", "action", "delete", "approve", "press"], jsx: "", imports: [], container: false, drawnOnly: false, guided: "button" },
+  { id: "guided-list", label: "List of records", category: "Connected", description: "A list with a row for each record of one kind",
+    search: ["table", "rows", "data", "records", "show"], jsx: "", imports: [], container: false, drawnOnly: false, guided: "list" },
+];
+
+/** What the row is called where a part is added, when it is added inside a list row: the record a button acts on. */
+export function rowVarAt(nodes: Record<string, PhonePart>, holderId: string | null): string | null {
+  let here: PhonePart | undefined = holderId ? nodes[holderId] : undefined;
+  for (let i = 0; here && i < 100; i++) {
+    if (here.rowVar) return here.rowVar;
+    here = here.parent ? nodes[here.parent] : undefined;
+  }
+  return null;
+}
+
+/** The part a place adds into: the named one, or the parent of the brother it goes beside. */
+export function holderIdOf(nodes: Record<string, PhonePart>, place: Place): string | null {
+  if ("parentId" in place.op) return place.op.parentId;
+  const ref = nodes["beforeId" in place.op ? place.op.beforeId : place.op.afterId];
+  return ref?.parent ?? null;
+}
+
 export type Zone = "before" | "inside" | "after";
 
 /** How far down a part the pointer is (0 at its top, 1 at its bottom) as where it means: a part that can hold others is dropped
@@ -223,7 +251,7 @@ export function resolveDrop(args: {
   partId?: string; source: Source | null; rel: number;
 }): { part: PalettePart; place: Place } | { why: string } {
   const { nodes, imports, kit, dragging, partId, source, rel } = args;
-  const part = (partId ? kit?.palette.find((p) => p.id === partId) : null) ?? dragging;
+  const part = (partId ? [...GUIDED_PARTS, ...(kit?.palette ?? [])].find((p) => p.id === partId) : null) ?? dragging;
   if (!part) return { why: "That was not a part from the Add list." };
   if (!nodes || !kit) return { why: "The screen is still being read. Try again in a moment." };
   if (!source || !screenOf(source.file)) return { why: "That is drawn by the app itself (the tab bar, a menu). Drop it on a part of the screen." };

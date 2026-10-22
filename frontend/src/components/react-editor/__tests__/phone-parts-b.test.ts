@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  addOps, newPartAfterAdd, resolveDrop, choiceOp, choicesOf, dropOp, dropPlace, outlineOf, placeFor, searchPalette, settingLabel, sourceOfPart, stepOp, valueLabel, zoneAt,
+  GUIDED_PARTS, holderIdOf, rowVarAt, addOps, newPartAfterAdd, resolveDrop, choiceOp, choicesOf, dropOp, dropPlace, outlineOf, placeFor, searchPalette, settingLabel, sourceOfPart, stepOp, valueLabel, zoneAt,
 } from "../phoneParts";
 import type { PalettePart, PhoneKit, PhonePart } from "../types";
 
@@ -222,5 +222,37 @@ describe("finding the part that was just added", () => {
   it("is nothing when the screen does not have it where it should be", () => {
     expect(newPartAfterAdd(nodes, { op: { parentId: "r0.2" }, says: "" }, nodes)).toBeNull();
     expect(newPartAfterAdd(nodes, { op: { afterId: "nope" }, says: "" }, nodes)).toBeNull();
+  });
+});
+
+describe("the guided parts", () => {
+  const inRow: Record<string, PhonePart> = {
+    ...nodes,
+    "r0.1@renderItem.0": part({ id: "r0.1@renderItem.0", parent: "r0.1", type: "Row", slot: "renderItem", rowVar: "item", children: ["r0.1@renderItem.0.0"] }),
+    "r0.1@renderItem.0.0": part({ id: "r0.1@renderItem.0.0", parent: "r0.1@renderItem.0", type: "Text" }),
+  };
+  it("are three, in their own group, each asking before it is added", () => {
+    expect(GUIDED_PARTS.map((p) => [p.guided, p.category])).toEqual([["form", "Connected"], ["button", "Connected"], ["list", "Connected"]]);
+    expect(GUIDED_PARTS.every((p) => p.jsx === "" && p.imports.length === 0)).toBe(true);   // the server writes the code, never the page
+  });
+  it("are found by the words people search by", () => {
+    expect(searchPalette(GUIDED_PARTS, "delete").map((p) => p.guided)).toEqual(["button"]);
+    expect(searchPalette(GUIDED_PARTS, "table").map((p) => p.guided)).toEqual(["list"]);
+  });
+  it("know what a list row is called where a part is added inside one", () => {
+    expect(rowVarAt(inRow, "r0.1@renderItem.0")).toBe("item");
+    expect(rowVarAt(inRow, "r0.1@renderItem.0.0")).toBe("item");
+    expect(rowVarAt(inRow, "r0.2")).toBeNull();
+    expect(rowVarAt(inRow, null)).toBeNull();
+  });
+  it("name the part a place adds into", () => {
+    expect(holderIdOf(nodes, { op: { parentId: "r0.2" }, says: "" })).toBe("r0.2");
+    expect(holderIdOf(nodes, { op: { afterId: "r0.2.0" }, says: "" })).toBe("r0.2");
+    expect(holderIdOf(nodes, { op: { beforeId: "nope" }, says: "" })).toBeNull();
+  });
+  it("can be dropped on the picture like any ready part", () => {
+    const out = resolveDrop({ nodes, imports, kit: { ...kit, palette: [] }, dragging: null, partId: "guided-form",
+                              source: { file: "src/screens/PAGE-001.tsx", line: 4, component: "Row" }, rel: 0.5 });
+    expect(out).toMatchObject({ part: { guided: "form" }, place: { op: { parentId: "r0.2" } } });
   });
 });

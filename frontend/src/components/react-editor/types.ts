@@ -276,6 +276,8 @@ export interface PhonePart {
   textEditable?: boolean;
   repeat?: unknown;
   file?: string;
+  /** What the row is called inside a list's `renderItem={(item) => …}`: set on the part the list holds. */
+  rowVar?: string;
   /** Set when the screen hands this part to a component as a setting (`footer`, `renderItem`): it cannot be copied or deleted alone. */
   slot?: string;
   props: { name: string; kind: string; value: unknown }[];
@@ -309,6 +311,39 @@ export interface PalettePart {
   container: boolean;
   /** Drawn right, but not typeable or pressable until Smith connects it to the screen's data. */
   drawnOnly: boolean;
+  /** A guided part: it asks a question first (which workflow, which records) and is connected to the application's own. */
+  guided?: GuideKind;
+}
+
+export type GuideKind = "form" | "button" | "list";
+
+/** One input a workflow takes. */
+export interface GuideInput {
+  name: string;
+  kind: string;
+  type: string;
+  required: boolean;
+  description: string;
+  entity: string | null;
+  options: string[];
+}
+
+/** What the guided dialogs choose from: the application's own workflows and kinds of record. */
+export interface GuideRefs {
+  workflows: { id: string; key: string; name: string; description: string; inputs: GuideInput[] }[];
+  entities: { name: string; typeName: string; fields: { name: string; type: string; label: string }[] }[];
+}
+
+/** What the server is told to build: names from the lists above and a few words, never code. */
+export interface GuideSpec {
+  kind: GuideKind;
+  place: { parentId: string } | { afterId: string } | { beforeId: string };
+  workflow?: string;
+  entity?: string;
+  label?: string;
+  values?: Record<string, string>;
+  title?: string;
+  subtitle?: string;
 }
 
 export interface PhoneKit {
@@ -328,6 +363,7 @@ export interface PhoneScreen {
   model: PhoneModel;
   /** The settings that hold words a person reads (title, label, placeholder…): the ones that can be typed over. */
   words: string[];
+  guides: GuideRefs;
   history: HistoryEntry[];
 }
 

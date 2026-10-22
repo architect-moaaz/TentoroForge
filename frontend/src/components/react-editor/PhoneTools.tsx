@@ -16,10 +16,11 @@ import { cn } from "@/lib/utils";
 import { PartEditor } from "./PartEditor";
 import { PART_DRAG_TYPE, usePhonePick } from "./phonePick";
 import {
-  addOps, dropOp, dropPlace, findPart, kitNameOf, newPartAfterAdd, outlineOf, placeFor, resolveDrop, searchPalette, sourceOfPart, zoneAt,
-  type Place, type Source, type Zone,
+  GUIDED_PARTS, addOps, dropOp, dropPlace, findPart, kitNameOf, newPartAfterAdd, outlineOf, placeFor, resolveDrop, searchPalette,
+  sourceOfPart, zoneAt, type Place, type Source, type Zone,
 } from "./phoneParts";
-import type { PalettePart, PhoneKit, PhoneModel, PhonePart } from "./types";
+import { GuidedDialog } from "./PhoneGuides";
+import type { GuideKind, GuideSpec, PalettePart, PhoneKit, PhoneModel, PhonePart } from "./types";
 import { usePhoneKit, usePhoneScreen, type PhoneSession } from "./usePhoneScreen";
 
 export { usePhonePick, PART_DRAG_TYPE };
@@ -38,18 +39,46 @@ export function PhoneToolsProvider({ projectId, children }: { projectId: string;
   const kit = usePhoneKit(projectId);
   const session = usePhoneScreen(projectId, pageId, chosen ? `${chosen.file}:${chosen.line}:${chosen.component}` : "");
   const value = useMemo(() => ({ session, kit, source: chosen, pageId }), [session, kit, chosen, pageId]);
-  return <Tools.Provider value={value}>{children}</Tools.Provider>;
+  const guide = usePhonePick((s) => s.guide);
+  const set = usePhonePick((s) => s.set);
+  const screen = session.screen;
+  const add = async (spec: GuideSpec) => {
+    if (!guide || !screen) return false;
+    const model = await session.guided(spec, `Added ${GUIDE_WORDS[guide.kind]} ${guide.place.says}.`);
+    if (!model) return false;
+    selectNew(set, pageId, screen.model.nodes, guide.place, model);
+    set({ guide: null });
+    return true;
+  };
+  return (
+    <Tools.Provider value={value}>
+      {children}
+      {guide && screen && (
+        <GuidedDialog guide={guide} refs={screen.guides} nodes={screen.model.nodes} busy={session.busy}
+          onClose={() => set({ guide: null })} onAdd={add} />
+      )}
+    </Tools.Provider>
+  );
+}
+
+const GUIDE_WORDS: Record<GuideKind, string> = { form: "a form", button: "a button", list: "a list" };
+
+/** Open the questions for a guided part that is to go in `place`. */
+export function askAboutPart(kind: GuideKind, place: Place) {
+  usePhonePick.getState().set({ guide: { kind, place } });
 }
 
 /** After a part is added, make it the picked part: the Change panel shows it, and its words are ready to be typed over. */
+function selectNew(set: (patch: { listed: Source; fresh: string }) => void, pageId: string | null, before: Record<string, PhonePart>, place: Place,
+                   after: PhoneModel) {
+  const added = newPartAfterAdd(before, place, after.nodes);
+  if (added && pageId) set({ listed: sourceOfPart(pageId, added), fresh: added.id });
+}
+
 function useSelectNew() {
   const tools = useContext(Tools);
   const set = usePhonePick((s) => s.set);
-  return (before: Record<string, PhonePart>, place: Place, after: PhoneModel) => {
-    const added = newPartAfterAdd(before, place, after.nodes);
-    if (!added || !tools?.pageId) return;
-    set({ listed: sourceOfPart(tools.pageId, added), fresh: added.id });
-  };
+  return (before: Record<string, PhonePart>, place: Place, after: PhoneModel) => selectNew(set, tools?.pageId ?? null, before, place, after);
 }
 
 /**
@@ -67,6 +96,7 @@ export function usePhoneDrop() {
   const select = useSelectNew();
   const add = async (part: PalettePart, place: ReturnType<typeof dropPlace>) => {
     if (!place || !run || !screen) return false;
+    if (part.guided) { askAboutPart(part.guided, place); return true; }
     const model = await run(addOps(part, place), `Add ${part.label.toLowerCase()}`, `Added ${part.label.toLowerCase()} ${place.says}.`);
     if (model) select(screen.model.nodes, place, model);
     return !!model;
@@ -130,7 +160,7 @@ export function AddPanel() {
   const { screen, busy, run } = session;
   const [text, setText] = useState("");
   const setDragging = (p: PalettePart | null) => usePhonePick.getState().set({ dragging: p });
-  const palette = kit?.palette ?? [];
+  const palette = [...GUIDED_PARTS, ...(kit?.palette ?? [])];
   const selected = useMemo(() => (screen && source ? findPart(screen.model.nodes, source) : null), [screen, source]);
   const place = useMemo(
     () => (screen ? placeFor(screen.model.nodes, screen.model.imports, kit?.containers ?? [], selected) : null),
@@ -142,6 +172,7 @@ export function AddPanel() {
   const select = useSelectNew();
   const add = (part: PalettePart) => {
     if (!place || !screen) return;
+    if (part.guided) { askAboutPart(part.guided, place); return; }
     void run(addOps(part, place), `Add ${part.label.toLowerCase()}`, `Added ${part.label.toLowerCase()}.`)
       .then((model) => { if (model) select(screen.model.nodes, place, model); });
   };

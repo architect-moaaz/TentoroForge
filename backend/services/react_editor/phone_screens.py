@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from services.blueprint.agent_contract import AgentResult, ArtifactProposal, apply_agent_result
-from services.react_editor import adapter, diagnostics, phone, phone_kit
+from services.react_editor import adapter, diagnostics, phone, phone_guides, phone_kit
 from services.react_editor import files as screen_files
 from services.react_editor.adapter import AdapterError, revision_of
 from services.react_editor.service import (EditorError, Project, _lock, _record, _ensure_baseline, _page, history,
@@ -56,7 +56,7 @@ def _state(svc: Any, page_id: str) -> tuple[dict, dict, str, dict[str, str], str
 
 #: What the picture needs of each part of the screen: not the character positions, which are the engine's business.
 _KEEP = ("id", "parent", "children", "index", "type", "kind", "line", "endLine", "text", "textEditable", "selfClosing",
-         "repeat", "condition", "file", "slot")
+         "repeat", "condition", "file", "slot", "rowVar")
 
 
 def _imports_map(model: dict[str, Any]) -> dict[str, str]:
@@ -92,13 +92,19 @@ def open_screen(project: Project, page_id: str) -> dict[str, Any]:
         raise EditorError(422, exc.code, str(exc), line=exc.line)
     _ensure_baseline(project, _hist(page_id), screen, "", svc.doc.get("version"), parts or None)
     return {"page": {"id": page_id, "name": page.get("name"), "route": page.get("route")},
-            "revision": revision, "model": _public(model), "words": sorted(WORDS_PROPS),
+            "revision": revision, "model": _public(model), "words": sorted(WORDS_PROPS), "guides": phone_guides.refs(svc.doc),
             "history": history(project, _hist(page_id))}
 
 
 def _kit_name(imports: dict[str, str], node: dict[str, Any] | None) -> str | None:
     """The kit's name for a part: a screen may import `Screen as ScreenView`, and the kit knows it as `Screen`."""
     return imports.get(str((node or {}).get("type"))) if node else None
+
+
+def _place_ok(op: dict[str, Any], nodes: dict[str, Any], imports: dict[str, str]) -> bool:
+    """Where a part is added: inside something that can hold others, or beside a part whose parent can (not one a setting holds)."""
+    holder = phone_guides.holder_of(nodes, {k: str(op[k]) for k in ("parentId", "afterId", "beforeId") if op.get(k)})
+    return phone_guides.holds_others(holder, imports)
 
 
 def _safe_without_compiler(op: dict[str, Any], before: dict[str, Any], project: Project) -> bool:
@@ -125,17 +131,7 @@ def _safe_without_compiler(op: dict[str, Any], before: dict[str, Any], project: 
         wanted = {name for entry in phone_kit.PALETTE for name in entry["imports"]}
         return op.get("source") == "@/ui" and not op.get("file") and set(op.get("names") or []) <= wanted
     if kind == "insert":
-        entry = phone_kit.palette_entry_for(str(op.get("jsx") or ""))
-        if entry is None:
-            return False
-        if op.get("parentId"):
-            holder = nodes.get(str(op["parentId"]))
-        else:
-            ref = nodes.get(str(op.get("afterId") or op.get("beforeId") or ""))
-            if not ref or ref.get("slot"):
-                return False
-            holder = nodes.get(str(ref.get("parent")))
-        return _kit_name(imports, holder) in phone_kit.CONTAINERS
+        return phone_kit.palette_entry_for(str(op.get("jsx") or "")) is not None and _place_ok(op, nodes, imports)
     return False
 
 
@@ -220,3 +216,25 @@ def restore(project: Project, page_id: str, *, revision: str, expected: str) -> 
     return apply(project, page_id, base_revision=expected, ops=[],
                  source={"screen": entry["view"], **({"parts": entry["parts"]} if entry.get("parts") else {})},
                  label=f"Restored “{entry.get('label') or revision}”", kind="restore", check=False)
+
+
+def add_guided(project: Project, page_id: str, *, base_revision: str, spec: dict[str, Any]) -> dict[str, Any]:
+    """A form that runs a workflow, a button that runs one, or a list of records, added where `spec` says.
+
+    The code is built from the Blueprint (`phone_guides`), then goes through the compiler like any change that is not a palette part:
+    a form that leaves out an input a workflow requires does not compile, and is not saved."""
+    svc = load_blueprint(project)
+    with _lock(project.root):
+        page, row, screen, parts, revision = _state(svc, page_id)
+        if base_revision != revision:
+            raise EditorError(409, "stale", "The screen changed since you last loaded it — your change was not applied. "
+                                            "Reload to see the latest version and try again.", current=revision)
+        try:
+            before = screen_files.merged_model(screen, "", parts, app_root=_native(project), slots=True)
+            ops = phone_guides.build(svc.doc, spec, source=screen, nodes=before["nodes"], imports=_imports_map(before))
+        except AdapterError as exc:
+            raise EditorError(422, exc.code, str(exc), line=exc.line)
+        except phone_guides.GuideError as exc:
+            raise EditorError(422, "guide", str(exc))
+    label = {"form": "Add form", "button": "Add button", "list": "Add list"}.get(str(spec.get("kind")), "Add part")
+    return apply(project, page_id, base_revision=base_revision, ops=ops, label=label, check=True)

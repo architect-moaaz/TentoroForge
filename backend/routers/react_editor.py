@@ -271,6 +271,20 @@ async def apply_phone_screen(project_id: uuid.UUID, page_id: str, req: PhoneAppl
                       label=req.label[:120])
 
 
+class PhoneGuidedRequest(BaseModel):
+    baseRevision: str
+    #: kind (form | button | list), the workflow or entity, the words to show, where it goes. Names, never code.
+    spec: dict[str, Any]
+
+
+@router.post("/api/projects/{project_id}/react-editor/phone/screens/{page_id}/guided")
+async def add_guided_part(project_id: uuid.UUID, page_id: str, req: PhoneGuidedRequest,
+                          user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """A form, a button or a list connected to the application's workflows and data."""
+    project = await _project(project_id, user, db)
+    return await _run(phone_screens.add_guided, project, page_id, base_revision=req.baseRevision, spec=req.spec)
+
+
 @router.post("/api/projects/{project_id}/react-editor/phone/screens/{page_id}/restore")
 async def restore_phone_screen(project_id: uuid.UUID, page_id: str, req: RestoreRequest,
                                user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):

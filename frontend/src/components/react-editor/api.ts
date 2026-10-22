@@ -7,7 +7,7 @@
  * a status text, which is exactly the wording (UX-004) the editor exists to
  * show.
  */
-import type { PhoneApplied, PhoneKit, PhoneScreen, ApplyResult, DraftResult, Finding, HistoryEntry, Navigation, Op, PageDoc, PageListItem, Proposal, Surfaces, ThemeDoc, ThemePatch, WidgetRef, WidgetSpec } from "./types";
+import type { GuideSpec, PhoneApplied, PhoneKit, PhoneScreen, ApplyResult, DraftResult, Finding, HistoryEntry, Navigation, Op, PageDoc, PageListItem, Proposal, Surfaces, ThemeDoc, ThemePatch, WidgetRef, WidgetSpec } from "./types";
 
 /** The name of the event that says the application's pages, menu or look changed: the phone preview listens, and redraws. */
 export const PLAN_CHANGED = "forge:plan-changed";
@@ -136,6 +136,9 @@ export const editorApi = {
   /** A change to what is on a phone screen. Saved into the plan at once; the picture is drawn again after (PLAN_CHANGED). */
   applyPhoneScreen: (projectId: string, pageId: string, baseRevision: string, ops: Op[], label: string) =>
     announced(call<PhoneApplied>(`${base(projectId)}/phone/screens/${pageId}/apply`, { method: "POST", body: JSON.stringify({ baseRevision, ops, label }) })),
+  /** A form, a button or a list connected to the application's workflows and data. Built on the server from the names given. */
+  addGuidedPhonePart: (projectId: string, pageId: string, baseRevision: string, spec: GuideSpec) =>
+    announced(call<PhoneApplied>(`${base(projectId)}/phone/screens/${pageId}/guided`, { method: "POST", body: JSON.stringify({ baseRevision, spec }) })),
   restorePhoneScreen: (projectId: string, pageId: string, revision: string, expectedRevision: string) =>
     announced(call<PhoneApplied>(`${base(projectId)}/phone/screens/${pageId}/restore`, { method: "POST", body: JSON.stringify({ revision, expectedRevision }) })),
   theme: (projectId: string) => call<ThemeDoc>(`${base(projectId)}/theme`),
