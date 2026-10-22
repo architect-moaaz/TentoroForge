@@ -407,3 +407,20 @@ def test_the_build_for_the_phone_app_ends_npm_on_a_cancel_too(tmp_path, monkeypa
             await task
     asyncio.run(go())
     assert ended == [(31337, True)]
+
+
+@pytest.mark.skipif(not Path("/proc").is_dir(), reason="zombies are a Linux thing")
+def test_a_killed_process_that_its_parent_has_not_collected_yet_is_not_alive():
+    """Found by running the tests on Linux (2026-10-23): `kill(pid, 0)` answers for a killed process until its parent collects it, so an install
+    ended on a cancel still looked alive."""
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        assert reg.pid_alive(child.pid)
+        child.kill()
+        for _ in range(50):                    # killed, and NOT waited for: it stays in the table as a zombie
+            if Path(f"/proc/{child.pid}/stat").read_text().split(")")[1].split()[0] == "Z":
+                break
+            time.sleep(0.05)
+        assert not reg.pid_alive(child.pid)
+    finally:
+        child.wait()

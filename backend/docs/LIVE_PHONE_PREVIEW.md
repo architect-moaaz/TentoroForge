@@ -78,7 +78,16 @@ It is now a small file per project (`services/phone_live_registry.py`, in `dev_s
   cut off with its worker is seen as cut off.
 * **Checked with real processes** (2026-10-23): worker A started FocusFlow's preview; worker B (another process) saw it ready on the same
   port, its own start changed nothing, it reached Metro (200), synced, and stopped it.
-* **Not covered:** Linux (the registry uses `/proc` start times and process groups there; Windows uses `taskkill`), and the full backend image.
+* **Checked on Linux with two real uvicorn workers (2026-10-23)** (Docker Desktop, `python:3.12` + Node 22, a fresh `npm install` of PlantPal's packages in
+  Linux; `uvicorn --workers 2`): a start answered by worker 24 was `ready` for both workers (24 status answers over new connections, 14 of them from the
+  worker that did not start it, all with the same port); the page's own entry bundle came back 200 (16 requests, both workers) and every other bundle,
+  option set and tool address 404; ten more starts started nothing; killing the owner worker with SIGKILL, the other worker's cleaner ended the orphaned
+  Metro and removed its record in 19 s (the supervisor started a new worker), a new start brought it back, and a stop from a worker that had not started
+  it left 0 Expo processes and 0 records. The same tests that pass on Windows pass on Linux (200).
+* **Found only by running on Linux:** a process that was killed but not yet collected by its parent still answers `kill(pid, 0)`, so `pid_alive` now reads
+  `/proc/<pid>/stat` and treats a zombie as gone. And on Linux the entry bundle's path is written with `../`, which a browser collapses: the proxy writes it
+  as `..%2F` (earlier fix), which is the address the page uses; a raw `../` request gets Metro's own 404.
+* **Not covered:** the full backend image (`backend/Dockerfile`: the other review tools, Postgres, nginx/Caddy in front).
 
 ## What an anonymous caller can do, and what the picture runs in
 

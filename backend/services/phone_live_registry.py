@@ -68,7 +68,17 @@ def pid_alive(pid: int) -> bool:
         return False
     except PermissionError:
         return True
-    return True
+    return not _is_zombie(pid)
+
+
+def _is_zombie(pid: int) -> bool:
+    """On Linux a process that has been killed stays in the table, answering `kill(pid, 0)` as if it lived, until its parent collects it. Found by running
+    the tests on Linux (2026-10-23): a step's install, ended on a cancel, still looked alive. Such a process is gone."""
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text()
+        return stat[stat.rindex(")") + 2:].split()[0] == "Z"
+    except (OSError, ValueError, IndexError):
+        return False
 
 
 def _started(pid: int) -> Optional[str]:
