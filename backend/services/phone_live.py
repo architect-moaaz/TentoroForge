@@ -19,6 +19,7 @@ import asyncio
 import json
 import logging
 import os
+import posixpath
 import re
 import shutil
 import signal
@@ -72,8 +73,25 @@ _PREFIXED = "${window.location.host}${window.__FORGE_LIVE__ || ''}"
 _QUIET_LOADING = 'Object.defineProperty(exports, "__esModule", { value: true });\nexports.default = { showMessage() {}, hide() {} };\n'
 
 
+#: Expo's router handles its base path (the path a page is served from) only in a production build: the two guards below say
+#: `if (process.env.NODE_ENV !== 'development')` around stripping it from an address and adding it back. In development it expects to be at the
+#: top of the host. Under the live path it found no screen, and the first answer (move the page's address to the top) made a full reload, which
+#: a change that cannot be hot-swapped causes, load the platform's own home page inside the phone frame (reported 2026-10-22). With the guard lifted
+#: in the live copy the page keeps its real address, a reload lands on the same screen, and nothing about the address is faked.
+_ROUTER_GUARD = "if (process.env.NODE_ENV !== 'development') {"
+_ROUTER_FILES = (("getStateFromPath.js", "stripBaseUrl"), ("getPathFromState.js", "appendBaseUrl"))
+
+
+def _absolute_requires(text: str, directory: str) -> str:
+    """The copy lives in the project, not beside the files it reads from: what it requires from its neighbours is named in full."""
+    def swap(m: "re.Match[str]") -> str:
+        return f'require("{posixpath.normpath(posixpath.join(directory, m.group(2)))}")'
+    return re.sub(r"""require\((["'])(\.{1,2}/[^"']+)\1\)""", swap, text)
+
+
 def patched_runtime(modules: Path) -> dict[str, str]:
-    """`{file name: its text}` for Expo's two socket files, reading the page's prefix. Refuses when they are not as expected."""
+    """`{file name: its text}` for the Expo files the live copy swaps: the two sockets (they read the page's prefix), the router's two
+    base-path guards (lifted), and the "Refreshing" bar (silenced). Refuses when a file is not as expected."""
     base = modules / "@expo" / "metro-runtime" / "build"
     out: dict[str, str] = {}
     for name, needle in _SOCKETS:
@@ -84,8 +102,17 @@ def patched_runtime(modules: Path) -> dict[str, str]:
         if text.count(needle) != 1:
             raise LiveUnavailable(f"Expo's {name} is not the version the live preview knows how to adjust. The preview is drawn the slower way.")
         text = text.replace(needle, needle.replace("${window.location.host}", _PREFIXED, 1))
-        # The copy lives in the project, not beside the files it reads from: what it requires from its neighbours is named in full.
-        out[name] = re.sub(r"""require\((["'])\./([^"']+)\1\)""", lambda m: f'require("@expo/metro-runtime/build/{m.group(2)}")', text)
+        out[name] = _absolute_requires(text, "@expo/metro-runtime/build")
+    router = modules / "expo-router" / "build" / "fork"
+    for name, function in _ROUTER_FILES:
+        try:
+            text = (router / name).read_text(encoding="utf-8")
+        except OSError as exc:
+            raise LiveUnavailable(f"Expo Router's {name} could not be read, so the live preview cannot be set up here.") from exc
+        if text.count(_ROUTER_GUARD) != 1:
+            raise LiveUnavailable(f"Expo Router's {name} is not the version the live preview knows how to adjust ({function}). "
+                                  "The preview is drawn the slower way.")
+        out[name] = _absolute_requires(text.replace(_ROUTER_GUARD, "if (true) {", 1), "expo-router/build/fork")
     out["LoadingView.js"] = _QUIET_LOADING
     return out
 
@@ -99,7 +126,8 @@ const resolve = config.resolver.resolveRequest;
 config.resolver.resolveRequest = (context, moduleName, platform) => {
   const found = (resolve || context.resolveRequest)(context, moduleName, platform);
   if (found && found.type === "sourceFile") {
-    const m = /@expo[\\\\/]metro-runtime[\\\\/]build[\\\\/](HMRClient|messageSocket|LoadingView)\\.js$/.exec(found.filePath);
+    const m = /@expo[\\\\/]metro-runtime[\\\\/]build[\\\\/](HMRClient|messageSocket|LoadingView)\\.js$/.exec(found.filePath)
+      || /expo-router[\\\\/]build[\\\\/]fork[\\\\/](getStateFromPath|getPathFromState)\\.js$/.exec(found.filePath);
     if (m) return { type: "sourceFile", filePath: path.join(__dirname, "forge-live", m[1] + ".js") };
   }
   return found;

@@ -26,8 +26,13 @@ requests on under `/api/projects/{short_id}/phone/live/` (`routers/phone_live.py
 1. **Metro stops if the page's socket tells it the wrong address.** The page names its bundle by full address, which carries the path it is
    served from; Metro reads that path as a file to find, did not, and the whole server stopped. The socket's text has the prefix removed on its
    way in (`phone_live_proxy.unprefixed`).
-2. **Expo's router strips its base path only in a production build.** Under a path prefix in development it finds no screen. The served page
-   moves its own address to the top of the host before the app starts (`history.replaceState`, in `rewrite_html`).
+2. **Expo's router strips its base path only in a production build.** Under a path prefix in development it finds no screen. An earlier
+   version moved the page's address to `/` (`history.replaceState`); any full reload then loaded the platform's own home page inside the phone
+   frame ("I drop a part and it takes me to the home page"). Now the live copy's router files (`getStateFromPath.js`, `getPathFromState.js`)
+   are swapped for copies that handle the base path in development too, and the page keeps its real address. The router then reports every
+   pathname with the base path in front, so the app's gate (`templates/native/src/sdk/gate.ts`) removes `EXPO_BASE_URL` before it decides
+   whether a route is public; without that, a signed-out visitor to a public `/` was sent to `/login`.
+
 3. **The app's entry file is outside the project** (the packages are linked from the real phone project), so Metro names it by climbing out.
    On Windows it writes `..%5C..%5C`; on Linux plain `../../`, which a browser collapses before asking. The climb is written as `..%2F`
    (`_no_dot_segments`); Metro reads it back as slashes.

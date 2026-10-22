@@ -55,12 +55,12 @@ def test_the_pages_links_move_under_the_prefix_and_it_learns_the_prefix_first():
     assert '<script src="/api/projects/abc/phone/live/__bridge.js"></script>' in out and out.index("__bridge.js") > out.index("entry.bundle")
 
 
-def test_the_page_moves_its_own_address_to_the_top_of_the_host_before_the_app_starts():
-    """Expo's router strips its base path only in production builds, so in development it must see the screen's address at the top."""
+def test_the_page_keeps_its_real_address_so_a_reload_lands_on_the_same_screen():
+    """It used to move its address to the top of the host; a full reload (any change that cannot be hot-swapped) then loaded the
+    platform's own home page inside the phone frame (reported 2026-10-22)."""
     out = proxy.rewrite_html(PAGE, "/api/projects/abc/phone/live")
-    script = out[out.index("<script>window.__FORGE_LIVE__"):out.index("</script>") + 9]
-    assert "history.replaceState" in script and "l.pathname.slice(p.length)||'/'" in script
-    assert out.index("history.replaceState") < out.index("entry.bundle"), "before the app's own script"
+    assert "replaceState" not in out and "history." not in out
+    assert 'window.__FORGE_LIVE__="/api/projects/abc/phone/live";</script>' in out, "it still learns the prefix, for its sockets"
 
 
 def test_a_link_to_another_site_is_left_alone():
@@ -76,11 +76,22 @@ def test_the_path_the_dev_server_is_asked_for_is_the_raw_one_without_the_prefix(
 
 # ---- Expo's two sockets, made to carry the prefix ----------------------------------------------------------------------
 
-def _runtime(tmp_path: Path, hmr: str, message: str) -> Path:
+GUARD = "if (process.env.NODE_ENV !== 'development') {"
+GET_STATE = ('const a = require("./findFocusedRoute");\nconst b = __importDefault(require("./validatePathConfig"));\nconst c = require("../matchers");\n'
+             f'function stripBaseUrl(path, baseUrl = process.env.EXPO_BASE_URL) {{\n    {GUARD}\n        if (baseUrl) return path.replace(baseUrl, "");\n    }}\n    return path;\n}}\n')
+GET_PATH = ('const core = require("@react-navigation/core");\nconst c = require("../matchers");\n'
+            f'function appendBaseUrl(path, baseUrl = process.env.EXPO_BASE_URL) {{\n    {GUARD}\n        if (baseUrl) return baseUrl + path;\n    }}\n    return path;\n}}\n')
+
+
+def _runtime(tmp_path: Path, hmr: str, message: str, state: str = GET_STATE, path: str = GET_PATH) -> Path:
     base = tmp_path / "node_modules" / "@expo" / "metro-runtime" / "build"
     base.mkdir(parents=True)
     (base / "HMRClient.js").write_text(hmr, encoding="utf-8")
     (base / "messageSocket.js").write_text(message, encoding="utf-8")
+    router = tmp_path / "node_modules" / "expo-router" / "build" / "fork"
+    router.mkdir(parents=True)
+    (router / "getStateFromPath.js").write_text(state, encoding="utf-8")
+    (router / "getPathFromState.js").write_text(path, encoding="utf-8")
     return tmp_path / "node_modules"
 
 
@@ -115,12 +126,38 @@ def test_an_expo_that_is_not_the_one_it_knows_is_said_and_the_build_is_used(tmp_
         pl.patched_runtime(tmp_path / "missing")
 
 
-def test_the_metro_config_swaps_exactly_those_two_files(tmp_path):
+def test_the_routers_base_path_works_in_development_too_so_the_page_keeps_its_address(tmp_path):
+    """Expo Router strips and adds its base path only outside development. Under the live path that left no screen."""
+    out = pl.patched_runtime(_runtime(tmp_path, HMR, MESSAGE))
+    for name, function in (("getStateFromPath.js", "stripBaseUrl"), ("getPathFromState.js", "appendBaseUrl")):
+        assert GUARD not in out[name] and "if (true) {" in out[name] and function in out[name]
+    assert out["getStateFromPath.js"].count("if (true) {") == 1, "only that guard"
+
+
+def test_the_routers_neighbours_are_named_in_full_whether_they_sit_beside_it_or_above_it(tmp_path):
+    out = pl.patched_runtime(_runtime(tmp_path, HMR, MESSAGE))
+    state = out["getStateFromPath.js"]
+    assert 'require("expo-router/build/fork/findFocusedRoute")' in state
+    assert 'require("expo-router/build/fork/validatePathConfig")' in state
+    assert 'require("expo-router/build/matchers")' in state, "`../matchers` climbs out of fork/"
+    assert 'require("@react-navigation/core")' in out["getPathFromState.js"], "a package is left as it was"
+
+
+def test_a_router_that_is_not_the_one_it_knows_is_said_and_the_build_is_used(tmp_path):
+    with pytest.raises(pl.LiveUnavailable) as e:
+        pl.patched_runtime(_runtime(tmp_path, HMR, MESSAGE, state="function stripBaseUrl(path) { return path; }"))
+    assert "stripBaseUrl" in str(e.value) and "not the version" in str(e.value)
+    with pytest.raises(pl.LiveUnavailable):
+        pl.patched_runtime(_runtime(tmp_path / "two", HMR, MESSAGE, path=GET_PATH + GET_PATH))      # the guard twice: not what it knows
+
+
+def test_the_metro_config_swaps_exactly_the_files_it_was_written_for(tmp_path):
     modules = _runtime(tmp_path, HMR, MESSAGE)
     stage = modules.parent
     pl.write_live_files(stage)
     config = (stage / "metro.config.js").read_text(encoding="utf-8")
-    assert "HMRClient|messageSocket" in config and "forge-live" in config
+    assert "HMRClient|messageSocket" in config and "getStateFromPath|getPathFromState" in config and "forge-live" in config
+    assert all((stage / "forge-live" / f).is_file() for f in ("HMRClient.js", "messageSocket.js", "LoadingView.js", "getStateFromPath.js", "getPathFromState.js"))
     assert (stage / "forge-live" / "HMRClient.js").is_file() and (stage / "forge-live" / "messageSocket.js").is_file()
 
 

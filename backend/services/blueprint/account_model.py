@@ -447,10 +447,23 @@ def after_signup_route(doc: dict) -> str:
 
 def has_sign_in(doc: dict) -> bool:
     sec = doc.get("security") if isinstance(doc.get("security"), dict) else {}
-    if str(sec.get("authentication") or "email_password") != "none":
-        return True
     si = sec.get("signIn") if isinstance(sec.get("signIn"), dict) else {}
-    return bool(si.get("magicLink") or si.get("sso"))
+    if si.get("magicLink") or si.get("sso"):
+        return True
+    if str(sec.get("authentication") or "email_password") == "none":
+        return False
+    return not _nothing_to_open(doc)
+
+
+def _nothing_to_open(doc: dict) -> bool:
+    """A sign-in would open nothing: every page is public, nobody has a role, and no entity is an account. The plan still says
+    `email_password` (the default Smith writes), so the application got a login gate, an Account tab and no way to create an account
+    (FocusFlow, a no-accounts brief, 2026-10-22). Such an application has no sign-in."""
+    sec = doc.get("security") if isinstance(doc.get("security"), dict) else {}
+    pages = [p for p in _live(doc.get("pages")) if not is_auth_page(p)]
+    return (bool(pages) and all(str(p.get("access") or "public") == "public" for p in pages)
+            and not _live(doc.get("roles")) and not sec.get("rbac") and not sec.get("protectedRoutes")
+            and account_entity(doc) is None)
 
 
 def passwords_on(doc: dict) -> bool:

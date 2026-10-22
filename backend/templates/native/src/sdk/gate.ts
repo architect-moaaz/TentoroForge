@@ -26,6 +26,15 @@ function isPublicRoute(pathname: string, publicRoutes: readonly string[]): boole
   });
 }
 
+/** The route without the address the app is served under. The router writes that base path in front of every pathname it reports
+ *  (`EXPO_BASE_URL`, set for the live preview in the Editor), so "/" arrives as "/api/…/phone/live" and no route would look public. */
+function withoutBase(pathname: string): string {
+  const base = (process.env.EXPO_BASE_URL ?? "").replace(/^\/+|\/+$/g, "");
+  let path = pathname;
+  if (base && (path === `/${base}` || path.startsWith(`/${base}/`))) path = path.slice(base.length + 1);
+  return path.replace(/\/+$/, "") || "/";
+}
+
 export interface GateInput {
   status: SessionStatus;
   needsOrganisation: boolean;
@@ -36,7 +45,7 @@ export interface GateInput {
 
 /** Where to go, or null to stay. Nothing is decided until the session is known. */
 export function gateDecision({ status, needsOrganisation, pathname, publicRoutes, home }: GateInput): string | null {
-  const path = pathname.replace(/\/+$/, "") || "/";
+  const path = withoutBase(pathname);
   if (status === "loading" || status === "offline") return null;
   if (status === "signedOut") {
     return path === LOGIN || path === SIGNUP || isPublicRoute(path, publicRoutes) ? null : LOGIN;

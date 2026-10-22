@@ -65,6 +65,12 @@ eqJson(g({ pathname: "/login" }), null, "signed out on /login: stay");
 eqJson(g({ publicRoutes: ["/shop"], pathname: "/shop/item/3" }), null, "a public route's children are public");
 eqJson(g({ publicRoutes: ["/shop"], pathname: "/shopping" }), "/login", "…but a route that merely shares its prefix is not");
 eqJson([g({ publicRoutes: ["/"], pathname: "/" }), g({ publicRoutes: ["/"], pathname: "/orders" })], [null, "/login"], "'/' public means only the home screen");
+process.env.EXPO_BASE_URL = "/api/projects/abc/phone/live";
+eqJson([g({ publicRoutes: ["/"], pathname: "/api/projects/abc/phone/live" }), g({ publicRoutes: ["/"], pathname: "/api/projects/abc/phone/live/" }),
+        g({ publicRoutes: ["/history"], pathname: "/api/projects/abc/phone/live/history" })], [null, null, null],
+       "under a base path (the Editor's live picture) the router prefixes every pathname; the gate reads the route without it");
+eqJson(g({ publicRoutes: ["/"], pathname: "/api/projects/abc/phone/live/orders" }), "/login", "…and a private route under the base path is still private");
+delete process.env.EXPO_BASE_URL;
 eqJson([g({ status: "loading" }), g({ status: "offline" })], [null, null], "nothing is decided until the session is known (offline keeps the person where they are)");
 eqJson([g({ status: "signedIn", pathname: "/login" }), g({ status: "signedIn", pathname: "/orders" })], ["/home", null], "signed in leaves /login and is otherwise left alone");
 eqJson([g({ status: "signedIn", needsOrganisation: true }), g({ status: "signedIn", needsOrganisation: true, pathname: "/organisation" })], ["/organisation", null], "an organisation to choose: to the picker, and stay");

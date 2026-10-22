@@ -68,11 +68,11 @@ def rewrite_html(html: str, prefix: str) -> str:
     html = re.sub(r'(\s(?:src|href)=")/(?!/)([^"]*)',
                   lambda m: m.group(1) + prefix + "/" + _no_dot_segments(m.group(2).split("?", 1)[0]) + ("?" + m.group(2).split("?", 1)[1] if "?" in m.group(2) else ""),
                   html)
-    # Expo's router strips its base path only in a production build; in development it expects to be at the top of the host and, under
-    # `prefix`, finds no screen ("This screen does not exist", Cart Buddy 2026-10-22). So before the app starts the page moves its own
-    # address to the top of the host, keeping the screen it was opened at (`prefix/bought` becomes `/bought`). Nothing is reloaded.
-    head = ("<script>window.__FORGE_LIVE__=" + json.dumps(prefix) + ";(function(){var p=window.__FORGE_LIVE__,l=window.location;"
-            "if(l.pathname.indexOf(p)===0){history.replaceState(history.state,'',(l.pathname.slice(p.length)||'/')+l.search+l.hash);}})();</script>")
+    # The page keeps its real address under `prefix`. (An earlier version moved it to the top of the host so Expo's router, which handles a
+    # base path only in production, would find a screen. A full reload, which any change that cannot be hot-swapped causes, then loaded the
+    # platform's own home page inside the phone frame. The live copy's router now handles the base path in development too; see
+    # `phone_live.patched_runtime`.)
+    head = "<script>window.__FORGE_LIVE__=" + json.dumps(prefix) + ";</script>"
     html = html.replace("<head>", "<head>" + head, 1) if "<head>" in html else head + html
     tags = f'<script src="{prefix}/__bridge.js"></script><script src="{prefix}/__fit.js"></script>'
     return html.replace("</body>", tags + "</body>", 1) if "</body>" in html else html + tags
