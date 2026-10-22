@@ -14,7 +14,7 @@ import mimetypes
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -50,6 +50,7 @@ async def preview_status(project_id: str, user: PlatformUser = Depends(get_curre
     if not project.output_dir:
         return {"state": "unavailable", "reason": "Nothing has been built into this project yet.",
                 "servePath": phone_preview.serve_path(project.short_id)}
+    phone_live.touch(project.short_id)            # the editor is open on this project (signed in): its live preview is in use
     return {**phone_preview.status(project.output_dir, project.short_id), "live": phone_live.status(project.short_id)}
 
 
@@ -69,4 +70,7 @@ async def serve(short_id: str, path: str = "", db: AsyncSession = Depends(get_db
     if not target.is_file():
         target = root / "index.html"
     media = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
+    if media == "text/html":
+        from services.phone_sandbox import with_shim      # the page runs in a sandbox (see `services/phone_sandbox.py`)
+        return HTMLResponse(with_shim(Path(target).read_text(encoding="utf-8", errors="replace")), headers={"Cache-Control": "no-store"})
     return FileResponse(Path(target), media_type=media, headers={"Cache-Control": "no-store"})

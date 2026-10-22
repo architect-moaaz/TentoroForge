@@ -25,6 +25,10 @@ from services import phone_live, phone_live_proxy as proxy
 
 router = APIRouter()
 
+#: Live-update sockets one project's picture may hold open at once (the page opens two; a second tab, two more).
+MAX_SOCKETS = 8
+_sockets: dict[str, int] = {}
+
 
 async def _built_project(project_id: str, user: PlatformUser, db: AsyncSession):
     project = await _project(project_id, user, db)
@@ -68,6 +72,9 @@ async def live(short_id: str, request: Request, path: str = ""):
     if port is None:
         return JSONResponse({"detail": "The live preview is not running."}, status_code=503)
     accept = request.headers.get("accept", "")
+    bare = rest.split("?", 1)[0]
+    if (bare.endswith(".bundle") or bare.endswith(".map")) and not proxy.bundle_allowed(bare, request.url.query, phone_live.entry_of(short_id)):
+        raise HTTPException(status_code=404, detail="Not found.")        # only the app's own entry bundle, with its own options
     if not proxy.allowed(rest):
         if "text/html" not in accept:
             raise HTTPException(status_code=404, detail="Not found.")
@@ -101,12 +108,17 @@ async def live_socket(websocket: WebSocket, short_id: str):
     if port is None:
         await websocket.close(code=1013)             # try again later
         return
+    if _sockets.get(short_id, 0) >= MAX_SOCKETS:
+        await websocket.close(code=1013)
+        return
+    _sockets[short_id] = _sockets.get(short_id, 0) + 1
     await websocket.accept()
     try:
-        await proxy.pump(websocket, port, which, phone_live.live_path(short_id))
+        await proxy.pump(websocket, port, which, phone_live.live_path(short_id), phone_live.entry_of(short_id))
     except Exception:  # noqa: BLE001 - the page reconnects; nothing here is worth a trace
         pass
     finally:
+        _sockets[short_id] = max(0, _sockets.get(short_id, 1) - 1)
         try:
             await websocket.close()
         except RuntimeError:

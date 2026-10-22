@@ -13,6 +13,11 @@ from middleware.phone_paths import is_phone_picture
 
 logger = logging.getLogger(__name__)
 
+#: What one caller may ask of one project's phone picture. A page is a dozen files at once and an iframe cannot wait and retry, so the
+#: burst is generous; but it is a limit (PR #28 review, 2026-10-22: the picture was exempt from any).
+PICTURE_PER_MINUTE = 900
+PICTURE_BURST = 240
+
 
 @dataclass
 class TokenBucket:
@@ -64,8 +69,17 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # Counting each reopen against the bucket starves the whole chat
         # UI when the user only pinged the tab a few times. Skip.
         p = request.url.path
-        # The phone preview's built screens: a page is a dozen files at once, and an iframe has no way to wait and retry.
+        # The phone preview's pictures: a page is a dozen files at once, and an iframe has no way to wait and retry. Its own, larger
+        # bucket per caller and project, not the exemption it was.
         if is_phone_picture(p):
+            key = f"picture:{self._get_client_ip(request)}:{p.split('/')[3]}"
+            bucket = self._buckets.get(key)
+            if bucket is None:
+                bucket = self._buckets[key] = TokenBucket(rate=PICTURE_PER_MINUTE / 60.0, capacity=PICTURE_BURST)
+            if not bucket.consume():
+                logger.warning("Rate limit exceeded for a phone picture: %s", key)
+                return JSONResponse(status_code=429, content={"error": {"code": "RATE_LIMIT_EXCEEDED", "message": "Too many requests."}},
+                                    headers={"Retry-After": "5"})
             return await call_next(request)
         if p.endswith("/events") or p.endswith("/verify/events") or p.endswith("/stream"):
             return await call_next(request)

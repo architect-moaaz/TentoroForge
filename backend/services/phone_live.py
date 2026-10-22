@@ -270,13 +270,27 @@ def status(short_id: str) -> dict[str, Any]:
 
 
 def port_of(short_id: str) -> Optional[int]:
-    """The port of a running server, and a mark that it was just used. None when there is none."""
+    """The port of a running server. None when there is none.
+
+    It does NOT mark the server as used. The picture's own requests come from a page nobody has to sign in for, so anyone who kept
+    asking would have kept a server (about 300 MB) alive forever; what marks a server as used is the editor's signed-in calls
+    (`touch`, called from the editor's status poll, and start and sync) (PR #28 review, 2026-10-22)."""
     _ensure_reaper()
     rec = reg.live(short_id)
     if rec is None or rec.get("state") != "ready" or not rec.get("port"):
         return None
-    reg.touch(short_id)
     return int(rec["port"])
+
+
+def touch(short_id: str) -> None:
+    """The editor is open on this project: the server is in use."""
+    reg.touch(short_id)
+
+
+def entry_of(short_id: str) -> Optional[str]:
+    """The address of the app's one entry bundle, as the dev server's own page names it (the only bundle the picture may ask for)."""
+    rec = reg.live(short_id)
+    return str(rec["entry"]) if rec and rec.get("entry") else None
 
 
 def mark_unreachable(short_id: str) -> None:
@@ -363,6 +377,7 @@ async def _start(server: Server) -> None:
                                        pidStarted=reg._started(server.process.pid)):
             raise _Superseded()
         html = await _wait_until_up(server)
+        await asyncio.to_thread(reg.update, server.short_id, server.token, entry=_entry_script(html) or "")
         await _warm(server, html)
         server.synced = pp._fingerprint(server.output_dir)
         if not await asyncio.to_thread(reg.update, server.short_id, server.token, state="ready"):

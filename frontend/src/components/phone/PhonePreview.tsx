@@ -288,6 +288,10 @@ export function PhonePreview({ projectId, onAskSmith, autoRedraw = false, editPa
                 ref={frame}
                 src={src}
                 title="Phone preview"
+                // The picture is a generated app's code served from the platform's own address, and the platform's sign-in is in
+                // localStorage: a sandbox WITHOUT allow-same-origin gives the page an origin of its own, so it cannot read it. It
+                // talks to this page by postMessage only (checked by `e.source`, never by origin), which a sandbox keeps.
+                sandbox="allow-scripts"
                 className="block rounded-[1.9rem] bg-white"
                 style={{ width: 375, height: 760 }}
               />

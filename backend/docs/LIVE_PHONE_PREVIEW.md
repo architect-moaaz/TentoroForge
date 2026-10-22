@@ -80,6 +80,36 @@ It is now a small file per project (`services/phone_live_registry.py`, in `dev_s
   port, its own start changed nothing, it reached Metro (200), synced, and stopped it.
 * **Not covered:** Linux (the registry uses `/proc` start times and process groups there; Windows uses `taskkill`), and the full backend image.
 
+## What an anonymous caller can do, and what the picture runs in
+
+The picture's address needs no sign-in (an iframe cannot send the platform's token). Two things keep that safe (PR #28 review, 2026-10-22).
+
+**What it will do for anyone.**
+* **One bundle.** Only the app's one entry bundle (and its source map), with exactly the options the page itself names it by, is passed to the dev
+  server (`phone_live_proxy.bundle_allowed`; the entry is read from the dev server's own page at start and written in the registry record).
+  Checked on a real picture: the page asks for this one bundle, and opening its other screens asks for no other. Any other path or option gets 404.
+* **Messages.** Over the `/hot` socket only `register-entrypoints` (naming that same entry) and `log` messages go on to the dev server; anything else,
+  non-JSON, binary, or over 64 KB is dropped (`message_allowed`). A message naming an address the dev server does not know once stopped the whole
+  server. At most 8 sockets per project.
+* **Nothing the caller does keeps a server alive.** The picture's own requests no longer mark a server as used. The editor's signed-in status call
+  does (`phone_live.touch`, every 8 s while the live preview is ready), and so do start and sync: a server ends 10 minutes after the editor is closed.
+* **A limit.** 900 requests a minute (burst 240) per caller and project for `/phone/serve` and `/phone/live`: a page load is a dozen files, so a
+  page never reaches it.
+
+**What the page runs in: a sandbox.** The picture is a generated app's code served from the platform's own address, and the platform keeps its sign-in
+in `localStorage`; on that origin a screen's code (or a package's) could read a viewer's token, and the link can be sent to anyone signed in. So:
+* the responses carry `Content-Security-Policy: sandbox allow-scripts` (no `allow-same-origin`) and `frame-ancestors 'self'`, plus
+  `X-Frame-Options: SAMEORIGIN` and `Access-Control-Allow-Origin: *` for GET and HEAD (`middleware/security_headers.py`). The page gets an origin of
+  its own (`null`) with no storage and no cookies, whether framed or opened directly from a link;
+* the editor's iframe has `sandbox="allow-scripts"` too (`PhonePreview.tsx`); it talks to the page by `postMessage` only, checked by `e.source`;
+* a sandboxed page that touches `localStorage` or `document.cookie` gets an error, so each page starts with a small stand-in that keeps them in
+  memory where the real ones throw (`services/phone_sandbox.py`; the built picture gets it when it is served, so one built earlier does too);
+* a sandboxed page is a different origin, so its fonts need CORS on every hop. The dev web server in front of the backend answers `/assets/?x` with
+  a redirect that has none, so the bundle's asset address is written without that slash (`/assets?x`; Metro serves both).
+* Checked in Chrome through Playwright: origin `null`, a decoy in the platform's storage not readable, the editor's messages and both sockets working,
+  fonts and icons loading, no failed request, no console error, and a hot update arriving without a reload.
+* Not covered: the website editor's own preview (`/preview/serve`), which has the same weakness and is a different route.
+
 ## Fail safe
 
 The editor falls back to the built picture (and its Redraw button) whenever the live preview is not ready: while it starts (about 30 s the

@@ -231,12 +231,12 @@ def _dead_pid() -> int:
     return done.pid
 
 
-def _server(short_id: str, state="ready", port=1234, used=None, code=None, owner=None) -> dict:
+def _server(short_id: str, state="ready", port=1234, used=None, code=None, owner=None, entry="") -> dict:
     """A record as another worker would have written it. `code` set: the server's process has finished. `owner`: a worker's number."""
     me = os.getpid()
     pid = _dead_pid() if code is not None else me
     rec = {"id": short_id, "outputDir": "x", "state": state, "error": "", "port": port if state == "ready" else 0, "pid": pid if state == "ready" else 0,
-           "pidStarted": reg._started(pid) if state == "ready" else None, "stage": "", "owner": owner or me,
+           "pidStarted": reg._started(pid) if state == "ready" else None, "stage": "", "entry": entry, "owner": owner or me,
            "ownerStarted": reg._started(owner or me), "token": f"token-{short_id}", "startedAt": time.time()}
     reg.DIR.mkdir(parents=True, exist_ok=True)
     reg._write(reg._path(short_id), rec)
@@ -262,10 +262,15 @@ def test_a_server_whose_process_died_says_so():
     assert pl.status("dead") == {"state": "failed", "path": "/api/projects/dead/phone/live", "error": "The live preview stopped."}
 
 
-def test_using_a_server_counts_as_use():
+def test_the_pictures_own_requests_do_not_count_as_use_but_the_editors_call_does():
+    """PR #28 review: the picture is asked for by a page nobody signs in for, so asking must not keep a server alive. The editor's
+    signed-in calls do (`touch`, from its status poll, and start and sync)."""
     _server("up", used=time.time() - 1000)
     before = reg.get("up")["used"]
     pl.port_of("up")
+    pl.port_of("up")
+    assert reg.get("up")["used"] == before, "asking for the port is not use"
+    pl.touch("up")
     assert reg.get("up")["used"] > before
 
 
@@ -372,7 +377,7 @@ def client(dev):
     from routers.phone_live import router
     app = FastAPI()
     app.include_router(router)
-    _server("abc", port=dev)
+    _server("abc", port=dev, entry="/..%5Cnative%5Cexpo-router%5Centry.bundle?platform=web&dev=true")
     return TestClient(app)
 
 
@@ -437,12 +442,12 @@ def test_a_live_update_socket_is_carried_both_ways(dev):
         app = FastAPI()
         app.include_router(router)
         with TestClient(app).websocket_connect("/api/projects/abc/phone/live/hot") as ws:
-            ws.send_text(json.dumps({"type": "register-entrypoints"}))
-            assert ws.receive_text() == 'echo:{"type": "register-entrypoints"}'
+            ws.send_text(json.dumps({"type": "log", "level": "info"}))
+            assert ws.receive_text() == 'echo:{"type": "log", "level": "info"}'
         assert got == ["/hot"], "the dev server sees its own path, without the prefix"
         with TestClient(app).websocket_connect("/api/projects/abc/phone/live/message") as ws:
-            ws.send_text("reload")
-            assert ws.receive_text() == "echo:reload"
+            ws.send_text('{"method": "ping"}')
+            assert ws.receive_text() == 'echo:{"method": "ping"}'
         assert got == ["/hot", "/message"]
     finally:
         server.shutdown()
@@ -487,7 +492,7 @@ def test_the_socket_tells_the_dev_server_the_address_it_built_the_bundle_for(dev
     server = wss.serve(handler, "127.0.0.1", 0)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
-        _server("abc", port=server.socket.getsockname()[1])
+        _server("abc", port=server.socket.getsockname()[1], entry="/..%5Cnative%5Centry.bundle?platform=web")
         app = FastAPI()
         app.include_router(router)
         said = json.dumps({"type": "register-entrypoints",
@@ -555,7 +560,7 @@ def test_a_path_with_no_climb_is_written_as_it_was():
 def test_the_addresses_of_fonts_and_pictures_in_the_code_move_under_the_prefix():
     code = 'x = {"httpServerLocation": "/assets/?unstable_path=.%2F..%2Fnative%2FFonts"}; y = "/assetsmith"; z = "/api/other"'
     out = proxy.rewrite_bundle(code, "/api/projects/abc/phone/live")
-    assert '"/api/projects/abc/phone/live/assets/?unstable_path=.%2F..%2Fnative%2FFonts"' in out
+    assert '"/api/projects/abc/phone/live/assets?unstable_path=.%2F..%2Fnative%2FFonts"' in out
     assert '"/assetsmith"' in out and '"/api/other"' in out, "only the dev server's asset address is moved"
 
 
@@ -570,9 +575,10 @@ def test_a_font_is_passed_on_by_its_asset_address(client):
 
 
 def test_a_bundle_comes_back_with_its_assets_under_the_prefix(client):
+    reg.update("abc", entry="/withassets.bundle?platform=web")
     r = client.get("/api/projects/abc/phone/live/withassets.bundle?platform=web")
     assert r.status_code == 200
-    assert r.text.count('"/api/projects/abc/phone/live/assets/?unstable_path=') == 2
+    assert r.text.count('"/api/projects/abc/phone/live/assets?unstable_path=') == 2
     assert '"/assetsmith"' in r.text and "content-length" not in {k.lower() for k in r.headers if k.lower() == "content-length" and int(r.headers[k]) != len(r.content)}
 
 
@@ -593,7 +599,7 @@ def test_a_live_update_carries_its_assets_under_the_prefix_too(dev):
         app = FastAPI()
         app.include_router(router)
         with TestClient(app).websocket_connect("/api/projects/abc/phone/live/hot") as ws:
-            ws.send_text("go")
-            assert ws.receive_text() == 'update {"httpServerLocation": "/api/projects/abc/phone/live/assets/?unstable_path=.%2Fx"}'
+            ws.send_text('{"type": "log"}')
+            assert ws.receive_text() == 'update {"httpServerLocation": "/api/projects/abc/phone/live/assets?unstable_path=.%2Fx"}'
     finally:
         server.shutdown()

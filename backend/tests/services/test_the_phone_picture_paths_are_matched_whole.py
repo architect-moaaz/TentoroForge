@@ -45,11 +45,11 @@ def _client(*middleware, **kw):
     return TestClient(app)
 
 
-def test_the_frame_header_is_dropped_for_the_picture_and_kept_for_a_look_alike():
+def test_the_picture_may_be_framed_by_the_platform_and_a_look_alike_not_at_all():
     from middleware.security_headers import SecurityHeadersMiddleware
 
     client = _client(SecurityHeadersMiddleware)
-    assert "x-frame-options" not in client.get("/api/projects/abc/phone/live/").headers
+    assert client.get("/api/projects/abc/phone/live/").headers["x-frame-options"] == "SAMEORIGIN"
     assert client.get("/api/admin/phone/live/anything").headers["x-frame-options"] == "DENY"
 
 

@@ -11,6 +11,7 @@ import json
 import logging
 import re
 from typing import AsyncIterator, Optional
+from urllib.parse import parse_qsl, unquote, urlsplit
 
 import httpx
 
@@ -38,6 +39,71 @@ _HOP = {"connection", "keep-alive", "transfer-encoding", "te", "trailer", "upgra
 def allowed(path: str) -> bool:
     """Is this path one a browser may ask the dev server for?"""
     return bool(_ALLOWED.match(path if path.startswith("/") else "/" + path))
+
+
+def _canon(path: str) -> str:
+    """A path as Metro means it, however the browser wrote it: `%5C` and `%2F` are separators, the leading slash does not count."""
+    return unquote(path).replace("\\", "/").strip("/")
+
+
+def entry_parts(entry: Optional[str]) -> Optional[tuple[str, dict[str, str]]]:
+    """The entry bundle's path and options, from the address the dev server's own page names it by (`/<path>.bundle?platform=web&...`)."""
+    if not entry:
+        return None
+    parts = urlsplit(entry)
+    return _canon(parts.path), dict(parse_qsl(parts.query, keep_blank_values=True))
+
+
+def bundle_allowed(path: str, query: str, entry: Optional[str]) -> bool:
+    """May this bundle (or its source map) be asked of the dev server? ONLY the app's one entry bundle, with exactly the options the
+    page itself names it by (PR #28 review, 2026-10-22). Any path ending in `.bundle`, with any options, made the dev server build a new
+    bundle (several MB, seconds of CPU) for every combination, for anyone who knew a project's id. Checked on the real page: it asks
+    for this one bundle only, and opening other screens asks for no other (the app is one bundle)."""
+    known = entry_parts(entry)
+    if known is None:
+        return False
+    want_path, want_query = known
+    base = _canon(path.split("?", 1)[0])
+    if base.endswith(".map"):
+        want_path = want_path[: -len(".bundle")] + ".map" if want_path.endswith(".bundle") else want_path + ".map"
+    return base == want_path and dict(parse_qsl(query, keep_blank_values=True)) == want_query
+
+
+#: The most a page says over a socket in one message.
+MAX_MESSAGE = 64 * 1024
+#: What the page's live-update client sends to the dev server: where its entry is, and its console, when asked to.
+_HOT_KINDS = frozenset({"log", "log-opt-in"})
+
+
+def message_allowed(text: str, entry: Optional[str], which: str) -> bool:
+    """May this message from the page go to the dev server? Anything else is dropped. A message naming an address the dev server does
+    not know stopped the whole server once (the first live-preview crash), so `register-entrypoints` may name only the app's own entry."""
+    if len(text) > MAX_MESSAGE:
+        return False
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return False
+    if not isinstance(data, dict):
+        return False
+    if which != "/hot":
+        return True                                     # the tools socket: a small JSON object, nothing else
+    kind = data.get("type")
+    if kind in _HOT_KINDS:
+        return True
+    if kind == "register-entrypoints":
+        points = data.get("entryPoints")
+        if not isinstance(points, list) or not points or len(points) > 4:
+            return False
+        known = entry_parts(entry)
+        for point in points:
+            if not isinstance(point, str) or known is None:
+                return False
+            parts = urlsplit(point)
+            if _canon(parts.path) != known[0] or dict(parse_qsl(parts.query, keep_blank_values=True)) != known[1]:
+                return False
+        return True
+    return False
 
 
 def own_file(path: str) -> Optional[tuple[str, str]]:
@@ -72,7 +138,8 @@ def rewrite_html(html: str, prefix: str) -> str:
     # base path only in production, would find a screen. A full reload, which any change that cannot be hot-swapped causes, then loaded the
     # platform's own home page inside the phone frame. The live copy's router now handles the base path in development too; see
     # `phone_live.patched_runtime`.)
-    head = "<script>window.__FORGE_LIVE__=" + json.dumps(prefix) + ";</script>"
+    from services.phone_sandbox import SHIM    # the page runs in a sandbox: storage and cookies are replaced by memory where they throw
+    head = SHIM + "<script>window.__FORGE_LIVE__=" + json.dumps(prefix) + ";</script>"
     html = html.replace("<head>", "<head>" + head, 1) if "<head>" in html else head + html
     tags = f'<script src="{prefix}/__bridge.js"></script><script src="{prefix}/__fit.js"></script>'
     return html.replace("</body>", tags + "</body>", 1) if "</body>" in html else html + tags
@@ -88,7 +155,10 @@ def rewrite_bundle(text: str, prefix: str) -> str:
     Expo's start command fixes where assets are served from (`/assets/?unstable_path=…`, from the top of the host) and writes it into every
     asset it bundles, so the icon font was asked for at the platform's own address and got a 404: no icons in the live picture (Cart Buddy,
     2026-10-22). The address is plain text in the code, so it is moved under the path the page is served from."""
-    return text.replace(_ASSET_ADDRESS, '"' + prefix + _ASSET_ADDRESS[1:])
+    # WITHOUT the slash Expo writes after `assets`: the dev web server in front of the backend answers `/assets/?x` with a redirect to `/assets?x`,
+    # and a redirect carries no CORS header. A sandboxed page (its own origin) must pass CORS on every hop, so its fonts failed on that redirect
+    # (found in a real browser, 2026-10-23). Metro serves both forms.
+    return text.replace(_ASSET_ADDRESS, '"' + prefix + "/assets?unstable_path=")
 
 
 def upstream_path(raw_path: bytes, prefix: str) -> str:
@@ -130,8 +200,8 @@ def unprefixed(text: str, prefix: str) -> str:
     return text.replace(prefix + "/", "/")
 
 
-async def pump(websocket, port: int, path: str, prefix: str = "") -> None:
-    """Carry one live-update socket both ways until either side closes."""
+async def pump(websocket, port: int, path: str, prefix: str = "", entry: Optional[str] = None) -> None:
+    """Carry one live-update socket both ways until either side closes. What the page says goes on only if `message_allowed`."""
     from websockets.asyncio.client import connect
     async with connect(f"ws://127.0.0.1:{port}{path}", open_timeout=10, max_size=None, ping_interval=None) as upstream:
         async def up() -> None:
@@ -140,9 +210,12 @@ async def pump(websocket, port: int, path: str, prefix: str = "") -> None:
                 if message["type"] == "websocket.disconnect":
                     return
                 if message.get("text") is not None:
-                    await upstream.send(unprefixed(message["text"], prefix) if prefix else message["text"])
-                elif message.get("bytes") is not None:
-                    await upstream.send(message["bytes"])
+                    said = unprefixed(message["text"], prefix) if prefix else message["text"]
+                    if message_allowed(said, entry, path):
+                        await upstream.send(said)
+                    else:
+                        logger.debug("[phone_live] a message from the page was not passed on (%d characters)", len(said))
+                # (what the page sends as bytes is dropped: its clients send text only)
 
         async def down() -> None:
             async for message in upstream:

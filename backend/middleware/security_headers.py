@@ -46,6 +46,17 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # platform editor's iframe can load its own project's Next dev
         # output (see comment above).
         frame_ancestors = "" if is_preview_serve else "; frame-ancestors 'none'"
+        if is_phone_picture(path):
+            # THE APP'S CODE RUNS HERE, and the platform keeps its sign-in in `localStorage`. On the platform's own origin a screen's
+            # code (or a package's) could read a viewer's token, and the link needs no sign-in, so it can be sent to anyone signed
+            # in (PR #28 review, 2026-10-22). `sandbox allow-scripts` (and no `allow-same-origin`) gives the page an origin of its
+            # own with no storage and no cookies, WHETHER IT IS FRAMED OR OPENED DIRECTLY; only the platform's own pages may frame it.
+            frame_ancestors = "; sandbox allow-scripts; frame-ancestors 'self'"
+            response.headers["X-Frame-Options"] = "SAMEORIGIN"
+            if request.method in ("GET", "HEAD"):
+                # A sandboxed page is a different origin, so its fonts and fetches need this. What is served is public and carries no
+                # credentials (the picture is loaded without a sign-in), so `*` gives nothing away.
+                response.headers["Access-Control-Allow-Origin"] = "*"
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
             "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
