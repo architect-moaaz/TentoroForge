@@ -61,6 +61,22 @@ class MappingResolver:
         return value
 
 
+def token_resolver(values: dict[str, str], ref_name: str = "") -> tuple[str, MappingResolver]:
+    """`(ref, resolver)` for the Figma token: the organisation's, whatever
+    name the caller asked for, else the named environment variable.
+
+    The name is Smith's to choose and it chose `FIGMA_ACCESS_TOKEN`; the store
+    keeps the organisation's token as `FIGMA_TOKEN`, so a token saved under
+    Settings → Integrations was never found and the person was told "no Figma
+    token in environment variable 'FIGMA_ACCESS_TOKEN'" (forge-v3, 2026-10-22).
+    With none anywhere, the error names where to add it."""
+    ref = (ref_name or TOKEN_KEY).strip()
+    token = (values.get(ref) or values.get(TOKEN_KEY) or os.environ.get(ref) or "").strip()
+    if not token:
+        return TOKEN_KEY, MappingResolver({})
+    return ref, MappingResolver({ref: token})
+
+
 def _run(coro: Any) -> Any:
     """Bridge one async query into a synchronous caller."""
     import asyncio

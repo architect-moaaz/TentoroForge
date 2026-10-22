@@ -585,12 +585,9 @@ def connect_figma(ctx: Ctx, u: dict) -> Outcome:
     if not url:
         return Outcome(status="asked", said="Which Figma file? Paste the link from Figma's Share "
                                             "dialog and I'll pull the screens and tokens out of it.")
-    if not token_env:
-        return Outcome(status="asked", said=(
-            "Which environment variable holds your Figma token? I need the NAME — `FIGMA_TOKEN`, "
-            "for example — not the token itself. Anything you type here is written to the "
-            "conversation log, so a credential must not go in it; export the token in the "
-            "backend's environment and tell me what you called it."))
+    # NO TOKEN QUESTION. The organisation's Figma token, from Settings →
+    # Integrations, is used whatever `token_env` names; with none set, the
+    # connect says where to add it (`figma.integrations.token_resolver`).
     if parse(url) is None:
         return Outcome(status="needs_user", said=(
             f"That does not look like a Figma URL: {url!r}. I need the link from Figma's Share "
