@@ -1255,7 +1255,20 @@ export async function evaluateFormRules(
   } catch (err) {
     console.error(`[rules] form computed pass failed for ${modelName}:`, err);
   }
-  return { patches: out.patches, formHints: out.formHints, errors: out.errors };
+  // A field is required on the form when ANY rule requires it — the test the
+  // save itself applies (a save leaving it empty is refused if any rule does).
+  // Two rules can disagree — one's THEN requires the note, another's OTHERWISE
+  // relaxes it (a 2500 travel expense: "travel note above 2000" requires, "note
+  // above 6000" says not) — and the save refuses, so the form must mark it: a
+  // "not required" hint never cancels another rule's "required". (Found by
+  // Smith on Expense Desk, 2026-10-23.)
+  const requiredNow = new Set(
+    out.formHints.filter((h) => h.required === true).map((h) => h.field),
+  );
+  const formHints = out.formHints.filter(
+    (h) => !(h.required === false && requiredNow.has(h.field)),
+  );
+  return { patches: out.patches, formHints, errors: out.errors };
 }
 
 // ---------------------------------------------------------------------------

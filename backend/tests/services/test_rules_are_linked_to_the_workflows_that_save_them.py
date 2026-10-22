@@ -207,3 +207,19 @@ def test_an_old_check_belongs_to_one_rule_never_to_one_that_only_shares_a_field(
     assert L.stale(doc, L.review_all(doc)) == [], "every check matches its own rule"
     _rule(doc, "RULE-002")["when"] = "amount > 7000"
     assert [(c["rule"], c["step"]) for c in L.stale(doc, L.review_all(doc))] == [("RULE-002", "check_note")]
+
+
+@needs_node
+def test_a_field_one_rule_requires_is_required_whatever_another_rules_otherwise_says():
+    from services.blueprint import rule_lab
+    from services.blueprint.projection import business_rule_rows
+    doc = _doc()
+    doc["businessRules"].append({"id": "RULE-009", "name": "Travel note", "kind": "condition_action",
+                                 "entity": "ENTITY-001", "when": 'category = "travel" and amount > 2000',
+                                 "then": [{"type": "set_required", "field": "managerNote", "required": True,
+                                           "message": "Travel above 2000 needs a note."}], "otherwise": []})
+    rows = [r for r in business_rule_rows(doc) if r.get("model_name") == "Expense"]
+    hints = rule_lab.simulate(model="Expense", rules=rows, record={"amount": 2500, "category": "travel"})["formHints"]
+    note = [h for h in hints if h["field"] == "managerNote"]
+    assert note and all(h.get("required") is True for h in note), note
+    assert any(h.get("message") == "Travel above 2000 needs a note." for h in note)

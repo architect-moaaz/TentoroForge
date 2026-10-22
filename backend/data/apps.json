@@ -19,6 +19,11 @@
   "org": "27c89a4d-8c1d-4c0a-b69a-f07fc821f0b2",
   "owner": "visitor@example.com"
  },
+ "6kbu7vy5": {
+  "name": "QA Throwaway Empty",
+  "org": "27c89a4d-8c1d-4c0a-b69a-f07fc821f0b2",
+  "owner": "visitor@example.com"
+ },
  "6knj2hxx": {
   "name": "Task Board",
   "org": "399cae4b-9e12-45fa-8556-5742b05b8e05",
@@ -79,6 +84,11 @@
   "org": "27c89a4d-8c1d-4c0a-b69a-f07fc821f0b2",
   "owner": "visitor@example.com"
  },
+ "cb57mve4": {
+  "name": "QA Throwaway Self Use",
+  "org": "39158705-ce8d-4240-9eba-fd875f30d6c9",
+  "owner": "dev.tester@example.com"
+ },
  "d6pytu2v": {
   "name": "Task Board",
   "org": "399cae4b-9e12-45fa-8556-5742b05b8e05",
@@ -108,6 +118,11 @@
   "name": "Acme Hiring 2",
   "org": "39158705-ce8d-4240-9eba-fd875f30d6c9",
   "owner": "dev.tester@example.com"
+ },
+ "gw4qbfzi": {
+  "name": "QA Throwaway Admin Use",
+  "org": "053e6820-9860-407b-a704-9fb653377d4e",
+  "owner": "admin@tentoro.ai"
  },
  "hltxnt1q": {
   "name": "Review copy",
@@ -171,6 +186,11 @@
  },
  "siaohkua": {
   "name": "Race copy 2",
+  "org": "27c89a4d-8c1d-4c0a-b69a-f07fc821f0b2",
+  "owner": "visitor@example.com"
+ },
+ "st38vc9k": {
+  "name": "QA Throwaway From Template",
   "org": "27c89a4d-8c1d-4c0a-b69a-f07fc821f0b2",
   "owner": "visitor@example.com"
  },

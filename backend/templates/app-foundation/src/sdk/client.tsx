@@ -110,13 +110,18 @@ export function useRuleHints(model: string, values: Json, delayMs = 250): RuleHi
     }, delayMs);
     return () => { live = false; clearTimeout(t); };
   }, [model, key, delayMs]);
-  const last = (field: string) => [...answer.hints].reverse().find((h) => h.field === field);
+  // ANY rule that requires, hides or locks a field does: a "not required" from
+  // one rule's Otherwise never cancels another rule's "required" — the save
+  // checks every rule, so the form must show what the save will ask for.
+  const any = (field: string, test: (h: Record<string, unknown>) => boolean) =>
+    answer.hints.some((h) => h.field === field && test(h));
   return {
-    required: (f) => last(f)?.required === true,
-    hidden: (f) => last(f)?.visible === false || last(f)?.hidden === true,
-    readonly: (f) => last(f)?.readonly === true,
+    required: (f) => any(f, (h) => h.required === true),
+    hidden: (f) => any(f, (h) => h.visible === false || h.hidden === true),
+    readonly: (f) => any(f, (h) => h.readonly === true),
     message: (f) => {
-      const h = [...answer.hints].reverse().find((x) => x.field === f && typeof x.message === "string" && x.message);
+      const h = answer.hints.find((x) => x.field === f && x.required === true && typeof x.message === "string" && x.message)
+        ?? answer.hints.find((x) => x.field === f && typeof x.message === "string" && x.message);
       return h ? String(h.message) : undefined;
     },
     errors: answer.errors,
