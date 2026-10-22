@@ -595,7 +595,12 @@ def connect_figma(ctx: Ctx, u: dict) -> Outcome:
         return Outcome(status="needs_user", said=(
             f"That does not look like a Figma URL: {url!r}. I need the link from Figma's Share "
             "dialog, like https://figma.com/design/<key>/<name>?node-id=1-2"))
-    treat_as = _design_scope(u.get("treat_as"))
+    # THE ANSWER IS THE PERSON'S, SO IT IS READ FROM WHAT THEY TYPED. The
+    # question offers two words; asked on forge-v3 (Tentoro, 2026-10-22), the
+    # person said "Specification" four times and was asked four times: the
+    # loop re-ran this verb with the link and the variable name and nothing
+    # else, because only the call's own fields were ever read.
+    treat_as = _design_scope(u.get("treat_as")) or _design_scope(ctx.message)
     if not treat_as:
         # ASKED ONCE, BECAUSE THE TWO ANSWERS BUILD DIFFERENT APPLICATIONS — and
         # the question says what each costs: "specification" quietly means no
@@ -637,7 +642,7 @@ def connect_uxpilot(ctx: Ctx, u: dict) -> Outcome:
         return Outcome(status="needs_user", said=(
             f"That does not look like a UX Pilot page: {ref!r}. I need the page id, or the "
             "page's URL from UX Pilot."))
-    treat_as = _design_scope(u.get("treat_as"))
+    treat_as = _design_scope(u.get("treat_as")) or _design_scope(ctx.message)
     if not treat_as:
         return Outcome(status="asked", said=_SCOPE_QUESTION, options=["Specification", "Reference"])
     try:

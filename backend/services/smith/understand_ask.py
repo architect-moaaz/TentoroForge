@@ -29,7 +29,7 @@ def _design_scope(raw: object) -> str:
     what the frames are to the rest of the pipeline, and `reference` is the
     accurate word for what the user is telling you.
     """
-    text = str(raw or "").strip().lower()
+    text = " ".join(str(raw or "").strip().lower().rstrip(".!").split())
     if text in ("specification", "spec", "the specification"):
         return "specification"
     if text in ("evidence", "reference", "a reference", "the reference"):
