@@ -4432,7 +4432,10 @@ def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
             for p in _live(doc.get("pages"))):
         apis = [*apis, "api/read"]
     excluded = list(_ALWAYS_OPEN) + open_routes + apis
-    pattern = "|".join(excluded)
+    # WHOLE PATH PIECES, NOT PREFIXES. A negative lookahead only looks at how the path starts, so `install` left `/installments`
+    # open and `pay` left `/payroll` open: signed-out visitors, and no role check (PR #28 review, 2026-10-22). Each entry now
+    # ends where a piece of the path ends: `install` is `/install` and what is under it.
+    pattern = "|".join(f"{e}(?:/|$)" for e in excluded)
     # A negative lookahead cannot exclude the empty path, so `/` is matched by
     # `.*` no matter what is listed. When the landing route is public, requiring
     # at least one character after the slash is what actually leaves it open.

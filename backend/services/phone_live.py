@@ -32,6 +32,7 @@ from typing import Any, Optional
 
 import httpx
 
+from services import phone_live_registry as reg
 from services import phone_preview as pp
 from services.phone_preview import PhonePreviewError
 
@@ -203,22 +204,24 @@ def _refresh_sample_data(doc: dict, stage: Path) -> int:
 # The servers
 # ---------------------------------------------------------------------------
 
+# WHICH SERVERS RUN, AND WHERE, IS WRITTEN ON DISK (`phone_live_registry`), one answer for every backend worker. What is here is only
+# what the worker that STARTED a server holds: its process handle, its start task and its watcher. A request that reaches another worker
+# reads the record, finds the port, and passes the request to the same Metro itself (PR #28 review, 2026-10-22).
+
 @dataclass
 class Server:
     short_id: str
     output_dir: str
-    state: str = "starting"                # starting | ready | failed
-    error: str = ""
+    token: str                             # the registry record this worker claimed
     port: int = 0
     process: Optional[asyncio.subprocess.Process] = None
     stage: Optional[Path] = None
-    last_used: float = field(default_factory=time.monotonic)
     tasks: list[asyncio.Task] = field(default_factory=list)
     synced: str = ""
-    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
-_servers: dict[str, Server] = {}
+_servers: dict[str, Server] = {}           # only the servers THIS worker started
+_sync_locks: dict[str, asyncio.Lock] = {}
 _reaper: Optional[asyncio.Task] = None
 
 
@@ -244,33 +247,41 @@ def _kill(process: Optional[asyncio.subprocess.Process]) -> None:
             pass
 
 
+def _off(short_id: str) -> dict[str, Any]:
+    return {"state": "off", "path": live_path(short_id), "error": ""}
+
+
 def status(short_id: str) -> dict[str, Any]:
-    """`state`: off | starting | ready | failed. `path` is where the browser loads it from, through the backend."""
-    server = _servers.get(short_id)
-    if server is None:
-        return {"state": "off", "path": live_path(short_id), "error": ""}
-    if server.state == "ready" and server.process is not None and server.process.returncode is not None:
-        server.state, server.error = "failed", "The live preview stopped."
-    return {"state": server.state, "path": live_path(short_id), "error": server.error}
+    """`state`: off | starting | ready | failed. `path` is where the browser loads it from, through the backend. The same from any worker."""
+    _ensure_reaper()
+    rec = reg.get(short_id)
+    if rec is None:
+        return _off(short_id)
+    path = live_path(short_id)
+    if reg.alive(rec):
+        return {"state": rec["state"], "path": path, "error": rec.get("error", "")}
+    if rec.get("state") == "failed":
+        return {"state": "failed", "path": path, "error": rec.get("error", "")}
+    if rec.get("state") == "ready":
+        return {"state": "failed", "path": path, "error": "The live preview stopped."}
+    return _off(short_id)                  # a start whose worker is gone: the next start clears it
 
 
 def port_of(short_id: str) -> Optional[int]:
     """The port of a running server, and a mark that it was just used. None when there is none."""
-    server = _servers.get(short_id)
-    if server is None or server.state != "ready" or not server.port:
+    _ensure_reaper()
+    rec = reg.live(short_id)
+    if rec is None or rec.get("state") != "ready" or not rec.get("port"):
         return None
-    if server.process is not None and server.process.returncode is not None:
-        server.state, server.error = "failed", "The live preview stopped."
-        return None
-    server.last_used = time.monotonic()
-    return server.port
+    reg.touch(short_id)
+    return int(rec["port"])
 
 
 def mark_unreachable(short_id: str) -> None:
     """The dev server did not answer: it is no longer ready, so the editor falls back to the build and the reaper stops what is left."""
-    server = _servers.get(short_id)
-    if server is not None and server.state == "ready":
-        server.state, server.error = "failed", "The live preview stopped answering."
+    rec = reg.get(short_id)
+    if rec is not None and rec.get("state") == "ready":
+        reg.update(short_id, rec.get("token"), state="failed", error="The live preview stopped answering.")
 
 
 def _entry_script(html: str) -> Optional[str]:
@@ -307,6 +318,15 @@ async def _warm(server: Server, html: str) -> None:
             logger.warning("[phone_live] the first bundle did not build: %s", exc)
 
 
+class _Superseded(Exception):
+    """The record this start claimed is gone (it was stopped, or ended to make room): stop, writing nothing."""
+
+
+def _still_mine(server: Server) -> None:
+    if not reg.mine(server.short_id, server.token):
+        raise _Superseded()
+
+
 async def _start(server: Server) -> None:
     from services.blueprint.service import BlueprintService
     try:
@@ -319,12 +339,17 @@ async def _start(server: Server) -> None:
         real = pp.native_dir(server.output_dir)
         stage = live_dir(server.output_dir)
         fresh = not stage.exists()
+        _still_mine(server)
         server.stage = await asyncio.to_thread(pp._stage_here, real, stage)
+        await asyncio.to_thread(reg.update, server.short_id, server.token, stage=str(server.stage))
         await asyncio.to_thread(pp._prepare_copy, server.stage, doc, server.short_id, live_path(server.short_id))
-        env = {k: v for k, v in os.environ.items() if k != "CI"}              # CI turns file watching off
+        from services.phone_env import phone_env
+        env = phone_env(server.output_dir)                                   # not the platform's secrets (phone_env)
+        env.pop("CI", None)                                                  # CI turns file watching off
         env.update({"EXPO_NO_TELEMETRY": "1", "EXPO_NO_GIT_STATUS": "1", "EXPO_OFFLINE": "1", "BROWSER": "none"})
         await pp._ensure_packages(server.output_dir, real, server.stage, env)
         await asyncio.to_thread(write_live_files, server.stage)
+        _still_mine(server)
         server.port = _free_port()
         log = open(stage.parent / "live.log", "wb")
         kwargs: dict[str, Any] = {"start_new_session": True} if os.name != "nt" else {}
@@ -332,90 +357,125 @@ async def _start(server: Server) -> None:
             npx, "expo", "start", "--web", "--port", str(server.port), "--localhost", *(["--clear"] if fresh else []),
             cwd=str(server.stage), env=env, stdout=log, stderr=asyncio.subprocess.STDOUT, **kwargs)
         log.close()
+        if not await asyncio.to_thread(reg.update, server.short_id, server.token, port=server.port, pid=server.process.pid,
+                                       pidStarted=reg._started(server.process.pid)):
+            raise _Superseded()
         html = await _wait_until_up(server)
         await _warm(server, html)
         server.synced = pp._fingerprint(server.output_dir)
-        server.state = "ready"
+        if not await asyncio.to_thread(reg.update, server.short_id, server.token, state="ready"):
+            raise _Superseded()
         server.tasks.append(asyncio.create_task(_watch(server)))
         logger.info("[phone_live] %s is live on port %s", server.short_id, server.port)
+    except _Superseded:
+        _kill(server.process)
     except PhonePreviewError as exc:
-        server.state, server.error = "failed", str(exc)
+        reg.update(server.short_id, server.token, state="failed", error=str(exc))
         _kill(server.process)
     except Exception as exc:  # noqa: BLE001 - said as a reason, not a traceback
         logger.exception("[phone_live] start failed for %s", server.short_id)
-        server.state, server.error = "failed", f"The live preview could not start ({type(exc).__name__}: {str(exc)[:160]})."
+        reg.update(server.short_id, server.token, state="failed",
+                   error=f"The live preview could not start ({type(exc).__name__}: {str(exc)[:160]}).")
         _kill(server.process)
 
 
 async def sync(short_id: str) -> int:
-    """Bring the live copy up to date now. Returns how many files changed."""
-    server = _servers.get(short_id)
-    if server is None or server.state != "ready" or server.stage is None:
+    """Bring the live copy up to date now, from any worker. Returns how many files changed."""
+    rec = reg.live(short_id)
+    if rec is None or rec.get("state") != "ready" or not rec.get("stage"):
         return 0
-    server.last_used = time.monotonic()
-    async with server.lock:
+    reg.touch(short_id)
+    async with _sync_locks.setdefault(short_id, asyncio.Lock()):
         from services.blueprint.service import BlueprintService
-        real = pp.native_dir(server.output_dir)
-        changed = await asyncio.to_thread(sync_files, real, server.stage)
+        output_dir = rec["outputDir"]
+        stage = Path(rec["stage"])
+        changed = await asyncio.to_thread(sync_files, pp.native_dir(output_dir), stage)
         try:
-            changed += await asyncio.to_thread(_refresh_sample_data, BlueprintService.load(output_dir=server.output_dir).doc, server.stage)
+            changed += await asyncio.to_thread(_refresh_sample_data, BlueprintService.load(output_dir=output_dir).doc, stage)
         except Exception:  # noqa: BLE001 - the screens matter more than the sample data
             logger.warning("[phone_live] sample data was not refreshed", exc_info=True)
-        server.synced = pp._fingerprint(server.output_dir)
+        local = _servers.get(short_id)
+        if local is not None and local.token == rec.get("token"):
+            local.synced = pp._fingerprint(output_dir)
         return changed
 
 
 async def _watch(server: Server) -> None:
-    """Whatever changes the phone project (the editor, Smith, a build) reaches the live copy within a moment."""
-    while server.state == "ready":
+    """Whatever changes the phone project (the editor, Smith, a build) reaches the live copy within a moment. Runs in the worker that
+    started the server; a sync asked for on another worker copies the same files, which is safe to do twice."""
+    beats = 0
+    while True:
         await asyncio.sleep(WATCH_EVERY)
+        beats += 1
         try:
+            if beats % 20 == 0 and not await asyncio.to_thread(reg.mine, server.short_id, server.token):
+                return
             if pp._fingerprint(server.output_dir) != server.synced:
                 await sync(server.short_id)
+                server.synced = pp._fingerprint(server.output_dir)
         except Exception:  # noqa: BLE001 - keep watching
             logger.warning("[phone_live] sync failed", exc_info=True)
+
+
+def _drop_local(short_id: str) -> None:
+    """Forget what this worker holds for a server, and end its process here (it is the parent of it)."""
+    local = _servers.pop(short_id, None)
+    if local is None:
+        return
+    for task in local.tasks:
+        task.cancel()
+    _kill(local.process)
 
 
 async def _reap() -> None:
     while True:
         await asyncio.sleep(30)
-        now = time.monotonic()
-        for sid, server in list(_servers.items()):
-            if server.state == "failed" or (server.state == "ready" and now - server.last_used > IDLE_SECONDS):
-                logger.info("[phone_live] stopping %s (%s)", sid, "failed" if server.state == "failed" else "idle")
-                stop(sid)
+        try:
+            await asyncio.to_thread(reg.reap, IDLE_SECONDS)
+            for sid, local in list(_servers.items()):         # one the registry no longer holds as ours (stopped, evicted, ended)
+                if not reg.mine(sid, local.token):
+                    _drop_local(sid)
+        except Exception:  # noqa: BLE001 - the reaper never takes a worker down
+            logger.warning("[phone_live] reap failed", exc_info=True)
+
+
+def _ensure_reaper() -> None:
+    """Every worker runs one, so what a worker that died left behind is cleared by whichever worker is still there."""
+    global _reaper
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    if _reaper is None or _reaper.done() or _reaper.get_loop() is not loop:
+        _reaper = loop.create_task(_reap())
 
 
 def start(output_dir: str | Path, short_id: str) -> dict[str, Any]:
-    """Start the live preview if it is not running; answers where it stands. Must be called from the running event loop."""
-    global _reaper
-    server = _servers.get(short_id)
-    if server is not None and server.state in ("starting", "ready") and (server.process is None or server.process.returncode is None):
-        server.last_used = time.monotonic()
+    """Start the live preview if it is not running anywhere; answers where it stands. Must be called from the running event loop.
+
+    Under the registry's lock a server that is live or starting (on this worker or another) is used and nothing is started or deleted;
+    otherwise the least recently used server (over all workers) is ended if the cap is reached, and this worker starts it."""
+    _ensure_reaper()
+    rec, created = reg.claim(short_id, output_dir, cap=MAX_SERVERS)
+    if not created:
         return status(short_id)
-    if server is not None:
-        stop(short_id)
-    # One more than the limit stops the one used least recently.
-    while len(_servers) >= MAX_SERVERS:
-        stop(min(_servers, key=lambda s: _servers[s].last_used))
-    server = Server(short_id=short_id, output_dir=str(output_dir))
+    _drop_local(short_id)                  # an earlier server of this worker's, failed or replaced
+    server = Server(short_id=short_id, output_dir=str(output_dir), token=rec["token"])
     _servers[short_id] = server
     server.tasks.append(asyncio.create_task(_start(server)))
-    if _reaper is None or _reaper.done():
-        _reaper = asyncio.create_task(_reap())
     return status(short_id)
 
 
 def stop(short_id: str) -> None:
-    server = _servers.pop(short_id, None)
-    if server is None:
-        return
-    server.state = "failed"
-    for task in server.tasks:
-        task.cancel()
-    _kill(server.process)
+    """Stop the live preview, from any worker."""
+    _drop_local(short_id)
+    rec = reg.get(short_id)
+    if rec is not None:
+        reg.end(rec, "stopped")
 
 
 def stop_all() -> None:
-    for sid in list(_servers):
-        stop(sid)
+    """This worker is going away: end the servers IT started (another worker's are its own)."""
+    for sid, local in list(_servers.items()):
+        _drop_local(sid)
+        reg.release(sid, local.token)

@@ -55,6 +55,27 @@ above) and the rewritten `..%2F` form was served (HTTP 200, 4.7 MB, patched sock
 kept Metro alive; a file change reached the live-update socket as an `update` of 2 modules in 0.9 s, through the backend's watcher and Linux file
 watching; stopping left no `expo` process (process-group kill). Not run: the full backend image behind Caddy.
 
+## Two workers
+
+The backend runs `uvicorn --workers 2`: two copies of the program, each with its own memory, answering the same port. A request can land on
+either. The list of running servers used to be in one copy's memory, so a start on worker A was invisible to worker B (503 "not running",
+a second server started, the working folder deleted under the first one's Metro, and a cap of 3 that was 3 per worker).
+
+It is now a small file per project (`services/phone_live_registry.py`, in `dev_servers.DIR/phone-live`, shared by every worker):
+`{id, outputDir, state, port, pid, stage, owner, token}`. Its modified time is "last used".
+
+* **Starting:** `claim` takes a lock, looks at the file, and starts only if no live server or start in progress is there. It also ends the
+  least recently used server of ANY worker when the cap is reached. A second start, from any worker, changes nothing.
+* **Using:** any worker reads the port from the file and passes the request to `127.0.0.1:port` itself. The status, "unreachable", sync
+  and stop work from any worker. Only the worker that claimed a record (its `token`) writes its progress.
+* **A worker that dies:** its servers have nothing watching their files. Every worker's reaper ends what is failed, idle (`FORGE_PHONE_LIVE_IDLE`),
+  or left by a worker that is gone; the next start brings it back.
+* **Builds of the built picture** (`phone_preview.start`) hold a file lock per project, so one runs at a time over all workers, and a build
+  cut off with its worker is seen as cut off.
+* **Checked with real processes** (2026-10-23): worker A started FocusFlow's preview; worker B (another process) saw it ready on the same
+  port, its own start changed nothing, it reached Metro (200), synced, and stopped it.
+* **Not covered:** Linux (the registry uses `/proc` start times and process groups there; Windows uses `taskkill`), and the full backend image.
+
 ## Fail safe
 
 The editor falls back to the built picture (and its Redraw button) whenever the live preview is not ready: while it starts (about 30 s the

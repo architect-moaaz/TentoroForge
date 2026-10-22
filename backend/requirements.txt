@@ -123,3 +123,5 @@ openpyxl>=3.1.0
 tzdata>=2024.1
 # Requirements documents attached as PDF (services/document_text.py). Pure Python.
 pypdf>=4.2.0
+# The live phone preview carries its two update sockets with it (services/phone_live_proxy.py); uvicorn[standard] brings it too, but this imports it directly.
+websockets>=13

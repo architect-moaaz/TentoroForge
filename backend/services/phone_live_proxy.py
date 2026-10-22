@@ -25,7 +25,7 @@ _ALLOWED = re.compile(
       | .+\.bundle$                                   # the app (its path climbs out of the project when the packages are linked)
       | [^/]*\.map$
       | assets(?:/.*)?$                                # fonts and pictures: `/assets/?unstable_path=…` names the file in its query
-      | _expo/.+
+      | _expo/static/.+
       | [^/]+\.(?:png|jpe?g|gif|svg|ico|ttf|otf|woff2?|json|js|css)$
     )""", re.X)
 #: The two sockets the page opens (patched to carry the path prefix).

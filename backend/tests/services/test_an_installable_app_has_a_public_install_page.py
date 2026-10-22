@@ -46,4 +46,4 @@ def test_the_install_page_is_open_to_someone_who_has_not_signed_in(tmp_path):
 
 def test_the_scaffold_agrees_before_any_projection():
     scaffold = Path(__file__).resolve().parents[2] / "templates" / "app-foundation" / "src" / "middleware.ts"
-    assert "offline|install|api/auth" in scaffold.read_text(encoding="utf-8")
+    assert "offline(?:/|$)|install(?:/|$)|api/auth(?:/|$)" in scaffold.read_text(encoding="utf-8")

@@ -461,7 +461,7 @@ def _nothing_to_open(doc: dict) -> bool:
     (FocusFlow, a no-accounts brief, 2026-10-22). Such an application has no sign-in."""
     sec = doc.get("security") if isinstance(doc.get("security"), dict) else {}
     pages = [p for p in _live(doc.get("pages")) if not is_auth_page(p)]
-    return (bool(pages) and all(str(p.get("access") or "public") == "public" for p in pages)
+    return (bool(pages) and all(str(p.get("access") or "authenticated") == "public" for p in pages)
             and not _live(doc.get("roles")) and not sec.get("rbac") and not sec.get("protectedRoutes")
             and account_entity(doc) is None)
 

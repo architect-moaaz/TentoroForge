@@ -129,7 +129,7 @@ def status(output_dir: str | Path, short_id: str) -> dict:
         data = json.loads(_status_path(output_dir).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         data = {}
-    running = short_id in _jobs and not _jobs[short_id].done()
+    running = (short_id in _jobs and not _jobs[short_id].done()) or _build_running(output_dir)
     state = "building" if running else data.get("state", "none")
     if state == "building" and not running:
         state = "failed"          # the server restarted mid-build
@@ -506,7 +506,8 @@ async def _build(output_dir: str, short_id: str) -> None:
         fresh = not stage_dir.exists()
         staged = await asyncio.to_thread(_stage_here, real, stage_dir)
         await asyncio.to_thread(_prepare_copy, staged, doc, short_id)
-        env = {**os.environ, "CI": "1", "EXPO_NO_TELEMETRY": "1", "EXPO_NO_GIT_STATUS": "1"}
+        from services.phone_env import phone_env
+        env = phone_env(output_dir, CI="1", EXPO_NO_TELEMETRY="1", EXPO_NO_GIT_STATUS="1")
         await _ensure_packages(output_dir, real, staged, env)
         _write_status(output_dir, step="Drawing the screens")
         out = work_dir(output_dir) / "building"
@@ -527,12 +528,63 @@ async def _build(output_dir: str, short_id: str) -> None:
     # The copy is kept: the next redraw is made in the same place (see `_stage_here`).
 
 
+def _build_lock_path(output_dir: str | Path) -> Path:
+    return work_dir(output_dir) / "build.lock"
+
+
+def _take_build_lock(output_dir: str | Path) -> Any:
+    """The project's build lock, or None when a build already holds it (in this worker or another).
+
+    THE LIST OF BUILDS WAS IN ONE WORKER'S MEMORY. With two backend workers a second build could start in the other one and write into
+    the same working folder (PR #28 review, 2026-10-22). A file lock is on disk, so it is the same for every worker, and the system
+    releases it if the worker holding it dies: a build that was cut off is then seen as cut off, not as running."""
+    from services.dev_servers import _try_lock
+
+    path = _build_lock_path(output_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fh = open(path, "a+")                                  # noqa: SIM115 - held until the build ends
+    if _try_lock(fh):
+        return fh
+    fh.close()
+    return None
+
+
+def _release_build_lock(fh: Any) -> None:
+    from services.dev_servers import _unlock
+
+    try:
+        _unlock(fh)
+    finally:
+        fh.close()
+
+
+def _build_running(output_dir: str | Path) -> bool:
+    """Whether a build holds the lock right now, whichever worker it runs in."""
+    path = _build_lock_path(output_dir)
+    if not path.exists():
+        return False
+    fh = _take_build_lock(output_dir)
+    if fh is None:
+        return True
+    _release_build_lock(fh)
+    return False
+
+
+async def _build_locked(output_dir: str, short_id: str, lock: Any) -> None:
+    try:
+        await _build(output_dir, short_id)
+    finally:
+        _release_build_lock(lock)
+
+
 def start(output_dir: str | Path, short_id: str) -> dict:
-    """Begin a build in the background (one at a time per project) and say where it stands."""
+    """Begin a build in the background (one at a time per project, over all workers) and say where it stands."""
     if not has_screens(output_dir):
         raise PhonePreviewError("This app has no phone screens to preview.")
     job = _jobs.get(short_id)
     if job is None or job.done():
-        _write_status(output_dir, state="building", step="Starting", error="")
-        _jobs[short_id] = asyncio.create_task(_build(str(output_dir), short_id))
+        lock = _take_build_lock(output_dir)
+        if lock is not None:                               # None: a build is running (here or in another worker)
+            _write_status(output_dir, state="building", step="Starting", error="")
+            _jobs[short_id] = asyncio.create_task(_build_locked(str(output_dir), short_id, lock))
     return status(output_dir, short_id)

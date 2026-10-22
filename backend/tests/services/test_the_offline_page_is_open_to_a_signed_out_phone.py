@@ -34,11 +34,12 @@ def test_the_offline_page_is_outside_the_gate(tmp_path):
 def test_a_route_that_only_starts_with_the_word_is_still_gated(tmp_path):
     project_middleware(DOC, tmp_path)
     gate = re.compile(_matcher(tmp_path).replace("\\\\", "\\"))
-    # NOTE the negative lookahead is a prefix test, as it already is for login and signup: pages are named by the app,
-    # and an app that names a page /offline-orders would be opened by it. Say so rather than hide it.
-    assert not gate.match("/offline-orders")
+    # Each open entry ends where a piece of the path ends (PR #28 review, 2026-10-22): an app that names a page
+    # /offline-orders is gated like any other.
+    assert gate.match("/offline-orders")
+    assert not gate.match("/offline") and not gate.match("/offline/x")
 
 
 def test_the_scaffold_agrees_before_any_projection():
     scaffold = Path(__file__).resolve().parents[2] / "templates" / "app-foundation" / "src" / "middleware.ts"
-    assert "set-password|offline|install|api/auth" in scaffold.read_text()
+    assert "set-password(?:/|$)|offline(?:/|$)|install(?:/|$)|api/auth(?:/|$)" in scaffold.read_text()

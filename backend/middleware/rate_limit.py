@@ -9,6 +9,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from middleware.phone_paths import is_phone_picture
+
 logger = logging.getLogger(__name__)
 
 
@@ -63,7 +65,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # UI when the user only pinged the tab a few times. Skip.
         p = request.url.path
         # The phone preview's built screens: a page is a dozen files at once, and an iframe has no way to wait and retry.
-        if "/phone/serve" in p or "/phone/live" in p:
+        if is_phone_picture(p):
             return await call_next(request)
         if p.endswith("/events") or p.endswith("/verify/events") or p.endswith("/stream"):
             return await call_next(request)

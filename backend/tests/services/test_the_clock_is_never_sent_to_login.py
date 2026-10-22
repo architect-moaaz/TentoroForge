@@ -39,4 +39,4 @@ def test_the_tick_and_the_webhooks_are_outside_the_gate(tmp_path):
 
 def test_the_scaffold_agrees_before_any_projection():
     scaffold = Path(__file__).resolve().parents[2] / "templates" / "app-foundation" / "src" / "middleware.ts"
-    assert "api/cron|api/webhooks" in scaffold.read_text()
+    assert "api/cron(?:/|$)|api/webhooks(?:/|$)" in scaffold.read_text()

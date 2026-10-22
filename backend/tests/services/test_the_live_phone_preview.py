@@ -8,6 +8,7 @@ real WebSocket) so no phone toolchain is needed."""
 from __future__ import annotations
 
 import asyncio
+import os
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -201,25 +202,47 @@ def test_the_previews_own_files_are_never_overwritten_or_removed(tmp_path):
 
 
 # ---- starting, using, and stopping -----------------------------------------------------------------------------------------
+# Which servers run is on disk (`phone_live_registry`), the same for every backend worker. These tests keep it in a temporary folder and
+# never end a real process: `reg.kill_pid` is replaced by a list.
 
-class _Process:
-    def __init__(self, code=None):
-        self.returncode = code
-        self.pid = 0
+import subprocess
+import sys
+import time
+
+from services import phone_live_registry as reg
 
 
 @pytest.fixture(autouse=True)
-def _clean():
+def _clean(tmp_path, monkeypatch):
+    monkeypatch.setattr(reg, "DIR", tmp_path / "phone-live")
+    killed: list[int] = []
+    monkeypatch.setattr(reg, "kill_pid", lambda pid: killed.append(int(pid)))
     pl._servers.clear()
-    yield
+    pl._sync_locks.clear()
+    pl._reaper = None
+    yield killed
     pl._servers.clear()
 
 
-def _server(short_id: str, state="ready", port=1234, used=0.0, code=None) -> "pl.Server":
-    s = pl.Server(short_id=short_id, output_dir="x", state=state, port=port, process=_Process(code))
-    s.last_used = used
-    pl._servers[short_id] = s
-    return s
+def _dead_pid() -> int:
+    """The number of a process that has finished."""
+    done = subprocess.Popen([sys.executable, "-c", "pass"])
+    done.wait()
+    return done.pid
+
+
+def _server(short_id: str, state="ready", port=1234, used=None, code=None, owner=None) -> dict:
+    """A record as another worker would have written it. `code` set: the server's process has finished. `owner`: a worker's number."""
+    me = os.getpid()
+    pid = _dead_pid() if code is not None else me
+    rec = {"id": short_id, "outputDir": "x", "state": state, "error": "", "port": port if state == "ready" else 0, "pid": pid if state == "ready" else 0,
+           "pidStarted": reg._started(pid) if state == "ready" else None, "stage": "", "owner": owner or me,
+           "ownerStarted": reg._started(owner or me), "token": f"token-{short_id}", "startedAt": time.time()}
+    reg.DIR.mkdir(parents=True, exist_ok=True)
+    reg._write(reg._path(short_id), rec)
+    if used is not None:
+        os.utime(reg._path(short_id), (used, used))
+    return rec
 
 
 def test_nothing_runs_until_it_is_asked_for():
@@ -239,16 +262,19 @@ def test_a_server_whose_process_died_says_so():
     assert pl.status("dead") == {"state": "failed", "path": "/api/projects/dead/phone/live", "error": "The live preview stopped."}
 
 
-def test_using_a_server_counts_as_use(monkeypatch):
-    s = _server("up", used=0.0)
+def test_using_a_server_counts_as_use():
+    _server("up", used=time.time() - 1000)
+    before = reg.get("up")["used"]
     pl.port_of("up")
-    assert s.last_used > 0.0
+    assert reg.get("up")["used"] > before
 
 
-def test_stopping_forgets_it_and_cancels_what_it_was_doing(monkeypatch):
-    killed = []
-    monkeypatch.setattr(pl, "_kill", lambda process: killed.append(process))
-    s = _server("up")
+def test_stopping_forgets_it_and_cancels_what_it_was_doing(monkeypatch, _clean):
+    killed_here = []
+    monkeypatch.setattr(pl, "_kill", lambda process: killed_here.append(process))
+    rec = _server("up")
+    s = pl.Server(short_id="up", output_dir="x", token=rec["token"], process=object())
+    pl._servers["up"] = s
 
     class T:
         cancelled = False
@@ -258,20 +284,19 @@ def test_stopping_forgets_it_and_cancels_what_it_was_doing(monkeypatch):
     t = T()
     s.tasks.append(t)
     pl.stop("up")
-    assert "up" not in pl._servers and t.cancelled and len(killed) == 1
+    assert "up" not in pl._servers and t.cancelled and len(killed_here) == 1
+    assert reg.get("up") is None and _clean == [rec["pid"]], "its record is gone and its process was ended"
     pl.stop("up")          # twice is fine
 
 
 def test_a_new_server_beyond_the_limit_stops_the_one_used_least_recently(monkeypatch):
-    stopped = []
-    monkeypatch.setattr(pl, "stop", lambda sid: (stopped.append(sid), pl._servers.pop(sid, None)))
     monkeypatch.setattr(pl, "MAX_SERVERS", 2)
 
     async def never(server):
         await asyncio.sleep(3600)
     monkeypatch.setattr(pl, "_start", never)
-    _server("old", used=1.0)
-    _server("newer", used=5.0)
+    _server("old", used=time.time() - 500)
+    _server("newer", used=time.time() - 100)
 
     async def go():
         pl.start("/tmp/x", "third")
@@ -280,7 +305,7 @@ def test_a_new_server_beyond_the_limit_stops_the_one_used_least_recently(monkeyp
         if pl._reaper:
             pl._reaper.cancel()
     asyncio.run(go())
-    assert stopped == ["old"]
+    assert reg.get("old") is None and reg.get("newer") is not None and reg.get("third") is not None
 
 
 def test_asking_again_while_it_starts_does_not_start_a_second(monkeypatch):
@@ -477,21 +502,21 @@ def test_the_socket_tells_the_dev_server_the_address_it_built_the_bundle_for(dev
 
 
 def test_a_dev_server_that_stopped_is_not_ready_and_is_not_asked(monkeypatch):
-    s = _server("dead", code=1)
+    _server("dead", code=1)
     assert pl.port_of("dead") is None
-    assert s.state == "failed" and s.error == "The live preview stopped."
+    assert pl.status("dead")["state"] == "failed" and pl.status("dead")["error"] == "The live preview stopped."
 
 
 def test_a_dev_server_that_stops_answering_is_marked_so_the_editor_shows_the_build(monkeypatch):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
     from routers.phone_live import router
-    s = _server("abc", port=1)                     # nothing listens on port 1
+    _server("abc", port=1)                         # nothing listens on port 1
     app = FastAPI()
     app.include_router(router)
     r = TestClient(app).get("/api/projects/abc/phone/live/")
     assert r.status_code == 503 and "not answering" in r.json()["detail"]
-    assert s.state == "failed" and pl.status("abc")["state"] == "failed"
+    assert reg.get("abc")["state"] == "failed" and pl.status("abc")["state"] == "failed"
 
 
 # ---- Linux writes the climb out of the project with plain slashes (found by reasoning, 2026-10-22) ------------------------------

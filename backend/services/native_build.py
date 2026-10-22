@@ -374,9 +374,11 @@ def project_id(native_dir: Path) -> str:
 async def _npm_run(argv: list[str], cwd: str, timeout: float) -> tuple[int, str]:
     """`npm` as a subprocess: its return code and the end of what it said. (`npm` is `npm.cmd` on Windows; a bare name
     is not found there.)"""
+    from services.phone_env import phone_env
+
     exe = shutil.which(argv[0]) or argv[0]
     proc = await asyncio.create_subprocess_exec(
-        exe, *argv[1:], cwd=cwd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+        exe, *argv[1:], cwd=cwd, env=phone_env(Path(cwd).parent), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
     try:
         out, _ = await asyncio.wait_for(proc.communicate(), timeout)
     except asyncio.TimeoutError:
