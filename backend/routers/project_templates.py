@@ -18,6 +18,8 @@ import hashlib
 import uuid
 from typing import Any
 
+import logging
+
 from fastapi import (
     APIRouter,
     BackgroundTasks,
@@ -43,6 +45,7 @@ from services import project_templates as templates
 from services import template_gallery as gallery
 from services.project_service import create_project, get_project_with_auth
 
+logger = logging.getLogger(__name__)
 router = APIRouter(tags=["project-templates"])
 
 
@@ -68,7 +71,7 @@ class UseTemplateRequest(BaseModel):
         # Spaces are not a name: the length was checked before they were trimmed.
         v = v.strip()
         if not v:
-            raise ValueError("give the new app a name")
+            raise ValueError("Give the new app a name.")
         return v
 
 
@@ -135,7 +138,7 @@ async def _managed(db: AsyncSession, template_id: str, user: PlatformUser, reque
 def _editable(row: TemplateListing | None) -> None:
     if gallery.status_of(row) not in gallery.EDITABLE:
         raise HTTPException(status_code=409, detail=(
-            "It is in the Gallery as it was approved. Save a new version of the app to change it."))
+            "This version is live in the Templates Gallery, so it can't be changed. Save the app as a template again to make a new version."))
 
 
 async def _cards(db: AsyncSession, pairs: list[tuple[dict, TemplateListing | None]],
@@ -211,7 +214,7 @@ async def list_org_templates(org_id: uuid.UUID, request: Request,
                              user: PlatformUser = Depends(get_current_user),
                              db: AsyncSession = Depends(get_db)):
     if not await gallery.membership(db, str(org_id), user):
-        raise HTTPException(status_code=403, detail="Not a member of this organization")
+        raise HTTPException(status_code=403, detail="You are not a member of this organisation.")
     metas = templates.list_for_org(str(org_id))
     rows = await gallery.listings(db, [m["id"] for m in metas])
     return {"templates": await _cards(db, [(m, rows.get(m["id"])) for m in metas],
@@ -233,6 +236,11 @@ async def save_project_as_template(project_id: uuid.UUID, req: SaveTemplateReque
                               description=req.description, category=req.category)
     except templates.TemplateError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except ValueError as exc:  # BlueprintInvalid: the app's own definition does not hold together
+        logger.warning("[templates] %s could not be saved as a template: %s", project.id, exc)
+        raise HTTPException(status_code=400, detail=(
+            "This app's definition has a problem, so it can't be saved as a template yet. "
+            "Ask Smith to check the app, then try again."))
     who = await gallery.viewer(db, meta, user, request.state)
     return await _card(db, meta, None, who)
 
@@ -566,7 +574,15 @@ async def rate_template(template_id: str, req: RateRequest, request: Request,
 @router.delete("/api/project-templates/{template_id}/reviews/mine", status_code=204)
 async def unrate_template(template_id: str, request: Request, user: PlatformUser = Depends(get_current_user),
                           db: AsyncSession = Depends(get_db)):
-    meta, _row, _who = await _seen(db, template_id, user, request)
+    try:
+        meta, _row, _who = await _seen(db, template_id, user, request)
+    except HTTPException as exc:
+        # The template is gone or out of sight; the person's own rating of it
+        # is still theirs to take back.
+        if exc.status_code == 404 and await gallery.unrate_gone(db, template_id, user):
+            await db.commit()
+            return
+        raise
     if not await gallery.unrate(db, meta, user):
         raise HTTPException(status_code=404, detail="You have not rated it")
     await db.commit()
@@ -617,13 +633,17 @@ async def create_from_project_template(org_id: uuid.UUID, req: UseTemplateReques
     any state, and everyone's in the Gallery. A Tentoro admin's copy of one
     under review is a test copy — kept, never counted as a use."""
     if not await gallery.membership(db, str(org_id), user):
-        raise HTTPException(status_code=403, detail="Not a member of this organization")
+        raise HTTPException(status_code=403, detail="You are not a member of this organisation.")
     meta = templates.get(req.template_id)
     row = await gallery.listing(db, req.template_id) if meta else None
     who = await gallery.viewer(db, meta, user, request.state) if meta else None
     if not meta or who is None or not gallery.may_use(gallery.status_of(row), who):
         raise HTTPException(status_code=404, detail="Template not found")
-    is_review = who.is_admin and not who.in_org and gallery.status_of(row) != gallery.APPROVED
+    # WHAT THE GALLERY COUNTS IS OTHER TEAMS STARTING FROM IT. A builder's own
+    # organisation using its template, or a Tentoro admin trying one, is not a
+    # use: counted, a builder could lift their template up the "popular" order
+    # by using it themselves.
+    is_review = who.in_org or who.is_admin
     project = await create_project(org_id=org_id, owner_id=user.id, name=req.name.strip(),
                                    description=meta.get("description") or "", db=db)
     from routers.blueprint_generate import _output_dir

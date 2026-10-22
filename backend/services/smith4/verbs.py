@@ -861,6 +861,11 @@ def save_as_template(ctx: Ctx, u: dict) -> Outcome:
                               name=_s(u, "new_value") or "")
     except templates.TemplateError as exc:
         return Outcome(status="needs_user", said=str(exc))
+    except ValueError as exc:  # BlueprintInvalid
+        logger.warning("[smith] save as template: %s", exc)
+        return Outcome(status="needs_user", said=(
+            "This app's definition has a problem, so I could not save it as a template. Ask me to "
+            "check the app, then try again."))
     held = templates.counted((meta.get("summary") or {}).get("counts") or {},
                              ("pages", "entities", "workflows"))
     version = int(meta.get("version") or 1)

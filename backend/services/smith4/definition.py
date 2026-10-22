@@ -207,6 +207,9 @@ def use_template(ctx: Ctx, args: dict) -> dict:
                                            keep_look=_truthy(args.get("keep_look"), True))
     except templates.TemplateError as exc:
         return _finding(str(exc))
+    except ValueError as exc:  # BlueprintInvalid — the template's definition does not hold together
+        return _finding(f"The template's definition could not be used as it is ({str(exc)[:200]}). "
+                        "Tell the person plainly and offer to build something like it instead.")
     from services.blueprint import documents as documents_mod
     documents_mod.store(ctx.out, [prepared["document"]["text"]])
     return define_application(ctx, {"brief": prepared["brief"]})

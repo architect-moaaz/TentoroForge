@@ -81,7 +81,7 @@ def test_saving_keeps_the_definition_ids_and_brand_beside_its_meta(saved, output
 
 def test_a_template_needs_a_definition_to_be_taken_from(output_base):
     empty = _project(output_base, "empty001", defined=False)
-    with pytest.raises(templates.TemplateError, match="no definition"):
+    with pytest.raises(templates.TemplateError, match="isn't defined yet"):
         templates.save(output_dir=empty, org_id=ORG)
     assert not (output_base / "_templates").exists() or not any((output_base / "_templates").iterdir())
 
@@ -343,3 +343,43 @@ def test_counts_are_said_the_way_a_person_says_them():
         "3 screens, 1 kind of record, 4 processes, 1 role"
     assert templates.counted({"pages": 1, "entities": 2}) == "1 screen, 2 kinds of record"
     assert templates.counted({}) == ""
+
+
+# --------------------------------------------------------------------------- #
+# A new version starts from the last; a copy of another team's is said so
+# --------------------------------------------------------------------------- #
+
+def _png() -> bytes:
+    import io
+
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", (64, 40), (30, 90, 200)).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def test_a_new_version_keeps_the_last_ones_name_description_category_and_pictures(saved, source):
+    templates.update(saved["id"], description="A hiring desk for recruiters: roles, candidates and interviews.",
+                     category="HR")
+    templates.add_screenshot(saved["id"], _png(), caption="The board")
+    v2 = templates.save(output_dir=source, org_id=ORG, created_by="u1", source_project_id="p1")
+    assert v2["version"] == 2 and v2["name"] == "Hiring desk"
+    assert v2["description"].startswith("A hiring desk for recruiters") and v2["category"] == "HR"
+    assert [s["caption"] for s in v2["screenshots"]] == ["The board"]
+    assert templates.screenshot_file(v2["id"], v2["screenshots"][0]["id"]) is not None
+    v3 = templates.save(output_dir=source, org_id=ORG, source_project_id="p1", name="Hiring desk 3")
+    assert v3["name"] == "Hiring desk 3", "what the builder gives now wins"
+
+
+def test_an_unchanged_copy_of_another_teams_template_is_not_shared_as_ones_own(saved, output_base):
+    from services import template_gallery as gallery
+    theirs = _project(output_base, "copy0001", defined=False)
+    templates.stage(saved["id"], theirs)
+    templates.use_exact(theirs, app_name="Our desk")
+    mine = templates.save(output_dir=theirs, org_id=OTHER_ORG, source_project_id="p2")
+    assert mine["based_on"]["template_id"] == saved["id"] and mine["based_on"]["same"] is True
+    own = next(c for c in gallery.checks(mine) if c["key"] == "own_work")
+    assert own["ok"] is False and own["blocking"] and "exact copy" in own["detail"]
+    # The organisation's own template, saved again, is its own work.
+    again = templates.save(output_dir=saved and output_base / "src00001", org_id=ORG, source_project_id="p1")
+    assert not any(c["key"] == "own_work" for c in gallery.checks(again))

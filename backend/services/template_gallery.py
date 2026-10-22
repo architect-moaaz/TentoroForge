@@ -290,8 +290,8 @@ def checks(meta: dict) -> list[dict]:
     counts = facts.get("counts") or {}
     check("screens", counts.get("pages", 0) > 0 and counts.get("entities", 0) > 0,
           "It has screens and the records they keep",
-          "Finish the app's screens and data model with Smith first; a template of a "
-          "requirements list is not something another team can use yet.")
+          "Finish the app's screens and data with Smith first — another team needs a working "
+          "app to start from.")
     check("designed", bool(facts.get("designed")), "Every screen has been designed and built",
           "Some screens have never been built. A copy will build them, which takes longer "
           "and spends AI credit.", blocking=False)
@@ -305,9 +305,24 @@ def checks(meta: dict) -> list[dict]:
     check("screenshots", shots >= 1, "It has at least one screenshot",
           "Add a screenshot — upload one, or add the app's own screens.")
     leaks = scan_secrets(meta["id"])
+    in_text = [x for x in leaks if "name or description" in x]
     check("secrets", not leaks, "No keys or passwords are in it",
-          "Something shaped like a live key is in " + "; ".join(leaks) +
-          ". Remove it from the app, then save the template again.")
+          "Something shaped like a live key is in " + "; ".join(leaks) + ". "
+          + ("Remove it from the template's name or description." if in_text and len(in_text) == len(leaks)
+             else "Remove it from the app, then save the template again."))
+    # ANOTHER TEAM'S TEMPLATE, SHARED AS ONE'S OWN. An app started from a
+    # Gallery template and left exactly as it was is that team's work: it is
+    # not submitted under another name. Changed, it may be — and the reviewer
+    # sees what it started from.
+    based = meta.get("based_on") or {}
+    if based and based.get("org_id") and str(based.get("org_id")) != str(meta.get("org_id")):
+        whose = f"“{based.get('name')}”" + (f" by {based.get('creator')}" if based.get("creator") else "")
+        check("own_work", based.get("same") is not True, f"It is more than a copy of {whose}",
+              f"This app is an exact copy of {whose} from the Templates Gallery. Change it with Smith "
+              "before sharing it as your own.")
+        if based.get("same") is not True:
+            check("started_from", True, f"Started from {whose} in the Templates Gallery, then changed",
+                  blocking=False)
     return out
 
 
@@ -385,7 +400,7 @@ def _check_pricing(model: str, price_cents: int | None,
     if model == "free":
         return "free", None, None
     if model != "paid":
-        raise GalleryError("A template is free or paid.")
+        raise GalleryError("Choose Free or Paid.")
     # Kept ready for paid templates; nothing can be charged for yet.
     raise GalleryError("Paid templates are coming soon — submit it as free for now.")
 
@@ -410,7 +425,7 @@ async def submit(db: AsyncSession, meta: dict, who: Viewer, *, pricing_model: st
                             APPROVED: "It is already in the Gallery. Save a new version of the app "
                                       "to send a change for review.",
                             SUPERSEDED: "A newer version of it is in the Gallery."}
-                           .get(row.status, "It cannot be submitted now."), 409)
+                           .get(row.status, "This template can't be sent for review in its current state."), 409)
     # ONE REQUEST PER APP. An older version cannot be sent while a newer one
     # waits or is live (approving it would change nothing); a newer one takes
     # the place of an older request still waiting.
@@ -577,7 +592,9 @@ async def stats(db: AsyncSession, lineages: list[str]) -> dict[str, dict]:
         return out
     for ln, n in (await db.execute(
             select(TemplateUse.lineage, func.count()).where(
-                TemplateUse.lineage.in_(lineages), TemplateUse.is_review.is_(False))
+                TemplateUse.lineage.in_(lineages), TemplateUse.is_review.is_(False),
+                # A use whose app was deleted since is not one any more.
+                TemplateUse.project_id.isnot(None))
             .group_by(TemplateUse.lineage))).all():
         out[ln]["uses"] = int(n)
     for ln, avg, n in (await db.execute(
@@ -744,10 +761,35 @@ async def moderate(db: AsyncSession, review_id: Any, admin: PlatformUser, reason
 
 async def forget(db: AsyncSession, template_id: str) -> None:
     """A deleted template leaves the review queue and the Gallery. Its uses
-    and ratings stay with the lineage: a newer version keeps them."""
+    and ratings stay with the lineage while another version of the app is
+    still there — a newer version keeps them; with the LAST version gone they
+    go too, so a template saved from the app later does not start with the
+    old one's ratings and uses (and a rating nobody could remove)."""
+    from sqlalchemy import delete as sa_delete
+    meta = templates.get(template_id)
     row = await listing(db, template_id)
     if row is not None:
         await db.delete(row)
+    if meta is None:
+        return
+    lineage = templates.lineage_of(meta)
+    others = [m for m in templates.list_for_org(str(meta.get("org_id")))
+              if str(m.get("id")) != str(template_id) and templates.lineage_of(m) == lineage]
+    if not others:
+        await db.execute(sa_delete(TemplateReview).where(TemplateReview.lineage == lineage))
+        await db.execute(sa_delete(TemplateUse).where(TemplateUse.lineage == lineage))
+
+
+async def unrate_gone(db: AsyncSession, template_id: str, user: PlatformUser) -> bool:
+    """A person's own rating of a template they can no longer see (deleted, or
+    taken out of the Gallery) — still theirs to remove."""
+    mine = (await db.execute(select(TemplateReview).where(
+        TemplateReview.template_id == str(template_id), TemplateReview.user_id == user.id))).scalars().all()
+    if not mine:
+        return False
+    for r in mine:
+        await db.delete(r)
+    return True
 
 
 __all__ = [
@@ -755,5 +797,5 @@ __all__ = [
     "SUPERSEDED", "GalleryError", "Outbox", "Viewer", "admins", "blocking_failures", "cancel",
     "checks", "decide", "forget", "moderate", "history", "is_admin", "listing", "listings", "may_manage", "may_rate",
     "may_use", "may_view", "membership", "org_names", "people", "published", "rate", "record_use",
-    "reviews", "scan_secrets", "stats", "status_of", "submit", "unpublish", "unrate", "viewer",
+    "reviews", "scan_secrets", "stats", "status_of", "submit", "unpublish", "unrate", "unrate_gone", "viewer",
 ]

@@ -292,6 +292,60 @@ def snapshot(doc: dict) -> dict:
     return out
 
 
+def _carry_screenshots(prev: dict, root: Path) -> list[dict]:
+    """The last version's pictures, copied into the new one (the builder can
+    replace them before submitting)."""
+    out = []
+    for shot in prev.get("screenshots") or []:
+        src = _dir(str(prev.get("id"))) / SCREENSHOTS_DIR / f"{shot.get('id')}.{shot.get('ext')}"
+        if not src.is_file():
+            continue
+        dst = root / SCREENSHOTS_DIR / src.name
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, dst)
+        out.append(dict(shot))
+    return out
+
+
+def shape(doc: dict) -> str:
+    """What an app IS, as a fingerprint: its screens, records and fields,
+    workflows and their steps, rules and roles — not its version, history or
+    build bookkeeping. Two apps with the same shape are the same app."""
+    import hashlib
+
+    def ids(rows: Any, *keys: str) -> list:
+        return sorted(json.dumps([r.get(k) for k in keys], sort_keys=True, default=str) for r in _live(rows))
+    data = doc.get("data") or {}
+    ents = sorted(json.dumps([e.get("name"), sorted(str(f.get("name")) for f in e.get("fields") or [] if isinstance(f, dict))],
+                             default=str) for e in _live(data.get("entities")))
+    flows = sorted(json.dumps([w.get("name"), [s.get("key") for s in w.get("steps") or [] if isinstance(s, dict)]],
+                              default=str) for w in _live(doc.get("workflows")))
+    body = json.dumps([ids(doc.get("pages"), "route", "title"), ents, flows,
+                       ids(doc.get("businessRules"), "when", "then", "otherwise", "table"),
+                       ids(doc.get("roles"), "name")], sort_keys=True, default=str)
+    return hashlib.sha256(body.encode()).hexdigest()
+
+
+def _based_on(output_dir: Path, doc: dict) -> dict | None:
+    """The template this app was started from, and whether it is still the
+    same app — so a reviewer sees where it came from, and a copy of another
+    team's template is not shared as someone else's own."""
+    src = source_of(output_dir)
+    if not src or not src.get("template_id") or src.get("status") == PENDING:
+        return None
+    orig = get(str(src["template_id"]))
+    same = None
+    if orig is not None:
+        try:
+            same = shape(load_definition(str(orig["id"]))) == shape(doc)
+        except Exception:  # noqa: BLE001 — unknown, not "the same"
+            same = None
+    return {"template_id": str(src["template_id"]), "name": str(src.get("name") or (orig or {}).get("name") or ""),
+            "org_id": str((orig or {}).get("org_id") or ""),
+            "creator": str((orig or {}).get("created_by_name") or ""),
+            "lineage": lineage_of(orig) if orig else "", "mode": str(src.get("mode") or ""), "same": same}
+
+
 def save(*, output_dir: str | Path, org_id: str, created_by: str = "",
          created_by_name: str = "", source_project_id: str = "",
          name: str = "", description: str = "", category: str = "") -> dict:
@@ -300,8 +354,8 @@ def save(*, output_dir: str | Path, org_id: str, created_by: str = "",
 
     output_dir = Path(output_dir)
     if not (output_dir / ".forge" / "blueprint" / "current.json").is_file():
-        raise TemplateError("This project has no definition yet — describe the app to Smith "
-                            "first; a template is made from what it defines.")
+        raise TemplateError("This app isn't defined yet — describe it to Smith first (or, for an app "
+                            "made from a template, choose the exact same app or one like it), then save it as a template.")
     doc = BlueprintService.load(output_dir=output_dir).doc
     if not is_defined(doc):
         raise TemplateError("This project has no requirements or screens yet, so there is "
@@ -310,6 +364,7 @@ def save(*, output_dir: str | Path, org_id: str, created_by: str = "",
         raise TemplateError("A template belongs to an organisation; none was given.")
 
     facts = summary(doc)
+    name_given = name
     name = (str(name or "").strip() or f"{facts['name'] or 'Application'} template")[:NAME_MAX]
     template_id = uuid.uuid4().hex
     root = _dir(template_id)
@@ -318,10 +373,22 @@ def save(*, output_dir: str | Path, org_id: str, created_by: str = "",
         # The next version of this app's template is counted and written under
         # one lock, so two saves of the same app at once are v2 and v3, not two v2s.
         with _root_lock():
-            version = 1 + max([_last_version(lineage)] +
-                              [int(m.get("version") or 1) for m in list_for_org(str(org_id))
-                               if lineage_of(m) == lineage])
+            siblings = [m for m in list_for_org(str(org_id)) if lineage_of(m) == lineage]
+            version = 1 + max([_last_version(lineage)] + [int(m.get("version") or 1) for m in siblings])
             _record_version(lineage, version)
+            # A NEW VERSION STARTS FROM THE LAST ONE. Its name, description,
+            # category and pictures were written and reviewed for the Gallery;
+            # a new version that started blank fell back to the app's own
+            # description — the builder's prompt to Smith — and approving it
+            # replaced the Gallery's text with that. What the builder gives now wins.
+            prev = max(siblings, key=lambda m: int(m.get("version") or 1), default=None)
+            if prev is not None:
+                if not str(name_given or "").strip():
+                    name = str(prev.get("name") or name)[:NAME_MAX]
+                if not str(description or "").strip():
+                    description = str(prev.get("description") or "")
+                if not str(category or "").strip():
+                    category = str(prev.get("category") or "")
             _write_json(root / "blueprint.json", snapshot(doc))
             ids = output_dir / ".forge" / "ids.json"
             if ids.is_file():
@@ -345,7 +412,8 @@ def save(*, output_dir: str | Path, org_id: str, created_by: str = "",
                 "source_version": int(doc.get("version") or 1),
                 "lineage": lineage,
                 "version": version,
-                "screenshots": [],
+                "screenshots": _carry_screenshots(prev, root) if prev is not None else [],
+                "based_on": _based_on(output_dir, doc),
                 "created_at": _now(),
                 "updated_at": _now(),
                 "summary": facts,
@@ -401,6 +469,8 @@ def update(template_id: str, *, name: str | None = None, description: str | None
         if name is not None:
             if not str(name).strip():
                 raise TemplateError("A template needs a name.")
+            if len(str(name).strip()) < 3:
+                raise TemplateError("Give it a name of at least 3 characters.")
             meta["name"] = str(name).strip()[:NAME_MAX]
         if description is not None:
             meta["description"] = str(description).strip()[:DESCRIPTION_MAX]

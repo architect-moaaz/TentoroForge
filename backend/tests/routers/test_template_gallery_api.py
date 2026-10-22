@@ -330,11 +330,13 @@ async def test_an_admins_review_copy_is_not_a_use(auth_client, org_id, super_adm
                                       json={"template_id": tpl["id"], "name": "Review copy"})
     assert r.status_code == 201, r.text
     assert (await auth_client.get(f"/api/project-templates/{tpl['id']}")).json()["uses"] == 0
-    # Its own organisation may use its own pending template; that counts.
+    # Its own organisation may use its own pending template — but that is not a
+    # use the Gallery counts: a builder could otherwise lift their own template
+    # up the "popular" order by using it themselves.
     r = await auth_client.post(f"/api/orgs/{org_id}/projects/from-project-template",
                                json={"template_id": tpl["id"], "name": "Ours"})
     assert r.status_code == 201
-    assert (await auth_client.get(f"/api/project-templates/{tpl['id']}")).json()["uses"] == 1
+    assert (await auth_client.get(f"/api/project-templates/{tpl['id']}")).json()["uses"] == 0
 
 
 @pytest.mark.asyncio

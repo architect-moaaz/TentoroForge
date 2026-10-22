@@ -81,7 +81,7 @@ async def test_save_list_use_rename_delete(auth_client, org_id):
 async def test_a_project_with_nothing_defined_cannot_be_a_template(auth_client, org_id):
     res = await auth_client.post(f"/api/orgs/{org_id}/projects", json={"name": "Blank"})
     res = await auth_client.post(f"/api/projects/{res.json()['id']}/templates", json={})
-    assert res.status_code == 400 and "definition" in res.json()["detail"]
+    assert res.status_code == 400 and "isn't defined yet" in res.json()["detail"]
 
 
 @pytest.mark.asyncio
