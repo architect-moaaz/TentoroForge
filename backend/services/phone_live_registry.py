@@ -12,8 +12,10 @@ So the answer is a small file per project in a folder every worker shares (next 
 * `claim` is the only way to begin: under one lock it looks at the file; a live server or a start in progress is not started again.
 * Anyone may read it, use the port, mark the server unreachable or stop it. Only the worker that claimed it (`token`) writes its
   progress, so a start that was stopped in between cannot write into a later one.
-* The file's modified time is "last used". `reap` ends what is failed, idle, or left by a worker that died, and `claim` ends the
-  least recently used one when the cap is reached (the cap is over all workers).
+* The file's modified time is "last used". `reap` ends what is failed, idle, or left by a worker that died.
+* The caps are over all workers: an organisation may hold `per_org_cap` servers and a start beyond that ends ITS OWN least recently used
+  one; the platform holds `global_cap`, and a start that would pass it is refused (`CapReached`), never made by ending another
+  organisation's server (PR #28 review, 2026-10-22: one organisation's start ended another's).
 * A server whose owner is gone has nothing watching its files for changes: it is ended, and the next start brings it back.
 
 No process list is trusted by number alone: where the system says when a process started (Linux `/proc`), that is kept with the number.
@@ -75,14 +77,18 @@ def _started(pid: int) -> Optional[str]:
     return seen[1] if seen else None
 
 
+class CapReached(RuntimeError):
+    """The platform already runs as many live previews as it may, and none of them is the asking organisation's to end."""
+
+
 def _same_process(pid: int, started: Optional[str]) -> bool:
     if not pid_alive(pid):
         return False
     return not started or _started(pid) in (None, started)
 
 
-def kill_pid(pid: int) -> None:
-    """The dev server and what it started: `npx` is a shell around node, so one process is not enough."""
+def kill_pid(pid: int, force: bool = False) -> None:
+    """The dev server and what it started: `npx` is a shell around node, so one process is not enough. `force`: do not ask it to stop."""
     pid = int(pid or 0)
     if pid <= 0:
         return
@@ -90,14 +96,15 @@ def kill_pid(pid: int) -> None:
         if os.name == "nt":
             subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, timeout=15)
             return
+        sig = signal.SIGKILL if force else signal.SIGTERM
         try:
             group = os.getpgid(pid)
         except ProcessLookupError:
             return
         if group == pid:                                      # the leader of its own group (`start_new_session`)
-            os.killpg(group, signal.SIGTERM)
+            os.killpg(group, sig)
         else:
-            os.kill(pid, signal.SIGTERM)
+            os.kill(pid, sig)
     except (OSError, subprocess.SubprocessError):
         logger.debug("[phone_live_registry] could not end %s", pid, exc_info=True)
 
@@ -218,12 +225,15 @@ def end(rec: dict[str, Any], why: str) -> None:
     release(str(rec.get("id") or ""), rec.get("token"))
 
 
-def claim(short_id: str, output_dir: str | Path, *, cap: int) -> tuple[dict[str, Any], bool]:
+def claim(short_id: str, output_dir: str | Path, *, org: str = "", per_org_cap: int = 2, global_cap: int = 4) -> tuple[dict[str, Any], bool]:
     """The one way to begin. Returns `(record, created)`.
 
     Under the lock: a server that is live or starting is used, not started again (so a second start, from any worker, never reaches
-    the working folder a running Metro stands on). Otherwise what is left of an old one is cleared, the least recently used server
-    is ended while `cap` or more are live, and a new record, owned by this process, is written in the `starting` state."""
+    the working folder a running Metro stands on). Otherwise what is left of an old one is cleared; while the organisation holds
+    `per_org_cap` or more, ITS least recently used server is ended; and if the platform then holds `global_cap` or more, the start is
+    refused with `CapReached` (another organisation's server is never ended to make room). A new record, owned by this process, is
+    written in the `starting` state."""
+    org = str(org or "")
     with _locked():
         existing = get(short_id)
         if existing is not None and alive(existing):
@@ -236,9 +246,13 @@ def claim(short_id: str, output_dir: str | Path, *, cap: int) -> tuple[dict[str,
             with contextlib.suppress(OSError):
                 _path(short_id).unlink()
         running = sorted((r for r in records() if r.get("id") != short_id and alive(r)), key=lambda r: r["used"])
-        for rec in running[:max(0, len(running) - max(0, cap - 1))]:
-            end_unlocked(rec, f"more than {cap} live previews")
-        rec = {"id": short_id, "outputDir": str(output_dir), "state": "starting", "error": "", "port": 0, "pid": 0,
+        own = [r for r in running if str(r.get("org") or "") == org]
+        for rec in own[:max(0, len(own) - max(0, per_org_cap - 1))]:
+            end_unlocked(rec, f"the organisation already has {per_org_cap} live previews")
+            running.remove(rec)
+        if len(running) >= max(1, global_cap):
+            raise CapReached(f"{len(running)} live previews are already running")
+        rec = {"id": short_id, "outputDir": str(output_dir), "org": org, "state": "starting", "error": "", "port": 0, "pid": 0,
                "pidStarted": None, "stage": "", "owner": os.getpid(), "ownerStarted": _started(os.getpid()),
                "token": uuid.uuid4().hex, "startedAt": time.time()}
         DIR.mkdir(parents=True, exist_ok=True)

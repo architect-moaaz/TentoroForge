@@ -40,8 +40,10 @@ logger = logging.getLogger(__name__)
 
 #: A dev server nobody has used for this long is stopped (each one holds about half a gigabyte).
 IDLE_SECONDS = int(os.environ.get("FORGE_PHONE_LIVE_IDLE", "600"))
-#: How many run at once; starting one more stops the one used least recently.
-MAX_SERVERS = int(os.environ.get("FORGE_PHONE_LIVE_MAX", "3"))
+#: How many run at once on the platform; a start beyond it is refused (the editor keeps the built picture).
+MAX_SERVERS = int(os.environ.get("FORGE_PHONE_LIVE_MAX", "4"))
+#: How many one organisation may run; starting one more stops that organisation's least recently used.
+MAX_PER_ORG = int(os.environ.get("FORGE_PHONE_LIVE_PER_ORG", "2"))
 START_TIMEOUT = 180
 WATCH_EVERY = 0.3
 
@@ -450,13 +452,18 @@ def _ensure_reaper() -> None:
         _reaper = loop.create_task(_reap())
 
 
-def start(output_dir: str | Path, short_id: str) -> dict[str, Any]:
+def start(output_dir: str | Path, short_id: str, org: str = "") -> dict[str, Any]:
     """Start the live preview if it is not running anywhere; answers where it stands. Must be called from the running event loop.
 
     Under the registry's lock a server that is live or starting (on this worker or another) is used and nothing is started or deleted;
-    otherwise the least recently used server (over all workers) is ended if the cap is reached, and this worker starts it."""
+    otherwise the organisation's own least recently used server is ended if it holds `MAX_PER_ORG`, and a start that would pass
+    `MAX_SERVERS` on the platform is refused: the picture stays the built one, and nobody else's server is ended."""
     _ensure_reaper()
-    rec, created = reg.claim(short_id, output_dir, cap=MAX_SERVERS)
+    try:
+        rec, created = reg.claim(short_id, output_dir, org=org, per_org_cap=MAX_PER_ORG, global_cap=MAX_SERVERS)
+    except reg.CapReached:
+        raise LiveUnavailable("Too many live previews are running right now, so this one is not started. The built picture is shown; "
+                              "try again in a few minutes.")
     if not created:
         return status(short_id)
     _drop_local(short_id)                  # an earlier server of this worker's, failed or replaced

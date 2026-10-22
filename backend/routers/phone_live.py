@@ -37,7 +37,7 @@ async def _built_project(project_id: str, user: PlatformUser, db: AsyncSession):
 async def live_start(project_id: str, user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     project = await _built_project(project_id, user, db)
     try:
-        return phone_live.start(project.output_dir, project.short_id)
+        return phone_live.start(project.output_dir, project.short_id, str(project.org_id))
     except phone_live.PhonePreviewError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
 

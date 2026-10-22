@@ -376,14 +376,24 @@ async def _npm_run(argv: list[str], cwd: str, timeout: float) -> tuple[int, str]
     is not found there.)"""
     from services.phone_env import phone_env
 
+    from services.phone_live_registry import kill_pid
+
     exe = shutil.which(argv[0]) or argv[0]
+    # In its own group, so that what `npm` starts is ended with it on a timeout or a cancel (PR #28 review, 2026-10-22).
+    kwargs = {"start_new_session": True} if os.name != "nt" else {}
     proc = await asyncio.create_subprocess_exec(
-        exe, *argv[1:], cwd=cwd, env=phone_env(Path(cwd).parent), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+        exe, *argv[1:], cwd=cwd, env=phone_env(Path(cwd).parent), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+        **kwargs)
     try:
         out, _ = await asyncio.wait_for(proc.communicate(), timeout)
     except asyncio.TimeoutError:
+        kill_pid(proc.pid, force=True)
         proc.kill()
         return 124, f"npm took longer than {int(timeout // 60)} minutes and was stopped"
+    except asyncio.CancelledError:
+        kill_pid(proc.pid, force=True)
+        proc.kill()
+        raise
     return proc.returncode or 0, (out or b"").decode("utf-8", "replace")[-700:]
 
 

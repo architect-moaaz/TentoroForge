@@ -316,15 +316,32 @@ def _prepare_copy(staged: Path, doc: dict, short_id: str, base_url: Optional[str
     (staged / "app.json").write_text(json.dumps(app, indent=2), encoding="utf-8", newline=chr(10))
 
 
+def _end_process(proc: Any) -> None:
+    """Stop a step's process and everything it started. `npm` is a shell around node and node starts more, so ending only `npm` left the
+    install running (PR #28 review, 2026-10-22); the process is started in its own group and the whole group is ended."""
+    from services.phone_live_registry import kill_pid
+
+    kill_pid(proc.pid, force=True)
+    try:
+        proc.kill()
+    except (ProcessLookupError, OSError):
+        pass
+
+
 async def _run(cmd: list[str], cwd: Path, env: dict, what: str) -> str:
     exe = shutil.which(cmd[0]) or cmd[0]
+    kwargs: dict[str, Any] = {"start_new_session": True} if os.name != "nt" else {}
     proc = await asyncio.create_subprocess_exec(
-        exe, *cmd[1:], cwd=str(cwd), env=env, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+        exe, *cmd[1:], cwd=str(cwd), env=env, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, **kwargs)
     try:
         out, _ = await asyncio.wait_for(proc.communicate(), STEP_TIMEOUT)
     except asyncio.TimeoutError:
-        proc.kill()
+        _end_process(proc)
         raise PhonePreviewError(f"{what} took too long and was stopped.")
+    except asyncio.CancelledError:
+        # The start (or the build) that wanted this was stopped: the install must not go on without it, holding the shared packages.
+        _end_process(proc)
+        raise
     text = (out or b"").decode("utf-8", "replace")
     if proc.returncode != 0:
         tail = " ".join(text.strip().splitlines()[-3:])[:300]

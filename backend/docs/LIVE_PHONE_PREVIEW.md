@@ -64,12 +64,16 @@ a second server started, the working folder deleted under the first one's Metro,
 It is now a small file per project (`services/phone_live_registry.py`, in `dev_servers.DIR/phone-live`, shared by every worker):
 `{id, outputDir, state, port, pid, stage, owner, token}`. Its modified time is "last used".
 
-* **Starting:** `claim` takes a lock, looks at the file, and starts only if no live server or start in progress is there. It also ends the
-  least recently used server of ANY worker when the cap is reached. A second start, from any worker, changes nothing.
+* **Starting:** `claim` takes a lock, looks at the file, and starts only if no live server or start in progress is there. If the
+  organisation already holds `FORGE_PHONE_LIVE_PER_ORG`, it ends that organisation's own least recently used server (over all workers); if
+  the platform holds `FORGE_PHONE_LIVE_MAX` it refuses (`CapReached`), and never ends another organisation's. A second start, from any
+  worker, changes nothing.
 * **Using:** any worker reads the port from the file and passes the request to `127.0.0.1:port` itself. The status, "unreachable", sync
   and stop work from any worker. Only the worker that claimed a record (its `token`) writes its progress.
 * **A worker that dies:** its servers have nothing watching their files. Every worker's reaper ends what is failed, idle (`FORGE_PHONE_LIVE_IDLE`),
   or left by a worker that is gone; the next start brings it back.
+* **A cancelled install:** every step that runs npm starts it in its own process group and, on a cancel or a timeout, ends the whole group
+  (`phone_preview._run`, `native_build._npm_run`), so a stopped start no longer leaves an install running in the shared packages.
 * **Builds of the built picture** (`phone_preview.start`) hold a file lock per project, so one runs at a time over all workers, and a build
   cut off with its worker is seen as cut off.
 * **Checked with real processes** (2026-10-23): worker A started FocusFlow's preview; worker B (another process) saw it ready on the same
@@ -87,7 +91,8 @@ Only the Editor asks for the live preview; the Phone tab on its own keeps the bu
 | Variable | Default | Meaning |
 |---|---|---|
 | `FORGE_PHONE_LIVE_IDLE` | 600 | seconds without use before a project's dev server is stopped |
-| `FORGE_PHONE_LIVE_MAX` | 3 | dev servers at once; one more stops the one used least recently |
+| `FORGE_PHONE_LIVE_MAX` | 4 | dev servers at once on the platform (over all workers). A start beyond it is refused, with a sentence; the editor keeps the built picture. Nobody else's server is ended to make room. |
+| `FORGE_PHONE_LIVE_PER_ORG` | 2 | dev servers one organisation may run. A start beyond it ends THAT organisation's least recently used one. |
 
 Each dev server holds about 300 MB (Metro 230 MB plus the `npx` wrapper 65 MB, measured on Cart Buddy) and more after many bundles: size the
 backend container for `FORGE_PHONE_LIVE_MAX` of them. Dev servers are stopped when the backend shuts down.
