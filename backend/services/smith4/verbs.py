@@ -255,7 +255,8 @@ def link_rule(ctx: Ctx, u: dict) -> Outcome:
         return Outcome(status="needs_user", said=f"“{name}” is a written note the app does not check, so it "
                        "cannot be used in a workflow yet. Ask me to make it a real rule first.")
     here = [x for x in L.links(doc, rule) if x["workflow"] == str(flow.get("id"))]
-    copies = [c for c in L.review(doc, rule) if c["workflow"] == str(flow.get("id")) and c.get("same") is not True]
+    copies = [c for c in L.stale(doc, L.review_all(doc))
+              if c["rule"] == str(rule["id"]) and c["workflow"] == str(flow.get("id"))]
     try:
         if copies:
             c = copies[0]

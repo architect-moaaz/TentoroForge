@@ -168,3 +168,42 @@ def test_a_rule_that_only_fills_in_a_value_cannot_be_made_a_workflow_step(tmp_pa
     monkeypatch.setattr(BlueprintService, "load", classmethod(lambda cls, **_k: svc))
     with pytest.raises(rules.RuleError, match="only fills in or changes values"):
         rules.attach(tmp_path, "RULE-004", workflow="FLOW-002", after=None)
+
+
+def test_smith_reads_where_each_rule_is_checked():
+    from services.smith import reads
+    said = reads.run("rule_links", {"rule": "rejected"}, output_dir="", doc=_doc())
+    assert "RULE-003" in said and "Approve (FLOW-002)" in said and "Log an expense" not in said
+    said = reads.run("rule_links", {"workflow": "List expenses", "rule": "positive"}, output_dir="", doc=_doc())
+    assert "not checked in List expenses" in said
+    assert "No business rule called" in reads.run("rule_links", {"rule": "nope"}, output_dir="", doc=_doc())
+
+
+def test_smith_links_a_rule_says_already_linked_or_adds_an_extra_check(tmp_path, monkeypatch):
+    from services import business_rules as rules
+    from services.blueprint.service import BlueprintService
+    from services.smith4.verbs import Ctx, perform
+
+    svc = type("S", (), {})()
+    svc.doc = _doc()
+    svc.output_dir = str(tmp_path)
+    monkeypatch.setattr(BlueprintService, "load", classmethod(lambda cls, **_k: svc))
+    attached = []
+    monkeypatch.setattr(rules, "attach", lambda out, rid, **k: attached.append((rid, k["workflow"])) or {"version": 9})
+    ctx = Ctx(output_dir=str(tmp_path), project_id="p", message="", ask="")
+    out = perform(ctx, "link_rule", {"verb": "link_rule", "rule": "positive amount", "workflow": "log an expense"})
+    assert out.status == "resolved" and "already linked" in out.said and not attached
+    out = perform(ctx, "link_rule", {"verb": "link_rule", "rule": "positive amount", "workflow": "approve"})
+    assert out.status == "resolved" and attached == [("RULE-001", "FLOW-002")]
+    out = perform(ctx, "link_rule", {"verb": "link_rule", "rule": "starts as submitted", "workflow": "approve"})
+    assert out.status == "needs_user" and "only fills in values" in out.said
+    out = perform(ctx, "unlink_rule", {"verb": "unlink_rule", "rule": "positive amount", "workflow": "log an expense"})
+    assert out.status == "needs_user" and "automatically" in out.said
+
+
+@needs_node
+def test_an_old_check_belongs_to_one_rule_never_to_one_that_only_shares_a_field():
+    doc = _doc()
+    assert L.stale(doc, L.review_all(doc)) == [], "every check matches its own rule"
+    _rule(doc, "RULE-002")["when"] = "amount > 7000"
+    assert [(c["rule"], c["step"]) for c in L.stale(doc, L.review_all(doc))] == [("RULE-002", "check_note")]

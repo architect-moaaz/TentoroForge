@@ -559,6 +559,37 @@ def review_all(doc: dict, rule_ids: set[str] | None = None) -> list[dict]:
     return judge_all(doc, pairs) if pairs else []
 
 
+def _check_fields(doc: dict, rule: dict, c: dict) -> set[str]:
+    ent = _entities(doc).get(str(rule.get("entity") or "")) or {}
+    camel, snake = _camel(str(ent.get("name") or "")), _snake(str(ent.get("name") or ""))
+    return {r.split(".", 1)[1] if r.split(".")[0] in (camel, snake) else r.split(".")[0] for r in _refs(c["expression"])}
+
+
+def stale(doc: dict, judged: list[dict]) -> list[dict]:
+    """The workflow checks that are a rule's OLD copy, each given to ONE rule:
+    never one another rule says exactly (that check is the other rule's), and
+    only a rule that looks at every field the check does — the closest such
+    rule. A check on the amount is not the manager-note rule's because both
+    read the amount."""
+    rules = {str(r.get("id")): r for r in _live(doc.get("businessRules"))}
+    proven = {(c["workflow"], c["step"]) for c in judged if c.get("same") is True}
+    best: dict[tuple, tuple[int, dict]] = {}
+    for c in judged:
+        if c.get("same") is True or (c["workflow"], c["step"]) in proven:
+            continue
+        rule = rules.get(c["rule"])
+        if rule is None:
+            continue
+        fields = _check_fields(doc, rule, c)
+        covers = _rule_fields(rule)
+        if not fields or not fields <= covers:
+            continue
+        k = (c["workflow"], c["step"])
+        if k not in best or len(covers) < best[k][0]:
+            best[k] = (len(covers), c)
+    return [c for _n, c in best.values()]
+
+
 def has_candidates(doc: dict) -> bool:
     """Cheap: is there anything that might be a copy? (No engine run.)"""
     return any(candidates(doc, r) for r in _live(doc.get("businessRules")))
@@ -583,4 +614,4 @@ def fold_copies(doc: dict, *, rule_ids: set[str] | None = None, only_same: bool 
 
 
 __all__ = ["can_stop", "candidates", "fold", "fold_copies", "has_candidates", "judge", "judge_all", "links",
-           "reads", "review", "review_all", "rule_events", "save_steps", "workflow_links"]
+           "reads", "review", "review_all", "rule_events", "save_steps", "stale", "workflow_links"]

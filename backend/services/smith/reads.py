@@ -336,7 +336,7 @@ def rule_links(doc: dict, rule_ref: str = "", workflow_ref: str = "") -> str:
             raise ReadRefused(f"No workflow called {workflow_ref!r}. The workflows are: "
                               + ", ".join(f"{w.get('id')} {w.get('name')}" for w in flows) + ".")
         flow_id = str(hit[0].get("id"))
-    judged = L.review_all(doc, {str(r.get("id")) for r in rules}) if rules else []
+    judged = L.stale(doc, L.review_all(doc)) if rules else []
     out = []
     for r in rules:
         rid = str(r.get("id"))

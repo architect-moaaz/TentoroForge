@@ -333,7 +333,7 @@ def read(output_dir: str | Path) -> dict:
     doc = svc.doc
     why = busy(output_dir)
     from services import rule_links
-    copies = rule_links.review_all(doc) if rule_links.has_candidates(doc) else []
+    copies = rule_links.stale(doc, rule_links.review_all(doc)) if rule_links.has_candidates(doc) else []
     rules = [view(r, doc, copies) for r in _live(doc.get("businessRules"))]
     # STRAIGHT FROM THE REQUEST. A rule the person stated is a requirement
     # (`owner: businessRules`) from the moment the requirements are written;
@@ -1297,8 +1297,9 @@ def follow_rule(output_dir: str | Path, rule_id: str, *, workflow: str, step: st
         _refuse_if_building(output_dir)
         svc = BlueprintService.load(output_dir=str(output_dir))
         rule = _find(svc.doc, rule_id)
-        cand = next((c for c in rule_links.candidates(svc.doc, rule)
-                     if c["workflow"] == str(workflow) and c["step"] == str(step)), None)
+        mine = rule_links.stale(svc.doc, rule_links.review_all(svc.doc))
+        cand = next((c for c in mine if c["rule"] == str(rule_id)
+                     and c["workflow"] == str(workflow) and c["step"] == str(step)), None)
         flow = next((w for w in _live(svc.doc.get("workflows")) if str(w.get("id")) == str(workflow)), None)
         if cand is None or flow is None:
             raise RuleError("That workflow no longer has its own check here. Reload the list.", status=404)
