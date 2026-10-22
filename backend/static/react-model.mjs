@@ -286,6 +286,9 @@ function importsOf(source, ast) {
         : sp.type === "ImportNamespaceSpecifier" ? `*:${sp.local.name}` : sp.local.name),
       span: [s.start, s.end],
       typeOnly: s.importKind === "type",
+      // `import { Screen as ScreenView }`: the name the file uses, and the one the module exports.
+      exported: Object.fromEntries(s.specifiers.filter((sp) => sp.type === "ImportSpecifier")
+        .map((sp) => [sp.local.name, sp.imported.name ?? sp.imported.value])),
     });
   }
   return out;

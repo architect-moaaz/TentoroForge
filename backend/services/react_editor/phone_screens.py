@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from services.blueprint.agent_contract import AgentResult, ArtifactProposal, apply_agent_result
-from services.react_editor import adapter, diagnostics, phone
+from services.react_editor import adapter, diagnostics, phone, phone_kit
 from services.react_editor import files as screen_files
 from services.react_editor.adapter import AdapterError, revision_of
 from services.react_editor.service import (EditorError, Project, _lock, _record, _ensure_baseline, _page, history,
@@ -59,6 +59,18 @@ _KEEP = ("id", "parent", "children", "index", "type", "kind", "line", "endLine",
          "repeat", "condition", "file", "slot")
 
 
+def _imports_map(model: dict[str, Any]) -> dict[str, str]:
+    """`{name the screen uses: name the kit exports}` for what it takes from the kit."""
+    out: dict[str, str] = {}
+    for imp in model.get("imports") or []:
+        if imp.get("source") != "@/ui":
+            continue
+        for name in imp.get("names") or []:
+            out[name] = name
+        out.update(imp.get("exported") or {})
+    return out
+
+
 def _public(model: dict[str, Any]) -> dict[str, Any]:
     nodes = {}
     for nid, n in (model.get("nodes") or {}).items():
@@ -66,7 +78,7 @@ def _public(model: dict[str, Any]) -> dict[str, Any]:
         slim["props"] = [{"name": p.get("name"), "kind": p.get("kind"), "value": p.get("value")}
                          for p in n.get("props") or [] if p.get("kind") != "spread"]
         nodes[nid] = slim
-    return {"roots": model.get("roots") or [], "nodes": nodes}
+    return {"roots": model.get("roots") or [], "nodes": nodes, "imports": _imports_map(model)}
 
 
 def open_screen(project: Project, page_id: str) -> dict[str, Any]:
@@ -84,15 +96,47 @@ def open_screen(project: Project, page_id: str) -> dict[str, Any]:
             "history": history(project, _hist(page_id))}
 
 
-def _safe_without_compiler(op: dict[str, Any]) -> bool:
-    """A change that cannot break a type: words, or taking a part away or copying one."""
+def _kit_name(imports: dict[str, str], node: dict[str, Any] | None) -> str | None:
+    """The kit's name for a part: a screen may import `Screen as ScreenView`, and the kit knows it as `Screen`."""
+    return imports.get(str((node or {}).get("type"))) if node else None
+
+
+def _safe_without_compiler(op: dict[str, Any], before: dict[str, Any], project: Project) -> bool:
+    """A change that cannot break a type, so the compiler is not asked.
+
+    Words; taking a part away or copying one; a choice from the kit's own pick list (its words are read from the kit's types);
+    putting a part before or after its brothers; and adding a ready part from the palette exactly as it is written there."""
     if op.get("file") == "load":
         return False
     kind = op.get("op")
+    nodes, imports = before["nodes"], before["imports"]
     if kind in ("setText", "remove", "duplicate"):
         return True
-    value = op.get("value") or {}
-    return kind == "setProp" and op.get("name") in WORDS_PROPS and value.get("kind") == "string"
+    if kind == "setProp":
+        value = op.get("value")
+        if op.get("name") in WORDS_PROPS and (value or {}).get("kind") == "string":
+            return True
+        component = _kit_name(imports, nodes.get(str(op.get("id"))))
+        return bool(component) and phone_kit.allows(project.root, component, str(op.get("name")), value)
+    if kind == "move":
+        n, parent = nodes.get(str(op.get("id"))), str(op.get("parentId"))
+        return bool(n) and not n.get("slot") and n.get("parent") == parent
+    if kind == "addImport":
+        wanted = {name for entry in phone_kit.PALETTE for name in entry["imports"]}
+        return op.get("source") == "@/ui" and not op.get("file") and set(op.get("names") or []) <= wanted
+    if kind == "insert":
+        entry = phone_kit.palette_entry_for(str(op.get("jsx") or ""))
+        if entry is None:
+            return False
+        if op.get("parentId"):
+            holder = nodes.get(str(op["parentId"]))
+        else:
+            ref = nodes.get(str(op.get("afterId") or op.get("beforeId") or ""))
+            if not ref or ref.get("slot"):
+                return False
+            holder = nodes.get(str(ref.get("parent")))
+        return _kit_name(imports, holder) in phone_kit.CONTAINERS
+    return False
 
 
 def _compile(doc: dict, project: Project, page_id: str, screen: str) -> list[dict]:
@@ -137,6 +181,11 @@ def apply(project: Project, page_id: str, *, base_revision: str, ops: list[dict[
                                             "Reload to see the latest version and try again.", current=revision)
         native = _native(project)
         try:
+            before_model = screen_files.merged_model(screen, "", parts, app_root=native, slots=True)
+        except AdapterError as exc:
+            raise EditorError(422, exc.code, str(exc), line=exc.line)
+        before = {"nodes": before_model["nodes"], "imports": _imports_map(before_model)}
+        try:
             if source is not None:
                 new_screen = str(source.get("screen", screen))
                 new_parts = {**parts, **{str(k): str(v) for k, v in (source.get("parts") or {}).items()}}
@@ -148,7 +197,7 @@ def apply(project: Project, page_id: str, *, base_revision: str, ops: list[dict[
         if new_screen == screen and new_parts == parts:
             return {"revision": revision, "model": _public(model), "checked": False, "unchanged": True,
                     "version": svc.doc.get("version")}
-        must_check = check if check is not None else not (source is None and all(_safe_without_compiler(o) for o in ops))
+        must_check = check if check is not None else not (source is None and all(_safe_without_compiler(o, before, project) for o in ops))
         if must_check:
             found = _compile(svc.doc, project, page_id, new_screen)
             if found:

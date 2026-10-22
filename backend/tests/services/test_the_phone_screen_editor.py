@@ -178,7 +178,7 @@ def test_a_page_with_no_phone_screen_says_so(p):
 
 def test_only_what_step_one_offers_can_be_asked_of_the_server():
     from routers.react_editor import _PHONE_OPS
-    assert _PHONE_OPS == {"setText", "setProp", "remove", "duplicate"}
+    assert _PHONE_OPS == {"setText", "setProp", "remove", "duplicate", "move", "insert", "addImport"}
 
 
 # ---- parts the screen hands to a component as settings (the footer, a row of a list) ----------------------------------

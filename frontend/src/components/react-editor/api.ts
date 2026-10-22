@@ -7,7 +7,7 @@
  * a status text, which is exactly the wording (UX-004) the editor exists to
  * show.
  */
-import type { PhoneApplied, PhoneScreen, ApplyResult, DraftResult, Finding, HistoryEntry, Navigation, Op, PageDoc, PageListItem, Proposal, Surfaces, ThemeDoc, ThemePatch, WidgetRef, WidgetSpec } from "./types";
+import type { PhoneApplied, PhoneKit, PhoneScreen, ApplyResult, DraftResult, Finding, HistoryEntry, Navigation, Op, PageDoc, PageListItem, Proposal, Surfaces, ThemeDoc, ThemePatch, WidgetRef, WidgetSpec } from "./types";
 
 /** The name of the event that says the application's pages, menu or look changed: the phone preview listens, and redraws. */
 export const PLAN_CHANGED = "forge:plan-changed";
@@ -130,6 +130,8 @@ export const editorApi = {
     }
     return res.json();
   },
+  /** What each part of the phone kit lets a person choose, and the ready parts that can be added. */
+  phoneKit: (projectId: string) => call<PhoneKit>(`${base(projectId)}/phone/kit`),
   phoneScreen: (projectId: string, pageId: string) => call<PhoneScreen>(`${base(projectId)}/phone/screens/${pageId}`),
   /** A change to what is on a phone screen. Saved into the plan at once; the picture is drawn again after (PLAN_CHANGED). */
   applyPhoneScreen: (projectId: string, pageId: string, baseRevision: string, ops: Op[], label: string) =>

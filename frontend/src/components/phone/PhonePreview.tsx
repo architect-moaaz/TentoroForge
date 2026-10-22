@@ -8,7 +8,10 @@ import { Loader2, MousePointerClick, RefreshCw, Smartphone, Hand, Send } from "l
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { PHONE_GO, PLAN_CHANGED } from "@/components/react-editor/api";
-import { PartEditor } from "@/components/react-editor/PartEditor";
+import { ChangePanel, usePhoneDrop } from "@/components/react-editor/PhoneTools";
+import { usePhonePick } from "@/components/react-editor/phonePick";
+import { screenOf, type Source } from "@/components/react-editor/phoneParts";
+import { useEditorStore } from "@/components/react-editor/store";
 import { useSmithDraftStore } from "@/stores/smithDraft";
 
 const PREFIX = "design2ui:";
@@ -56,6 +59,11 @@ export function PhonePreview({ projectId, onAskSmith, autoRedraw = false, editPa
   const [mode, setMode] = useState<"use" | "select">("use");
   const [route, setRoute] = useState("/");
   const [picked, setPicked] = useState<Picked | null>(null);
+  // A part chosen in Layers (the left panel) rather than clicked in the picture; the panels share what is picked.
+  const listed = usePhonePick((s) => s.listed);
+  const setPick = usePhonePick((s) => s.set);
+  const setListed = useCallback((l: Source | null) => setPick({ listed: l }), [setPick]);
+  const pages = useEditorStore((s) => s.pages);
   const [change, setChange] = useState("");
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState("");
@@ -63,6 +71,12 @@ export function PhonePreview({ projectId, onAskSmith, autoRedraw = false, editPa
   const [go, setGo] = useState("");
   const [wantRedraw, setWantRedraw] = useState(0);
   const ask = useSmithDraftStore((s) => s.ask);
+  // A ready part dropped on the picture: the bridge says which part was under it; the handler below is made once, so it reads the
+  // latest drop through a ref.
+  const dropping = usePhoneDrop();
+  const dropRef = useRef(dropping);
+  dropRef.current = dropping;
+  const [dropSaid, setDropSaid] = useState("");
 
   const { data: status } = useQuery({
     queryKey: phoneStatusKey(projectId),
@@ -114,7 +128,7 @@ export function PhonePreview({ projectId, onAskSmith, autoRedraw = false, editPa
   // A new build is a new page.
   // The picture it was picked from is gone, and the part may be too.
   useEffect(() => {
-    if (status?.state === "ready") { setFrameKey((k) => k + 1); setPicked(null); }
+    if (status?.state === "ready") { setFrameKey((k) => k + 1); setPicked(null); setListed(null); }
   }, [status?.builtAt, status?.state]);
 
   useEffect(() => {
@@ -124,17 +138,22 @@ export function PhonePreview({ projectId, onAskSmith, autoRedraw = false, editPa
       if (!type.startsWith(PREFIX)) return;
       const kind = type.slice(PREFIX.length);
       if (kind === "route") setRoute(String(e.data.payload?.path ?? "/").replace(/^.*\/phone\/serve/, "") || "/");
-      if (kind === "select") setPicked(e.data.payload as Picked);
+      if (kind === "select") { setPicked(e.data.payload as Picked); setListed(null); }
       if (kind === "deselect") setPicked(null);
+      if (kind === "drop" && editParts) {
+        const { source, rel, part } = e.data.payload as { source: Source | null; rel: number; part?: string };
+        setDropSaid("");
+        void dropRef.current.onSource(source, rel, part).then((why) => { if (why) setDropSaid(why); }).finally(() => dropRef.current.end());
+      }
       if (kind === "ready") frame.current?.contentWindow?.postMessage({ type: PREFIX + "set-mode", payload: { mode } }, "*");
     }
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [mode]);
+  }, [mode, editParts]);
 
   const choose = (next: "use" | "select") => {
     setMode(next);
-    if (next === "use") setPicked(null);
+    if (next === "use") { setPicked(null); setListed(null); }
     frame.current?.contentWindow?.postMessage({ type: PREFIX + "set-mode", payload: { mode: next } }, "*");
   };
 
@@ -145,19 +164,31 @@ export function PhonePreview({ projectId, onAskSmith, autoRedraw = false, editPa
     onAskSmith();
   };
 
+  const toolSource: Source | null = listed ?? picked?.source ?? null;
+  const pageId = screenOf(toolSource?.file)?.page ?? pages.find((p) => p.phone && p.route === route)?.id ?? null;
+  // Another screen was opened: what was chosen in Layers belongs to the one before.
+  useEffect(() => { setListed(null); }, [route, setListed]);
+
+  // Say what is picked, and on which screen, to the panels that are not in this file.
+  useEffect(() => {
+    if (!editParts) return;
+    setPick({ source: picked?.source ?? null, pageId });
+  }, [editParts, setPick, picked, pageId]);
   const src = status ? `${process.env.NEXT_PUBLIC_API_URL ?? ""}${status.servePath}${go && go !== "/" ? go : "/"}` : null;
   const building = status?.state === "building" || starting;
+  // A picture is already drawn: keep it, and the tools beside it, on show while the next one is drawn.
+  const usable = status?.state === "ready" || (building && !!status?.builtAt);
 
   return (
     <div className="flex h-full flex-col" data-testid="phone-preview">
       <div className="flex items-center justify-between border-b px-3 py-2">
         <div className="flex items-center gap-1">
           <Button variant={mode === "use" ? "secondary" : "ghost"} size="sm" className="h-8 text-xs" onClick={() => choose("use")}
-                  disabled={status?.state !== "ready"}>
+                  disabled={!usable}>
             <Hand className="mr-1 h-3.5 w-3.5" /> Use
           </Button>
           <Button variant={mode === "select" ? "secondary" : "ghost"} size="sm" className="h-8 text-xs" onClick={() => choose("select")}
-                  disabled={status?.state !== "ready"}>
+                  disabled={!usable}>
             <MousePointerClick className="mr-1 h-3.5 w-3.5" /> Select to change
           </Button>
         </div>
@@ -176,7 +207,7 @@ export function PhonePreview({ projectId, onAskSmith, autoRedraw = false, editPa
         <div className="flex flex-1 items-center justify-center overflow-auto bg-muted/30 p-4">
           {status?.state === "unavailable" ? (
             <p className="max-w-xs text-center text-sm text-muted-foreground">{status.reason}</p>
-          ) : building ? (
+          ) : building && !usable ? (
             <div className="flex flex-col items-center gap-2 text-center">
               <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
               <p className="text-sm text-muted-foreground">{status?.step || "Starting"}…</p>
@@ -190,8 +221,13 @@ export function PhonePreview({ projectId, onAskSmith, autoRedraw = false, editPa
               <p className="text-sm text-red-600">{startError || status?.error}</p>
               <Button size="sm" onClick={build}>Try again</Button>
             </div>
-          ) : status?.state === "ready" && src ? (
-            <div className="shrink-0 rounded-[2.5rem] border-[10px] border-slate-900 bg-slate-900 shadow-xl dark:border-slate-700">
+          ) : usable && src ? (
+            <div className="relative shrink-0 rounded-[2.5rem] border-[10px] border-slate-900 bg-slate-900 shadow-xl dark:border-slate-700">
+              {building && (
+                <span className="absolute left-1/2 top-2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-full bg-slate-900/85 px-3 py-1 text-[11px] text-white">
+                  <Loader2 className="h-3 w-3 animate-spin" /> Updating…
+                </span>
+              )}
               <iframe
                 key={frameKey}
                 ref={frame}
@@ -206,8 +242,8 @@ export function PhonePreview({ projectId, onAskSmith, autoRedraw = false, editPa
           )}
         </div>
 
-        {status?.state === "ready" && (
-          <aside className="flex w-72 shrink-0 flex-col gap-3 border-l p-3 text-sm">
+        {usable && (
+          <aside className="flex w-72 shrink-0 flex-col gap-3 overflow-y-auto border-l p-3 text-sm [&>*]:shrink-0">
             <div>
               <p className="text-xs uppercase tracking-wide text-muted-foreground">Screen</p>
               <p className="font-mono text-xs">{route}</p>
@@ -222,7 +258,8 @@ export function PhonePreview({ projectId, onAskSmith, autoRedraw = false, editPa
                 {picked.source && <p className="mt-1 font-mono text-[11px] text-muted-foreground">{picked.source.file}:{picked.source.line}</p>}
               </div>
             )}
-            {editParts && picked?.source && <PartEditor projectId={projectId} source={picked.source} />}
+            {editParts && <ChangePanel />}
+            {dropSaid && <p role="status" className="text-xs text-red-600">{dropSaid}</p>}
             <label className="text-xs text-muted-foreground" htmlFor="phone-change">{editParts && picked ? "Or ask Smith" : "What should change?"}</label>
             <textarea
               id="phone-change"

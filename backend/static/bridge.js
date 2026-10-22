@@ -273,6 +273,61 @@
     }
   });
 
+  // --- A ready part dragged in from the editor's Add list ---
+  //
+  // The editor starts the drag (its own document) and this page receives it. It only answers to that one kind of drag. While it is
+  // over a part the part is outlined: a line at the top or the bottom (before / after it) or the whole box (inside it). On drop the
+  // parent is told which part, and how far down it, and decides what that means for the screen's code.
+  var PART_TYPE = "application/x-forge-part";
+  var dropOverlay = createOverlay("rgba(37,99,235,0.18)", "2px solid #2563eb");
+  document.body.appendChild(dropOverlay);
+
+  function isPartDrag(e) {
+    var types = e.dataTransfer && e.dataTransfer.types;
+    return !!types && Array.prototype.indexOf.call(types, PART_TYPE) >= 0;
+  }
+
+  function dropTarget(e) {
+    var el = document.elementFromPoint(e.clientX, e.clientY);
+    if (!el || isBridgeElement(el) || el === document.documentElement || el === document.body) return null;
+    var rect = el.getBoundingClientRect();
+    var rel = rect.height > 0 ? (e.clientY - rect.top) / rect.height : 0.5;
+    return { el: el, rect: rect, rel: Math.max(0, Math.min(1, rel)) };
+  }
+
+  function showDrop(t) {
+    var r = t.rect;
+    var line = 3;
+    if (t.rel < 0.25) positionOverlay(dropOverlay, { top: r.top - 1, left: r.left, width: r.width, height: line });
+    else if (t.rel > 0.75) positionOverlay(dropOverlay, { top: r.bottom - 2, left: r.left, width: r.width, height: line });
+    else positionOverlay(dropOverlay, r);
+  }
+
+  document.addEventListener("dragover", function (e) {
+    if (!isPartDrag(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    var t = dropTarget(e);
+    if (t) showDrop(t); else hideOverlay(dropOverlay);
+  }, true);
+
+  document.addEventListener("dragleave", function (e) {
+    if (isPartDrag(e) && !e.relatedTarget) hideOverlay(dropOverlay);
+  }, true);
+
+  document.addEventListener("drop", function (e) {
+    if (!isPartDrag(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    hideOverlay(dropOverlay);
+    // The drag carries which part it is: the editor's own record of it is cleared when the drag ends, which a browser does
+    // before this page's message arrives.
+    var part = e.dataTransfer.getData(PART_TYPE);
+    var t = dropTarget(e);
+    if (!t) { send("drop", { source: null, rel: 0.5, part: part }); return; }
+    send("drop", { source: getElementInfo(t.el).source, rel: t.rel, part: part });
+  }, true);
+
   // Reposition overlays on scroll/resize
   function repositionOverlays() {
     if (hoveredElement && hoveredElement.isConnected) {

@@ -23,7 +23,7 @@ from database import get_db
 from models.auth import PlatformUser
 from services.project_paths import project_root
 from services.project_service import get_project_with_auth
-from services.react_editor import assets, jit, pages, phone_screens, service, smith, theme, widgets
+from services.react_editor import assets, jit, pages, phone_kit, phone_screens, service, smith, theme, widgets
 from services.react_editor.service import EditorError, Project
 
 router = APIRouter(tags=["react-editor"])
@@ -236,13 +236,20 @@ async def remove_widget(project_id: uuid.UUID, widget_id: str,
 # ---------------------------------------------------------------------------
 
 #: What a person can do to a phone screen from the picture. The rest of the editor's operations are for later steps.
-_PHONE_OPS = frozenset({"setText", "setProp", "remove", "duplicate"})
+_PHONE_OPS = frozenset({"setText", "setProp", "remove", "duplicate", "move", "insert", "addImport"})
 
 
 class PhoneApplyRequest(BaseModel):
     baseRevision: str
     ops: list[dict[str, Any]] = Field(default_factory=list)
     label: str = "Edit"
+
+
+@router.get("/api/projects/{project_id}/react-editor/phone/kit")
+async def phone_kit_choices(project_id: uuid.UUID, user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """What each part of the phone kit lets a person choose, and the ready parts that can be added."""
+    project = await _project(project_id, user, db)
+    return await _run(phone_kit.for_browser, project.root)
 
 
 @router.get("/api/projects/{project_id}/react-editor/phone/screens/{page_id}")

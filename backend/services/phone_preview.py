@@ -91,7 +91,9 @@ def _fingerprint(output_dir: str | Path) -> str:
         for p in (root / sub).rglob("*"):
             if p.is_file():
                 newest = max(newest, p.stat().st_mtime)
-    for extra in (root / "app.json", Path(output_dir) / ".forge" / "blueprint" / "current.json"):
+    # What the preview is drawn WITH counts too: a newer bridge (how the picture talks to the editor) is a picture to draw again.
+    for extra in (root / "app.json", Path(output_dir) / ".forge" / "blueprint" / "current.json", STATIC / "bridge.js",
+                  *(p for p in ASSETS.glob("*") if p.is_file())):
         if extra.is_file():
             newest = max(newest, extra.stat().st_mtime)
     return hashlib.sha1(str(newest).encode()).hexdigest()[:12]
