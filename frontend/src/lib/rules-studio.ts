@@ -19,10 +19,33 @@ export interface Usage {
   stops?: boolean;
 }
 
+/** A workflow step that saves the rule's record — the app checks the rule there, always. */
+export interface RuleLink {
+  workflow: string;
+  name: string;
+  step: string;
+  stepName: string;
+  event: FiresOn;
+  /** Does this save change a field the rule looks at? (A new record always does.) */
+  touches: boolean;
+}
+
+/** A workflow's own yes/no check on the rule's fields that does not say what the rule says. */
+export interface RuleCopy {
+  workflow: string;
+  name: string;
+  step: string;
+  stepName: string;
+  expression: string;
+  differs?: Record<string, unknown>;
+}
+
 export interface Usages {
   steps: Usage[];
   starts: Usage[];
   saves: Usage[];
+  links?: RuleLink[];
+  copies?: RuleCopy[];
 }
 
 /** A rule as the studio reads it: the view, plus where it acts and when it fires. */
@@ -103,9 +126,9 @@ export interface TestAnswer {
 
 const OPERATOR_WORDS: Record<string, string> = {
   equals: "is", not_equals: "is not", gt: "is more than", gte: "is at least", lt: "is less than",
-  lte: "is at most", in: "is one of", not_in: "is not one of", is_null: "is blank",
+  lte: "is at most", in: "is one of", not_in: "is not one of", is_null: "is empty",
   is_not_null: "is filled in", contains: "contains", starts_with: "starts with", ends_with: "ends with",
-  matches_regex: "matches",
+  matches_regex: "matches the pattern",
 };
 
 /** "amount" -> "amount"; "managerNote" -> "manager note". */
@@ -150,11 +173,11 @@ export function whenWords(feel: string | undefined): string {
 function actionWords(a: Record<string, any>, cat: StudioCatalogue | null): string {
   const field = a.field ? humanField(a.field) : "";
   switch (a.type) {
-    case "show_error": return `refuse it: “${a.message ?? ""}”`;
-    case "set_field": return `set ${field} to ${a.valueMode === "formula" ? a.value : quote(a.value)}`;
-    case "set_default": return `default ${field} to ${quote(a.value)}`;
-    case "clear_field": return `clear ${field}`;
-    case "set_required": return a.required === false ? `stop requiring ${field}` : `require ${field}`;
+    case "show_error": return `don’t save it and show “${a.message ?? ""}”`;
+    case "set_field": return `fill in ${field} with ${a.valueMode === "formula" ? a.value : quote(a.value)}`;
+    case "set_default": return `fill in ${field} with ${quote(a.value)} if it is empty`;
+    case "clear_field": return `empty ${field}`;
+    case "set_required": return a.required === false ? `${field} is not required` : `${field} must be filled in${a.message ? ` (“${a.message}”)` : ""}`;
     case "set_visibility": return `${a.visible === false ? "hide" : "show"} ${field}`;
     case "set_readonly": return `${a.readonly === false ? "unlock" : "lock"} ${field}`;
     case "set_options": return `limit ${field} to ${(a.options ?? []).map((o: any) => o.label ?? o.value).join(", ")}`;
@@ -163,31 +186,31 @@ function actionWords(a: Record<string, any>, cat: StudioCatalogue | null): strin
       const w = cat?.workflows.find((x) => x.id === a.workflow);
       return `start “${w?.name ?? a.workflow}”`;
     }
-    case "send_notification": return `notify: “${a.message ?? ""}”`;
+    case "send_notification": return `send a notification: “${a.message ?? ""}”`;
     default: return String(a.type ?? "").replace(/_/g, " ");
   }
 }
 
 const POLICY_WORDS: Record<string, string> = {
-  U: "one row may match", F: "the first matching row wins", P: "the highest-priority value wins",
+  U: "only one row can match", F: "the first matching row is used", P: "the most important result is used",
   A: "matching rows must agree", C: "every matching row counts", R: "every matching row, in order",
 };
 
 export function firesWords(on: FiresOn[] | undefined): string {
   if (!on || on.length !== 1) return "is saved";
-  return on[0] === "create" ? "is created" : "is updated";
+  return on[0] === "create" ? "is added" : "is changed";
 }
 
 /** The whole rule as a sentence a person reads before they read its parts. */
 export function ruleSentence(view: StudioView, cat: StudioCatalogue | null): string {
   const r = view.rule;
-  const record = view.entityName ? `${/^[aeiou]/i.test(view.entityName) ? "an" : "a"} ${view.entityName}` : "a record";
+  const record = view.entityName ? `${/^[aeiou]/i.test(view.entityName) ? "an" : "a"} ${view.entityName.toLowerCase()}` : "an item";
   if (view.kind === "decision_table") {
     const t = r.table ?? {};
     const ins = (t.inputs ?? []).map((c) => humanField(c.label || c.variableBinding || c.name)).join(", ");
     const outs = (t.outputs ?? []).map((c) => humanField(c.label || c.variableBinding || c.name)).join(", ");
     const n = (t.rules ?? []).length;
-    return `When ${record} ${firesWords(r.on)}, set ${outs || "…"} from ${ins || "…"} by a table of ${n} row${n === 1 ? "" : "s"} (${POLICY_WORDS[String(t.hitPolicy || "F").toUpperCase()] ?? "first match"}).`;
+    return `When ${record} ${firesWords(r.on)}, fill in ${outs || "…"} based on ${ins || "…"}, using a table of ${n} row${n === 1 ? "" : "s"} (${POLICY_WORDS[String(t.hitPolicy || "F").toUpperCase()] ?? "the first matching row is used"}).`;
   }
   if (view.kind === "condition_action") {
     const cond = whenWords(r.when || r.expression);
@@ -195,8 +218,8 @@ export function ruleSentence(view: StudioView, cat: StudioCatalogue | null): str
     const otherwise = (r.otherwise ?? []).map((a) => actionWords(a as any, cat));
     let s = `When ${record} ${firesWords(r.on)}`;
     s += cond === "always" ? ", " : ` and ${cond}, `;
-    s += then.length ? then.join(", then ") : "nothing";
-    if (otherwise.length) s += `; otherwise ${otherwise.join(", then ")}`;
+    s += then.length ? then.join(", and ") : "nothing happens";
+    if (otherwise.length) s += `; otherwise ${otherwise.join(", and ")}`;
     // A quoted message already ends the sentence: “… a note.” — not “… a note.”.
     return /[.!?]”$/.test(s) ? s : s + ".";
   }
@@ -210,12 +233,12 @@ export type HitPolicy = "U" | "F" | "P" | "A" | "C" | "R";
 export type Aggregation = "SUM" | "COUNT" | "MIN" | "MAX";
 
 export const HIT_POLICIES: { id: HitPolicy; name: string; says: string; forRecords: boolean }[] = [
-  { id: "U", name: "Unique", says: "Exactly one row can match any record. Overlapping rows are caught when you save.", forRecords: true },
-  { id: "F", name: "First", says: "Rows are read top to bottom; the first that matches wins.", forRecords: true },
-  { id: "P", name: "Priority", says: "Of the rows that match, the one whose result comes first in the result's list of values wins.", forRecords: true },
-  { id: "A", name: "Any", says: "Several rows may match, but they must give the same result.", forRecords: true },
-  { id: "C", name: "Collect", says: "Every matching row counts: add them up, count them, or take the smallest or largest.", forRecords: true },
-  { id: "R", name: "Rule order", says: "Every matching row, as a list in row order — for a workflow step.", forRecords: false },
+  { id: "F", name: "First match", says: "Rows are read from the top. The first row that matches is used. (Best for most tables.)", forRecords: true },
+  { id: "U", name: "Only one", says: "Only one row may ever match. If two rows overlap, you are told when you save.", forRecords: true },
+  { id: "P", name: "Most important", says: "If several rows match, the result listed first among the possible results is used.", forRecords: true },
+  { id: "A", name: "Must agree", says: "Several rows may match, but they must all give the same result.", forRecords: true },
+  { id: "C", name: "Add up", says: "Every matching row counts: add them up, count them, or take the smallest or largest.", forRecords: true },
+  { id: "R", name: "All in order", says: "Every matching row, in row order — for a workflow step.", forRecords: false },
 ];
 
 export interface TableColumn {
@@ -297,7 +320,7 @@ export const CELL_HELP: { example: string; means: string }[] = [
   { example: "[1000..5000]", means: "from 1000 to 5000, both included" },
   { example: "(0..100]", means: "above 0, up to and including 100" },
   { example: "not(travel)", means: "anything but this" },
-  { example: "> budget", means: "more than another field of the record" },
+  { example: "> budget", means: "more than another field (here: budget)" },
   { example: '> "2026-06-30"', means: "after a date" },
 ];
 

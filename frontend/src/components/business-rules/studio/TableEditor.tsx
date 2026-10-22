@@ -139,7 +139,7 @@ export function TableEditor({
   return (
     <div className="space-y-4" data-testid="table-editor">
       <div className="space-y-2">
-        <p className="text-xs font-medium text-muted-foreground">When more than one row matches</p>
+        <p className="text-xs font-medium text-muted-foreground">If more than one row matches</p>
         <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Hit policy">
           {HIT_POLICIES.filter((p) => p.forRecords).map((p) => (
             <button key={p.id} type="button" role="radio" aria-checked={t.hitPolicy === p.id} disabled={disabled}
@@ -170,14 +170,14 @@ export function TableEditor({
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <FieldPicker label="Field it reads" fields={free} onPick={(f) => addColumn("inputs", f)} disabled={disabled} tone="in" />
-        <FieldPicker label="Field it sets" fields={free} onPick={(f) => addColumn("outputs", f)} disabled={disabled} tone="out" />
+        <FieldPicker label="Add a column to check" fields={free} onPick={(f) => addColumn("inputs", f)} disabled={disabled} tone="in" />
+        <FieldPicker label="Add a column to fill in" fields={free} onPick={(f) => addColumn("outputs", f)} disabled={disabled} tone="out" />
         <Popover>
           <PopoverTrigger asChild>
-            <Button variant="ghost" size="sm" className="ml-auto h-8 gap-1 text-xs"><HelpCircle className="h-3.5 w-3.5" /> How to fill a cell</Button>
+            <Button variant="ghost" size="sm" className="ml-auto h-8 gap-1 text-xs"><HelpCircle className="h-3.5 w-3.5" /> What can I type in a cell?</Button>
           </PopoverTrigger>
           <PopoverContent align="end" className="w-80">
-            <p className="mb-2 text-xs font-medium">A cell of a field it reads matches when:</p>
+            <p className="mb-2 text-xs font-medium">In a column to check, a cell matches when:</p>
             <ul className="space-y-1">
               {CELL_HELP.map((h) => (
                 <li key={h.example} className="flex gap-3 text-xs">
@@ -186,14 +186,14 @@ export function TableEditor({
                 </li>
               ))}
             </ul>
-            <p className="mt-2 text-xs text-muted-foreground">A cell of a field it sets is a value, or a formula like <code>amount * 0.1</code>.</p>
+            <p className="mt-2 text-xs text-muted-foreground">In a column to fill in, type the value (or a calculation like <code>amount * 0.1</code>).</p>
           </PopoverContent>
         </Popover>
       </div>
 
       {t.inputs.length + t.outputs.length === 0 ? (
         <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-          Pick a field the table reads (like <em>amount</em>) and a field it sets (like <em>approver</em>) — then one row per case.
+          First add a column to check (like <em>amount</em>) and a column to fill in (like <em>category</em>). Then add one row for each case.
         </div>
       ) : (
         <div className="overflow-x-auto rounded-lg border">
@@ -201,8 +201,8 @@ export function TableEditor({
             <thead>
               <tr className="text-[11px] uppercase tracking-wide text-muted-foreground">
                 <th className="w-10 border-b bg-muted/40" />
-                {t.inputs.length > 0 && <th colSpan={t.inputs.length} className="border-b bg-sky-50/70 px-2 py-1 text-left dark:bg-sky-950/30">When</th>}
-                {t.outputs.length > 0 && <th colSpan={t.outputs.length} className="border-b bg-emerald-50/70 px-2 py-1 text-left dark:bg-emerald-950/30">Then set</th>}
+                {t.inputs.length > 0 && <th colSpan={t.inputs.length} className="border-b bg-sky-50/70 px-2 py-1 text-left dark:bg-sky-950/30">If</th>}
+                {t.outputs.length > 0 && <th colSpan={t.outputs.length} className="border-b bg-emerald-50/70 px-2 py-1 text-left dark:bg-emerald-950/30">Then fill in</th>}
                 <th className="border-b bg-muted/40 px-2 py-1 text-left">Note</th>
                 <th className="w-28 border-b bg-muted/40" />
               </tr>
@@ -229,7 +229,7 @@ export function TableEditor({
                     {t.inputs.map((c, ci) => cell(ri, "inputs", ci, c))}
                     {t.outputs.map((c, ci) => cell(ri, "outputs", ci, c))}
                     <td className="border-b border-r p-0">
-                      <input value={r.note ?? ""} disabled={disabled} placeholder="why" aria-label={`Row ${n}, note`}
+                      <input value={r.note ?? ""} disabled={disabled} placeholder="why (optional)" aria-label={`Row ${n}, note`}
                              onChange={(e) => set({ rows: t.rows.map((x, i) => (i === ri ? { ...x, note: e.target.value } : x)) })}
                              className="h-9 w-full min-w-[120px] bg-transparent px-2 text-xs outline-none focus:bg-background" />
                     </td>

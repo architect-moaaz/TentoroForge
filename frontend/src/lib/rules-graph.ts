@@ -67,8 +67,8 @@ export function fieldsRead(feel: string | undefined, fields: Set<string>): strin
 }
 
 const HINT_WORDS: Record<string, string> = {
-  set_required: "requires", set_visibility: "shows / hides", set_readonly: "locks",
-  set_options: "limits the options of", recommendation: "suggests a value for",
+  set_required: "makes required", set_visibility: "shows / hides", set_readonly: "locks",
+  set_options: "limits the choices of", recommendation: "suggests a value for",
 };
 
 /** One record's rules as a diagram, laid out left to right. */
@@ -109,7 +109,7 @@ export function buildRuleGraph(views: StudioView[], catalogue: StudioCatalogue |
       for (const c of r.table?.outputs ?? []) {
         const name = c.variableBinding || c.name;
         if (!fields.has(name)) continue;
-        edges.push({ id: `e:${ruleNode}>${write(name)}`, source: ruleNode, target: `write:${name}`, branch: "table", ruleId: rid, label: "sets" });
+        edges.push({ id: `e:${ruleNode}>${write(name)}`, source: ruleNode, target: `write:${name}`, branch: "table", ruleId: rid, label: "fills in" });
       }
     } else {
       for (const branch of ["then", "otherwise"] as const) {
@@ -117,15 +117,15 @@ export function buildRuleGraph(views: StudioView[], catalogue: StudioCatalogue |
           const t = String(a.type);
           const label = branch === "otherwise" ? "otherwise" : undefined;
           if (t === "show_error") {
-            const id = add({ id: `refuse:${rid}:${branch}`, kind: "refuse", label: "Refuses the save", detail: a.message ?? "", ruleId: rid });
+            const id = add({ id: `refuse:${rid}:${branch}`, kind: "refuse", label: "Stops the save", detail: a.message ?? "", ruleId: rid });
             edges.push({ id: `e:${ruleNode}>${id}`, source: ruleNode, target: id, branch, ruleId: rid, label });
           } else if ((t === "set_field" || t === "set_default" || t === "clear_field") && a.field) {
-            const verb = t === "set_default" ? "defaults" : t === "clear_field" ? "clears" : "sets";
+            const verb = t === "set_default" ? "fills in if empty" : t === "clear_field" ? "empties" : "fills in";
             edges.push({ id: `e:${ruleNode}>${write(a.field)}:${branch}:${i}`, source: ruleNode, target: `write:${a.field}`, branch, ruleId: rid,
                          label: branch === "otherwise" ? `otherwise ${verb}` : verb });
           } else if (HINT_WORDS[t] && a.field) {
             const id = add({ id: `hint:${a.field}`, kind: "hint", label: humanField(a.field), field: a.field, detail: "on the form" });
-            const word = t === "set_required" && a.required === false ? "stops requiring"
+            const word = t === "set_required" && a.required === false ? "makes optional"
               : t === "set_visibility" && a.visible === false ? "hides" : t === "set_visibility" ? "shows"
               : t === "set_readonly" && a.readonly === false ? "unlocks" : HINT_WORDS[t];
             edges.push({ id: `e:${ruleNode}>${id}:${branch}:${i}`, source: ruleNode, target: id, branch, ruleId: rid,
@@ -140,10 +140,20 @@ export function buildRuleGraph(views: StudioView[], catalogue: StudioCatalogue |
         }
       }
     }
-    // Where it runs as a step of a workflow.
+    // THE WORKFLOWS THAT USE IT: every one that saves this record checks it
+    // (the ones that change what it looks at; if none do, every one that saves).
+    if (v.enabled) {
+      const links = v.usages?.links ?? [];
+      const shown = links.some((l) => l.touches) ? links.filter((l) => l.touches) : links;
+      for (const l of shown) {
+        const id = add({ id: `wf:${l.workflow}`, kind: "workflow", label: l.name, detail: "checks it when saving" });
+        edges.push({ id: `e:${ruleNode}>${id}:link:${l.step}`, source: ruleNode, target: id, branch: "always", ruleId: rid, label: "used in" });
+      }
+    }
+    // An extra check someone added earlier in a workflow.
     for (const s of v.usages?.steps ?? []) {
-      const id = add({ id: `wf:${s.workflow}`, kind: "workflow", label: s.name, detail: "runs it as a step" });
-      edges.push({ id: `e:${ruleNode}>${id}:step`, source: ruleNode, target: id, branch: "always", ruleId: rid, label: "a step of" });
+      const id = add({ id: `wf:${s.workflow}`, kind: "workflow", label: s.name, detail: "checks it when saving" });
+      edges.push({ id: `e:${ruleNode}>${id}:step`, source: ruleNode, target: id, branch: "always", ruleId: rid, label: "extra check in" });
     }
   }
 

@@ -126,6 +126,7 @@ def workflow_list_item(data: dict, stem: str) -> WorkflowListItem:
         description=data.get("description"),
         trigger_type=trigger.get("type") if isinstance(trigger, dict) else None,
         step_count=step_count,
+        blueprintId=data.get("blueprintId") if isinstance(data.get("blueprintId"), str) else None,
     )
 
 

@@ -3430,6 +3430,18 @@ def _project_integration(svc: BlueprintService, app_root: str) -> None:
         keep_stated_rules(svc)
     except Exception:  # noqa: BLE001 — the rules the build wrote still reach the app
         logger.exception("[blueprint] keeping the stated rules failed")
+    # ONE RULE, NOT A RULE AND ITS COPY. A workflow's own yes/no step that
+    # says exactly what a business rule says (proven by the app's engine on
+    # sample saves) is taken out: the save step after it checks the rule
+    # itself — so changing the rule changes the workflow (services/rule_links).
+    try:
+        from services.rule_links import fold_copies
+        folded = fold_copies(svc.doc)
+        if folded:
+            logger.info("[blueprint] %d workflow check(s) now follow their business rule: %s", len(folded),
+                        ", ".join(f"{f['name']}/{f['step']}→{f['rule']}" for f in folded))
+    except Exception:  # noqa: BLE001 — the workflows as written still run
+        logger.exception("[blueprint] linking workflow checks to their rules failed")
     project_business_rules(svc.doc, app_root)
     result = project_workflows(svc.doc, app_root)
     for entry in result["codeMap"]:

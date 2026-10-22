@@ -58,6 +58,30 @@ async function simulate(req: Json): Promise<Json> {
   };
 }
 
+// Many questions in one run of node: a workflow condition's value for each
+// set of variables (as the workflow engine reads it — truthy is yes), and
+// what the rules say about each save. Used to tell whether a workflow's own
+// check says exactly what a business rule says (services/rule_links.py).
+async function batch(req: Json): Promise<Json> {
+  const conditions = (Array.isArray(req.conditions) ? req.conditions : []).map((c: Json) => {
+    try {
+      return { value: Boolean(evaluateExpression(normalizeBlankChecks(String(c.expression || "false")), (c.vars || {}) as any)) };
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : String(e) };
+    }
+  });
+  const saves: Json[] = [];
+  for (const s of Array.isArray(req.saves) ? req.saves : []) {
+    try {
+      const r = await simulate({ ...s, op: "simulate" });
+      saves.push({ refused: r.refused, errors: r.errors });
+    } catch (e) {
+      saves.push({ error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  return { conditions, saves };
+}
+
 let raw = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (c) => (raw += c));
@@ -68,6 +92,7 @@ process.stdin.on("end", async () => {
     if (req.op === "analyze") out = { findings: analyzeTable(req.table || {}) };
     else if (req.op === "cells") out = { cells: (req.cells || []).map((c: string) => parseCell(c)) };
     else if (req.op === "simulate") out = await simulate(req);
+    else if (req.op === "batch") out = await batch(req);
     else out = { error: `unknown op ${req.op}` };
     process.stdout.write(JSON.stringify(out));
   } catch (e) {

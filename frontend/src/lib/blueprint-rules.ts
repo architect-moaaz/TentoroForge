@@ -84,6 +84,8 @@ export interface RulesResponse {
   /** Rules the person stated that the build has not written yet. */
   planned?: { id: string; description: string }[];
   catalogue: Catalogue | null;
+  /** Workflow checks that repeated a rule, handed to the rule as the list was read. */
+  linked?: { rule: string; ruleName?: string; workflow: string; name: string; step: string }[];
 }
 
 export const ORIGIN_LABEL: Record<RuleOrigin, string> = {
@@ -94,11 +96,11 @@ export const ORIGIN_LABEL: Record<RuleOrigin, string> = {
 };
 
 export const RUNS_LABEL: Record<RuleRuns, string> = {
-  everywhere: "Enforced on every save + live on the form",
-  form: "Shapes the form",
-  save: "Enforced on every save",
-  before: "Checked before its workflows run",
-  nowhere: "Not enforced",
+  everywhere: "Checked every time it is saved, and shown on the form",
+  form: "Changes how the form looks",
+  save: "Checked every time it is saved",
+  before: "Checked before its workflows start",
+  nowhere: "Not checked",
 };
 
 // ---- the data model, in the shape the existing editors take --------------

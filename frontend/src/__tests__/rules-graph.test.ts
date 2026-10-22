@@ -43,7 +43,7 @@ describe("the rules map", () => {
     const e = (s: string, t: string) => g.edges.find((x) => x.source === s && x.target.startsWith(t));
     expect(e("read:amount", "rule:RULE-007")?.branch).toBe("always");
     expect(e("rule:RULE-007", "write:category")?.branch).toBe("table");
-    expect(e("rule:RULE-001", "wf:FLOW-002")?.label).toBe("a step of");
+    expect(e("rule:RULE-001", "wf:FLOW-002")?.label).toBe("extra check in");
     expect(g.edges.filter((x) => x.source === "rule:RULE-002").map((x) => x.branch).sort()).toEqual(["otherwise", "then"]);
     // Laid out left to right: a field it reads sits left of the rule, a field it writes right of it.
     const at = (id: string) => g.nodes.find((n) => n.id === id)!.x;

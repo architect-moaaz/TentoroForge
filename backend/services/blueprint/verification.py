@@ -381,10 +381,13 @@ def check_api_permission(doc: dict) -> list[Finding]:
 
 
 def check_workflow_rule(doc: dict) -> list[Finding]:
-    """A rule may not govern an artifact that isn't there."""
+    """A rule may not govern an artifact that isn't there. A rule names the
+    requirements it answers among what it applies to (``REQ-…``): those are
+    artifacts too — leaving them out flagged every rule of every app."""
     everything = (
         _ids(doc.get("pages")) | _ids(doc.get("apis")) | _ids(doc.get("workflows"))
         | _ids(_entities(doc)) | _ids(doc.get("roles")) | _ids(doc.get("permissions"))
+        | _ids(doc.get("requirements"))
     )
     out: list[Finding] = []
     for rule in _live(doc.get("businessRules")):

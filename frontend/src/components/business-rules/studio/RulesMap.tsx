@@ -105,7 +105,7 @@ const FieldNode = memo(({ data }: NodeProps<Node<Data>>) => {
 FieldNode.displayName = "FieldNode";
 
 const STATE_SAID: Record<RuleState, string> = {
-  idle: "", held: "acted", missed: "otherwise", quiet: "did not fire", broken: "could not be read",
+  idle: "", held: "applied", missed: "didn’t apply", quiet: "not checked here", broken: "could not be read",
 };
 
 const RuleNode = memo(({ data }: NodeProps<Node<Data>>) => {
@@ -127,7 +127,7 @@ const RuleNode = memo(({ data }: NodeProps<Node<Data>>) => {
       <span className="flex min-w-0 flex-1 flex-col justify-center gap-0.5 px-3">
         <span className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
           {table ? <Table2 className="h-3 w-3 text-indigo-500" /> : <Scale className="h-3 w-3 text-violet-500" />}
-          {table ? "Decision table" : "When → then"} · {data.detail}
+          {table ? "Table rule" : "If → then rule"}
           {!data.enabled && <span className="rounded bg-muted px-1 normal-case tracking-normal">off</span>}
         </span>
         <span className="line-clamp-2 text-[13px] font-semibold leading-snug">{data.label}</span>
@@ -288,12 +288,13 @@ function Legend() {
   const dot = "h-2 w-2 rounded-full";
   return (
     <div className="pointer-events-none absolute left-3 top-3 flex flex-wrap items-center gap-3 rounded-full border bg-background/80 px-3 py-1.5 text-[11px] text-muted-foreground shadow-sm backdrop-blur">
-      <span className="flex items-center gap-1.5"><span className={cn(dot, "bg-sky-500")} />reads</span>
+      <span className="flex items-center gap-1.5"><span className={cn(dot, "bg-sky-500")} />looks at</span>
       <span className="flex items-center gap-1.5"><span className={cn(dot, "bg-violet-500")} />rule</span>
       <span className="flex items-center gap-1.5"><span className={cn(dot, "bg-indigo-500")} />table</span>
-      <span className="flex items-center gap-1.5"><span className={cn(dot, "bg-emerald-500")} />writes</span>
-      <span className="flex items-center gap-1.5"><span className={cn(dot, "bg-rose-500")} />refuses</span>
+      <span className="flex items-center gap-1.5"><span className={cn(dot, "bg-emerald-500")} />fills in</span>
+      <span className="flex items-center gap-1.5"><span className={cn(dot, "bg-rose-500")} />stops the save</span>
       <span className="flex items-center gap-1.5"><span className={cn(dot, "bg-amber-500")} />form hint</span>
+      <span className="flex items-center gap-1.5"><span className={cn(dot, "bg-violet-300")} />workflow that uses it</span>
     </div>
   );
 }
@@ -319,14 +320,14 @@ function PlayBar({ projectId, entity, catalogue, answer, onAnswer, onClose }: {
   void catalogue;
 
   const said = answer && (answer.problems?.length ? answer.problems[0]
-    : answer.refused ? `Refused — “${(answer.errors ?? [])[0] ?? ""}”`
-    : `Saved — ${Object.keys(answer.patches ?? {}).length} value${Object.keys(answer.patches ?? {}).length === 1 ? "" : "s"} set by the rules`);
+    : answer.refused ? `Not saved — the person sees: “${(answer.errors ?? [])[0] ?? ""}”`
+    : `Saved${Object.keys(answer.patches ?? {}).length ? ` — the rules filled in ${Object.keys(answer.patches ?? {}).length} value${Object.keys(answer.patches ?? {}).length === 1 ? "" : "s"}` : ""}`);
   return (
     <aside className="flex w-[320px] shrink-0 flex-col rounded-xl border bg-background p-3 shadow-sm motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-right-4 motion-safe:duration-300"
            data-testid="play-bar">
       <div className="mb-2 flex items-center gap-2">
         <Play className="h-4 w-4 text-violet-600" />
-        <p className="flex-1 text-sm font-semibold">Play a save of a {entity.name}</p>
+        <p className="flex-1 text-sm font-semibold">Try saving {/^[aeiou]/i.test(entity.name) ? "an" : "a"} {entity.name.toLowerCase()}</p>
         <button type="button" onClick={onClose} aria-label="Close the player" className="text-muted-foreground hover:text-foreground">
           <X className="h-4 w-4" />
         </button>

@@ -299,7 +299,7 @@ def where_it_runs(rule: dict) -> str:
     return "form" if acts else "nowhere"
 
 
-def view(rule: dict, doc: dict) -> dict:
+def view(rule: dict, doc: dict, copies: list[dict] | None = None) -> dict:
     """A rule as the tab shows it: the rule itself, plus what a person needs
     to read it — the record's name, where it runs, what it gates and cites."""
     ents = _entities(doc)
@@ -322,7 +322,7 @@ def view(rule: dict, doc: dict) -> dict:
                          if str(r) in reqs],
         # Where else it acts: as a workflow step, the workflows it starts, and
         # the workflows that save its record (its checks run there too).
-        "usages": usages(doc, rule),
+        "usages": usages(doc, rule, copies),
     }
 
 
@@ -332,7 +332,9 @@ def read(output_dir: str | Path) -> dict:
     svc = BlueprintService.load(output_dir=str(output_dir))
     doc = svc.doc
     why = busy(output_dir)
-    rules = [view(r, doc) for r in _live(doc.get("businessRules"))]
+    from services import rule_links
+    copies = rule_links.review_all(doc) if rule_links.has_candidates(doc) else []
+    rules = [view(r, doc, copies) for r in _live(doc.get("businessRules"))]
     # STRAIGHT FROM THE REQUEST. A rule the person stated is a requirement
     # (`owner: businessRules`) from the moment the requirements are written;
     # the rule that enforces it is written by the build. Until then it is
@@ -1216,6 +1218,85 @@ def _find(doc: dict, rule_id: str) -> dict:
                     status=404)
 
 
+def _fold_own_copies(svc: Any, rule_id: str) -> list[str]:
+    """Before a rule changes, is switched off or is removed: a workflow step
+    that says exactly what the rule says now is the rule's copy — it goes, so
+    the workflow follows the rule from now on (otherwise the old copy would
+    go on stopping saves the rule no longer stops). The workflows changed."""
+    from services import rule_links
+    try:
+        done = rule_links.fold_copies(svc.doc, rule_ids={str(rule_id)})
+    except Exception:  # noqa: BLE001 — the rule still changes; the copy stays as it was
+        logger.exception("[rules] could not hand %s's workflow copies to the rule", rule_id)
+        return []
+    return sorted({d["workflow"] for d in done})
+
+
+def link_copies(output_dir: str | Path) -> list[dict]:
+    """Every workflow step proven to say exactly what a rule says is handed
+    to the rule (see `services/rule_links`). Run when the tab opens, so an
+    app built before this keeps one rule, not a rule and its copy. Nothing to
+    do (the usual case) costs no engine run and no write."""
+    from services import rule_links
+    from services.blueprint.projection import project_workflows
+    from services.blueprint.service import BlueprintService
+    if not has_definition(output_dir) or busy(output_dir):
+        return []
+    svc = BlueprintService.load(output_dir=str(output_dir))
+    if not rule_links.has_candidates(svc.doc):
+        return []
+    if not any(c.get("same") is True for c in rule_links.review_all(svc.doc)):
+        return []
+    with write_lock(output_dir, timeout=TAB_LOCK_WAIT):
+        if busy(output_dir):
+            return []
+        svc = BlueprintService.load(output_dir=str(output_dir))
+        before = svc.snapshot()
+        done = rule_links.fold_copies(svc.doc)
+        if not done:
+            return []
+        svc.validate()
+        flows = sorted({d["workflow"] for d in done})
+        said = "; ".join(f"{d['name']}: “{d['step']}” is now the rule {d['rule']}" for d in done)
+        _commit(svc, before, "Business Rules: workflow checks that repeated a rule now follow the rule",
+                said, sorted({d["rule"] for d in done}) + flows)
+        app = Path(svc.output_dir) / "app"
+        if app.is_dir():
+            project_workflows(svc.doc, str(app))
+        logger.info("[rules] %s: %s", Path(output_dir).name, said)
+        return done
+
+
+def follow_rule(output_dir: str | Path, rule_id: str, *, workflow: str, step: str, actor: str = "") -> dict:
+    """The person's choice: a workflow's own check on the rule's fields is
+    taken out, and the rule — checked when the workflow saves — decides."""
+    from services import rule_links
+    from services.blueprint.projection import project_workflows
+    from services.blueprint.service import BlueprintService
+    _guard_writable(output_dir)
+    with write_lock(output_dir, timeout=TAB_LOCK_WAIT):
+        _refuse_if_building(output_dir)
+        svc = BlueprintService.load(output_dir=str(output_dir))
+        rule = _find(svc.doc, rule_id)
+        cand = next((c for c in rule_links.candidates(svc.doc, rule)
+                     if c["workflow"] == str(workflow) and c["step"] == str(step)), None)
+        flow = next((w for w in _live(svc.doc.get("workflows")) if str(w.get("id")) == str(workflow)), None)
+        if cand is None or flow is None:
+            raise RuleError("That workflow no longer has its own check here. Reload the list.", status=404)
+        before = svc.snapshot()
+        if not rule_links.fold(flow, cand):
+            raise RuleError("That check could not be taken out. Reload the list.", status=409)
+        svc.validate()
+        version = _commit(svc, before, f"Business Rules tab: let “{rule.get('name')}” decide in {flow.get('name')}"
+                          + (f" (by {actor})" if actor else ""),
+                          f"Took out {flow.get('name')}'s own check “{step}”; {rule_id} decides when it saves",
+                          [str(rule_id), str(workflow)])
+        app = Path(svc.output_dir) / "app"
+        if app.is_dir():
+            project_workflows(svc.doc, str(app))
+        return {"rule": view(rule, svc.doc), "version": version}
+
+
 def create(output_dir: str | Path, payload: dict, *, actor: str = "") -> dict:
     """A rule made in the Business Rules tab."""
     from services.blueprint.ids import prose_key
@@ -1279,6 +1360,7 @@ def update(output_dir: str | Path, rule_id: str, payload: dict, *, expected: str
             return {"rule": view(current, svc.doc), "version": int(svc.doc.get("version") or 1),
                     "files": [], "unchanged": True}
         before = svc.snapshot()
+        folded = _fold_own_copies(svc, rule_id)
         rows = svc.doc.get("businessRules") or []
         for i, r in enumerate(rows):
             if isinstance(r, dict) and str(r.get("id")) == str(rule_id):
@@ -1297,8 +1379,8 @@ def update(output_dir: str | Path, rule_id: str, payload: dict, *, expected: str
                 logger.warning("[rules] could not carry %s's id to its new wording", rule_id)
         version = _commit(svc, before, f"Business Rules tab: edit “{rule.get('name')}”"
                           + (f" (by {actor})" if actor else ""),
-                          f"Edited {rule_id} in the Business Rules tab", [str(rule_id)])
-        files = _project(svc, prerequisites=rule.get("kind") == "prerequisite")
+                          f"Edited {rule_id} in the Business Rules tab", [str(rule_id), *folded])
+        files = _project(svc, prerequisites=rule.get("kind") == "prerequisite" or bool(folded))
         logger.info("[rules] %s: edited %s in the tab", Path(output_dir).name, rule_id)
         return {"rule": view(rule, svc.doc), "version": version, "files": files}
 
@@ -1321,6 +1403,7 @@ def remove(output_dir: str | Path, rule_id: str, *, expected: str | None, actor:
             raise RuleError("This rule was changed since you opened it. Reload, then remove it again.",
                             status=409)
         before = svc.snapshot()
+        folded = _fold_own_copies(svc, rule_id)
         for r in svc.doc.get("businessRules") or []:
             if isinstance(r, dict) and str(r.get("id")) == str(rule_id):
                 r["status"] = "DEPRECATED"
@@ -1335,6 +1418,7 @@ def remove(output_dir: str | Path, rule_id: str, *, expected: str | None, actor:
                     and s.get("type") == "decision" and str((s.get("config") or {}).get("rule") or "") == str(rule_id)]
             if [k for k in keys if _detach_in(flow, k)]:
                 flows.append(str(flow.get("id")))
+        flows = sorted(set(flows) | set(folded))
         if flows:
             svc.validate()
         version = _commit(svc, before, f"Business Rules tab: remove “{current.get('name')}”"
@@ -1523,7 +1607,8 @@ def adopt(output_dir: str | Path, rows: list[dict]) -> list[str]:
 
 
 __all__ = [
-    "RuleError", "adopt", "building", "catalogue", "check", "create", "has_definition", "keep_stated_rules",
+    "RuleError", "adopt", "building", "catalogue", "check", "create", "follow_rule", "has_definition",
+    "keep_stated_rules", "link_copies",
     "normalise", "read", "remove", "revision", "set_enabled", "try_rule", "update", "view",
     "where_it_runs", "write_lock",
 ]
@@ -1599,11 +1684,16 @@ def _step_key(rule_id: str) -> str:
     return slug if slug.startswith("rule_") else f"rule_{slug}"
 
 
-def usages(doc: dict, rule: dict) -> dict:
-    """Where a rule acts beyond the record's own saves:
-    ``steps`` — workflow steps that run it; ``starts`` — the workflows it
-    starts; ``saves`` — the workflows that save its record, where the record's
-    rules are checked on every write anyway."""
+def usages(doc: dict, rule: dict, copies: list[dict] | None = None) -> dict:
+    """Where a rule acts in the workflows:
+    ``links`` — every workflow step that saves its record on a save the rule
+    is for: the rule is checked there, by the app, always (services/rule_links);
+    ``steps`` — extra steps that run it earlier in a workflow; ``starts`` —
+    the workflows it starts; ``copies`` — a workflow's own yes/no step on the
+    same fields that does not say what the rule says (left from a build, the
+    rule edited since), which the person can hand over to the rule;
+    ``saves`` — the workflows of `links`, kept for older screens."""
+    from services import rule_links
     rid = str(rule.get("id") or "")
     ent = _entities(doc).get(str(rule.get("entity") or "")) or {}
     table = str(ent.get("table") or "").lower()
@@ -1634,7 +1724,14 @@ def usages(doc: dict, rule: dict) -> dict:
                 saved = True
         if saved and rule.get("entity"):
             saves.append({"workflow": wid, "name": wname})
-    return {"steps": steps, "starts": started, "saves": saves}
+    linked = rule_links.links(doc, rule)
+    by_flow: dict[str, dict] = {}
+    for ln in linked:
+        by_flow.setdefault(ln["workflow"], {"workflow": ln["workflow"], "name": ln["name"]})
+    own = [{k: c.get(k) for k in ("workflow", "name", "step", "stepName", "expression", "differs", "same")}
+           for c in copies or [] if c.get("rule") == str(rule.get("id")) and c.get("same") is not True]
+    return {"steps": steps, "starts": started, "links": linked, "copies": own,
+            "saves": list(by_flow.values()) if linked or not saves else saves}
 
 
 def _flow_concerns(flow: dict, ent: dict) -> bool:
@@ -1651,10 +1748,15 @@ def _flow_concerns(flow: dict, ent: dict) -> bool:
     return bool(re.search(r"(?<![\w/.])(?:" + re.escape(camel.lower()) + "|" + re.escape(snake) + r")\.\w", text))
 
 
+def _a(noun: str) -> str:
+    return f"{'an' if noun[:1].lower() in 'aeiou' else 'a'} {noun}"
+
+
 def _refusal_message(rule: dict) -> str:
     for side in ("then", "otherwise"):
         for a in rule.get(side) or []:
-            if isinstance(a, dict) and a.get("type") == "show_error" and str(a.get("message") or "").strip():
+            if (isinstance(a, dict) and a.get("type") in ("show_error", "set_required")
+                    and a.get("required") is not False and str(a.get("message") or "").strip()):
                 return str(a["message"]).strip()
     return str(rule.get("message") or "").strip() or f"Stopped by the rule “{rule.get('name') or rule.get('id')}”."
 
@@ -1683,6 +1785,11 @@ def attach(output_dir: str | Path, rule_id: str, *, workflow: str, after: str | 
                             "of a workflow. Make this one enforceable first.")
         if rule.get("enabled") is False:
             raise RuleError("This rule is switched off; switch it on to use it in a workflow.")
+        from services import rule_links
+        if rule.get("kind") == "condition_action" and not rule_links.can_stop(rule):
+            ent_name = (_entities(svc.doc).get(str(rule.get("entity") or "")) or {}).get("name") or "record"
+            raise RuleError(f"This rule only fills in or changes values. It already does that every time a "
+                            f"workflow saves {_a(ent_name)}, so it does not need its own step.")
         flow = next((w for w in _live(svc.doc.get("workflows")) if str(w.get("id")) == str(workflow)), None)
         if flow is None:
             raise RuleError(f"{workflow} is not a workflow of this application.", status=404)
@@ -1699,9 +1806,7 @@ def attach(output_dir: str | Path, rule_id: str, *, workflow: str, after: str | 
             raise RuleError(f"The workflow has no step “{after}”.", status=404)
         if after is not None and by_key[after].get("type") in ("end", "end_event"):
             raise RuleError("A step cannot come after the end of the workflow — choose a step before it.")
-        gate = rule.get("kind") == "condition_action" and any(
-            isinstance(a, dict) and a.get("type") == "show_error"
-            for a in list(rule.get("then") or []) + list(rule.get("otherwise") or []))
+        gate = rule_links.can_stop(rule)
         step = {"key": key, "name": f"Check: {rule.get('name') or rule_id}", "type": "decision",
                 "config": {"rule": str(rule_id)}, "next": []}
         if rule.get("entity"):

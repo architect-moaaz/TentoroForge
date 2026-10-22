@@ -15,3 +15,30 @@ export function askSmith(projectId: string, text: string): void {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent<AskSmithDetail>(ASK_SMITH_EVENT, { detail: { projectId, text } }));
 }
+
+/** Open a workflow of the project in the Workflows tab — from the Business
+ *  Rules tab's "used in" list, say. `workflow` is its id in the app's
+ *  definition (FLOW-…). */
+export const OPEN_WORKFLOW_EVENT = "forge:open-workflow";
+
+export interface OpenWorkflowDetail {
+  projectId: string;
+  workflow: string;
+}
+
+let pendingWorkflow: OpenWorkflowDetail | null = null;
+
+export function openWorkflow(projectId: string, workflow: string): void {
+  if (typeof window === "undefined") return;
+  // Kept for the Workflows tab to pick up when it mounts after the switch.
+  pendingWorkflow = { projectId, workflow };
+  window.dispatchEvent(new CustomEvent<OpenWorkflowDetail>(OPEN_WORKFLOW_EVENT, { detail: { projectId, workflow } }));
+}
+
+/** The workflow asked for and not yet opened, for this project (taken once). */
+export function takeOpenWorkflow(projectId: string): string | null {
+  if (!pendingWorkflow || pendingWorkflow.projectId !== projectId) return null;
+  const w = pendingWorkflow.workflow;
+  pendingWorkflow = null;
+  return w;
+}

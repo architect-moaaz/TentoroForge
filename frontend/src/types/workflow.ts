@@ -368,6 +368,8 @@ export interface WorkflowListItem {
   description: string | null;
   trigger_type: string | null;
   step_count: number;
+  /** The workflow in the app's definition (FLOW-…) it was written from. */
+  blueprintId?: string | null;
 }
 
 // ---------------------------------------------------------------------------

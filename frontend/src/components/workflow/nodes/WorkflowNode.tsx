@@ -31,8 +31,10 @@ import {
   FileText,
   Plug,
   ClipboardCheck,
+  ShieldCheck,
 } from "lucide-react";
 import { visualFor } from "@/catalog/workflowNodes";
+import { useRuleChecks } from "../ruleChecks";
 import type { WorkflowNodeData, WorkflowNodeType } from "@/types/workflow";
 
 // ---------------------------------------------------------------------------
@@ -280,10 +282,12 @@ const SIM_STATUS_RING: Record<string, string> = {
 };
 
 function WorkflowNodeComponent({
+  id,
   data,
   selected,
 }: NodeProps & { data: WorkflowNodeData & { simStatus?: "pending" | "active" | "done" | "failed" } }) {
   const { label, nodeType, config, status, simStatus } = data;
+  const checks = useRuleChecks(id);
   const visual = getVisual(nodeType, config);
   const Icon = visual.icon;
 
@@ -349,6 +353,23 @@ function WorkflowNodeComponent({
               <span className="max-w-[100px] truncate">{pill.value}</span>
             </span>
           ))}
+        </div>
+      )}
+
+      {/* The business rules this step checks when it saves (read from the server). */}
+      {checks.length > 0 && (
+        <div className="border-t border-emerald-100 bg-emerald-50/70 px-3 py-2" data-testid="step-rule-checks">
+          <div className="mb-1 flex items-center gap-1 text-[11px] font-semibold text-emerald-800">
+            <ShieldCheck className="h-3 w-3" /> Checks {checks.length} business rule{checks.length === 1 ? "" : "s"}
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {checks.map((c) => (
+              <span key={c.rule} title={c.rule}
+                    className="max-w-[240px] truncate rounded-full border border-emerald-200 bg-white px-2 py-0.5 text-[11px] text-emerald-800">
+                {c.name}
+              </span>
+            ))}
+          </div>
         </div>
       )}
 

@@ -149,8 +149,16 @@ async def list_business_rules(project_id: uuid.UUID, user: PlatformUser = Depend
         await _adopt_old_rows(project, out, db)
     except Exception:  # noqa: BLE001 — the list is still read
         logger.exception("[business-rules] adopting old rows failed for %s", project_id)
+    linked: list[dict] = []
     try:
-        return await asyncio.to_thread(rules.read, out)
+        linked = await asyncio.to_thread(rules.link_copies, out)
+    except Exception:  # noqa: BLE001 — the list is still read
+        logger.exception("[business-rules] linking workflow checks to rules failed for %s", project_id)
+    try:
+        listed = await asyncio.to_thread(rules.read, out)
+        if linked:
+            listed["linked"] = linked
+        return listed
     except Exception as exc:  # noqa: BLE001
         raise _fail(exc) from exc
 
@@ -255,5 +263,40 @@ async def detach_business_rule(project_id: uuid.UUID, rule_id: str, workflow_id:
     try:
         return await asyncio.to_thread(rules.detach, _dir(project), rule_id, workflow=workflow_id,
                                        actor=user.name or "")
+    except Exception as exc:  # noqa: BLE001
+        raise _fail(exc) from exc
+
+
+class FollowPayload(BaseModel):
+    step: str = Field(min_length=1, max_length=200)
+
+
+@router.post("/api/projects/{project_id}/business-rules/{rule_id}/workflows/{workflow_id}/follow")
+async def follow_business_rule(project_id: uuid.UUID, rule_id: str, workflow_id: str, req: FollowPayload,
+                               user: PlatformUser = Depends(get_current_user),
+                               db: AsyncSession = Depends(get_db)):
+    """Take a workflow's own check out, so the rule decides there."""
+    project = await get_project_with_auth(project_id, user, db)
+    try:
+        return await asyncio.to_thread(rules.follow_rule, _dir(project), rule_id, workflow=workflow_id,
+                                       step=req.step, actor=user.name or "")
+    except Exception as exc:  # noqa: BLE001
+        raise _fail(exc) from exc
+
+
+@router.get("/api/projects/{project_id}/business-rules-links")
+async def business_rule_links(project_id: uuid.UUID, user: PlatformUser = Depends(get_current_user),
+                              db: AsyncSession = Depends(get_db)):
+    """For the workflow screens: the rules each save step of each workflow
+    checks — ``{FLOW-id: {step key: [{rule, name}]}}``."""
+    from services import rule_links
+    from services.blueprint.service import BlueprintService
+    project = await get_project_with_auth(project_id, user, db)
+    out = _dir(project)
+    if not rules.has_definition(out):
+        return {"links": {}}
+    try:
+        svc = await asyncio.to_thread(BlueprintService.load, output_dir=str(out))
+        return {"links": rule_links.workflow_links(svc.doc)}
     except Exception as exc:  # noqa: BLE001
         raise _fail(exc) from exc

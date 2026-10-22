@@ -176,9 +176,14 @@ export function evaluateDecision(
     // condition the refusal is written on ("when over 5000 and no note:
     // refuse" refuses when its condition HOLDS). A rule that never refuses
     // branches on its condition.
-    const refuses = (list: unknown) => Array.isArray(list) && list.some((a: any) => a?.type === "show_error");
+    // A field the rule requires stops the run when it is blank, as it stops
+    // the save ("above 5000, a manager note is required").
+    const blank = (v: unknown) => v === null || v === undefined || (typeof v === "string" && v.trim() === "");
+    const stopper = (a: any) => a?.type === "show_error" || (a?.type === "set_required" && a?.required !== false);
+    const refuses = (list: unknown) => Array.isArray(list) && list.some(stopper);
     const isGate = refuses(cfg.then) || refuses(cfg.otherwise);
-    const refusedNow = refuses(acts);
+    const refusedNow = Array.isArray(acts) && acts.some((a: any) =>
+      a?.type === "show_error" || (a?.type === "set_required" && a?.required !== false && a?.field && blank(vars[a.field])));
     const outputs: Record<string, unknown> = {};
     let message: string | undefined;
     for (const a of acts || []) {
@@ -189,6 +194,8 @@ export function evaluateDecision(
           : outputValue(a.value, {});
       }
       if (a.type === "show_error" && a.message) message = String(a.message);
+      if (a.type === "set_required" && a.required !== false && a.field && blank(vars[a.field as string]) && !message)
+        message = String(a.message || `${a.field} is required.`);
     }
     write(ctx, outputs, mapping);
     writeRecord(record, outputs);

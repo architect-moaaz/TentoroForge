@@ -82,7 +82,7 @@ export function TestPanel({
       <div className="flex items-center gap-2">
         <FlaskConical className="h-4 w-4 text-violet-600" />
         <p className="text-sm font-semibold">Test it</p>
-        <span className="text-[11px] text-muted-foreground">by the app’s own engine · nothing is saved</span>
+        <span className="text-[11px] text-muted-foreground">Try an example. Nothing is really saved.</span>
       </div>
       {disabledReason ? (
         <p className="rounded-md bg-muted/60 p-3 text-xs text-muted-foreground">{disabledReason}</p>
@@ -92,14 +92,14 @@ export function TestPanel({
             {(["create", "update"] as FiresOn[]).map((e) => (
               <button key={e} type="button" role="radio" aria-checked={event === e} onClick={() => setEvent(e)}
                       className={cn("rounded px-2.5 py-1", event === e ? "bg-primary text-primary-foreground" : "hover:bg-muted")}>
-                {e === "create" ? "A new record is saved" : "A record is changed"}
+                {e === "create" ? "Adding a new one" : "Changing one"}
               </button>
             ))}
           </div>
           <div className="max-h-[320px] space-y-1.5 overflow-y-auto pr-1">
             {event === "update" && (
               <div className="grid grid-cols-[1fr_1fr_1fr] gap-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                <span>Field</span><span>Before</span><span>Now</span>
+                <span>Field</span><span>Before the change</span><span>After the change</span>
               </div>
             )}
             {shown.map((f) => (
@@ -114,7 +114,7 @@ export function TestPanel({
           </div>
           <Button size="sm" className="w-full" onClick={() => run.mutate()} disabled={run.isPending}>
             {run.isPending ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Play className="mr-1.5 h-3.5 w-3.5" />}
-            Run this save
+            Try it
           </Button>
         </>
       )}
@@ -130,18 +130,18 @@ export function TestPanel({
           {result.trace && (
             result.refused ? (
               <div className="rounded-md border border-rose-200 bg-rose-50 p-2.5 dark:border-rose-900 dark:bg-rose-950/40">
-                <p className="flex items-center gap-1.5 text-xs font-semibold text-rose-800 dark:text-rose-200"><OctagonX className="h-3.5 w-3.5" /> The app refuses this save</p>
+                <p className="flex items-center gap-1.5 text-xs font-semibold text-rose-800 dark:text-rose-200"><OctagonX className="h-3.5 w-3.5" /> This would NOT be saved. The person sees:</p>
                 <ul className="mt-1 space-y-0.5 text-xs text-rose-900 dark:text-rose-200">{(result.errors ?? []).map((e) => <li key={e}>“{e}”</li>)}</ul>
               </div>
             ) : (
               <p className="flex items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 p-2.5 text-xs font-semibold text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200">
-                <CheckCircle2 className="h-3.5 w-3.5" /> The app saves it
+                <CheckCircle2 className="h-3.5 w-3.5" /> This would be saved
               </p>
             )
           )}
           {result.patches && Object.keys(result.patches).length > 0 && (
             <div className="rounded-md border p-2">
-              <p className="mb-1 text-[11px] font-medium text-muted-foreground">The app sets</p>
+              <p className="mb-1 text-[11px] font-medium text-muted-foreground">The app fills in</p>
               <ul className="space-y-0.5 text-xs">
                 {Object.entries(result.patches).map(([k, v]) => (
                   <li key={k}><span className="font-medium">{humanField(k)}</span> → <code className="rounded bg-muted px-1">{JSON.stringify(v)}</code></li>
@@ -153,13 +153,13 @@ export function TestPanel({
             <ul className="space-y-0.5 rounded-md border p-2 text-xs">
               {(result.sideEffects ?? []).map((s, i) => (
                 <li key={i} className="flex items-center gap-1.5"><Workflow className="h-3 w-3" />
-                  {s.type === "trigger_workflow" ? `Starts “${flow(s.workflow)}”` : `Notifies: “${s.message ?? ""}”`}</li>
+                  {s.type === "trigger_workflow" ? `Starts the workflow “${flow(s.workflow)}”` : `Sends a notification: “${s.message ?? ""}”`}</li>
               ))}
             </ul>
           )}
           {result.trace && result.trace.length > 0 && (
             <details className="rounded-md border p-2 text-xs" open>
-              <summary className="cursor-pointer text-[11px] font-medium text-muted-foreground">Why — rule by rule</summary>
+              <summary className="cursor-pointer text-[11px] font-medium text-muted-foreground">Why? Each rule, one by one</summary>
               <ul className="mt-1.5 space-y-1">
                 {result.trace.map((l) => (
                   <li key={l.id} className={cn("flex items-start gap-1.5", result.focus?.id === l.id && "font-medium")}>
@@ -169,10 +169,10 @@ export function TestPanel({
                         : <CircleSlash className="mt-0.5 h-3 w-3 shrink-0 text-slate-400" />}
                     <span>
                       {result.focus?.id === l.id ? "This rule" : l.name}:{" "}
-                      {!l.fires ? "does not fire on this kind of save"
+                      {!l.fires ? "not checked for this kind of save"
                         : l.kind === "decision_table"
                           ? (l.matched?.length ? `row${l.matched.length > 1 ? "s" : ""} ${l.matched.join(", ")} matched${l.used?.length && l.used.join() !== l.matched.join() ? `, row ${l.used.join(", ")} used` : ""}` : "no row matched")
-                          : l.error ? `its condition could not be read — ${l.error}` : l.held ? "its condition holds" : "its condition does not hold"}
+                          : l.error ? `its “If” part could not be read — ${l.error}` : l.held ? "its “If” is true, so it applies" : "its “If” is not true, so it doesn’t apply"}
                       {l.violation && <span className="block text-amber-700">{l.violation}</span>}
                     </span>
                   </li>

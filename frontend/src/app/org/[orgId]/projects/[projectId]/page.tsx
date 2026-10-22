@@ -63,7 +63,7 @@ import { BusinessRulesPanel } from "@/components/business-rules/BusinessRulesPan
 import { ExportDialog } from "@/components/projects/ExportDialog";
 import { MORE_TABS, PRIMARY_TABS, TabRow, type Tab } from "@/components/projects/ProjectTabs";
 import { PublishButton } from "@/components/deploy/PublishButton";
-import { ASK_SMITH_EVENT, type AskSmithDetail } from "@/lib/ask-smith";
+import { ASK_SMITH_EVENT, OPEN_WORKFLOW_EVENT, type AskSmithDetail, type OpenWorkflowDetail } from "@/lib/ask-smith";
 import { SaveAsTemplateButton } from "@/components/templates/SaveAsTemplateButton";
 import { DeleteProjectDialog } from "@/components/projects/DeleteProjectDialog";
 import { CommandPalette } from "@/components/CommandPalette";
@@ -167,6 +167,15 @@ function ProjectWorkspace({
     };
     window.addEventListener(ASK_SMITH_EVENT, show);
     return () => window.removeEventListener(ASK_SMITH_EVENT, show);
+  }, [projectId]);
+  // A workflow named elsewhere (the Business Rules tab's "used in") opens in
+  // the Workflows tab; the panel there picks the workflow out of the event.
+  useEffect(() => {
+    const show = (e: Event) => {
+      if ((e as CustomEvent<OpenWorkflowDetail>).detail?.projectId === projectId) setActiveTab("workflows");
+    };
+    window.addEventListener(OPEN_WORKFLOW_EVENT, show);
+    return () => window.removeEventListener(OPEN_WORKFLOW_EVENT, show);
   }, [projectId]);
   // Back from a DNS provider's approval (`?settings=domains&dc=…`): App settings → Domains.
   const searchParams = useSearchParams();

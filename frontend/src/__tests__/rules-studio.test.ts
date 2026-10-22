@@ -18,20 +18,20 @@ describe("a rule read as a sentence", () => {
       then: [{ type: "show_error", message: "Add a note." }],
       otherwise: [{ type: "trigger_workflow", workflow: "FLOW-002" }],
     }), cat);
-    expect(s).toContain("When an Expense is saved and");
+    expect(s).toContain("When an expense is saved and");
     expect(s).toContain("amount is more than 5000");
-    expect(s).toContain("refuse it: “Add a note.”");
+    expect(s).toContain("don’t save it and show “Add a note.”");
     expect(s).toContain("otherwise start “Approve expense”");
   });
   it("says when it fires", () => {
     expect(ruleSentence(view({ on: ["create"], when: "true", then: [{ type: "set_default", field: "status", value: "submitted" }] }), cat))
-      .toBe("When an Expense is created, default status to “submitted”.");
-    expect(ruleSentence(view({ on: ["update"], when: "true", then: [] }), cat)).toContain("is updated");
+      .toBe("When an expense is added, fill in status with “submitted” if it is empty.");
+    expect(ruleSentence(view({ on: ["update"], when: "true", then: [] }), cat)).toContain("is changed");
   });
   it("says a requirement released as released", () => {
     expect(ruleSentence(view({ when: "amount > 5000", then: [{ type: "set_required", field: "managerNote", required: true }],
                                otherwise: [{ type: "set_required", field: "managerNote", required: false }] }), cat))
-      .toBe("When an Expense is saved and amount is more than 5000, require manager note; otherwise stop requiring manager note.");
+      .toBe("When an expense is saved and amount is more than 5000, manager note must be filled in; otherwise manager note is not required.");
   });
   it("keeps a condition it cannot put in words as written", () => {
     expect(whenWords("string length(title) > 3")).toBe("“string length(title) > 3”");
@@ -40,7 +40,7 @@ describe("a rule read as a sentence", () => {
   it("describes a table by what it reads, sets and how rows win", () => {
     const s = ruleSentence(view({ table: { hitPolicy: "U", inputs: [{ name: "amount" }], outputs: [{ name: "approverRole" }],
                                            rules: [{ inputEntries: ["-"], outputEntries: ["cfo"] }] } }, "decision_table"), cat);
-    expect(s).toBe("When an Expense is saved, set approver role from amount by a table of 1 row (one row may match).");
+    expect(s).toBe("When an expense is saved, fill in approver role based on amount, using a table of 1 row (only one row can match).");
   });
 });
 
