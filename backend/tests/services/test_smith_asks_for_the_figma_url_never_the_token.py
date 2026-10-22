@@ -42,8 +42,10 @@ def _session(output_dir="/tmp/does-not-exist"):
 
 # --------------------------------------------------------------- the contract
 
-def test_the_verb_needs_a_url_and_a_variable_name():
-    assert REQUIRED_BY_VERB["connect_figma"] == {"figma_url", "token_env"}
+def test_the_verb_needs_only_a_url():
+    """The organisation's Figma token, from Settings → Integrations, is used
+    whatever name is given — so nobody is asked for one (2026-10-22)."""
+    assert REQUIRED_BY_VERB["connect_figma"] == {"figma_url"}
 
 
 def test_the_verb_help_says_never_the_token():
@@ -91,12 +93,12 @@ def test_no_url_asks_for_the_file():
     assert "figma" in r.answer.lower()
 
 
-def test_no_variable_name_asks_for_the_name_and_warns():
+def test_no_variable_name_goes_on_to_the_design_question_not_a_token_question():
     r = _session()._connect_figma(
         {"figma_url": "https://www.figma.com/design/aBcD1234EfGh/P?node-id=1-2"})
     assert r.status == "asked"
-    assert "NAME" in r.answer
-    assert "not the token itself" in r.answer
+    assert "SPECIFICATION" in r.answer and "REFERENCE" in r.answer
+    assert "environment variable" not in r.answer.lower()
 
 
 def test_the_ask_never_invites_a_token():
@@ -196,3 +198,21 @@ def test_the_store_defaults_to_evidence_and_rejects_nonsense():
     assert source_record(ref)["treatAs"] == "evidence"
     assert source_record(ref, treat_as="nonsense")["treatAs"] == "evidence"
     assert source_record(ref, treat_as="specification")["treatAs"] == "specification"
+
+
+def test_the_organisations_token_is_found_whatever_the_name(monkeypatch):
+    """Smith asked for `FIGMA_ACCESS_TOKEN`; the store keeps `FIGMA_TOKEN`, and
+    the person was told no token was in an environment variable (forge-v3,
+    2026-10-22)."""
+    from services.figma.credentials import FigmaCredentialError
+    from services.figma.integrations import token_resolver
+    monkeypatch.delenv("FIGMA_ACCESS_TOKEN", raising=False)
+    ref, resolver = token_resolver({"FIGMA_TOKEN": "figd_org"}, "FIGMA_ACCESS_TOKEN")
+    assert resolver.resolve(ref) == "figd_org"
+    ref, resolver = token_resolver({}, "")
+    with pytest.raises(FigmaCredentialError) as err:
+        resolver.resolve(ref)
+    assert "Settings → Integrations → Figma" in str(err.value)
+    monkeypatch.setenv("MY_FIGMA", "figd_env")
+    ref, resolver = token_resolver({}, "MY_FIGMA")
+    assert resolver.resolve(ref) == "figd_env", "a named variable on the server still works"

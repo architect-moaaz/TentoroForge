@@ -539,10 +539,9 @@ def _classify_regions(svc: Any, page: dict, code: str, screen: Any,
     if not file_key:
         return []
 
+    from services.figma.integrations import token_resolver
     values = config_for(svc.output_dir)
-    ref_name = "FIGMA_TOKEN"
-    resolver = (MappingResolver(values) if values.get(ref_name)
-                else EnvSecretResolver())
+    ref_name, resolver = token_resolver(values)
     gateway = FigmaGateway(credential=FigmaCredential(ref=ref_name),
                            resolver=resolver, endpoint=endpoint_from(values))
 

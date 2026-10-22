@@ -146,15 +146,28 @@ DEFINITION: tuple[tuple[str, str, dict[str, str]], ...] = (
 DEFINITION_NAMES: frozenset[str] = frozenset(name for name, _d, _a in DEFINITION)
 
 
+#: Fields a verb takes when the person has already said them, and asks for
+#: itself when they have not. Listed, or the model never passes them: the
+#: design scope was left out of the catalogue so the verb could ask it as a
+#: sentence, and the answer then had no field to arrive in (Tentoro on
+#: forge-v3, 2026-10-22: "Specification", four times, asked four times).
+OPTIONAL_BY_VERB: dict[str, dict[str, str]] = {
+    "connect_figma": {"treat_as": "specification | reference"},
+    "connect_uxpilot": {"treat_as": "specification | reference"},
+}
+
+
 def catalogue() -> list[dict]:
     """Every verb as a tool, in the order `REQUIRED_BY_VERB` declares them."""
     out: list[dict] = []
     for verb, required in REQUIRED_BY_VERB.items():
+        optional = OPTIONAL_BY_VERB.get(verb, {})
         out.append({
             "name": verb,
             "description": VERB_HELP.get(verb, ""),
             "required": sorted(required),
-            "properties": {f: FIELD_TYPES[f] for f in sorted(required)},
+            "optional": sorted(optional),
+            "properties": {**{f: FIELD_TYPES[f] for f in sorted(required)}, **optional},
         })
     return out
 
@@ -213,7 +226,8 @@ def render() -> str:
     """The catalogue as the text a prompt carries."""
     lines: list[str] = []
     for tool in catalogue():
-        args = ", ".join(f"{f}: {tool['properties'][f]}" for f in tool["required"])
+        args = ", ".join([f"{f}: {tool['properties'][f]}" for f in tool["required"]]
+                         + [f"{f}?: {tool['properties'][f]}" for f in tool["optional"]])
         head = f"- `{tool['name']}`" + (f" ({args})" if args else " (no arguments)")
         lines.append(head)
         if tool["description"]:
