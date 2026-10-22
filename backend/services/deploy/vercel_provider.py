@@ -390,7 +390,7 @@ class VercelDeployProvider:
                 if reused_neon:
                     neon_project_id = prior_neon.neon_project_id
                 else:
-                    r = await self.neon.create_project(name=snapshot.project_slug)
+                    r = await self.neon.create_project(name=snapshot.project_slug, region_id=snapshot.neon_region)
                     neon_project_id = r["project_id"]
                     # THE PROJECT IS ON THE ROW BEFORE ANYTHING ELSE IS ASKED OF
                     # IT: a failure in the next step must leave a row that names
@@ -420,7 +420,7 @@ class VercelDeployProvider:
                 row.neon_project_id = neon_project_id
                 row.neon_branch_id = prior_neon.neon_branch_id
             else:
-                r = await self.neon.create_project(name=snapshot.project_slug)
+                r = await self.neon.create_project(name=snapshot.project_slug, region_id=snapshot.neon_region)
                 neon_project_id = r["project_id"]
                 neon_url = r["database_url"]
                 row.neon_project_id = neon_project_id
@@ -450,6 +450,10 @@ class VercelDeployProvider:
                         vercel_project_id
                     )
             row.vercel_project_id = vercel_project_id
+            if snapshot.vercel_region:
+                # ITS SERVER BESIDE ITS DATABASE (services.deploy.regions). The
+                # default leaves Vercel's own region as it is.
+                await self.vercel.set_function_region(vercel_project_id, snapshot.vercel_region)
             if side == envs.TEST:
                 # Previews fall under Vercel's deployment protection by
                 # default; the test side must be reachable like production.

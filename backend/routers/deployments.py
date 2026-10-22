@@ -104,6 +104,23 @@ def _deploy_app_dir(output_dir: str) -> str:
     return output_dir
 
 
+async def _region_state(db: AsyncSession, project: Project) -> dict:
+    """Where the app is (or will be) published: the region, whether it is
+    fixed (its database exists), the organisation's default, and the choices."""
+    from sqlalchemy import exists
+    from models.org import Organization
+    from services import app_settings
+    from services.deploy import regions
+    locked = bool((await db.execute(select(exists().where(
+        Deployment.project_id == project.id, Deployment.neon_project_id.isnot(None))))).scalar())
+    org = await db.get(Organization, project.org_id) if project.org_id else None
+    org_settings = (org.settings if org is not None else None) or {}
+    chosen = app_settings.deploy_region(project.output_dir) if project.output_dir else None
+    region = regions.choose(locked=locked, app_choice=chosen, org_settings=org_settings)
+    return {"region": region, "label": regions.get(region)["label"], "locked": locked,
+            "org_default": regions.org_default(org_settings), "regions": regions.catalogue()}
+
+
 async def _require_project(
     project_id: uuid.UUID, user: PlatformUser, db: AsyncSession
 ) -> Project:
@@ -194,6 +211,15 @@ async def publish(
         if tested is None:
             raise HTTPException(400, "There is no live test version to promote. Publish to Test first.")
         side, promote_from = envs.PRODUCTION, str(tested.id)
+    # WHERE IT RUNS. The region the app chose, else its organisation's default;
+    # fixed by the first publish — its database is made there — and recorded so
+    # a later change of default never moves it.
+    from services import app_settings
+    from services.deploy import regions
+    where = await _region_state(db, project)
+    if not where["locked"]:
+        app_settings.set_deploy_region(project.output_dir, where["region"], by=str(user.id))
+    region = regions.get(where["region"])
     integrations = await _collect_integrations(project.org_id, db)
     # The app's own switches go with it (`app_settings`): a publish is when a
     # deployment's environment is set, so turning one on or off reaches the
@@ -210,6 +236,8 @@ async def publish(
         promote_from=promote_from,
         reset_test_data=bool(req.reset_test_data and side == envs.TEST),
         test_recipients=await _member_emails(project.org_id, db) if side == envs.TEST else (),
+        neon_region=region["neon"],
+        vercel_region=region["vercel"],
     )
 
     # THE PUBLISH IS THE SERVER'S TO FINISH. It runs on its own task and its
@@ -405,7 +433,8 @@ async def publish_status(
             "test": _side_view(test), "production": _side_view(prod),
             "test_address": f"https://{envs.test_alias(_slugify(project.short_id))}",
             "production_address": production_address,
-            "untested_changes": untested, "test_ahead": test_ahead}
+            "untested_changes": untested, "test_ahead": test_ahead,
+            "region": await _region_state(db, project)}
 
 
 @router.put("/api/projects/{project_id}/publish-target", dependencies=[Depends(feature_gate("publish"))])
@@ -424,6 +453,35 @@ async def set_publish_target(
         raise HTTPException(400, str(exc)) from exc
     await db.commit()
     return {"target": project.publish_target}
+
+
+class DeployRegion(BaseModel):
+    region: str
+
+
+@router.put("/api/projects/{project_id}/deploy-region", dependencies=[Depends(feature_gate("publish"))])
+async def set_deploy_region(
+    project_id: uuid.UUID,
+    body: DeployRegion,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Where this app is published, until its first publish fixes it."""
+    from services import app_settings
+    from services.deploy import regions
+    project = await _require_project(project_id, user, db)
+    try:
+        region = regions.normalise(body.region)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    state = await _region_state(db, project)
+    if state["locked"] and region != state["region"]:
+        raise HTTPException(409, f"This app is already published in {state['label']}; its database "
+                                 "stays where it was made.")
+    if not project.output_dir:
+        raise HTTPException(400, "project has no generated output yet — run generation first")
+    app_settings.set_deploy_region(project.output_dir, region, by=str(user.id))
+    return await _region_state(db, project)
 
 
 # --------------------------------------------------------------------------- #

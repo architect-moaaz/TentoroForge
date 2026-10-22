@@ -8,7 +8,7 @@ import { Bot, Globe, Rocket } from "lucide-react";
 
 import { AssistantsSection } from "@/components/app-settings/AssistantsSection";
 import { DomainsPanel } from "@/components/deploy/DomainsPanel";
-import { PublishTargetSwitch, SidesSummary, usePublishStatus } from "@/components/deploy/PublishSides";
+import { DeployRegionPicker, PublishTargetSwitch, SidesSummary, usePublishStatus } from "@/components/deploy/PublishSides";
 import { useAppSettingsStore, type AppSettingsSection } from "@/stores/appSettings";
 
 const SECTIONS: { id: AppSettingsSection; label: string; icon: typeof Globe }[] = [
@@ -26,6 +26,7 @@ function PublishingSection({ projectId }: { projectId: string }) {
     <div className="space-y-4">
       <PublishTargetSwitch projectId={projectId} value={data.target} />
       <SidesSummary status={data} />
+      <DeployRegionPicker projectId={projectId} state={data.region} />
       <ul className="list-disc space-y-1 pl-5 text-sm text-slate-600 dark:text-slate-300">
         <li>
           <b>Test</b>: Publish puts the app at its own address with its own demo data. The live app, its data and its

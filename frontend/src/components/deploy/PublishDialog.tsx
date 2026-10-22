@@ -39,7 +39,7 @@ import { MobileBuildsPanel } from "./MobileBuildsPanel";
 import { LockedPanel } from "@/components/features/Locked";
 import { DomainsPanel } from "./DomainsPanel";
 import { useAppSettingsStore } from "@/stores/appSettings";
-import { PublishTargetSwitch, SidesSummary, usePublishStatus, type Side } from "./PublishSides";
+import { DeployRegionPicker, PublishTargetSwitch, SidesSummary, usePublishStatus, type Side } from "./PublishSides";
 
 interface LatestDeployment {
   id: string;
@@ -331,6 +331,7 @@ export function PublishDialog({
             </div>
             <PublishTargetSwitch projectId={projectId} value={side} disabled={started} />
             <SidesSummary status={sides} />
+            <DeployRegionPicker projectId={projectId} state={sides.region} disabled={started} />
           </div>
         )}
 
