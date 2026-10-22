@@ -76,6 +76,11 @@ class DeploySnapshot:
     reset_test_data: bool = False
     #: Who the test side may email: the organisation's own members.
     test_recipients: tuple[str, ...] = ()
+    #: Where it runs (`services.deploy.regions`): the Neon region a new
+    #: database is made in, and the Vercel region for its functions (None:
+    #: Vercel's own default, left as it is).
+    neon_region: str = "aws-us-east-2"
+    vercel_region: Optional[str] = None
 
 
 @runtime_checkable

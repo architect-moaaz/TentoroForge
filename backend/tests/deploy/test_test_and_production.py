@@ -26,6 +26,9 @@ def _vercel(**over: Any):
     m.alias_deployment.return_value = {}
     m.redeploy.return_value = {"id": "dpl_prod", "url": "acme-prod.vercel.app"}
     m.set_env_target.return_value = {}
+    # An app whose production side has a version that built; a first publish
+    # is said so by the test that is about it.
+    m.get_project.return_value = {"id": "prj_1", "targets": {"production": {"readyState": "READY"}}}
     for k, v in over.items():
         setattr(m, k, v)
     return m
@@ -364,3 +367,44 @@ def test_the_live_app_is_shown_at_its_main_address_once_it_answers(tmp_path):
     svc.save()
     assert live_address(tmp_path, "aqua") == "https://app.acme.com"
     assert live_address(None, "aqua") == ""
+
+
+# --- a first publish, to Test ------------------------------------------------
+# Vercel makes a project's first deployment its production one whatever the
+# request says; Personal Finance's first publish, to Test, was built without its
+# test settings — "[reset-schema] DATABASE_URL missing" (u8w3uw4j, 2026-10-21).
+
+@pytest.mark.asyncio
+async def test_a_first_test_publish_gives_both_sides_the_test_settings(db_session, sample_project_id, tmp_path):
+    _mk_app_tree(tmp_path)
+    vercel = _vercel()
+    vercel.get_project.return_value = {"id": "prj_1", "targets": {}}
+    events = await _publish(db_session, sample_project_id, tmp_path, vercel, _neon(created=True), environment="test")
+    assert events[-1].stage == "done"
+    pushed = _pushed(vercel)
+    assert all(sorted(t) == ["preview", "production"] for _, t in pushed.values()), "whichever side Vercel builds"
+    assert pushed["DATABASE_URL"][0].endswith("/forge_test"), "still the test database"
+
+
+@pytest.mark.asyncio
+async def test_after_a_failed_first_build_the_rows_are_widened_and_duplicates_go(db_session, sample_project_id, tmp_path):
+    _mk_app_tree(tmp_path)
+    vercel = _vercel()
+    vercel.get_project.return_value = {"id": "prj_1", "targets": {"production": {"readyState": "ERROR"}}}
+    vercel.list_env.return_value = [
+        {"id": "e1", "key": "DATABASE_URL", "target": ["preview"]},
+        {"id": "e2", "key": "DATABASE_URL", "target": ["production"]},
+    ]
+    await _publish(db_session, sample_project_id, tmp_path, vercel, _neon(created=False), environment="test")
+    widened = [c for c in vercel.update_env.call_args_list if c.args[1] == "e1"]
+    assert widened and sorted(widened[0].args[3]) == ["preview", "production"]
+    assert [c.args[1] for c in vercel.delete_env.call_args_list] == ["e2"], "the second row of the name goes"
+    assert "DATABASE_URL" not in _pushed(vercel), "updated in place, not written twice"
+
+
+@pytest.mark.asyncio
+async def test_once_production_has_built_a_test_publish_is_the_test_sides_alone(db_session, sample_project_id, tmp_path):
+    _mk_app_tree(tmp_path)
+    vercel = _vercel()   # production READY
+    await _publish(db_session, sample_project_id, tmp_path, vercel, _neon(created=True), environment="test")
+    assert all(t == ["preview"] for _, t in _pushed(vercel).values())

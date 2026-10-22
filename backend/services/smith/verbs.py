@@ -172,7 +172,10 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     # and "reference" build different applications from the same file — and a
     # missing-field message ("I just need treat as") would be a worse way to
     # ask than the sentence that explains the difference.
-    "connect_figma": {"figma_url", "token_env"},
+    # Nor is `token_env` (2026-10-22): the organisation's Figma token from
+    # Settings → Integrations is used whatever name is given, so nobody is
+    # asked for a variable name.
+    "connect_figma": {"figma_url"},
     # The same contract for the second design tool: the page, and the NAME of
     # the variable holding the API key — never the key.
     "connect_uxpilot": {"uxpilot_ref", "key_env"},

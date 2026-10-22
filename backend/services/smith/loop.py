@@ -352,9 +352,11 @@ between two real products. The same brief must get the same definition.
 A CREDENTIAL IS NEVER A VALUE IN A CALL. `token_env` and `key_env` take the
 NAME of an environment variable — `FIGMA_TOKEN`, `UXPILOT_API_KEY` — never
 the secret. A pasted Figma token (`figd_…`) or UX Pilot key (`ep_…`) is the
-person answering the wrong question: do not pass it on; `ask_user` for the
-variable's name, and say that what they typed is written to the conversation
-and must not be a secret.
+person answering the wrong question: do not pass it on, and say that what they
+typed is written to the conversation and must not be a secret. For Figma, never
+ask for a variable name at all: the organisation's Figma token from Settings →
+Integrations → Figma is used — leave `token_env` out. For UX Pilot, `ask_user`
+for the variable's name.
 
 SEVERAL ASKS IN ONE MESSAGE ARE A PLAN, NOT A GUESS ABOUT WHICH ONE. "Add a
 phone number, show it on the form and make it required" is three; end the

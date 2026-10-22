@@ -390,7 +390,7 @@ class VercelDeployProvider:
                 if reused_neon:
                     neon_project_id = prior_neon.neon_project_id
                 else:
-                    r = await self.neon.create_project(name=snapshot.project_slug)
+                    r = await self.neon.create_project(name=snapshot.project_slug, region_id=snapshot.neon_region)
                     neon_project_id = r["project_id"]
                     # THE PROJECT IS ON THE ROW BEFORE ANYTHING ELSE IS ASKED OF
                     # IT: a failure in the next step must leave a row that names
@@ -420,7 +420,7 @@ class VercelDeployProvider:
                 row.neon_project_id = neon_project_id
                 row.neon_branch_id = prior_neon.neon_branch_id
             else:
-                r = await self.neon.create_project(name=snapshot.project_slug)
+                r = await self.neon.create_project(name=snapshot.project_slug, region_id=snapshot.neon_region)
                 neon_project_id = r["project_id"]
                 neon_url = r["database_url"]
                 row.neon_project_id = neon_project_id
@@ -450,6 +450,10 @@ class VercelDeployProvider:
                         vercel_project_id
                     )
             row.vercel_project_id = vercel_project_id
+            if snapshot.vercel_region:
+                # ITS SERVER BESIDE ITS DATABASE (services.deploy.regions). The
+                # default leaves Vercel's own region as it is.
+                await self.vercel.set_function_region(vercel_project_id, snapshot.vercel_region)
             if side == envs.TEST:
                 # Previews fall under Vercel's deployment protection by
                 # default; the test side must be reachable like production.
@@ -470,15 +474,31 @@ class VercelDeployProvider:
             # Vercel environment are this side's; a row shared with the other
             # side is split first, so a test publish never changes production.
             targets = envs.env_targets(side)
-            mine = targets[0]
+            if side == envs.TEST and not await self._production_ready(vercel_project_id):
+                # A FIRST PUBLISH TO TEST IS BUILT AS PRODUCTION. Vercel makes a
+                # project's first deployment its production one whatever the
+                # request says; Personal Finance's first publish, to Test, was
+                # built without its test settings — "[reset-schema]
+                # DATABASE_URL missing" (u8w3uw4j, 2026-10-21). Until production
+                # has a version of its own, the test settings are both sides';
+                # the first production publish splits them off.
+                targets = ["preview", "production"]
             existing_by_key: dict[str, dict] = {}
             for e in existing_env:
                 k = e.get("key")
                 t = list(e.get("target") or [])
-                if not k or mine not in t:
+                if not k or not set(t) & set(targets):
+                    continue
+                if len(targets) > 1:
+                    # One row per setting for both sides: a second row of the
+                    # same name would be refused, so it goes.
+                    if k in existing_by_key and e.get("id"):
+                        await self.vercel.delete_env(vercel_project_id, e["id"])
+                    else:
+                        existing_by_key[k] = e
                     continue
                 if len(t) > 1 and e.get("id"):
-                    await self.vercel.set_env_target(vercel_project_id, e["id"], [x for x in t if x != mine])
+                    await self.vercel.set_env_target(vercel_project_id, e["id"], [x for x in t if x != targets[0]])
                     continue
                 existing_by_key[k] = e
 
@@ -814,6 +834,15 @@ class VercelDeployProvider:
         except Exception:
             await self.db.rollback()
             raise
+
+    async def _production_ready(self, vercel_project_id: str) -> bool:
+        """Whether the Vercel project has a production deployment that built."""
+        try:
+            proj = await self.vercel.get_project(vercel_project_id) or {}
+        except Exception:  # noqa: BLE001 — unknown is treated as none: both sides get the settings
+            return False
+        prod = (proj.get("targets") or {}).get("production") or {}
+        return str(prod.get("readyState") or "").upper() == "READY"
 
     async def _latest_prior_with_neon(
         self, snapshot: DeploySnapshot, environment: str | None = None

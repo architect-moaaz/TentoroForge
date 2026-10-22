@@ -164,6 +164,54 @@ async def update_org(
     return org
 
 
+from pydantic import BaseModel as _BaseModel
+
+
+class _DeployRegion(_BaseModel):
+    region: str
+
+
+@router.get("/api/orgs/{org_id}/deploy-region")
+async def get_deploy_region(
+    org_id: uuid.UUID,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Where this organisation's applications are published by default, and the choices."""
+    from services.deploy import regions
+    await _require_org_member(org_id, user, db)
+    org = await db.get(Organization, org_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    region = regions.org_default(org.settings)
+    return {"region": region, "label": regions.get(region)["label"], "regions": regions.catalogue()}
+
+
+@router.put("/api/orgs/{org_id}/deploy-region")
+async def set_deploy_region(
+    org_id: uuid.UUID,
+    body: _DeployRegion,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """The default for applications published from now on. An application
+    already published stays where it is."""
+    from sqlalchemy.orm.attributes import flag_modified
+    from services.deploy import regions
+    await _require_org_member(org_id, user, db, min_role=OrgMemberRole.admin)
+    org = await db.get(Organization, org_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    try:
+        region = regions.normalise(body.region)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    org.settings = {**(org.settings or {}), "deploy_region": region}
+    flag_modified(org, "settings")
+    await db.commit()
+    return {"region": region, "label": regions.get(region)["label"], "regions": regions.catalogue()}
+
+
 @router.post("/api/orgs/{org_id}/logo", response_model=OrgResponse)
 async def upload_org_logo(
     org_id: uuid.UUID,

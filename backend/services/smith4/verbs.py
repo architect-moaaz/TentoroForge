@@ -585,17 +585,19 @@ def connect_figma(ctx: Ctx, u: dict) -> Outcome:
     if not url:
         return Outcome(status="asked", said="Which Figma file? Paste the link from Figma's Share "
                                             "dialog and I'll pull the screens and tokens out of it.")
-    if not token_env:
-        return Outcome(status="asked", said=(
-            "Which environment variable holds your Figma token? I need the NAME — `FIGMA_TOKEN`, "
-            "for example — not the token itself. Anything you type here is written to the "
-            "conversation log, so a credential must not go in it; export the token in the "
-            "backend's environment and tell me what you called it."))
+    # NO TOKEN QUESTION. The organisation's Figma token, from Settings →
+    # Integrations, is used whatever `token_env` names; with none set, the
+    # connect says where to add it (`figma.integrations.token_resolver`).
     if parse(url) is None:
         return Outcome(status="needs_user", said=(
             f"That does not look like a Figma URL: {url!r}. I need the link from Figma's Share "
             "dialog, like https://figma.com/design/<key>/<name>?node-id=1-2"))
-    treat_as = _design_scope(u.get("treat_as"))
+    # THE ANSWER IS THE PERSON'S, SO IT IS READ FROM WHAT THEY TYPED. The
+    # question offers two words; asked on forge-v3 (Tentoro, 2026-10-22), the
+    # person said "Specification" four times and was asked four times: the
+    # loop re-ran this verb with the link and the variable name and nothing
+    # else, because only the call's own fields were ever read.
+    treat_as = _design_scope(u.get("treat_as")) or _design_scope(ctx.message)
     if not treat_as:
         # ASKED ONCE, BECAUSE THE TWO ANSWERS BUILD DIFFERENT APPLICATIONS — and
         # the question says what each costs: "specification" quietly means no
@@ -637,7 +639,7 @@ def connect_uxpilot(ctx: Ctx, u: dict) -> Outcome:
         return Outcome(status="needs_user", said=(
             f"That does not look like a UX Pilot page: {ref!r}. I need the page id, or the "
             "page's URL from UX Pilot."))
-    treat_as = _design_scope(u.get("treat_as"))
+    treat_as = _design_scope(u.get("treat_as")) or _design_scope(ctx.message)
     if not treat_as:
         return Outcome(status="asked", said=_SCOPE_QUESTION, options=["Specification", "Reference"])
     try:

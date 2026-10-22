@@ -80,7 +80,7 @@ def test_the_provider_records_the_project_before_asking_it_for_a_database():
     import inspect
     from services.deploy import vercel_provider
     src = inspect.getsource(vercel_provider)
-    made = src.index('r = await self.neon.create_project(name=snapshot.project_slug)\n                    neon_project_id = r["project_id"]')
+    made = src.index('r = await self.neon.create_project(name=snapshot.project_slug, region_id=snapshot.neon_region)\n                    neon_project_id = r["project_id"]')
     asked = src.index("made = await self.neon.ensure_database(neon_project_id, envs.TEST_DATABASE)")
     recorded = src.index("row.neon_project_id = neon_project_id\n                    row.neon_branch_id = r.get(\"branch_id\")\n                    await self._flush()")
     assert made < recorded < asked

@@ -10,7 +10,7 @@
  * (`/api/projects/{id}/publish-target`).
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, FlaskConical, Globe } from "lucide-react";
+import { ExternalLink, FlaskConical, Globe, MapPin } from "lucide-react";
 import { toast } from "sonner";
 
 import { api } from "@/lib/api";
@@ -39,6 +39,22 @@ export interface PublishStatus {
   untested_changes: boolean;
   /** Test runs a newer version than production. */
   test_ahead: boolean;
+  /** Where the app runs: its database and its server, as a pair. */
+  region?: RegionState;
+}
+
+export interface RegionChoice {
+  id: string;
+  label: string;
+}
+
+export interface RegionState {
+  region: string;
+  label: string;
+  /** Its database exists: the first publish fixed the region. */
+  locked: boolean;
+  org_default: string;
+  regions: RegionChoice[];
 }
 
 export const publishStatusKey = (projectId?: string) => ["project", projectId, "publish-status"];
@@ -61,6 +77,72 @@ export function useSetPublishTarget(projectId: string | undefined) {
     },
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "The switch did not change"),
   });
+}
+
+export function useSetDeployRegion(projectId: string | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (region: string) => api.put<RegionState>(`/api/projects/${projectId}/deploy-region`, { region }),
+    onSuccess: (region) => {
+      qc.setQueryData<PublishStatus | undefined>(publishStatusKey(projectId), (old) => (old ? { ...old, region } : old));
+      toast.success(`It will run in ${region.label}`);
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "The region did not change"),
+  });
+}
+
+/**
+ * Where the app runs. Until its first publish, a choice (its organisation's
+ * default unless changed here); after it, where its database was made —
+ * fixed, because a database does not move.
+ */
+export function DeployRegionPicker({
+  projectId,
+  state,
+  disabled = false,
+}: {
+  projectId: string | undefined;
+  state: RegionState | undefined;
+  disabled?: boolean;
+}) {
+  const set = useSetDeployRegion(projectId);
+  if (!state) return null;
+  const id = `deploy-region-${projectId}`;
+  if (state.locked) {
+    return (
+      <p className="flex items-start gap-1.5 text-xs text-muted-foreground" data-testid="deploy-region-fixed">
+        <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <span>
+          Runs in <b className="font-medium text-foreground">{state.label}</b>, where its database was made at its
+          first publish.
+        </span>
+      </p>
+    );
+  }
+  return (
+    <div className="space-y-1">
+      <label htmlFor={id} className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+        <MapPin className="h-3.5 w-3.5" /> Region
+      </label>
+      <select
+        id={id}
+        value={state.region}
+        disabled={disabled || set.isPending}
+        onChange={(e) => set.mutate(e.target.value)}
+        className="w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-sm disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900"
+      >
+        {state.regions.map((r) => (
+          <option key={r.id} value={r.id}>
+            {r.label}
+            {r.id === state.org_default ? " · your organisation's default" : ""}
+          </option>
+        ))}
+      </select>
+      <p className="text-xs text-muted-foreground">
+        Where its database and server run. Its first publish fixes it.
+      </p>
+    </div>
+  );
 }
 
 /** The Test | Production switch. */

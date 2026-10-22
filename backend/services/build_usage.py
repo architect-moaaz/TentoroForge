@@ -193,6 +193,13 @@ def record_usage(
     try:
         usage = usage if isinstance(usage, dict) else {}
         who = actor()
+        if not (org or who.get("org")):
+            # WORK NOBODY ASKED FOR IN PERSON STILL HAS AN OWNER: a self-heal,
+            # the checks after a build. Its organisation is the application's,
+            # from the register, so its spend stays theirs even after the
+            # application is deleted (services/app_register).
+            from services.app_register import lookup
+            org = lookup(str(project or "")).get("org", "")
         entry = {
             "ts": round(time.time(), 2),
             "project": str(project or "unknown"),

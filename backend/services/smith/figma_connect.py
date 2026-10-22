@@ -149,12 +149,6 @@ def connect(output_dir: Any, *, figma_url: str, token_env: str,
         )
 
     ref_name = (token_env or "").strip()
-    if not ref_name:
-        raise FigmaConnectError(
-            "I need the NAME of the environment variable holding your Figma "
-            "token — for example FIGMA_TOKEN. Never paste the token itself: it "
-            "would be written to the conversation log (§42)."
-        )
 
     from services.blueprint.service import BlueprintService
 
@@ -169,13 +163,10 @@ def connect(output_dir: Any, *, figma_url: str, token_env: str,
     # The endpoint travels with it: the desktop app's Dev Mode server only runs
     # while Figma is open on one person's machine, so it is a real setting and
     # a bad default.
-    from services.figma.integrations import (
-        MappingResolver, config_for, endpoint_from,
-    )
+    from services.figma.integrations import config_for, endpoint_from, token_resolver
 
     values = config_for(output_dir)
-    resolver = (MappingResolver(values) if values.get(ref_name)
-                else EnvSecretResolver())
+    ref_name, resolver = token_resolver(values, ref_name)
 
     gateway = FigmaGateway(
         credential=FigmaCredential(ref=ref_name),

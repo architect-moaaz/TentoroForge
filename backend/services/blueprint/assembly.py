@@ -1250,14 +1250,29 @@ def verify_boot(app_root: str | Path, *, entry: str = "/",
                 + _last_error(_stop()))
 
         url = f"http://127.0.0.1:{port}{entry if entry.startswith('/') else '/' + entry}"
-        try:
-            with urllib.request.urlopen(url, timeout=60) as reply:
-                status = reply.status
-        except urllib.error.HTTPError as exc:
-            status = exc.code          # 4xx/5xx still means it routed
-        except Exception as exc:  # noqa: BLE001
-            raise BootFailed(
-                f"{url} did not answer: {exc}; " + _last_error(_stop())) from exc
+        # THE FIRST REQUEST IS THE COMPILE. `next dev` compiles a page when it
+        # is first asked for, and on a host compiling two other apps at once
+        # (load 10 on four cores) that took longer than the 60 s this allowed:
+        # Lifestyle App listened, compiled, and its build ended "did not
+        # answer: timed out" with nothing wrong in it (forge-v3, 2026-10-09).
+        # The compile gets FIRST_COMPILE_S, and a timeout is asked once more
+        # while the process is still alive; a refusal or a dead process is
+        # still the failure it always was.
+        status = None
+        for attempt in (1, 2):
+            try:
+                with urllib.request.urlopen(url, timeout=FIRST_COMPILE_S) as reply:
+                    status = reply.status
+                break
+            except urllib.error.HTTPError as exc:
+                status = exc.code          # 4xx/5xx still means it routed
+                break
+            except Exception as exc:  # noqa: BLE001
+                timed_out = isinstance(exc, TimeoutError) or "timed out" in str(exc)
+                if attempt == 1 and timed_out and proc.poll() is None:
+                    continue
+                raise BootFailed(
+                    f"{url} did not answer: {exc}; " + _last_error(_stop())) from exc
 
         return {"port": port, "entry": entry, "status": status,
                 "seconds": round(time.monotonic() - started, 1)}
@@ -1327,6 +1342,39 @@ def check_route_tree(app_root: str | Path) -> None:
                                        for url, files in clashes[:8]))
 
 
+#: Written into `node_modules` when `npm install` has finished. A tree
+#: without it is an install that was cut off.
+INSTALLED_MARK = ".forge-installed"
+
+
+def _clear_unfinished_install(root: Path) -> bool:
+    """Throw away a `node_modules` whose install never finished.
+
+    `npm install` over an existing tree checks names and versions, not file
+    contents. TStyle's install was killed with its worker (forge-v3,
+    2026-10-09 10:55) while writing the Next compiler: 62,976 bytes of a
+    143 MB binary. The next build's install saw the package in place and moved
+    on, and `next build` died on it with "Bus error (core dumped)". A linked
+    tree (a local copy's `node_modules` pointing into another app) is never
+    removed."""
+    import shutil
+
+    nm = root / "node_modules"
+    if nm.is_symlink() or not nm.is_dir() or (nm / INSTALLED_MARK).exists():
+        return False
+    shutil.rmtree(nm, ignore_errors=True)
+    return True
+
+
+def _mark_install_finished(root: Path) -> None:
+    nm = root / "node_modules"
+    if nm.is_dir() and not nm.is_symlink():
+        try:
+            (nm / INSTALLED_MARK).write_text("npm install finished\n", "utf-8")
+        except OSError:
+            pass
+
+
 def verify_build(app_root: str | Path, *, timeout: int = 900,
                  install: bool = True, build: bool = True, dispatches: bool = True) -> dict[str, Any]:
     """Install and build the assembled app; raise if it does not compile.
@@ -1364,6 +1412,8 @@ def verify_build(app_root: str | Path, *, timeout: int = 900,
     env = {**os.environ, "NEXT_DIST_DIR": VERIFY_DIST_DIR}
     out: dict[str, Any] = {}
     for name, cmd in steps:
+        if name == "install":
+            _clear_unfinished_install(root)
         proc = subprocess.run(cmd, cwd=root, capture_output=True, text=True,
                               timeout=timeout, env=env)
         out[name] = proc.returncode
@@ -1372,6 +1422,8 @@ def verify_build(app_root: str | Path, *, timeout: int = 900,
                 f"npm {name} failed ({proc.returncode}):\n"
                 + build_message(proc.stdout, proc.stderr)
             )
+        if name == "install":
+            _mark_install_finished(root)
     if build and dispatches:
         out["dispatches"] = verify_dispatches(root, timeout=timeout)
     return out

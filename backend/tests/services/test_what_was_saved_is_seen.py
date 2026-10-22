@@ -80,6 +80,22 @@ def test_the_pages_looked_at_are_the_ones_that_person_opens():
     assert rt.pages_for(DOC, entity, "Admin") == (["/admin/children"], [])
 
 
+def test_a_page_that_sums_or_collects_is_not_held_to_listing_each_record():
+    """Personal Finance's Create Category wrote "Travel" and was failed: its
+    Financial Dashboard and onboarding wizard name Category as their record
+    type, and neither lists categories one by one (u8w3uw4j, 2026-10-22)."""
+    entity = DOC["data"]["entities"][0]
+    extra = [{"id": f"PAGE-1{i}", "route": route, "pattern": pattern, "users": ["ROLE-002"],
+              "data": {"primaryEntity": "ENTITY-001"}}
+             for i, (route, pattern) in enumerate([("/", "dashboard"), ("/stats", "analytics"),
+                                                   ("/onboarding", "wizard"), ("/plan", "tool"),
+                                                   ("/kids", "entity_list"), ("/setup", "configuration")])]
+    doc = {**DOC, "pages": DOC["pages"] + extra}
+    lists, _details = rt.pages_for(doc, entity, "Parent")
+    assert "/" not in lists and "/stats" not in lists and "/onboarding" not in lists and "/plan" not in lists
+    assert "/kids" in lists and "/setup" in lists, "pages that show the records one by one still count"
+
+
 def test_a_saved_record_that_is_seen_is_no_problem(pages):
     pages.served["/children/c-1"] = (200, "<main><h1>Trial Kid</h1><script>x</script></main>")
     pages.served["/children"] = (200, "<ul><li>Trial Kid &middot; 2 yrs</li></ul>")

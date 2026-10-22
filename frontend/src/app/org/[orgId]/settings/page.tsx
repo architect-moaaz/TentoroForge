@@ -14,7 +14,7 @@
 import { use, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Building2, Copy, Mail, RefreshCw, Upload, Users, X as XIcon } from "lucide-react";
+import { Building2, Copy, Mail, MapPin, RefreshCw, Upload, Users, X as XIcon } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,6 +22,7 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ROLES, type MemberRole, badEmails, parseEmails, slugProblem } from "@/app/start/lib";
 import { describeInvite, type InviteOutcome } from "./invites";
+import type { RegionChoice } from "@/components/deploy/PublishSides";
 
 interface Org { id: string; name: string; slug: string; logo_url: string | null }
 interface OrgMember {
@@ -66,6 +67,46 @@ function InviteNotice({ outcome, onDismiss }: { outcome: InviteOutcome; onDismis
         </div>
       )}
     </div>
+  );
+}
+
+interface OrgRegion {
+  region: string;
+  label: string;
+  regions: RegionChoice[];
+}
+
+/** Where this organisation's apps are published unless an app picks its own.
+ *  An app already published stays where it is. */
+function PublishingRegion({ orgId, card }: { orgId: string; card: string }) {
+  const queryClient = useQueryClient();
+  const key = ["org", orgId, "deploy-region"];
+  const { data } = useQuery({ queryKey: key, queryFn: () => api.get<OrgRegion>(`/api/orgs/${orgId}/deploy-region`) });
+  const save = useMutation({
+    mutationFn: (region: string) => api.put<OrgRegion>(`/api/orgs/${orgId}/deploy-region`, { region }),
+    onSuccess: (r) => { queryClient.setQueryData(key, r); toast.success(`New apps will run in ${r.label}.`); },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Could not change the region."),
+  });
+  return (
+    <section className={`${card} p-6`} aria-label="Publishing region">
+      <h2 className="flex items-center gap-2 text-base font-semibold"><MapPin className="h-4 w-4" /> Publishing region</h2>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Where your apps&rsquo; databases and servers run when they are first published. An app can choose its own in
+        the Publish dialog; an app already published stays where it is.
+      </p>
+      <div className="mt-5 space-y-1.5">
+        <Label htmlFor="org-deploy-region">Default region</Label>
+        <select
+          id="org-deploy-region"
+          value={data?.region ?? ""}
+          disabled={!data || save.isPending}
+          onChange={(e) => save.mutate(e.target.value)}
+          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm disabled:opacity-60"
+        >
+          {(data?.regions ?? []).map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
+        </select>
+      </div>
+    </section>
   );
 }
 
@@ -209,6 +250,8 @@ function OrgSettings({ orgId }: { orgId: string }) {
             ))}
           </ul>
         </section>
+
+        <PublishingRegion orgId={orgId} card={card} />
       </div>
 
       {inviting && <InviteDialog orgId={orgId} onClose={() => setInviting(false)} onDone={(got) => { setOutcomes((all) => [...got, ...all]); refreshMembers(); }} />}
