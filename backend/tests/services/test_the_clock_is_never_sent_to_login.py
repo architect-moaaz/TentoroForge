@@ -7,10 +7,11 @@ scheduled process ever ran in a published app (confirmed on
 output/zo9k0ekd, 2026-10-11)."""
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
-from services.blueprint.projection import _ALWAYS_OPEN, project_middleware
+from services.blueprint.platform_routes import PUBLIC
+from services.blueprint.projection import project_middleware
+from tests.services._middleware_gate import Gate
 
 DOC = {
     "roles": [{"id": "ROLE-001", "name": "Admin"}],
@@ -20,23 +21,19 @@ DOC = {
 }
 
 
-def _matcher(app_root: Path) -> str:
-    src = (app_root / "src" / "middleware.ts").read_text()
-    return re.search(r'matcher:\s*\["(.+?)"\]', src).group(1)
-
-
 def test_the_tick_and_the_webhooks_are_outside_the_gate(tmp_path):
-    assert "api/cron" in _ALWAYS_OPEN and "api/webhooks" in _ALWAYS_OPEN
+    assert {"/api/cron", "/api/webhooks"} <= {r.route for r in PUBLIC if r.subtree}
     project_middleware(DOC, tmp_path)
-    matcher = _matcher(tmp_path)
-    assert "api/cron" in matcher and "api/webhooks" in matcher
-    gate = re.compile(matcher.replace("\\\\", "\\"))
-    assert not gate.match("/api/cron/tick"), "the tick must not be answered with a redirect to sign in"
-    assert not gate.match("/api/webhooks/stripe")
-    assert gate.match("/admin"), "a page is still gated"
-    assert gate.match("/api/data/orders"), "the data API is still gated"
+    gate = Gate(tmp_path)
+    assert gate.is_public("/api/cron/tick"), "the tick must not be answered with a redirect to sign in"
+    assert gate.is_public("/api/webhooks/stripe")
+    assert not gate.is_public("/admin"), "a page is still gated"
+    assert not gate.is_public("/api/data/orders"), "the data API is still gated"
+    assert not gate.is_public("/api/cronjobs"), "a route that only starts with the word is not the tick's"
 
 
 def test_the_scaffold_agrees_before_any_projection():
     scaffold = Path(__file__).resolve().parents[2] / "templates" / "app-foundation" / "src" / "middleware.ts"
-    assert "api/cron(?:/|$)|api/webhooks(?:/|$)" in scaffold.read_text()
+    gate = Gate(scaffold)
+    assert gate.is_public("/api/cron/tick") and gate.is_public("/api/webhooks/stripe")
+    assert not gate.is_public("/api/data/orders")

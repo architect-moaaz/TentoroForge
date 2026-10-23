@@ -74,7 +74,7 @@ def test_publish_is_told_what_still_does_not_work(tmp_path, monkeypatch):
     assert ac.publish_note(str(tmp_path)) == {
         "checked": True, "stale": False, "pages": 3, "working": 2,
         "failing": [{"route": "/p3", "detail": "as Parent: it answers HTTP 500", "stale": False, "found_at": None}],
-        "processes": ["Book Slot"]}
+        "processes": ["Book Slot"], "untried": []}
 
 
 def test_a_project_with_nothing_to_read_says_it_was_not_checked(tmp_path):

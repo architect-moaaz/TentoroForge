@@ -35,6 +35,7 @@ import shutil
 import signal
 import socket
 import subprocess
+import threading
 import time
 import urllib.request
 import uuid
@@ -187,6 +188,10 @@ def _listening(port: int | None) -> bool:
         return s.connect_ex(("127.0.0.1", port)) == 0
 
 
+#: How often a running copy's memory is looked at (`RunningApp._watch`).
+WATCH_EVERY_S = 5.0
+
+
 def _capped(env: dict) -> dict:
     """A server for trying the app runs with the trial heap (`TRIAL_HEAP_MB`):
     it opens every page in one sitting."""
@@ -217,6 +222,13 @@ class RunningApp:
         self.started_db = False
         self.clone: tuple[str, str, str] | None = None
         self._sink: Any = None
+        #: Each start of the dev server, counted: a caller that saw the server
+        #: fail at one count does not restart one a neighbour already restarted.
+        self.generation = 0
+        #: Why the server was started afresh, in order.
+        self.restarts: list[str] = []
+        self._restart_lock = threading.Lock()
+        self._watching = threading.Event()
 
     def __enter__(self) -> "RunningApp":
         # ONE OF A FEW AT ONCE (`dev_servers.TrialSlot`): two trial servers
@@ -274,13 +286,21 @@ class RunningApp:
 
     def _serve(self) -> "RunningApp":
         assert self.clone is not None
-        sink: Any = subprocess.DEVNULL
         if self.log is not None:
             self.log.parent.mkdir(parents=True, exist_ok=True)
-            sink = self._sink = open(self.log, "ab")  # noqa: SIM115 — closed in __exit__
+            self._sink = open(self.log, "ab")  # noqa: SIM115 — closed in __exit__
+        self._start_server()
+        self._watching.set()
+        threading.Thread(target=self._watch, name=f"rss-watch-{self.port}", daemon=True).start()
+        return self
+
+    def _start_server(self) -> None:
+        """Start `next dev` on this copy's port and wait until it answers."""
+        assert self.clone is not None
+        sink: Any = self._sink if self._sink is not None else subprocess.DEVNULL
         self.proc = subprocess.Popen(
             ["npx", "next", "dev", "--port", str(self.port)], cwd=self.root,
-            stdout=sink, stderr=subprocess.STDOUT if self.log is not None else subprocess.DEVNULL,
+            stdout=sink, stderr=subprocess.STDOUT if self._sink is not None else subprocess.DEVNULL,
             start_new_session=True,
             env=_capped({**os.environ, "BROWSER": "none",
                  # The preview secret, so a session minted for a role the
@@ -290,17 +310,66 @@ class RunningApp:
                  # builds into `.next-review`.
                  "NEXT_DIST_DIR": self.dist_dir, "DATABASE_URL": self.clone[2],
                  **self.extra_env}))
+        self.generation += 1
         from services import dev_servers
         dev_servers.track(self.proc.pid, port=self.port, root=self.root, kind="review")
         deadline = time.monotonic() + 180
         while time.monotonic() < deadline:
-            try:
-                urllib.request.urlopen(f"{self.base}/api/auth/csrf", timeout=30)
-                return self
-            except Exception:  # noqa: BLE001 — not up yet
-                time.sleep(2)
+            if self.answers(timeout=30):
+                return
+            if getattr(self.proc, "poll", lambda: None)() is not None:
+                break
+            time.sleep(2)
         self.__exit__(None, None, None)
         raise ReviewUnavailable("the dev server did not start within 180s")
+
+    def answers(self, timeout: float = 10) -> bool:
+        """Whether the dev server is running and answering requests."""
+        if self.proc is None or getattr(self.proc, "poll", lambda: None)() is not None:
+            return False
+        try:
+            urllib.request.urlopen(f"{self.base}/api/auth/csrf", timeout=timeout)
+            return True
+        except Exception:  # noqa: BLE001 — not answering
+            return False
+
+    def rss_mb(self) -> int:
+        """What the dev server holds in memory as the host counts it, in MB."""
+        if self.proc is None or getattr(self.proc, "poll", lambda: None)() is not None:
+            return 0
+        from services.dev_servers import group_rss_mb
+        return group_rss_mb(self.proc.pid)
+
+    def restart(self, why: str, *, if_generation: int | None = None) -> bool:
+        """Start the dev server afresh on the same port, the database copy kept.
+        With `if_generation`, only if nobody has restarted it since then. Said
+        in `restarts`; False when it was not restarted."""
+        with self._restart_lock:
+            if if_generation is not None and if_generation != self.generation:
+                return False
+            logger.warning("[page_review] starting the dev server on %s afresh: %s", self.port, why)
+            self.restarts.append(why)
+            self._stop_server()
+            self._start_server()
+            return True
+
+    def _watch(self) -> None:
+        """Past `TRIAL_RSS_CEILING_MB`, the server is started afresh at once:
+        left alone, the kernel kills it, or a neighbour, when the host fills."""
+        from services import dev_servers
+        while self._watching.is_set():
+            time.sleep(WATCH_EVERY_S)
+            ceiling = dev_servers.TRIAL_RSS_CEILING_MB
+            if not self._watching.is_set() or ceiling <= 0:
+                continue
+            held = self.rss_mb()
+            if held > ceiling:
+                try:
+                    self.restart(f"it held {held} MB, over the {ceiling} MB a check server may",
+                                 if_generation=self.generation)
+                except ReviewUnavailable as exc:
+                    logger.warning("[page_review] the dev server did not come back: %s", exc)
+                    return
 
     def __exit__(self, *exc: Any) -> None:
         try:
@@ -312,6 +381,17 @@ class RunningApp:
                 self._slot = None
 
     def _stop(self) -> None:
+        watching = getattr(self, "_watching", None)
+        if watching is not None:
+            watching.clear()
+        self._stop_server()
+        if self._sink is not None:
+            self._sink.close()
+            self._sink = None
+        self._drop_copy()
+
+    def _stop_server(self) -> None:
+        """End the dev server and everything it started; the database copy stays."""
         if self.proc is not None:
             from services import dev_servers
             dev_servers.forget(self.proc.pid)
@@ -328,9 +408,8 @@ class RunningApp:
                     break
                 except Exception:  # noqa: BLE001
                     continue
-        if self._sink is not None:
-            self._sink.close()
-            self._sink = None
+
+    def _drop_copy(self) -> None:
         if self.clone is not None:
             container, copy, _ = self.clone
             if not container:

@@ -11,7 +11,6 @@ the one visitor who certainly cannot sign in is sent to the sign-in).
 from __future__ import annotations
 
 import json
-import re
 
 import pytest
 
@@ -97,13 +96,12 @@ def test_the_middleware_leaves_the_setup_page_open(tmp_path):
     app_root.mkdir()
     project_middleware({"pages": [{"id": "PAGE-001", "route": "/nurses",
                                    "access": "authenticated"}]}, app_root)
-    written = (app_root / "src" / "middleware.ts").read_text("utf-8")
-
-    matcher = re.search(r'matcher:\s*\[\s*"([^"]+)"', written)
-    assert matcher, written
-    assert "set-password" in matcher.group(1)
+    from tests.services._middleware_gate import Gate
+    gate = Gate(app_root)
+    assert gate.is_public("/set-password")
     # Beside the other two pages that cannot require a session.
-    assert "login" in matcher.group(1) and "signup" in matcher.group(1)
+    assert gate.is_public("/login") and gate.is_public("/signup")
+    assert not gate.is_public("/nurses")
 
 
 def test_the_scaffold_middleware_leaves_it_open_too(tmp_path):
@@ -111,8 +109,9 @@ def test_the_scaffold_middleware_leaves_it_open_too(tmp_path):
     middleware when no projection wrote one."""
     from pathlib import Path
 
-    shipped = Path("templates/app-foundation/src/middleware.ts").read_text("utf-8")
-    assert "set-password" in shipped
+    from tests.services._middleware_gate import Gate
+
+    assert Gate(Path("templates/app-foundation/src/middleware.ts")).is_public("/set-password")
 
 
 def test_the_app_is_given_the_invite_table_and_the_route_that_hashes(tmp_path):

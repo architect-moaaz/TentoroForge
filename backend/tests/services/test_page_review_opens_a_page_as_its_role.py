@@ -116,8 +116,9 @@ def test_the_shot_config_carries_who_opens_each_page(monkeypatch, tmp_path):
 
 
 def test_the_review_server_is_booted_with_the_preview_secret():
-    # The server starts in `_serve`, on whichever database path got it there.
-    src = inspect.getsource(pr.RunningApp._serve)
+    # The server starts in `_start_server` (from `_serve`, and again on a
+    # restart), on whichever database path got it there.
+    src = inspect.getsource(pr.RunningApp._start_server)
     assert "boot_env(self.base)" in src
 
 
