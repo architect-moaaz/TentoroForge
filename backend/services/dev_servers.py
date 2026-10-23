@@ -69,6 +69,57 @@ HEAP_MB = int(os.environ.get("FORGE_DEV_SERVER_HEAP_MB") or 2560)
 #: at most `MAX_TRIALS` of these run at once.
 TRIAL_HEAP_MB = int(os.environ.get("FORGE_TRIAL_HEAP_MB") or 4096)
 
+#: WHAT THE HOST COUNTS IS RESIDENT MEMORY, NOT THE HEAP. `TRIAL_HEAP_MB`
+#: caps JavaScript's heap; webpack's caches and SWC sit outside it. A check
+#: server capped at 4 GB of heap held 6.1 GB when the kernel killed it, and
+#: every page the build's check tried after that was counted as not working
+#: (6m1a22xb, forge-v3, 2026-10-22 17:06). Two trial servers, their browsers
+#: and the platform share sixteen gigabytes, so a trial server is held to:
+#:
+#: * `TRIAL_RSS_MB` — past it, the server is started afresh at the next moment
+#:   nothing is using it (between one person's pages and the next's);
+#: * `TRIAL_RSS_CEILING_MB` — past it, it is started afresh at once, before the
+#:   kernel picks something to kill. What was in flight is asked again.
+#:
+#: The next check on the same app filled the host again at 04:31 the next
+#: morning, and the kernel's choice took a backend worker with it; so the
+#: shares leave room for two servers, their browsers and the platform.
+TRIAL_RSS_MB = int(os.environ.get("FORGE_TRIAL_RSS_MB") or 3072)
+TRIAL_RSS_CEILING_MB = int(os.environ.get("FORGE_TRIAL_RSS_CEILING_MB") or 4352)
+
+
+def group_rss_mb(pgid: int) -> int:
+    """Resident memory of every process in group `pgid`, in MB (0 when none
+    can be read). `next dev` is several processes; the host counts them all."""
+    pgid = int(pgid or 0)
+    if pgid <= 0:
+        return 0
+    total_kb = 0
+    proc = Path("/proc")
+    if proc.is_dir():
+        page_kb = os.sysconf("SC_PAGE_SIZE") // 1024
+        for d in proc.iterdir():
+            if not d.name.isdigit():
+                continue
+            try:
+                stat = (d / "stat").read_text()
+                if int(stat[stat.rindex(")") + 2:].split()[2]) != pgid:
+                    continue
+                total_kb += int((d / "statm").read_text().split()[1]) * page_kb
+            except (OSError, ValueError, IndexError):
+                continue
+        return total_kb // 1024
+    try:
+        out = subprocess.run(["ps", "-A", "-o", "pgid=,rss="], capture_output=True, text=True, timeout=10).stdout
+    except Exception:  # noqa: BLE001 — unreadable is unknown, never a reason to act
+        return 0
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[0] == str(pgid):
+            total_kb += int(parts[1])
+    return total_kb // 1024
+
+
 #: How many dev servers for trying an app — the statements, Smith's trials,
 #: the page review — may run at once. More wait for a slot.
 MAX_TRIALS = int(os.environ.get("FORGE_MAX_TRIAL_SERVERS") or 2)
