@@ -427,10 +427,9 @@ def test_a_blueprint_field_never_shadows_a_platform_column():
 # §100 access — auth is a property of a page, not of an application
 # ---------------------------------------------------------------------------
 
-def _matcher(app) -> str:
-    import re as _re
-    text = (app / "src" / "middleware.ts").read_text()
-    return _re.search(r'matcher: \["(.+?)"\]', text).group(1)
+def _gate(app):
+    from tests.services._middleware_gate import Gate
+    return Gate(app)
 
 
 def _pages(*specs):
@@ -455,7 +454,9 @@ def test_a_fully_open_app_gates_nothing_but_the_auth_flow(tmp_path):
     result = project_middleware(doc, tmp_path / "app")
     assert result["gated"] == 0
     assert set(result["public"]) == {"/", "/pricing"}
-    assert "pricing" in _matcher(tmp_path / "app")
+    gate = _gate(tmp_path / "app")
+    assert gate.is_public("/") and gate.is_public("/pricing")
+    assert not gate.is_public("/pricing-admin"), "a page is open by its route, not by how a path starts"
 
 
 def test_a_partly_public_app_is_expressible(tmp_path):
@@ -467,9 +468,9 @@ def test_a_partly_public_app_is_expressible(tmp_path):
                  ("/checkout", "authenticated"), ("/orders", "role_restricted"))
     result = project_middleware(doc, tmp_path / "app")
     assert result["gated"] == 2
-    matcher = _matcher(tmp_path / "app")
-    assert "catalog" in matcher
-    assert "checkout" not in matcher and "orders" not in matcher
+    gate = _gate(tmp_path / "app")
+    assert gate.is_public("/catalog")
+    assert not gate.is_public("/checkout") and not gate.is_public("/orders")
 
 
 def test_a_role_restricted_page_names_who_may_open_it(tmp_path):
@@ -509,22 +510,25 @@ def test_a_role_restricted_page_names_who_may_open_it(tmp_path):
 
 def test_a_public_landing_route_is_actually_reachable(tmp_path):
     """A negative lookahead cannot exclude the empty path, so `/` stayed gated
-    however it was declared — requiring one character after the slash is what
-    actually opens it."""
+    however it was declared. Decided on the exact route, `/` is open when it
+    says so and only `/` is."""
     from services.blueprint.projection import project_middleware
 
-    project_middleware(_pages(("/", "public")), tmp_path / "open")
-    assert _matcher(tmp_path / "open").endswith(".+)")
+    project_middleware(_pages(("/", "public"), ("/orders", "authenticated")), tmp_path / "open")
+    assert _gate(tmp_path / "open").is_public("/")
+    assert not _gate(tmp_path / "open").is_public("/orders")
 
     project_middleware(_pages(("/", "authenticated")), tmp_path / "shut")
-    assert _matcher(tmp_path / "shut").endswith(".*)")
+    assert not _gate(tmp_path / "shut").is_public("/")
 
 
 def test_dynamic_segments_become_a_wildcard(tmp_path):
     from services.blueprint.projection import project_middleware
 
     project_middleware(_pages(("/docs/[slug]", "public")), tmp_path / "app")
-    assert "docs/[^/]+" in _matcher(tmp_path / "app")
+    gate = _gate(tmp_path / "app")
+    assert gate.is_public("/docs/getting-started")
+    assert not gate.is_public("/docs/a/b") and not gate.is_public("/docs")
 
 
 def test_the_auth_flow_is_never_caught_by_its_own_gate(tmp_path):
@@ -532,7 +536,42 @@ def test_the_auth_flow_is_never_caught_by_its_own_gate(tmp_path):
     from services.blueprint.projection import project_middleware
 
     project_middleware(_pages(("/anything", "authenticated")), tmp_path / "app")
-    assert "api/auth" in _matcher(tmp_path / "app")
+    gate = _gate(tmp_path / "app")
+    assert gate.is_public("/login") and gate.is_public("/api/auth/session")
+    assert gate.is_public("/api/auth/callback/credentials")
+
+
+def test_a_public_route_opens_that_route_and_nothing_that_starts_like_it(tmp_path):
+    """The matcher's word list matched how a path STARTS: `pay` opened
+    `/payroll`, and `install` would have opened `/installments` in every app
+    (PR #28 review, 2026-10-22). Public-ness is decided on whole routes — the
+    app's own and the platform's alike."""
+    from services.blueprint.projection import project_middleware
+
+    doc = _pages(("/shop", "public"), ("/shop-admin", "authenticated"),
+                 ("/payroll", "authenticated"), ("/payments", "authenticated"),
+                 ("/offline-orders", "authenticated"), ("/login-history", "authenticated"),
+                 ("/signups", "authenticated"))
+    project_middleware(doc, tmp_path / "app")
+    gate = _gate(tmp_path / "app")
+    assert gate.is_public("/shop")
+    for route in ("/shop-admin", "/shop/secret", "/payroll", "/payments", "/offline-orders",
+                  "/login-history", "/signups", "/api/authority", "/api/mcpx", "/installments"):
+        assert not gate.is_public(route), route
+    # A platform route that covers what lies under it still does.
+    for route in ("/pay", "/pay/cs_123", "/api/pay/confirm", "/offline", "/set-password"):
+        assert gate.is_public(route), route
+
+
+def test_only_static_files_skip_the_middleware(tmp_path):
+    """A dot in a route is not a file: `/v1.2/notes` and `/u/jane.doe` are
+    pages and are gated; `/logo.png` and the framework's chunks are not."""
+    from services.blueprint.projection import project_middleware
+
+    project_middleware(_pages(("/anything", "authenticated")), tmp_path / "app")
+    gate = _gate(tmp_path / "app")
+    assert not gate.reaches("/logo.png") and not gate.reaches("/_next/static/chunk.js")
+    assert gate.reaches("/u/jane.doe") and not gate.is_public("/u/jane.doe")
 
 
 def test_the_root_route_is_owned_inside_the_shell(tmp_path):

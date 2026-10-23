@@ -71,6 +71,6 @@ def test_the_route_ships_outside_the_gate_and_the_bus_dedupes():
     assert "ON CONFLICT (dedupe_key) DO NOTHING" in bus and "{ duplicate: true }" in bus
     schema = (root / "templates" / "runtime" / "db" / "forge-events.schema.ts").read_text()
     assert 'text("dedupe_key").unique()' in schema
-    from services.blueprint.projection import _ALWAYS_OPEN
-    assert "api/webhooks" in _ALWAYS_OPEN
+    from services.blueprint.platform_routes import PUBLIC
+    assert any(r.route == "/api/webhooks" and r.subtree for r in PUBLIC)
     assert integration_slug({"name": "Shop Platform"}) == "shop-platform"

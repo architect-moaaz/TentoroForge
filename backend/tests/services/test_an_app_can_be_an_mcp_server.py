@@ -83,9 +83,12 @@ def test_the_switch_is_kept_with_the_project_and_written_for_the_preview(tmp_pat
     assert "FORGE_APP_MCP=off" in (app / ".env.local").read_text()
 
 
-def test_the_middleware_lets_a_token_through_to_the_route():
-    from services.blueprint.projection import _ALWAYS_OPEN
-    assert "api/mcp" in _ALWAYS_OPEN
+def test_the_middleware_lets_a_token_through_to_the_route(tmp_path):
+    from services.blueprint.projection import project_middleware
+    from tests.services._middleware_gate import Gate
+    project_middleware({"pages": [{"id": "PAGE-001", "route": "/", "access": "authenticated"}]}, tmp_path)
+    assert Gate(tmp_path).is_public("/api/mcp")
+    assert Gate(tmp_path).is_public("/api/mcp/tools")
 
 
 def test_smith_reads_and_turns_the_switch(tmp_path):

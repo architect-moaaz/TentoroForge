@@ -46,7 +46,7 @@ def test_the_runtime_ships_the_stand_in_and_the_cart_waits_for_the_payment():
     handlers = (ROOT / "templates/runtime/workflows/index.ts").read_text()
     for action in ("create_checkout", "refund_payment", "payment_status", "connect_account"):
         assert f'registerActionHandler("{action}"' in handlers
-    from services.blueprint.projection import _ALWAYS_OPEN
-    assert "pay" in _ALWAYS_OPEN and "api/pay" in _ALWAYS_OPEN
+    from services.blueprint.platform_routes import PUBLIC
+    assert {"/pay", "/api/pay"} <= {r.route for r in PUBLIC if r.subtree}
     route = (ROOT / "templates/runtime/api-webhooks/route.ts").read_text()
     assert "onProviderCall(" in route, "a payment provider's signed call settles the ledger"
