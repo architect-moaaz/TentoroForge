@@ -58,7 +58,16 @@ PUBLIC: tuple[PlatformRoute, ...] = (
     # An assistant holds a token, not a session: the MCP route checks the
     # person's token itself (and answers 404 unless the owner turned it on).
     PlatformRoute("/api/mcp", True, "an assistant's calls, which carry their own token"),
+    # Where a link or a QR code sends someone who wants the app on their phone: they have not signed in, and the page shows what installing
+    # is and nothing of theirs. Only an installable app has it (`projection.project_pwa` writes it, and removes it when the app stops being one).
+    PlatformRoute("/install", False, "where someone who wants the app on their phone is sent", when=lambda doc: _installable(doc)),
 )
+
+
+def _installable(doc: dict) -> bool:
+    from services.blueprint.pwa_check import installable
+
+    return installable(doc)
 
 
 def public_for(doc: dict) -> list[PlatformRoute]:

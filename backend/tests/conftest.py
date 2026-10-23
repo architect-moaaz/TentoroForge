@@ -19,6 +19,10 @@ os.environ["ANTHROPIC_API_KEY"] = "test-key"
 # machine's, where a running backend's reaper would act on them.
 import tempfile as _tempfile
 os.environ["FORGE_DEV_SERVERS_DIR"] = _tempfile.mkdtemp(prefix="forge-dev-servers-test-")
+# The suite's model calls are counted in a ledger of its own. They went into the machine's (`data/build-usage.jsonl`) as
+# round-number rows under projects named `blueprint`, `t` and `a`, so the cost reports and the cost guard of a person
+# building a real app counted money nobody spent (2026-10-22). A test that wants its own file sets the variable itself.
+os.environ["FORGE_USAGE_LOG"] = os.path.join(_tempfile.mkdtemp(prefix="forge-usage-test-"), "build-usage.jsonl")
 
 # ---------------------------------------------------------------------------
 # The rate limiter is a WALL-CLOCK token bucket, and the suite shares one.

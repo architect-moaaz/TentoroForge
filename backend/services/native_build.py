@@ -18,6 +18,7 @@ unique there. Two organisations each calling an app "Leafy" would otherwise be o
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -64,7 +65,12 @@ def choose_target(output_dir: str | Path, doc: Optional[dict]) -> Optional[Targe
     if doc and enabled(doc):
         return Target("native", native_root(output_dir))
     shell = Path(output_dir) / "mobile"
-    return Target("shell", shell) if shell.is_dir() else None
+    if shell.is_dir():
+        return Target("shell", shell)
+    # A PWA's phone app is the shell, and `prepare_shell` makes it when there is none yet (full generation makes it;
+    # an app built another way, or before this choice, does not).
+    surface = str(((doc or {}).get("mobile") or {}).get("surface") or "") if doc else ""
+    return Target("shell", shell) if surface in SHELL_SURFACES else None
 
 
 def _read_app_json(native_dir: Path) -> dict:
@@ -113,6 +119,73 @@ def prepare(output_dir: str | Path, doc: dict, deployed_url: str) -> Path:
         expo["owner"] = prior_owner
     _write_app_json(root, data)
     return root
+
+
+#: The choices whose phone app is the WebView shell: it opens the installable website inside an app.
+SHELL_SURFACES = ("web_pwa", "pwa_only")
+
+
+def _brand_hex(doc: dict) -> str:
+    value = str((((doc or {}).get("designSystem") or {}).get("colors") or {}).get("primary") or "").strip()
+    return value if re.match(r"^#[0-9a-fA-F]{6}$", value) else ""
+
+
+#: What in an application's pages means it uses the phone's camera: a barcode scanner, a photo capture, an image search, or
+#: a page of the `capture` pattern.
+_CAMERA_USE = re.compile(r"BarcodeScanner|CameraCapture|ImageSearch|\"pattern\":\s*\"capture\"")
+
+
+def uses_camera(doc: dict) -> bool:
+    """Does the application use the camera? Decided from its own pages, so a habit tracker does not ask for it."""
+    text = json.dumps([doc.get("pageCode"), doc.get("pageLayouts"), doc.get("pages")], ensure_ascii=False, default=str)
+    return bool(_CAMERA_USE.search(text))
+
+
+def prepare_shell(output_dir: str | Path, doc: dict, deployed_url: str) -> Path:
+    """The WebView shell of a PWA, current: made when the application has none, with the web app's address, its brand
+    colour and icons, and a unique slug written in. Keeps the EAS project and the owning Expo account already linked
+    (the scaffold rewrites app.json from the template, and a robot token is refused without the owner)."""
+    from services.mobile_branding import apply_mobile_branding
+    from services.mobile_scaffold import scaffold_mobile
+
+    out = Path(output_dir)
+    shell = out / "mobile"
+    try:
+        prior_owner = str(((_read_app_json(shell).get("expo") or {}).get("owner")) or "").strip()
+    except NativeBuildError:
+        prior_owner = ""
+    name = str((doc.get("application") or {}).get("name") or "").strip() or None
+    bundle = str((((doc.get("mobile") or {}).get("store")) or {}).get("bundleId") or "").strip() or None
+    try:
+        scaffold_mobile(str(out), app_name=name, deployed_url=str(deployed_url or "").strip().rstrip("/"),
+                        brand_hex=_brand_hex(doc) or None, bundle_id=bundle)
+        apply_mobile_branding(str(shell))
+    except Exception as exc:  # noqa: BLE001 - said as a reason, not a traceback
+        raise NativeBuildError(f"the phone app could not be written ({type(exc).__name__}: {str(exc)[:160]})") from exc
+    data = _read_app_json(shell)
+    expo = data.setdefault("expo", {})
+    expo["slug"] = unique_slug(str(expo.get("slug") or "app"), out.name)
+    expo["scheme"] = expo["slug"]
+    # THE CAMERA ONLY WHEN THE APP USES IT: the shell's Scan button, its start-up camera prompt and the manifest's camera,
+    # microphone and storage permissions are for apps with a scanner. Without one they are a prompt people refuse and a
+    # question in store review.
+    camera = uses_camera(doc)
+    expo.setdefault("extra", {})["camera"] = camera
+    if not camera:
+        # `permissions: []` is not enough: the camera library brings its own into the manifest. Expo's `blockedPermissions`
+        # removes them from the built app.
+        expo.setdefault("android", {})["permissions"] = []
+        expo["android"]["blockedPermissions"] = [
+            "android.permission.CAMERA", "android.permission.RECORD_AUDIO",
+            "android.permission.READ_EXTERNAL_STORAGE", "android.permission.WRITE_EXTERNAL_STORAGE",
+        ]
+        plist = (expo.get("ios") or {}).get("infoPlist") or {}
+        for key in ("NSCameraUsageDescription", "NSMicrophoneUsageDescription", "NSPhotoLibraryUsageDescription"):
+            plist.pop(key, None)
+    if prior_owner:
+        expo["owner"] = prior_owner
+    _write_app_json(shell, data)
+    return shell
 
 
 def _host(url: str) -> str:
@@ -298,6 +371,53 @@ def project_id(native_dir: Path) -> str:
     return "" if value.startswith("__") else value.strip()
 
 
+async def _npm_run(argv: list[str], cwd: str, timeout: float) -> tuple[int, str]:
+    """`npm` as a subprocess: its return code and the end of what it said. (`npm` is `npm.cmd` on Windows; a bare name
+    is not found there.)"""
+    from services.phone_env import phone_env
+
+    from services.phone_live_registry import kill_pid
+
+    exe = shutil.which(argv[0]) or argv[0]
+    # In its own group, so that what `npm` starts is ended with it on a timeout or a cancel (PR #28 review, 2026-10-22).
+    kwargs = {"start_new_session": True} if os.name != "nt" else {}
+    proc = await asyncio.create_subprocess_exec(
+        exe, *argv[1:], cwd=cwd, env=phone_env(Path(cwd).parent), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+        **kwargs)
+    try:
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout)
+    except asyncio.TimeoutError:
+        kill_pid(proc.pid, force=True)
+        proc.kill()
+        return 124, f"npm took longer than {int(timeout // 60)} minutes and was stopped"
+    except asyncio.CancelledError:
+        kill_pid(proc.pid, force=True)
+        proc.kill()
+        raise
+    return proc.returncode or 0, (out or b"").decode("utf-8", "replace")[-700:]
+
+
+async def ensure_packages(native_dir: Path, *, run: Any = None, timeout: float = 1500.0) -> bool:
+    """The phone project's packages, installed once, so Expo can read the app's config plugins on this machine.
+
+    `eas init` and `eas build` resolve plugins such as `expo-router` BEFORE anything is uploaded, and failed with "Failed to
+    resolve plugin for module expo-router ... Do you have node modules installed?" for any phone app whose packages nobody
+    had installed (the web app's `install` node installs the web app's, and the type-check toolchain is its own folder).
+    True when it had to install; False when they were there already."""
+    native_dir = Path(native_dir)
+    if (native_dir / "node_modules" / "expo").is_dir():
+        return False
+    if not (native_dir / "package.json").is_file():
+        raise NativeBuildError("the phone project has no package.json, so its packages cannot be installed")
+    run = run or _npm_run
+    rc, said = await run(["npm", "install", "--no-audit", "--no-fund"], str(native_dir), timeout)
+    if rc != 0:
+        raise NativeBuildError(f"installing the phone project's packages failed (npm exited {rc}): {said.strip()[-400:]}")
+    if not (native_dir / "node_modules" / "expo").is_dir():
+        raise NativeBuildError("the phone project's packages were installed but `expo` is not among them")
+    return True
+
+
 async def ensure_eas_project(native_dir: Path, expo_token: str, *, run: Any = None) -> str:
     """The folder linked to an EAS project, linking it when it is not: `eas init`, which writes the id AND the owning
     account into app.json. A robot token is refused without the owner, so a project that has its id but lost its owner
@@ -318,5 +438,5 @@ async def ensure_eas_project(native_dir: Path, expo_token: str, *, run: Any = No
     return linked
 
 
-__all__ = ["BUNDLE", "LOCAL_HOSTS", "NativeBuildError", "Report", "Target", "choose_target", "ensure_eas_project",
-           "owner", "prepare", "preflight", "project_id", "stage", "unique_slug", "unstage", "write_submit_keys"]
+__all__ = ["BUNDLE", "LOCAL_HOSTS", "SHELL_SURFACES", "NativeBuildError", "Report", "Target", "choose_target", "ensure_eas_project", "ensure_packages",
+           "owner", "prepare", "prepare_shell", "preflight", "project_id", "stage", "unique_slug", "unstage", "uses_camera", "write_submit_keys"]

@@ -212,7 +212,7 @@ SIGNUP_PAGES = [{"id": "PAGE-005", "name": "Sign Up", "route": "/signup", "patte
 def test_the_phone_can_create_an_account_when_the_app_has_a_sign_up_and_passwords():
     from services.blueprint.native_projection import can_sign_up
     assert can_sign_up({**DOC, "pages": DOC["pages"] + SIGNUP_PAGES}) is True
-    assert can_sign_up({**DOC, "pages": SIGNUP_PAGES[1:]}) is False, "a sign-in page is not a sign-up"
+    assert can_sign_up({**DOC, "pages": SIGNUP_PAGES[1:]}) is True, "the sign-up page is added to every plan with a sign-in, so the phone shows its link"
     no_passwords = {**DOC, "pages": DOC["pages"] + SIGNUP_PAGES, "security": {"signIn": {"password": False, "magicLink": True}}}
     assert can_sign_up(no_passwords) is False, "the phone signs in with a password; an email link needs a browser"
 
@@ -249,3 +249,39 @@ def test_a_page_of_the_apps_own_at_account_is_not_shadowed(tmp_path):
 def test_a_page_at_the_fixed_signup_route_is_never_drawn_over_it():
     from services.blueprint.native_projection import route_file
     assert route_file("/signup") is None and route_file("/login") is None
+
+
+# --- an application with nothing to sign in to has no sign-in (FocusFlow, 2026-10-22) ----------------------------
+
+OPEN_APP = {"application": {"name": "FocusFlow"}, "security": {"authentication": "email_password", "rbac": False, "protectedRoutes": [],
+                                                           "signIn": {"magicLink": False, "password": True, "sso": []}},
+            "pages": [{"id": "PAGE-001", "name": "Focus", "route": "/", "access": "public"},
+                      {"id": "PAGE-002", "name": "History", "route": "/history", "access": "public"}],
+            "data": {"entities": [{"name": "FocusSession"}]}}
+
+
+def test_an_application_whose_pages_are_all_public_and_has_no_users_has_no_sign_in():
+    from services.blueprint.account_model import auth_page_bodies, has_sign_in
+    from services.blueprint.native_projection import can_sign_up, has_account_tab
+    assert has_sign_in(OPEN_APP) is False
+    assert auth_page_bodies(OPEN_APP) == []
+    assert has_account_tab(OPEN_APP) is False and can_sign_up(OPEN_APP) is False
+
+
+def test_one_page_that_needs_a_login_brings_the_sign_in_back():
+    from services.blueprint.account_model import has_sign_in
+    from services.blueprint.native_projection import can_sign_up, has_account_tab
+    guarded = {**OPEN_APP, "pages": OPEN_APP["pages"] + [{"id": "PAGE-003", "name": "Settings", "route": "/settings", "access": "authenticated"}]}
+    assert has_sign_in(guarded) and has_account_tab(guarded) and can_sign_up(guarded)
+    with_roles = {**OPEN_APP, "roles": [{"id": "ROLE-001", "name": "Admin"}]}
+    assert has_sign_in(with_roles)
+    with_account = {**OPEN_APP, "data": {"entities": [{"name": "Member", "account": True}]}}
+    assert has_sign_in(with_account)
+    with_link = {**OPEN_APP, "security": {**OPEN_APP["security"], "signIn": {"magicLink": True, "password": False}}}
+    assert has_sign_in(with_link)
+
+
+def test_a_plan_with_a_sign_in_but_no_sign_up_page_yet_still_lets_the_phone_create_an_account():
+    from services.blueprint.native_projection import can_sign_up
+    plan = {**OPEN_APP, "roles": [{"id": "ROLE-001", "name": "Member"}]}
+    assert can_sign_up(plan) is True

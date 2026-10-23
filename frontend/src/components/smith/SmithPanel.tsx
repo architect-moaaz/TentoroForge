@@ -95,6 +95,7 @@ import {
   type BlueprintRun,
 } from "@/hooks/useBlueprintRun";
 import { authFetch } from "@/lib/api";
+import { useSmithDraftStore } from "@/stores/smithDraft";
 
 /** §107 step 1 — what Smith says before the user says anything. */
 type Greeting = {
@@ -642,6 +643,15 @@ export function SmithPanel({
   // REQUIREMENTS DOCUMENTS — a BRD, a PRD — read on upload and sent with the
   // next message, where their text joins what the definition reads.
   const [docs, setDocs] = useState<AttachedDocument[]>([]);
+
+  // "Ask Smith" from the phone preview: the request is put in the composer for the person to finish and send.
+  const askedAt = useSmithDraftStore((s) => s.requested);
+  const askedText = useSmithDraftStore((s) => s.text);
+  useEffect(() => {
+    if (!askedAt || !askedText) return;
+    setDraft(askedText);
+    composerRef.current?.focus();
+  }, [askedAt, askedText]);
   const [listening, setListening] = useState(false);
 
   const authHeaders = (): Record<string, string> => {

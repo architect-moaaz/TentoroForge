@@ -106,6 +106,9 @@ google-genai>=1.0.0
 
 # LangGraph migration (Phase 1 — agent-loop runner behind FORGE_LANGGRAPH=1).
 langgraph>=0.2.60
+# The pipeline's checkpoints (services/pipeline_graph.py imports langgraph.checkpoint.sqlite.aio). It is a package of its own
+# and was in no list, so a fresh install failed 10 pipeline tests with "No module named 'langgraph.checkpoint.sqlite'".
+langgraph-checkpoint-sqlite>=2.0.0
 langchain-anthropic>=0.3.0
 langchain-core>=0.3.30
 
@@ -114,5 +117,11 @@ langchain-core>=0.3.30
 # every business actually has would make the import a feature for other
 # developers. Read-only use: openpyxl never writes a workbook here.
 openpyxl>=3.1.0
+
+# The IANA zone database. Windows and slim containers have none of their own, and without it every zone name (even UTC) is
+# "not an IANA zone": a workflow with a schedule is refused and the app's pages are never composed.
+tzdata>=2024.1
 # Requirements documents attached as PDF (services/document_text.py). Pure Python.
 pypdf>=4.2.0
+# The live phone preview carries its two update sockets with it (services/phone_live_proxy.py); uvicorn[standard] brings it too, but this imports it directly.
+websockets>=13

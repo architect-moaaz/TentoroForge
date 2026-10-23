@@ -24,6 +24,7 @@ call. Live callers use the default runner.
 from __future__ import annotations
 
 import asyncio
+import re
 import json
 import logging
 import os
@@ -113,6 +114,22 @@ def _tail(text: str, size: int = 700) -> str:
     return (text or "").strip()[-size:]
 
 
+#: What the CLI prints on every run, which says nothing about why it failed.
+_NOISE = re.compile(r"punycode|DEP0040|--trace-deprecation|without version control|Failed to get Git root|"
+                    r"Falling back to using current|EAS_PROJECT_ROOT")
+
+
+def _reason(stdout: str, stderr: str, size: int = 900) -> str:
+    """Why a CLI command failed: both streams together, the noise it always prints left out, the end of what is left.
+
+    Only the error stream was shown when it had any text at all, and the line that named the cause was in the other one: a
+    build failed with "project:init command failed" and the sentence above it ("Failed to resolve plugin for module
+    expo-router ... Do you have node modules installed?") never reached the person (2026-10-22)."""
+    lines = ((stdout or "") + chr(10) + (stderr or "")).splitlines()
+    kept = [line.rstrip() for line in lines if line.strip() and not _NOISE.search(line)]
+    return chr(10).join(kept).strip()[-size:]
+
+
 def _build_env(
     expo_token: str,
     deployed_url: str,
@@ -193,7 +210,7 @@ async def create_build(
     rc, stdout, stderr = await run(argv, mobile_dir, env)
     if rc != 0:
         raise EasClientError(
-            f"eas build exited {rc}: {_tail(stderr) or _tail(stdout)}"
+            f"eas build exited {rc}: {_reason(stdout, stderr)}"
         )
 
     # CLI --json --no-wait returns a JSON array (one entry per platform requested).
@@ -229,7 +246,7 @@ async def link_project(
         argv += ["--id", project_id]          # link to the project that already exists, never make a second one
     rc, stdout, stderr = await run(argv, native_dir, _build_env(expo_token, "", NO_VCS))
     if rc != 0:
-        raise EasClientError(f"eas init exited {rc}: {_tail(stderr) or _tail(stdout)}")
+        raise EasClientError(f"eas init exited {rc}: {_reason(stdout, stderr)}")
 
 
 # --------------------------------------------------------------------------- #
@@ -258,7 +275,7 @@ async def submit_build(
     argv = ["npx", "eas-cli", "submit", "--platform", platform, "--id", build_id, "--profile", "production", "--non-interactive"]
     rc, stdout, stderr = await run(argv, project_dir, _build_env(expo_token, "", extra_env))
     if rc != 0:
-        raise EasClientError(f"eas submit exited {rc}: {_tail(stderr) or _tail(stdout)}")
+        raise EasClientError(f"eas submit exited {rc}: {_reason(stdout, stderr)}")
     return _tail(stdout, 300)
 
 

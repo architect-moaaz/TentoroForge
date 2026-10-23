@@ -246,8 +246,19 @@ async def publish(
     # publish and strands its row at "snapshot" (`services.deploy.runs`).
     from sqlalchemy.ext.asyncio import async_sessionmaker
     from services.deploy import runs
-    queue = runs.start(lambda own: VercelDeployProvider(db=own).publish(snapshot),
-                       async_sessionmaker(db.bind, expire_on_commit=False))
+
+    async def publish_then_phone_app(own):
+        went_live = False
+        async for evt in VercelDeployProvider(db=own).publish(snapshot):
+            went_live = went_live or evt.stage == "done"
+            yield evt
+        if went_live and side == envs.PRODUCTION:
+            # A PWA's phone app is built once, when it first reaches production, and the Mobile tab offers the install.
+            # It never fails the publish: the app is live whatever happens here.
+            from services import mobile_autobuild
+            await mobile_autobuild.start_phone_app(project.id, user.id)
+
+    queue = runs.start(publish_then_phone_app, async_sessionmaker(db.bind, expire_on_commit=False))
 
     return StreamingResponse(
         runs.frames(queue),

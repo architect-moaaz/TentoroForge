@@ -508,6 +508,21 @@ def shoot(app: RunningApp, doc: dict, page_ids: list[str], out_dir: Path) -> lis
     return run_shots(app, pages, out_dir)
 
 
+_IS_WINDOWS = os.name == "nt"
+
+
+def _link_node_modules(modules: Path, link: Path) -> None:
+    """Let the screenshot script find the tool's packages. A symlink needs a privilege a Windows user does not have
+    (WinError 1314: Smith could not open a page, 2026-10-22), so there it is a junction, made the way the Expo build makes
+    its own; everywhere else it is the symlink it always was."""
+    if not _IS_WINDOWS:
+        link.symlink_to(modules)
+        return
+    from services import native_build
+    if not native_build._link_packages(modules, link):
+        raise ReviewUnavailable("the screenshot tool's packages could not be linked in")
+
+
 def run_shots(app: RunningApp, pages: list[dict], out_dir: Path, *, probe: bool = True,
               states: bool = True) -> list[dict]:
     """`page_shots.mjs` over `pages` (`{id, route, entity?, as?, cookies?,
@@ -522,7 +537,7 @@ def run_shots(app: RunningApp, pages: list[dict], out_dir: Path, *, probe: bool 
     work.mkdir(exist_ok=True)
     link = work / "node_modules"
     if not link.exists():
-        link.symlink_to(modules)
+        _link_node_modules(modules, link)
     script = work / "page_shots.mjs"
     shutil.copyfile(_SHOTS, script)
     env = {**os.environ}

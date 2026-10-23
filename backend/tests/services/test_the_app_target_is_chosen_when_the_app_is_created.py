@@ -78,7 +78,7 @@ def test_the_project_keeps_the_choice_beside_its_blueprint(tmp_path, monkeypatch
         return await project_service.create_project(uuid.uuid4(), uuid.uuid4(), "Paws", None, Db(), mobile_target="native")
 
     project = asyncio.run(run())
-    assert app_target.read(project.output_dir) == "native"
+    assert app_target.read(project.output_dir) == "web_native"      # the dialog's old "native" is read as what it meant
 
 
 def test_a_native_app_made_from_the_dialog_passes_the_contracts_own_mobile_check(tmp_path):

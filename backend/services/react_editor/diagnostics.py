@@ -55,7 +55,7 @@ def finding(raw: str) -> dict[str, Any]:
         return {"file": None, "line": None, "code": None, "raw": raw,
                 "plain": f"This page: {_shorten(raw, 160)}", "severity": "must-fix"}
     file, line = m.group("file"), int(m.group("line"))
-    what = {"view.tsx": "the page", "load.ts": "what the page loads", "page.tsx": "the page's route"}.get(file, file)
+    what = {"view.tsx": "the page", "load.ts": "what the page loads", "page.tsx": "the page's route", "Screen.tsx": "the screen"}.get(file, file)
     where = f"Line {line} of {what}"
     return {"file": file, "line": line, "code": m.group("code"), "raw": raw,
             "plain": plain(m.group("msg"), where), "severity": "must-fix"}

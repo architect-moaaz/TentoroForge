@@ -19,7 +19,7 @@ import { pageSources } from "./lib/data";
 import { listKeyFor } from "./lib/lists";
 import { GROUPS, type GroupKind } from "./lib/templates";
 import { mainRoot, plainName, topmost } from "./lib/plain";
-import type { Breakpoint, Device, DraftResult, Finding, HistoryEntry, ModelNode, Navigation, Op, PageDoc, PageListItem, PageModel, Proposal, PropValue, ReadOptions, Rect, ThemeDoc, ThemePatch } from "./types";
+import type { Breakpoint, Device, DraftResult, Finding, HistoryEntry, ModelNode, Navigation, Op, PageDoc, PageListItem, PageModel, Proposal, PropValue, ReadOptions, Rect, Surfaces, ThemeDoc, ThemePatch } from "./types";
 
 export interface Snapshot { revision: string; view: string; load: string; parts?: Record<string, string> }
 export interface HistoryOp { label: string; before: Snapshot; after: Snapshot }
@@ -94,6 +94,8 @@ export interface EditorState {
   projectId: string | null;
   pages: PageListItem[];
   navigation: Navigation | null;
+  /** The website, the phone app, or both: what the project page's Editor can show. Null until the pages are read. */
+  surfaces: Surfaces | null;
   entryPage: string | null;
   pageId: string | null;
   doc: PageDoc | null;
@@ -300,6 +302,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   projectId: null,
   pages: [],
   navigation: null,
+  surfaces: null,
   entryPage: null,
   pageId: null,
   doc: null,
@@ -382,7 +385,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (!projectId) return;
     try {
       const out = await editorApi.pages(projectId);
-      set({ pages: out.pages, entryPage: out.entryPage, navigation: out.navigation ?? null });
+      set({ pages: out.pages, entryPage: out.entryPage, navigation: out.navigation ?? null, surfaces: out.surfaces ?? { web: true, phone: false } });
     } catch (err) {
       set({ loadError: failureOf(err).message });
     }

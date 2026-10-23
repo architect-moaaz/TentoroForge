@@ -255,8 +255,124 @@ export interface PageListItem {
   pattern: string | null;
   access: string;
   coded: boolean;
+  /** A phone screen is written for this page: the Editor's phone side lists it. */
+  phone?: boolean;
   module: string | null;
   navigatesTo: string[];
+}
+
+/** Which surfaces the application has: the website, the phone app, or both. */
+export interface Surfaces { web: boolean; phone: boolean }
+
+/** One part of a phone screen, as the picture needs it (no character positions). */
+export interface PhonePart {
+  id: string;
+  parent: string | null;
+  children?: string[];
+  type: string;
+  kind: string;
+  line: number;
+  text?: string | null;
+  textEditable?: boolean;
+  repeat?: unknown;
+  file?: string;
+  /** What the row is called inside a list's `renderItem={(item) => …}`: set on the part the list holds. */
+  rowVar?: string;
+  /** Set when the screen hands this part to a component as a setting (`footer`, `renderItem`): it cannot be copied or deleted alone. */
+  slot?: string;
+  props: { name: string; kind: string; value: unknown }[];
+}
+
+/** The parts of a screen, and what it takes from the kit (`Screen as ScreenView`: the name it uses -> the name the kit gives it). */
+export interface PhoneModel {
+  nodes: Record<string, PhonePart>;
+  imports: Record<string, string>;
+}
+
+/** What the kit lets a person choose on one setting of a part: a word from a list, or on and off. */
+export interface KitChoice {
+  kind: "enum" | "boolean";
+  values: string[];
+  /** A list too long to repeat for every part (the icons) is sent once, under this name, in `PhoneKit.lists`. */
+  list?: string;
+  alsoNumber?: boolean;
+  optional?: boolean;
+}
+
+/** A ready part that can be added to a screen, as the web editor's palette lists its own. */
+export interface PalettePart {
+  id: string;
+  label: string;
+  category: string;
+  description: string;
+  search: string[];
+  jsx: string;
+  imports: string[];
+  container: boolean;
+  /** Drawn right, but not typeable or pressable until Smith connects it to the screen's data. */
+  drawnOnly: boolean;
+  /** A guided part: it asks a question first (which workflow, which records) and is connected to the application's own. */
+  guided?: GuideKind;
+}
+
+export type GuideKind = "form" | "button" | "list";
+
+/** One input a workflow takes. */
+export interface GuideInput {
+  name: string;
+  kind: string;
+  type: string;
+  required: boolean;
+  description: string;
+  entity: string | null;
+  options: string[];
+}
+
+/** What the guided dialogs choose from: the application's own workflows and kinds of record. */
+export interface GuideRefs {
+  workflows: { id: string; key: string; name: string; description: string; inputs: GuideInput[] }[];
+  entities: { name: string; typeName: string; fields: { name: string; type: string; label: string }[] }[];
+}
+
+/** What the server is told to build: names from the lists above and a few words, never code. */
+export interface GuideSpec {
+  kind: GuideKind;
+  place: { parentId: string } | { afterId: string } | { beforeId: string };
+  workflow?: string;
+  entity?: string;
+  label?: string;
+  values?: Record<string, string>;
+  title?: string;
+  subtitle?: string;
+}
+
+export interface PhoneKit {
+  ok: boolean;
+  error?: string | null;
+  components: Record<string, { props: Record<string, KitChoice> }>;
+  lists: Record<string, string[]>;
+  palette: PalettePart[];
+  /** The kit's names for the parts that can hold other parts. */
+  containers: string[];
+}
+
+/** A phone screen opened for editing: the parts it is made of, and the version they are. */
+export interface PhoneScreen {
+  page: { id: string; name: string; route: string };
+  revision: string;
+  model: PhoneModel;
+  /** The settings that hold words a person reads (title, label, placeholder…): the ones that can be typed over. */
+  words: string[];
+  guides: GuideRefs;
+  history: HistoryEntry[];
+}
+
+export interface PhoneApplied {
+  revision: string;
+  model: PhoneModel;
+  unchanged: boolean;
+  checked: boolean;
+  history?: HistoryEntry;
 }
 
 export interface Finding {

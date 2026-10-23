@@ -14,6 +14,8 @@ import httpx
 
 from services import dev_servers
 
+from services import process_groups  # noqa: E402
+
 logger = logging.getLogger(__name__)
 
 # Port range reserved for preview servers (separate from screenshot range 3100-3199)
@@ -226,7 +228,7 @@ async def start_preview(project_id: str, output_dir: str) -> int:
         stderr=asyncio.subprocess.DEVNULL,
         env=env,
         # Use process group so we can kill the whole tree
-        preexec_fn=os.setsid,
+        **process_groups.own_group(),
     )
 
     _previews[project_id] = {
@@ -274,7 +276,7 @@ def stop_preview(project_id: str) -> bool:
     dev_servers.forget(proc.pid)
     if proc.returncode is None:
         try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            process_groups.stop_group(proc)
         except (ProcessLookupError, OSError):
             pass
     return True
@@ -395,7 +397,7 @@ async def _restart_preview(project_id: str) -> bool:
     proc = entry.get("proc")
     if proc and proc.returncode is None:
         try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            process_groups.stop_group(proc)
         except (ProcessLookupError, OSError):
             pass
 
@@ -410,7 +412,7 @@ async def _restart_preview(project_id: str) -> bool:
         stderr=asyncio.subprocess.DEVNULL,
         env=app_env(output_dir, NEXT_BASE_PATH=prefix, NEXT_ASSET_PREFIX=prefix,
                     NEXT_PUBLIC_BASE_PATH=prefix, NEXT_DIST_DIR=PREVIEW_DIST_DIR),
-        preexec_fn=os.setsid,
+        **process_groups.own_group(),
     )
 
     if proc is not None:
