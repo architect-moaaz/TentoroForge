@@ -3440,6 +3440,27 @@ def _project_integration(svc: BlueprintService, app_root: str) -> None:
     svc.save()
 
 
+def _project_integration_of_a_build(svc: BlueprintService, app_root: str) -> None:
+    """The build's integration node: first, ONE RULE, NOT A RULE AND ITS COPY.
+    A workflow's own yes/no step that says exactly what a business rule says
+    (proven by the app's engine on sample saves) is taken out: the save step
+    after it checks the rule itself, so changing the rule changes the workflow
+    (services/rule_links). Only here, in the build that wrote the copies — a
+    re-projection (catch-up, repair) writes what the document says and never
+    changes the document behind a change record's back; an app built before
+    this has its copies handed over when its Business Rules tab is opened,
+    recorded."""
+    try:
+        from services.rule_links import fold_copies
+        folded = fold_copies(svc.doc)
+        if folded:
+            logger.info("[blueprint] %d workflow check(s) now follow their business rule: %s", len(folded),
+                        ", ".join(f"{f['name']}/{f['step']}→{f['rule']}" for f in folded))
+    except Exception:  # noqa: BLE001 — the workflows as written still run
+        logger.exception("[blueprint] linking workflow checks to their rules failed")
+    _project_integration(svc, app_root)
+
+
 #: Projection handlers, by node key. A node with no handler stays blocked —
 #: which is the honest state for the projections not yet ported.
 def _project_install(svc: BlueprintService, app_root: str) -> Any:
@@ -3612,7 +3633,7 @@ PROJECTION_HANDLERS: dict[str, Any] = {
     "install": _project_install,
     "backend": _project_data_layer,
     "frontend": _project_frontend,
-    "integration": _project_integration,
+    "integration": _project_integration_of_a_build,
     "assemble": _project_assemble,
 }
 

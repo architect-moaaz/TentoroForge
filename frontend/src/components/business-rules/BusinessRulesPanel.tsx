@@ -17,7 +17,7 @@ import {
 } from "@/lib/business-rule-validation";
 import type { BusinessRule, ConditionActionConfig } from "@/types/business-rules";
 import type { DecisionTableDefinition } from "@/types/decision";
-import { BlueprintRulesPanel } from "./BlueprintRulesPanel";
+import { RulesStudio } from "./studio/RulesStudio";
 import type { RulesResponse } from "@/lib/blueprint-rules";
 
 interface BusinessRulesPanelProps {
@@ -86,7 +86,7 @@ export function BusinessRulesPanel(props: BusinessRulesPanelProps) {
     );
   }
   if (query.data?.mode === "blueprint") {
-    return <BlueprintRulesPanel projectId={props.projectId} initial={query.data} />;
+    return <RulesStudio projectId={props.projectId} initial={query.data} />;
   }
   // A FAILED READ IS NOT AN EMPTY LIST. With Forge's API down the tab fell
   // through to the old table-backed editor and said "No business rules yet"

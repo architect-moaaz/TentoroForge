@@ -341,3 +341,10 @@
 {"say": "I want to reuse this app later for another client", "verb": "save_as_template"}
 {"say": "make a template out of this", "verb": "save_as_template"}
 {"say": "can I keep this as a starting point for other apps?", "verb": "save_as_template"}
+{"say": "link the manager note rule to the Log an expense workflow", "verb": "link_rule"}
+{"say": "make Approve check the rejected expense rule", "verb": "link_rule"}
+{"say": "stop checking the positive amount rule in Approve", "verb": "unlink_rule"}
+{"say": "is my template approved yet?", "verb": "template_status"}
+{"say": "what templates do we have?", "verb": "template_status"}
+{"say": "submit my template for review", "verb": "submit_template"}
+{"say": "publish the template to the gallery", "verb": "submit_template"}

@@ -1379,6 +1379,48 @@ sentences:
     source: routing
     reaches: {verb: back_up, states: []}
 
+  - id: rule-link-1
+    say: "link the manager note rule to the Log an expense workflow"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: link_rule, states: [rule, workflow]}
+
+  - id: rule-link-2
+    say: "make Approve check the rejected expense rule"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: link_rule, states: [rule, workflow]}
+
+  - id: rule-unlink-1
+    say: "stop checking the positive amount rule in Approve"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: unlink_rule, states: [rule, workflow]}
+
+  - id: template-status-1
+    say: "is my template approved yet?"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: template_status, states: []}
+
+  - id: template-status-2
+    say: "what templates do we have?"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: template_status, states: []}
+
+  - id: template-submit-1
+    say: "submit my template for review"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: submit_template, states: []}
+
+  - id: template-submit-2
+    say: "publish the template to the gallery"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: submit_template, states: []}
+
   - id: template-1
     say: "save this app as a template"
     checked: {colour: acts, via: handler}

@@ -873,15 +873,29 @@ async function executeNode(
         break;
 
       case "decision": {
-        // Rule-table evaluation: walk rows top-to-bottom, first matching
-        // row's outputs are written back to ctx.variables. Syntax is
-        // Tentoro's own (see decision.ts) — wildcards, equality,
-        // numeric compare, ranges.
-        const decisionOut = evaluateDecision(node.data.config || {}, ctx);
-        logEntry.output = decisionOut;
-        nextEdges = workflow.definition.edges.filter(
-          (e) => e.source === node.id,
-        );
+        // A decision table, or a business rule of the app named by id (see
+        // decision.ts). The step branches like a condition: the then-path
+        // when a row matched or the rule's condition held, the else-path
+        // otherwise. It used to follow every edge whatever matched, so a
+        // "refuse" path ran beside the "carry on" one.
+        const decisionConfig = (node.data.config || {}) as { rule?: string };
+        let ruleRow = null;
+        if (decisionConfig.rule) {
+          const { loadRules, isRuleSwitchedOff } = await import("../rules/engine");
+          ruleRow = (await loadRules()).find((r) => String(r.id) === String(decisionConfig.rule))
+            ?? (isRuleSwitchedOff(decisionConfig.rule) ? { id: decisionConfig.rule, is_active: false } : null);
+        }
+        const decisionOut = evaluateDecision(node.data.config || {}, ctx, ruleRow as any);
+        logEntry.output = { ...decisionOut, branch: decisionOut.matched ? "then" : "else" };
+        if (decisionOut.message) ctx.variables.__ruleMessage = decisionOut.message;
+        const outgoing = workflow.definition.edges.filter((e) => e.source === node.id);
+        const hasElse = outgoing.some((e) => e.data?.edgeType === "else");
+        // No else-path drawn: a table used to compute values carries on as
+        // it always did, whatever matched.
+        nextEdges = hasElse ? branchEdges(outgoing, decisionOut.matched) : outgoing;
+        if (decisionOut.skipped && decisionConfig.rule && !ruleRow) {
+          logEntry.error = `Decision step skipped: ${decisionOut.reason}`;
+        }
         break;
       }
 

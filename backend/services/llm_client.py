@@ -369,6 +369,24 @@ _ADAPTIVE_THINKING_PREFIXES: tuple[str, ...] = (
 THINKING_HEADROOM_TOKENS = 4096
 
 
+def reasons_unasked() -> bool:
+    """Whether the endpoint's model reasons on every call, asked or not.
+
+    Anthropic's thinks only when a thinking block is sent. An Anthropic-
+    COMPATIBLE host (``ANTHROPIC_BASE_URL`` — Kimi's) answers with a model that
+    always reasons, and its reasoning is paid from ``max_tokens``: a five-token
+    yes/no came back EMPTY, every time, so the check behind it always read "no"
+    (smith4 `asked_for`, 2026-10-14). Such a call gets the same headroom an
+    asked-for thinking call gets; tokens are paid as produced, so a short
+    answer costs what it did."""
+    from urllib.parse import urlparse
+    base = os.environ.get("ANTHROPIC_BASE_URL", "").strip()
+    if not base:
+        return False
+    host = urlparse(base).hostname or ""
+    return not (host == "anthropic.com" or host.endswith(".anthropic.com"))
+
+
 def supports_thinking(model: str) -> bool:
     if not isinstance(model, str) or not model.strip():
         return False
@@ -527,7 +545,8 @@ def complete(*, system: Any = None, messages: list[dict] | None = None,
         # The cap covers thinking AND output together on the adaptive path, so
         # asking for reasoning without raising it buys the reasoning at the
         # answer's expense — and a truncated reply parses as a failed one.
-        max_tokens=max_tokens + (THINKING_HEADROOM_TOKENS if thinking else 0),
+        max_tokens=max_tokens + (THINKING_HEADROOM_TOKENS
+                                 if thinking or reasons_unasked() else 0),
         messages=messages, system=system,
         # Extended thinking requires temperature=1.0; the API rejects other
         # values when the thinking block is present.

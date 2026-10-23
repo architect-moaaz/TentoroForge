@@ -314,6 +314,61 @@ def read_section(doc: dict, name: str) -> str:
     return f"{name}:\n{scrub(text)}"
 
 
+def rule_links(doc: dict, rule_ref: str = "", workflow_ref: str = "") -> str:
+    """Where each business rule is checked in the workflows (services/rule_links),
+    in the words the Business Rules tab uses."""
+    from services import rule_links as L
+    rules = L._live(doc.get("businessRules"))
+    flows = L._live(doc.get("workflows"))
+    if rule_ref.strip():
+        want = rule_ref.strip().lower()
+        rules = [r for r in rules if want in (str(r.get("id")).lower(), str(r.get("name") or "").lower())
+                 or want in str(r.get("name") or "").lower()]
+        if not rules:
+            raise ReadRefused(f"No business rule called {rule_ref!r}. The rules are: "
+                              + ", ".join(f"{r.get('id')} {r.get('name')}" for r in L._live(doc.get("businessRules"))) + ".")
+    flow_id = ""
+    if workflow_ref.strip():
+        want = workflow_ref.strip().lower()
+        hit = [w for w in flows if want in (str(w.get("id")).lower(), str(w.get("name") or "").lower())
+               or want in str(w.get("name") or "").lower()]
+        if not hit:
+            raise ReadRefused(f"No workflow called {workflow_ref!r}. The workflows are: "
+                              + ", ".join(f"{w.get('id')} {w.get('name')}" for w in flows) + ".")
+        flow_id = str(hit[0].get("id"))
+    judged = L.stale(doc, L.review_all(doc)) if rules else []
+    out = []
+    for r in rules:
+        rid = str(r.get("id"))
+        head = f"{rid} “{r.get('name')}”"
+        if r.get("enabled") is False:
+            out.append(f"{head}: turned off — checked nowhere.")
+            continue
+        if r.get("kind") not in ("condition_action", "decision_table"):
+            out.append(f"{head}: a written note — the app does not check it, so no workflow uses it.")
+            continue
+        links = [x for x in L.links(doc, r) if not flow_id or x["workflow"] == flow_id]
+        lines = [f"  - {x['name']} ({x['workflow']}) at step “{x['stepName']}”, when it saves "
+                 + ("a new record" if x["event"] == "create" else "a change")
+                 + ("" if x["touches"] else " (that save does not change what the rule looks at)")
+                 for x in links]
+        steps = [f"  - extra check step in {w.get('name')} ({w.get('id')})" for w in flows
+                 if (not flow_id or str(w.get("id")) == flow_id)
+                 and any(s.get("type") == "decision" and str((s.get("config") or {}).get("rule")) == rid
+                         for s in w.get("steps") or [] if isinstance(s, dict))]
+        copies = [f"  - {c['name']} ({c['workflow']}) has its own check “{c['stepName']}” ({c['expression']}) "
+                  f"that does NOT match the rule" for c in judged
+                  if c["rule"] == rid and c.get("same") is not True and (not flow_id or c["workflow"] == flow_id)]
+        if not (lines or steps or copies):
+            out.append(f"{head}: not checked in {hit[0].get('name')} — that workflow never saves the kind of record "
+                       "this rule is about (or not the kind of save it is for)." if flow_id else
+                       f"{head}: no workflow saves its record — it is still checked on every save from a screen.")
+            continue
+        out.append(f"{head}: checked automatically in:" + ("\n" + "\n".join(lines) if lines else " (none)")
+                   + ("\n" + "\n".join(steps) if steps else "") + ("\n" + "\n".join(copies) if copies else ""))
+    return "\n".join(out) or "This application has no business rules."
+
+
 def _item(items: list, ref: str) -> Any:
     """A list's item by its id, key, name or route (any case), or by position."""
     want = ref.strip().lower()
@@ -491,6 +546,15 @@ READS: tuple[tuple[str, str, dict[str, str]], ...] = (
      "What refers to an artifact and what it refers to: the pages a workflow "
      "is launched from, the entity a field belongs to, the rules on a page.",
      {"artifact_id": "string"}),
+    ("rule_links",
+     "Where business rules are checked in the workflows — the answer to \"is "
+     "this rule linked to that workflow?\", \"which rules does Log an expense "
+     "check?\". A rule of a record is checked AUTOMATICALLY by every workflow "
+     "step that saves that record (nobody connects it); this lists those steps "
+     "per rule, the extra check steps someone added, and any workflow check of "
+     "the same fields that does not match the rule. Empty `rule` = every rule; "
+     "a rule id or name narrows it; a workflow id or name narrows to one workflow.",
+     {"rule": "string", "workflow": "string"}),
 )
 
 READ_NAMES: frozenset[str] = frozenset(name for name, _d, _a in READS)
@@ -599,6 +663,8 @@ def run(name: str, args: dict, *, output_dir: str, doc: dict) -> str:
             return read_rows(doc, output_dir, str(args.get("entity") or ""))
         if name == "dependents":
             return dependents(doc, str(args.get("artifact_id") or ""))
+        if name == "rule_links":
+            return rule_links(doc, str(args.get("rule") or ""), str(args.get("workflow") or ""))
     except ReadRefused as refused:
         return str(refused)
     except (ValueError, TypeError) as exc:
@@ -607,5 +673,5 @@ def run(name: str, args: dict, *, output_dir: str, doc: dict) -> str:
 
 
 __all__ = ["READS", "READ_NAMES", "ReadRefused", "run", "read_file", "read_rows", "list_files",
-           "grep", "read_section", "find", "read_page_code", "dependents", "open_error",
+           "grep", "read_section", "find", "read_page_code", "dependents", "open_error", "rule_links",
            "MAX_LINES", "MAX_MATCHES", "SECRET_NAMES", "SKIP_DIRS"]

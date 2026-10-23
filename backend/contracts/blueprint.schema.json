@@ -2410,6 +2410,15 @@
                 ],
                 "default": "F"
               },
+              "aggregation": {
+                "type": "string",
+                "enum": [
+                  "SUM",
+                  "COUNT",
+                  "MIN",
+                  "MAX"
+                ]
+              },
               "inputs": {
                 "type": "array",
                 "items": {
@@ -2437,6 +2446,12 @@
                     },
                     "variableBinding": {
                       "type": "string"
+                    },
+                    "values": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
                     }
                   },
                   "required": [
@@ -2634,6 +2649,16 @@
           "salience": {
             "type": "integer",
             "default": 0
+          },
+          "on": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "create",
+                "update"
+              ]
+            }
           },
           "status": {
             "$ref": "#/properties/product/properties/capabilities/items/properties/status"
