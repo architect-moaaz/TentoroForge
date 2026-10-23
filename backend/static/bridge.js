@@ -221,6 +221,22 @@
     }
   }
 
+  // The page is going away: a reload, which a change that a hot update cannot swap in causes. The editor draws "Updating…" over the phone
+  // until the page says it is ready again, instead of showing a blank phone for a second or two.
+  window.addEventListener("pagehide", function () { send("unloading", {}); });
+  // ... and when the app on the new page has drawn its first text ("ready" only says this script started, a second or two earlier).
+  (function () {
+    var tries = 0;
+    var timer = setInterval(function () {
+      tries += 1;
+      var text = document.body && document.body.innerText ? document.body.innerText.trim() : "";
+      if (text.length > 0 || tries > 300) {
+        clearInterval(timer);
+        if (text.length > 0) send("painted", {});
+      }
+    }, 100);
+  })();
+
   // --- Element lookup by xpath ---
   function findByXPath(xpath) {
     try {

@@ -158,8 +158,19 @@ _PEOPLE = ("Alex Rivera", "Sam Chen", "Jordan Patel", "Taylor Brooks", "Morgan L
 _PERSON_NAME_FIELDS = ("name", "displayname", "fullname", "username")
 
 
+def _now() -> datetime:
+    """The moment the sample dates are counted from: today at noon, UTC, the same all day.
+
+    IT WAS THE CURRENT SECOND. The live preview rewrites its sample-data file when its text differs, and every date in it carried the second it
+    was made in, so EVERY change (one edited word) wrote a new file. That file is a module of the app, a data file cannot be hot-swapped, and the
+    update climbed to the app's root: the navigator was rebuilt on its first tab, so a change to any screen but the first put the phone back on
+    the first screen (found with a real browser, 2026-10-23: an edit to the Today screen replaced two modules, the screen and `preview-data`).
+    Sample dates are "a few days ago", "tomorrow": they need the day, not the second."""
+    return datetime.now(timezone.utc).replace(hour=12, minute=0, second=0, microsecond=0)
+
+
 def _iso(days: int) -> str:
-    return (datetime.now(timezone.utc) + timedelta(days=days)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return (_now() + timedelta(days=days)).isoformat().replace("+00:00", "Z")
 
 
 def _sample_value(field: dict, entity: str, i: int, labels: str, person: bool = False) -> Any:

@@ -43,6 +43,24 @@ export function pictureSource(status: PhoneStatus | undefined, wantsLive: boolea
   return wantsLive && status?.live?.state === "ready" ? "live" : "built";
 }
 
+/**
+ * Where a frame starts. A frame made again (the live picture and the built one swap, the Reload button) used to open at "/", which the app
+ * redirects to its first screen: a change sent the person back to the home screen from wherever they were. A new frame starts at the screen
+ * the person was on. It is held for the life of one frame (its id): a `src` that followed the person around the app would reload the frame
+ * at every tap.
+ */
+/**
+ * Whether the phone is between two pages: the page said it is going away (a reload), and the new one has not drawn anything yet. "ready" is not
+ * the end of it (it only says the editor's script on the new page started, about a second before the app shows anything): "painted" is.
+ */
+export function reloadingAfter(kind: string, was: boolean): boolean {
+  return kind === "unloading" ? true : kind === "painted" ? false : was;
+}
+
+export function startOfFrame(held: { id: string; route: string }, id: string, routeNow: string): { id: string; route: string } {
+  return held.id === id ? held : { id, route: routeNow || "/" };
+}
+
 interface Picked {
   tagName: string;
   textContent: string;
@@ -85,6 +103,13 @@ export function PhonePreview({ projectId, onAskSmith, autoRedraw = false, editPa
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState("");
   const [frameKey, setFrameKey] = useState(0);
+  const [reloading, setReloading] = useState(false);
+  // A page that never says it is ready again must not leave the phone covered.
+  useEffect(() => {
+    if (!reloading) return;
+    const t = setTimeout(() => setReloading(false), 20000);
+    return () => clearTimeout(t);
+  }, [reloading]);
   const [go, setGo] = useState("");
   const [wantRedraw, setWantRedraw] = useState(0);
   const ask = useSmithDraftStore((s) => s.ask);
@@ -167,9 +192,10 @@ export function PhonePreview({ projectId, onAskSmith, autoRedraw = false, editPa
   }, [status?.state, status?.live?.state, wantsLive, build]);
 
   // A new build is a new page.
-  // The picture it was picked from is gone, and the part may be too.
+  // The picture it was picked from is gone, and the part may be too. NOT while the live preview is what is shown: a finished build of the
+  // built picture is not a change to it, and drawing the frame again sent the person back to the app's first screen.
   useEffect(() => {
-    if (status?.state === "ready") { setFrameKey((k) => k + 1); setPicked(null); setListed(null); }
+    if (status?.state === "ready" && !liveRef.current) { setFrameKey((k) => k + 1); setPicked(null); setListed(null); }
   }, [status?.builtAt, status?.state]);
 
   useEffect(() => {
@@ -178,6 +204,7 @@ export function PhonePreview({ projectId, onAskSmith, autoRedraw = false, editPa
       const type = typeof e.data?.type === "string" ? e.data.type : "";
       if (!type.startsWith(PREFIX)) return;
       const kind = type.slice(PREFIX.length);
+      setReloading((was) => reloadingAfter(kind, was));
       if (kind === "route") setRoute(String(e.data.payload?.path ?? "/").replace(/^.*\/phone\/(?:serve|live)/, "") || "/");
       if (kind === "select") { setPicked(e.data.payload as Picked); setListed(null); }
       if (kind === "deselect") setPicked(null);
@@ -215,7 +242,10 @@ export function PhonePreview({ projectId, onAskSmith, autoRedraw = false, editPa
     if (!editParts) return;
     setPick({ source: picked?.source ?? null, pageId });
   }, [editParts, setPick, picked, pageId]);
-  const where = go && go !== "/" ? go : "/";
+  const frameId = `${live ? "live" : "built"}-${frameKey}`;
+  const started = useRef({ id: frameId, route: "/" });
+  started.current = startOfFrame(started.current, frameId, route);
+  const where = go && go !== "/" ? go : started.current.route;
   const api_ = process.env.NEXT_PUBLIC_API_URL ?? "";
   const src = status ? `${api_}${live && status.live ? status.live.path : status.servePath}${where}` : null;
   const building = status?.state === "building" || starting;
@@ -282,6 +312,11 @@ export function PhonePreview({ projectId, onAskSmith, autoRedraw = false, editPa
                 <span className="absolute left-1/2 top-2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-full bg-slate-900/85 px-3 py-1 text-[11px] text-white">
                   <Loader2 className="h-3 w-3 animate-spin" /> Updating…
                 </span>
+              )}
+              {reloading && (
+                <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-[1.9rem] bg-white/75">
+                  <span className="flex items-center gap-2 text-xs text-slate-600"><Loader2 className="h-4 w-4 animate-spin" /> Updating the screen…</span>
+                </div>
               )}
               <iframe
                 key={`${live ? "live" : "built"}-${frameKey}`}
