@@ -77,6 +77,8 @@ interface CheckNote {
   working: number;
   failing: Array<{ route: string; detail: string; stale?: boolean }>;
   processes: string[];
+  /** Pages the check could not open at all (its server or browser failed): not known to work, not known to fail. */
+  untried?: string[];
 }
 
 const STAGES: Array<{
@@ -364,6 +366,15 @@ export function PublishDialog({
             </ul>
             <p className="mt-1">Publishing puts them live as they are. Tell Smith &ldquo;check the app again and fix everything that still fails&rdquo; first.</p>
           </div>
+        )}
+
+        {/* PAGES THE CHECK NEVER SAW are not counted as broken: its own server or browser failed on them. */}
+        {!started && check?.checked && (check.untried?.length ?? 0) > 0 && (
+          <p role="status" className="text-xs text-amber-800 dark:text-amber-300">
+            {check.untried!.length} page{check.untried!.length === 1 ? "" : "s"} could not be checked — the
+            check itself failed to open {check.untried!.length === 1 ? "it" : "them"}, so this says nothing about
+            whether {check.untried!.length === 1 ? "it works" : "they work"}. Ask Smith to check the app again.
+          </p>
         )}
 
         {!started && check?.checked && check.stale && (

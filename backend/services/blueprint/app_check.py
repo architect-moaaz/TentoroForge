@@ -22,8 +22,10 @@ completion message says it (`runtime.check`).
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 import re
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable
@@ -38,6 +40,9 @@ STEPS = 12
 MAX_REPAIRS = 15
 #: Roles checked at once against the one running copy.
 PARALLEL = 3
+#: Times one check starts its server afresh to ask again what was lost when the
+#: server stopped answering. Past that, what was lost is "could not try".
+RESTARTS = 3
 
 
 # --------------------------------------------------------------------------- #
@@ -190,16 +195,43 @@ def visit_id(v: dict) -> str:
 #: time, could not take the picture. Neither is a fact about the page.
 TOOLING_PREFIXES = ("navigation:", "screenshot:")
 
+#: The check's server was not there to answer: refused, hung up, or answered
+#: nothing. A page cannot cause this on its own — the server stopped (the host
+#: killed it for its memory: 6m1a22xb, forge-v3, 2026-10-22, where sixteen of
+#: twenty pages were then reported as not working).
+UNREACHABLE = re.compile(r"ECONNREFUSED|ECONNRESET|ERR_EMPTY_RESPONSE|ERR_CONNECTION_(?:REFUSED|RESET|CLOSED)"
+                         r"|socket hang up|Remote end closed connection")
+
+
+def checks_own(error: Any) -> bool:
+    """A failure of the check itself, not a fact about the page."""
+    text = str(error or "")
+    return text.startswith(TOOLING_PREFIXES) or bool(UNREACHABLE.search(text))
+
+
+def unreachable(shot: dict) -> bool:
+    """Whether this visit met a server that was not answering."""
+    said = [shot.get("unavailable")] + list(shot.get("errors") or [])
+    for state in (shot.get("states") or {}).values():
+        if isinstance(state, dict):
+            said += list(state.get("errors") or [])
+    return any(UNREACHABLE.search(str(e or "")) for e in said)
+
 
 def tooling_faults(shot: dict) -> list[str]:
     """The check's own failures on one visit — the browser did not get to the
-    page, or could not picture it. Said as "could not try", never as a fault
-    of the application: the app check once sent ten pages to repair for its
-    own screenshot timeout (`page_shots.mjs:154`, ECom L2, 2026-10-11)."""
+    page, or could not picture it, or the server was not answering. Said as
+    "could not try", never as a fault of the application: the app check once
+    sent ten pages to repair for its own screenshot timeout
+    (`page_shots.mjs:154`, ECom L2, 2026-10-11)."""
     if shot.get("unavailable"):
         return [f"the page could not be opened: {shot['unavailable']}"]
-    return [f"the check's browser failed: {str(e)[:200]}" for e in shot.get("errors") or []
-            if str(e).startswith(TOOLING_PREFIXES)]
+    out = [f"the check's browser failed: {str(e)[:200]}" for e in shot.get("errors") or [] if checks_own(e)]
+    for name, state in (shot.get("states") or {}).items():
+        if isinstance(state, dict):
+            out += [f"the check's browser failed on the {name} state: {str(e)[:200]}"
+                    for e in state.get("errors") or [] if checks_own(e)]
+    return out
 
 
 def shot_findings(shot: dict, visit: dict, doc: dict) -> list[str]:
@@ -219,15 +251,20 @@ def shot_findings(shot: dict, visit: dict, doc: dict) -> list[str]:
     landed = str(shot.get("landed") or "")
     if visit["as"] != "signed out" and re.search(r"/(login|signin|sign-in)\b", landed):
         out.append(f"it sends a signed-in {visit['as']} to {landed}")
-    for e in [e for e in shot.get("errors") or [] if not str(e).startswith(TOOLING_PREFIXES)][:4]:
+    for e in [e for e in shot.get("errors") or [] if not checks_own(e)][:4]:
         out.append(f"the browser reports: {str(e)[:200]}")
+    # A STATE THE CHECK COULD NOT REACH SAYS NOTHING OF THE PAGE. "/stay-lookup
+    # with nothing to show breaks (ERR_EMPTY_RESPONSE)" was the server being
+    # killed under it (6m1a22xb, 2026-10-22); that is `tooling_faults`'.
     empty = (shot.get("states") or {}).get("empty") or {}
-    if (isinstance(empty.get("status"), int) and empty["status"] >= 500) or empty.get("errors"):
-        why = (empty.get("errors") or [f"HTTP {empty.get('status')}"])[0]
+    empty_errors = [e for e in empty.get("errors") or [] if not checks_own(e)]
+    if (isinstance(empty.get("status"), int) and empty["status"] >= 500) or empty_errors:
+        why = (empty_errors or [f"HTTP {empty.get('status')}"])[0]
         out.append(f"with nothing to show it breaks ({str(why)[:200]}) instead of saying there is nothing yet")
     missing = (shot.get("states") or {}).get("missing") or {}
-    if (isinstance(missing.get("status"), int) and missing["status"] >= 500) or missing.get("errors"):
-        why = (missing.get("errors") or [f"HTTP {missing.get('status')}"])[0]
+    missing_errors = [e for e in missing.get("errors") or [] if not checks_own(e)]
+    if (isinstance(missing.get("status"), int) and missing["status"] >= 500) or missing_errors:
+        why = (missing_errors or [f"HTTP {missing.get('status')}"])[0]
         out.append(f"on a record that does not exist it breaks ({str(why)[:200]}) instead of saying so")
     for c in shot.get("controls") or []:
         verdict = BROKEN_OUTCOMES.get(str(c.get("outcome")))
@@ -307,8 +344,12 @@ def arrival_findings(app: Any, doc: dict, out_dir: Path) -> list[str]:
         shots = run_shots(app, [{"id": "arrive", "route": login, "signIn": True, "as": admin},
                                 {"id": "arrive-home", "route": f"{login}?callbackUrl=%2F", "signIn": True, "as": admin}],
                           out_dir / "arrival", probe=False, states=False)
-    except ReviewUnavailable as exc:
-        return [f"signing in through the form could not be tried: {exc}"]
+    except ReviewUnavailable:
+        raise                            # the check's own failure: `check_pages` says it as "could not try"
+    lost = [s for s in shots if unreachable(s)]
+    if lost:
+        raise ReviewUnavailable("the check's server was not answering: "
+                                + str(lost[0].get("unavailable") or (lost[0].get("errors") or [""])[0])[:200])
     out = []
     for shot in shots:
         landed = str(shot.get("landed") or "")
@@ -351,29 +392,121 @@ def _entries(app: Any, doc: dict, batch: list[dict]) -> list[dict]:
     return out
 
 
+class _ServerGate:
+    """Who is using the one check server, so that it is started afresh only
+    when nobody is: past `TRIAL_RSS_MB` between one person's pages and the
+    next's, and after it stopped answering. While a restart waits, nobody new
+    starts; a role already opening pages finishes first.
+
+    With a stand-in app (a test's, a bench's) that cannot be restarted, every
+    call is a no-op."""
+
+    def __init__(self, app: Any):
+        self.app = app
+        self.can = callable(getattr(app, "restart", None))
+        self._cond = threading.Condition()
+        self._using = 0
+        self._waiting = 0
+        self.restarts = 0
+
+    @contextlib.contextmanager
+    def using(self) -> Any:
+        with self._cond:
+            while self._waiting:
+                self._cond.wait()
+            self._using += 1
+        try:
+            yield getattr(self.app, "generation", 0)
+        finally:
+            with self._cond:
+                self._using -= 1
+                self._cond.notify_all()
+
+    def restart(self, why: str, seen: int) -> bool:
+        """Start the server afresh once nobody is using it — unless a neighbour
+        already did since `seen`. False when it could not be (no restarts left,
+        or a stand-in)."""
+        if not self.can:
+            return False
+        with self._cond:
+            if getattr(self.app, "generation", 0) != seen:
+                return True                       # a neighbour restarted it already
+            if self.restarts >= RESTARTS:
+                return False
+            self._waiting += 1
+            try:
+                while self._using:
+                    self._cond.wait()
+                if getattr(self.app, "generation", 0) != seen:
+                    return True
+                self.restarts += 1
+                try:
+                    self.app.restart(why, if_generation=seen)
+                except Exception as exc:  # noqa: BLE001 — a server that will not come back leaves the rest untried
+                    logger.warning("[app-check] the server did not come back: %s", exc)
+                    return False
+                return True
+            finally:
+                self._waiting -= 1
+                self._cond.notify_all()
+
+    def heavy(self) -> int:
+        """MB the server holds past `TRIAL_RSS_MB`, or 0."""
+        from services import dev_servers
+        rss = getattr(self.app, "rss_mb", None)
+        if not callable(rss) or dev_servers.TRIAL_RSS_MB <= 0:
+            return 0
+        held = int(rss() or 0)
+        return held if held > dev_servers.TRIAL_RSS_MB else 0
+
+
 def check_pages(app: Any, doc: dict, todo: list[dict], out_dir: Path, *,
                 server_said: Callable[[], list[str]] = lambda: [],
                 cancelled: Callable[[], bool] = lambda: False, probe: bool = True) -> dict[str, dict]:
     """Open `todo` (from `visits`) and read what happened: `{page: {name,
-    route, findings: [(as, finding)]}}` for every page visited."""
+    route, findings: [(as, finding)]}}` for every page visited.
+
+    A visit that met a server that was not answering is asked again after the
+    server is started afresh (`_ServerGate`), at most `RESTARTS` times in one
+    check; what is still lost is "could not try", never a finding."""
     from services.blueprint.page_review import ReviewUnavailable, run_shots
 
     by_role: dict[str, list[dict]] = {}
     for v in todo:
         by_role.setdefault(v["as"], []).append(v)
     server_said()                                   # what was printed before belongs to no page
+    gate = _ServerGate(app)
+
+    def answering() -> bool:
+        ask = getattr(app, "answers", None)
+        return bool(ask()) if callable(ask) else True
 
     def shoot(role: str) -> tuple[str, list[dict]]:
         batch = by_role[role]
         safe = re.sub(r"[^a-z0-9]+", "-", role.lower()).strip("-") or "role"
         if cancelled():
             return role, [{"id": visit_id(v), "unavailable": "stopped by the person"} for v in batch]
-        try:
-            shots = run_shots(app, _entries(app, doc, batch), out_dir / safe,
-                              probe=probe and role != "signed out", states=role != "signed out")
-        except ReviewUnavailable as exc:
-            shots = [{"id": visit_id(v), "unavailable": str(exc)} for v in batch]
-        return role, shots
+        held = gate.heavy()
+        if held:
+            gate.restart(f"it held {held} MB before the pages of {role}", getattr(app, "generation", 0))
+        shots: dict[str, dict] = {}
+        left = list(batch)
+        for _attempt in range(RESTARTS + 1):
+            with gate.using() as seen:
+                try:
+                    got = run_shots(app, _entries(app, doc, left), out_dir / safe,
+                                    probe=probe and role != "signed out", states=role != "signed out")
+                except ReviewUnavailable as exc:
+                    got = [{"id": visit_id(v), "unavailable": str(exc)} for v in left]
+            by_id = {str(s.get("id")): s for s in got if isinstance(s, dict)}
+            shots.update(by_id)
+            lost = [v for v in left if visit_id(v) not in by_id or unreachable(by_id[visit_id(v)])]
+            if not lost or answering() and not any(unreachable(by_id.get(visit_id(v)) or {}) for v in lost):
+                break
+            if cancelled() or not gate.restart(f"it stopped answering while {role}'s pages were open", seen):
+                break
+            left = lost
+        return role, [shots[visit_id(v)] for v in batch if visit_id(v) in shots]
 
     with ThreadPoolExecutor(max_workers=PARALLEL) as pool:
         results = list(pool.map(shoot, list(by_role)))
@@ -410,10 +543,18 @@ def check_pages(app: Any, doc: dict, todo: list[dict], out_dir: Path, *,
     # WHERE A SIGNED-IN PERSON ARRIVES, checked with the sign-in page.
     login = next((v for v in todo if v.get("as") == "signed out" and not v.get("inside")), None)
     if login is not None:
-        for f in arrival_findings(app, doc, out_dir):
-            report.setdefault(login["page"], {"name": login["name"], "route": login["route"], "findings": [],
-                                              "untried": []})
-            report[login["page"]]["findings"].append(("signing in", f))
+        page = report.setdefault(login["page"], {"name": login["name"], "route": login["route"], "findings": [],
+                                                 "untried": []})
+        for attempt in range(2):
+            with gate.using() as seen:
+                try:
+                    page["findings"] += [("signing in", f) for f in arrival_findings(app, doc, out_dir)]
+                    break
+                except ReviewUnavailable as exc:
+                    why = str(exc)
+            if attempt or answering() or not gate.restart("it stopped answering while signing in was tried", seen):
+                page["untried"].append(("signing in", f"signing in through the form could not be tried: {why}"))
+                break
     return report
 
 
@@ -746,7 +887,8 @@ def publish_note(output_dir: str) -> dict:
         from services.blueprint.service import BlueprintService
         doc = BlueprintService.load(output_dir=output_dir).doc
     except Exception:  # noqa: BLE001 — nothing to say is not an error
-        return {"checked": False, "stale": False, "pages": 0, "working": 0, "failing": [], "processes": []}
+        return {"checked": False, "stale": False, "pages": 0, "working": 0, "failing": [], "processes": [],
+                "untried": []}
     runtime = doc.get("runtime") or {}
     check = runtime.get("check") if isinstance(runtime.get("check"), dict) else None
     issues = [i for i in runtime.get("issues") or [] if isinstance(i, dict)]
@@ -770,6 +912,10 @@ def publish_note(output_dir: str) -> dict:
         "working": int((check or {}).get("working") or 0),
         "failing": failing,
         "processes": [str(i.get("name") or i.get("workflow")) for i in issues if i.get("kind") == "process"],
+        # PAGES THE CHECK NEVER SAW. "4 of 20 pages passed" read as sixteen
+        # broken pages when the check's server had been killed under twelve
+        # of them (6m1a22xb, 2026-10-22); the dialog says which were not seen.
+        "untried": [str(r) for r in (check or {}).get("untried") or []],
     }
 
 

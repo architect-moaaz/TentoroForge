@@ -8,8 +8,8 @@ redirected to ``/login`` and was discarded, correctly and uselessly: the visual
 review ran over whatever had opted into ``public`` and reported honestly that it
 had reviewed a landing page.
 
-The gate is NextAuth. ``project_middleware`` writes ``withAuth`` with a matcher
-built from what the pages declare, so what stands between the browser and a
+The gate is NextAuth. ``project_middleware`` writes ``withAuth`` with the public
+routes the pages declare, so what stands between the browser and a
 gated page is one cookie holding an encrypted JWT.
 
 Minting it rather than typing it in

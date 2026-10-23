@@ -49,8 +49,9 @@ def test_the_injector_ships_the_routes_and_the_middleware_lets_them_through():
     injector = (ROOT / "services/runtime_injector.py").read_text()
     assert '"api-auth-methods/route.ts", "auth/methods/route.ts"' in injector and '"api-auth-magic/route.ts", "auth/magic/route.ts"' in injector
     assert (ROOT / "templates/runtime/api-auth-methods/route.ts").read_text().count("methods()") == 1
-    middleware = (ROOT / "templates/app-foundation/src/middleware.ts").read_text()
-    assert "api/auth" in middleware
+    from tests.services._middleware_gate import Gate
+    gate = Gate(ROOT / "templates/app-foundation/src/middleware.ts")
+    assert gate.is_public("/api/auth/methods") and gate.is_public("/api/auth/magic")
 
 
 def test_the_check_lays_its_own_token_on_the_row_and_tries_it_three_times(monkeypatch):

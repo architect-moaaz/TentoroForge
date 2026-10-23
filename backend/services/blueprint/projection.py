@@ -4156,48 +4156,62 @@ def project_ownership_rules(doc: dict, app_root: str | Path) -> dict[str, Any]:
 #: only the `signIn` page (`/login`), so `/login` slipped through by luck while
 #: `/signup` was gated — the gate redirected the very visitor who has no account
 #: yet straight back to `/login`, so "Sign up" never opened the signup page.
-#: The pages that create or restore a session cannot themselves require one.
-#:
-#: `set-password` is the third of them. It is where a setup link lands — the
-#: screen on which someone the owner invited, or someone whose password was
-#: reset, chooses a password. Gated, it would redirect the one visitor who
-#: certainly cannot sign in yet to the sign-in they cannot complete. It leaks
-#: nothing: the page shows only the email its own one-time token resolves to.
-#:
-#: `api/cron` and `api/webhooks` are the routes machines call, not people: the
-#: scheduler's tick (Vercel cron, the app's own self-ping) and another
-#: system's signed call. Each authenticates itself — the tick by `CRON_SECRET`,
-#: a webhook by its signature — and neither can hold a session, so gated they
-#: were answered with a redirect to the sign-in page and never ran: every
-#: scheduled process in every published app slept (confirmed on a built app's
-#: matcher, 2026-10-11).
-_ALWAYS_OPEN: tuple[str, ...] = (
-    "api/auth", "_next", "favicon.ico",
-    "login", "signup", "set-password",
-    "api/cron", "api/webhooks",
-    # The stand-in checkout: a signed-out buyer (a guest cart) is sent here
-    # too; it shows an amount by a session id and charges nothing.
-    "pay", "api/pay",
-    # AN ASSISTANT HOLDS A TOKEN, NOT A SESSION. The MCP route checks the
-    # person's token itself (and answers 404 unless the owner turned it on);
-    # its token routes ask for the session themselves.
-    "api/mcp",
+#: The routes the platform adds to every app and leaves open are declared in
+#: `services.blueprint.platform_routes`, each with its route and why; the
+#: middleware decides on exact routes, never on how a path starts.
+
+#: Static files the middleware never sees: the framework's own, and files
+#: served from `public/` by their extension. Explicit, so a route whose last
+#: segment merely contains a dot (`/people/a.b`) is still gated.
+_STATIC_EXTENSIONS: tuple[str, ...] = (
+    "ico", "png", "jpg", "jpeg", "gif", "svg", "webp", "avif", "css", "js", "map", "txt",
+    "xml", "json", "webmanifest", "woff", "woff2", "ttf", "otf", "pdf", "mp4", "webm", "mp3", "wasm",
 )
 
 
-def _matcher_segment(route: str) -> str:
-    """`/roles/[id]` -> `roles/[^/]+` for a middleware negative lookahead."""
-    body = (route or "/").strip("/")
-    if not body:
-        return ""
-    # Escape only what is special in a JS regex. `re.escape` also escapes
-    # hyphens, so `/sign-in` came out as `sign\\-in` — legal but noise in a
-    # generated file someone has to read.
-    def lit(part: str) -> str:
-        return re.sub(r"([.*+?^${}()|\[\]\\])", r"\\\1", part)
+def _subtree_regex(route: str) -> str:
+    """`/api/auth` -> the route itself and everything under it, anchored."""
+    exact = _route_regex(route)
+    return exact[:-1] + "(?:/.*)?$" if exact != "^/$" else "^/.*$"
 
-    parts = [r"[^/]+" if p.startswith("[") else lit(p) for p in body.split("/")]
-    return "/".join(parts)
+
+def public_route_patterns(doc: dict) -> list[tuple[str, str]]:
+    """`(regex, why)` for every route a signed-out visitor may open: the app's
+    own public pages (exactly), the root when it only forwards to a public
+    entry page, the endpoints a public page reaches (and what lies under each),
+    and the platform's own open routes. Anchored, segment by segment: `/shop`
+    never opens `/shop-admin`, `/install` never `/installments`."""
+    access = access_map(doc)
+    out: list[tuple[str, str]] = []
+    seen: set[str] = set()
+
+    def add(rx: str, why: str) -> None:
+        if rx not in seen:
+            seen.add(rx)
+            out.append((rx, why))
+
+    for route in access["public"]:
+        add(_route_regex(route), f"{route}: a page that says it is public")
+    # A ROOT THAT ONLY FORWARDS to a public entry page is open too: gating it
+    # puts a sign-in in front of a page anyone may see. It holds no content.
+    entry = _entry_route(doc)
+    if entry and entry in access["public"]:
+        add("^/$", f"/: forwards to the public {entry}")
+    for api in public_apis(doc):
+        add(_subtree_regex("/" + api), f"/{api}: reached by a public page")
+    from services.blueprint.native_projection import enabled as _native_enabled
+    # A PUBLIC SCREEN ON THE PHONE READS OVER /api/read. The read route decides
+    # for itself (`READ_ACCESS`: an anonymous caller gets only what a public
+    # page reads), so for a native app with a public page of its own (not the
+    # sign-in pages) it is left to answer.
+    if _native_enabled(doc) and any(
+            str(p.get("access") or "") == "public" and str(p.get("pattern") or "") != "auth"
+            for p in _live(doc.get("pages"))):
+        add(_subtree_regex("/api/read"), "/api/read: a public phone screen reads here")
+    from services.blueprint.platform_routes import public_for
+    for r in public_for(doc):
+        add(_subtree_regex(r.route) if r.subtree else _route_regex(r.route), f"{r.route}: {r.why}")
+    return out
 
 
 def access_map(doc: dict) -> dict[str, list[str]]:
@@ -4386,40 +4400,15 @@ def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
     Fails closed: a page is gated unless it says it is public.
     """
     access = access_map(doc)
-    open_routes = [_matcher_segment(r) for r in access["public"]]
-    open_routes = [r for r in open_routes if r]
-    # A public route at "/" needs the bare root excluded too.
-    #
-    # AND SO DOES A ROOT THAT ONLY FORWARDS. Most applications declare no page
-    # at "/" — a master-data app is `/add-data` and `/master-data` — so the
-    # root renders nothing of its own and the catch-all sends the visitor to
-    # the entry page. Gating that forward puts a sign-in screen in front of a
-    # public page, which is a login for nothing: the visitor signs in, arrives
-    # back at "/", and is forwarded to the page they could always have seen.
-    #
-    # It leaks nothing. The root holds no content, and the page it forwards to
-    # is public by its own declaration or this does not fire.
-    root_public = "/" in access["public"] or (
-        _entry_route(doc) and _entry_route(doc) in access["public"])
-
-    # A public page is only public if what it fetches is reachable too.
     apis = public_apis(doc)
-    # A PUBLIC SCREEN ON THE PHONE READS OVER /api/read. The gate answered every call without a token with a 401 before
-    # the route ran, so a public screen of a gated app read nothing and the 401 sent the person to sign in. The read
-    # route decides for itself (`READ_ACCESS`: an anonymous caller gets only what a public page reads), so for a native
-    # app that has a public page of its own (not the sign-in pages) it is left to answer.
-    from services.blueprint.native_projection import enabled as _native_enabled
-    if _native_enabled(doc) and any(
-            str(p.get("access") or "") == "public" and str(p.get("pattern") or "") != "auth"
-            for p in _live(doc.get("pages"))):
-        apis = [*apis, "api/read"]
-    excluded = list(_ALWAYS_OPEN) + open_routes + apis
-    pattern = "|".join(excluded)
-    # A negative lookahead cannot exclude the empty path, so `/` is matched by
-    # `.*` no matter what is listed. When the landing route is public, requiring
-    # at least one character after the slash is what actually leaves it open.
-    tail = "+" if root_public else "*"
-    matcher = f"/((?!{pattern}|.*\\\\..*).{tail})"
+    public = public_route_patterns(doc)
+    # The middleware sees every route but the framework's files and static
+    # files by extension; WHICH routes are public it decides itself, on exact
+    # routes (`PUBLIC_ROUTES`). A negative lookahead of words matched how a
+    # path starts, so `pay` opened `/payments` and a public `/shop` opened
+    # `/shop-admin` (2026-10-23).
+    static = "|".join(_STATIC_EXTENSIONS)
+    matcher = f"/((?!_next/|.*\\\\.(?:{static})$).*)"
 
     lines = [
         '// Generated from the Living Blueprint. Edit the Blueprint, not this file.',
@@ -4436,7 +4425,11 @@ def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
         lines.append(f'//   by role: {route}')
     for route in apis:
         lines.append(f'//   public: /{route}  (reached by a public page)')
+    from services.blueprint.platform_routes import public_for as _platform_public
+    for r in _platform_public(doc):
+        lines.append(f'//   public: {r.route}{"/*" if r.subtree else ""}  (the platform\'s: {r.why})')
     gated_by_role = role_routes(doc)
+    public_lines = [f'  new RegExp({json.dumps(rx)}),  // {why}' for rx, why in public]
     role_lines = [
         f'  {{ route: new RegExp({json.dumps(_route_regex(r["route"]))}), roles: {json.dumps(r["roles"])} }},'
         for r in gated_by_role
@@ -4459,6 +4452,14 @@ def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
         *role_lines,
         '];',
         '',
+        '// Every route a signed-out visitor may open, each matched whole: the',
+        '// pages that say they are public, what those pages reach, and the',
+        "// platform's own (sign-in, the offline page, the scheduler's tick...).",
+        'const PUBLIC_ROUTES: RegExp[] = [',
+        *public_lines,
+        '];',
+        'const isPublic = (path: string) => PUBLIC_ROUTES.some((r) => r.test(path));',
+        '',
         '// A CALL TO THE API IS ANSWERED, NOT SENT SOMEWHERE. A person without a',
         '// session is redirected to the sign-in page; a client that is not a',
         '// browser (a phone app, a script) cannot follow that, and read a page of',
@@ -4470,8 +4471,9 @@ def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
         '',
         'export default withAuth(',
         '  function middleware(req) {',
-        '    const token = req.nextauth.token as { role?: unknown } | null;',
         '    const path = req.nextUrl.pathname;',
+        '    if (isPublic(path)) return NextResponse.next();',
+        '    const token = req.nextauth.token as { role?: unknown } | null;',
         '    if (!token && isApi(path)) return refuse(401, "UNAUTHORIZED", "Sign in to use this.");',
         '    const role = String(token?.role ?? "");',
         '    for (const r of ROLE_ROUTES) {',
@@ -4487,7 +4489,7 @@ def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
         '    cookies: sessionCookies(),',
         '    // `withAuth` redirects every unauthorised request before the function',
         '    // above runs; an API call is let through to it, which answers it.',
-        '    callbacks: { authorized: ({ token, req }) => !!token || isApi(req.nextUrl.pathname) },',
+        '    callbacks: { authorized: ({ token, req }) => !!token || isApi(req.nextUrl.pathname) || isPublic(req.nextUrl.pathname) },',
         '  },',
         ');',
         '',
