@@ -48,17 +48,22 @@ export const drizzleStore: ConversationStore = {
   },
 
   async saveMessage(conversationId, msg) {
-    await db.insert(forgeAgentMessages).values({
-      conversationId,
-      role: msg.role,
-      content: msg.content,
-      toolCalls: msg.toolCalls ?? null,
-      tokenCount: msg.tokenCount ?? null,
-    });
+    const rows = await db
+      .insert(forgeAgentMessages)
+      .values({
+        conversationId,
+        role: msg.role,
+        content: msg.content,
+        toolCalls: msg.toolCalls ?? null,
+        tokenCount: msg.tokenCount ?? null,
+      })
+      .returning({ id: forgeAgentMessages.id });
     await db
       .update(forgeAgentConversations)
       .set({ updatedAt: new Date() })
       .where(eq(forgeAgentConversations.id, conversationId));
+    // The id is what a thumbs up or down is sent against (see turns-store.ts).
+    return rows[0]?.id;
   },
 
   async getState(conversationId): Promise<ConfirmState> {

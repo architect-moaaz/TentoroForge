@@ -719,6 +719,8 @@ def assemble(doc: dict, app_root: str | Path, *,
         # — no Blueprint-built app could encrypt, or sign a push (60v142ju).
         f"SENSITIVE_ENCRYPTION_KEY={kept.get('SENSITIVE_ENCRYPTION_KEY') or base64.b64encode(secrets.token_bytes(32)).decode('ascii')}\n"
         + "".join(f"{k}={kept.get(k) or vapid[k]}\n" for k in VAPID_KEYS)
+        # What a rebuild must not wipe: where this app reports its assistant analytics, and the salt behind its people's anonymous codes.
+        + "".join(f"{k}={kept[k]}\n" for k in INSIGHTS_KEYS if kept.get(k))
         # No NEXTAUTH_URL: pinning it to :3000 sent every post-login redirect
         # to a port the app is not served on. NextAuth infers the origin from
         # the request, which is correct for any port a preview lands on.
@@ -797,8 +799,14 @@ def assemble(doc: dict, app_root: str | Path, *,
     }
 
 
+#: The settings that tell an app where to send its assistant analytics (services/agent_runtime_install.py, templates/runtime/agents/
+#: insights-shipper.ts). The salt makes every person's anonymous code: a new salt would split each person's history in two, so it is kept
+#: for the life of the app like the auth secrets. The address, the key and the "include message text" choice are the builder's: a rebuild
+#: must not wipe them either, or a live app silently stops reporting.
+INSIGHTS_KEYS = ("FORGE_INSIGHTS_USER_SALT", "FORGE_INSIGHTS_URL", "FORGE_INSIGHTS_KEY", "FORGE_INSIGHTS_INCLUDE_TEXT")
+
 _SECRET_KEYS = ("AUTH_SECRET", "NEXTAUTH_SECRET", "CRON_SECRET", "SENSITIVE_ENCRYPTION_KEY",
-                "VAPID_PUBLIC_KEY", "VAPID_PRIVATE_KEY", "VAPID_SUBJECT")
+                "VAPID_PUBLIC_KEY", "VAPID_PRIVATE_KEY", "VAPID_SUBJECT", *INSIGHTS_KEYS)
 
 
 def existing_secrets(app_root: str | Path) -> dict[str, str]:

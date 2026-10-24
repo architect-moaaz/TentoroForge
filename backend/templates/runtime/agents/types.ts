@@ -240,7 +240,8 @@ export interface ConversationStore {
   createConversation(agentId: string, userId: string): Promise<string>;
   /** Oldest first. */
   listMessages(conversationId: string): Promise<StoredMessage[]>;
-  saveMessage(conversationId: string, msg: StoredMessage): Promise<void>;
+  /** Resolves to the saved message's id when the store knows it (the chat hands it to the widget for thumbs up/down). */
+  saveMessage(conversationId: string, msg: StoredMessage): Promise<string | void>;
   setSummary(conversationId: string, summary: string, dropMessageIds: string[]): Promise<void>;
   /** Held changes and the turn count. Optional: a store without them can never release a held change. */
   getState?(conversationId: string): Promise<ConfirmState>;
@@ -277,6 +278,8 @@ export interface ModelRequest {
 export interface ModelResult {
   content: ModelBlock[];
   usage: { inputTokens: number; outputTokens: number };
+  /** The model that actually answered (what the provider reports). Absent from a fake or an older caller. */
+  model?: string;
 }
 
 // ── the run ───────────────────────────────────────────────────────────────
@@ -295,7 +298,8 @@ export type AgentEvent =
   | { type: "blocked"; reason: string; stage: "input" | "output"; replacement?: string }
   /** The conversation is with a person now (or was): `status` says where it stands. */
   | { type: "handoff"; ref: string; status: HandoffStatus; note?: string | null }
-  | { type: "done"; conversationId: string; tokens: { input: number; output: number }; turns: number }
+  /** `messageId` is the saved assistant message (null when the turn saved none): what a thumbs up or down is sent against. */
+  | { type: "done"; conversationId: string; tokens: { input: number; output: number }; turns: number; messageId?: string | null }
   | { type: "error"; message: string };
 
 export interface ToolContext {
@@ -317,6 +321,48 @@ export type TraceEvent =
   | { type: "phase"; phase: "with_person"; ref: string }
   | { type: "phase"; phase: "output_check"; ok: boolean; reason?: string };
 
+// ── what each turn cost, and how it went ─────────────────────────────────
+
+export type TurnStatus = "ok" | "error" | "blocked";
+
+/** One tool call in a turn: its name, whether it worked, how long it took. Never what it returned. */
+export interface TurnToolStat {
+  name: string;
+  ok: boolean;
+  ms: number;
+}
+
+/** What is kept about one turn (see db/forge-agent-turns.schema.ts). No message text, no tool results. */
+export interface TurnRecord {
+  /** Empty when the message was refused before a conversation existed. */
+  conversationId: string;
+  agentId: string;
+  userId: string;
+  model: string | null;
+  inputTokens: number;
+  outputTokens: number;
+  ms: number;
+  status: TurnStatus;
+  /** Why it failed or was blocked, as a short sentence. */
+  error: string | null;
+  toolCalls: number;
+  toolErrors: number;
+  /** At most 20 entries. */
+  toolStats: TurnToolStat[];
+  handedOff: boolean;
+  assistantMessageId: string | null;
+  /** The person's role name when they were signed in. Sent to the platform's insights, so it can split numbers by role. */
+  userRole?: string | null;
+  /** 1 = the first message of its conversation; null when the runtime could not say (the store counts then). */
+  turnNumber?: number | null;
+  /** The first words of what the person wrote: only when FORGE_INSIGHTS_INCLUDE_TEXT=1, otherwise always null. */
+  userMessage?: string | null;
+}
+
+export interface TurnStore {
+  record(turn: TurnRecord): Promise<void>;
+}
+
 export interface AgentDeps {
   callModel(req: ModelRequest, onText: (chunk: string) => void): Promise<ModelResult>;
   /** `scope` holds each tool's latest result by tool name, so a later tool's
@@ -336,6 +382,8 @@ export interface AgentDeps {
   };
   /** Usage counts for the limits. Absent (or failing: no table yet) → not limited. */
   usage?: UsageStore;
+  /** Where each turn's cost and outcome is kept. Absent (or failing: no table yet) → nothing is recorded, the chat is unaffected. */
+  turns?: TurnStore;
   /** Told where the run is (checks, memory, answer check). Absent in a normal chat; the live view supplies it. */
   trace?: (e: TraceEvent) => void;
   /** FEEL-lite. Absent → output rules are skipped. */

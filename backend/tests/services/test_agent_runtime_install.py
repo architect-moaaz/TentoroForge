@@ -8,6 +8,7 @@ that re-running is safe.
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from pathlib import Path
 
@@ -675,9 +676,175 @@ def test_the_install_brings_the_safety_files_and_the_usage_table(tmp_path):
     assert "forgeAgentUsage" in (app / "src" / "db" / "schema" / "index.ts").read_text()
 
 
+def test_the_install_brings_the_turn_record_the_feedback_and_the_insights(tmp_path):
+    project, app = make_app(tmp_path)
+    install_agent_runtime(project, graphs=[sample_graph()])
+    for f in ("turns-store.ts", "insights.ts"):
+        assert (app / "src" / "lib" / "agents" / f).is_file(), f
+    assert (app / "src" / "app" / "api" / "agent" / "feedback" / "route.ts").is_file()
+    assert (app / "src" / "app" / "api" / "agent" / "insights" / "route.ts").is_file()
+    schema = (app / "src" / "db" / "schema" / "_forge_agent_turns.ts").read_text()
+    assert '"forge_agent_turns"' in schema
+    # indexes are named by hand (drizzle's own long names are truncated by Postgres and re-created on every push)
+    for name in ("idx_forge_agent_turns_time", "idx_forge_agent_turns_agent", "idx_forge_agent_turns_msg"):
+        assert name in schema
+    assert 'export { forgeAgentTurns } from "./_forge_agent_turns";' in (app / "src" / "db" / "schema" / "index.ts").read_text()
+    # the new routes are infrastructure, not redundant CRUD, so the route prune must keep them
+    from services.api_route_prune import _load_injected_paths
+
+    paths = _load_injected_paths(app)
+    assert "src/app/api/agent/feedback/route.ts" in paths and "src/app/api/agent/insights/route.ts" in paths
+
+
+def test_installing_twice_exports_the_turns_table_once(tmp_path):
+    project, app = make_app(tmp_path)
+    install_agent_runtime(project, graphs=[sample_graph()])
+    install_agent_runtime(project)
+    assert (app / "src" / "db" / "schema" / "index.ts").read_text().count("_forge_agent_turns") == 1
+
+
+def test_the_insights_route_is_opened_in_the_middleware_next_to_the_debug_route(tmp_path):
+    project, app = make_app(tmp_path)
+    mw = app / "src" / "middleware.ts"
+    mw.write_text('export const config = {\n  matcher: ["/((?!api/auth|_next|login).*)"],\n};\n', encoding="utf-8")
+    install_agent_runtime(project, graphs=[sample_graph()])
+    once = mw.read_text()
+    assert "(?!api/auth|api/agent/debug|api/agent/insights|" in once
+    install_agent_runtime(project)
+    assert mw.read_text() == once, "re-installing changes nothing"
+    assert once.count("api/agent/insights") == 1 and once.count("api/agent/debug") == 1
+
+
+def test_an_app_that_already_opened_only_the_debug_route_gets_the_insights_route_added(tmp_path):
+    project, app = make_app(tmp_path)
+    mw = app / "src" / "middleware.ts"
+    mw.write_text('export const config = {\n  matcher: ["/((?!api/auth|api/agent/debug|_next|login).*)"],\n};\n', encoding="utf-8")
+    install_agent_runtime(project, graphs=[sample_graph()])
+    after = mw.read_text()
+    assert "(?!api/auth|api/agent/debug|api/agent/insights|_next" in after
+    assert after.count("api/agent/debug") == 1
+
+
 def test_an_assistant_that_has_changing_tools_is_told_the_app_asks_so_it_does_not_ask_twice():
     sp = node("sp", "system_prompt", "P", {"prompt": "You help."})
     with_write = compile_agent(graph(sp, tool("t", "close", tool_type="data_engine", entity="tickets", operation="update")))
     assert "confirmed by the app" in with_write.config["systemPrompt"] and "same input" in with_write.config["systemPrompt"]
     reads_only = compile_agent(graph(sp, tool("t", "look", tool_type="data_engine", entity="tickets", operation="list")))
     assert "confirmed by the app" not in reads_only.config["systemPrompt"]
+
+
+# ---------------------------------------------------------------------------
+# the platform's insights: what the app sends every turn with, and the salt that hides the people
+# ---------------------------------------------------------------------------
+
+def _env_of(app: Path, name: str = ".env.local") -> dict[str, str]:
+    f = app / name
+    out: dict[str, str] = {}
+    if f.is_file():
+        for line in f.read_text(encoding="utf-8").splitlines():
+            k, sep, v = line.partition("=")
+            if sep and k.strip() and not k.lstrip().startswith("#"):
+                out[k.strip()] = v.strip()
+    return out
+
+
+def test_the_install_brings_the_shipper_the_outbox_and_the_catch_up_route(tmp_path):
+    project, app = make_app(tmp_path)
+    install_agent_runtime(project, graphs=[sample_graph()])
+    for f in ("insights-shipper.ts", "insights-outbox.ts"):
+        assert (app / "src" / "lib" / "agents" / f).is_file(), f
+    # under /api/cron/, which the sign-in gate already lets through (the route guards itself with the tick's secret)
+    route = app / "src" / "app" / "api" / "cron" / "insights" / "route.ts"
+    assert route.is_file() and "runInsightsTick" in route.read_text(encoding="utf-8")
+    from services.api_route_prune import _load_injected_paths
+
+    assert "src/app/api/cron/insights/route.ts" in _load_injected_paths(app)
+    # the chat hands the shipper its moment after the reply
+    chat = (app / "src" / "app" / "api" / "agent" / "chat" / "route.ts").read_text(encoding="utf-8")
+    assert "holdForShipping" in chat
+
+
+def test_the_turns_table_is_the_outbox_and_old_rows_keep_working(tmp_path):
+    project, app = make_app(tmp_path)
+    install_agent_runtime(project, graphs=[sample_graph()])
+    schema = (app / "src" / "db" / "schema" / "_forge_agent_turns.ts").read_text(encoding="utf-8")
+    new_cols = ("shipped_at", "ship_attempts", "ship_error", "user_role", "turn_number", "rating_at", "problem_message")
+    for col in new_cols:
+        assert f'"{col}"' in schema, col
+    # hand-named, unique, short enough for Postgres to keep (63 characters), and one for "oldest unsent"
+    names = re.findall(r'index\("([^"]+)"\)', schema)
+    assert len(names) == len(set(names)) and all(len(n) <= 63 and n.startswith("idx_forge_agent_turns_") for n in names)
+    assert "idx_forge_agent_turns_shipped" in names and ".on(t.shippedAt, t.createdAt)" in schema
+    # a column that was not there before must be allowed to be empty, or every existing row would break the push
+    for col in new_cols:
+        line = next(ln for ln in schema.splitlines() if f'("{col}")' in ln)
+        assert "notNull" not in line, col
+
+
+def test_the_people_salt_is_made_once_kept_and_never_shown(tmp_path):
+    project, app = make_app(tmp_path)
+    first = install_agent_runtime(project, graphs=[sample_graph()])
+    salt = _env_of(app)["FORGE_INSIGHTS_USER_SALT"]
+    assert re.fullmatch(r"[0-9a-f]{64}", salt), "a long random value"
+    assert first["insights_salt"] == "created"
+    assert salt not in json.dumps(first), "the result never carries the value"
+    before = (app / ".env.local").read_bytes()
+    second = install_agent_runtime(project)
+    assert second["insights_salt"] == "kept"
+    assert _env_of(app)["FORGE_INSIGHTS_USER_SALT"] == salt and (app / ".env.local").read_bytes() == before
+    # a copy beside the app's other secret files, kept out of git
+    assert (app / ".forge-insights-salt").read_text(encoding="utf-8").strip() == salt
+    assert ".forge-insights-salt" in (app / ".gitignore").read_text(encoding="utf-8").split()
+
+
+def test_the_salt_survives_a_rebuild_that_rewrites_the_env_file(tmp_path):
+    project, app = make_app(tmp_path)
+    install_agent_runtime(project, graphs=[sample_graph()])
+    salt = _env_of(app)["FORGE_INSIGHTS_USER_SALT"]
+    # an assembly writes .env.local whole, and it knows nothing of this key
+    (app / ".env.local").write_text("DATABASE_URL=postgres://x\nAUTH_SECRET=abc\n", encoding="utf-8")
+    install_agent_runtime(project)
+    assert _env_of(app)["FORGE_INSIGHTS_USER_SALT"] == salt, "the same salt, not a new one (a new one would split every person's history)"
+    assert _env_of(app)["DATABASE_URL"] == "postgres://x" and _env_of(app)["AUTH_SECRET"] == "abc", "and nothing else was touched"
+    # only with both copies gone does the app get a fresh one
+    (app / ".env.local").write_text("", encoding="utf-8")
+    (app / ".forge-insights-salt").unlink()
+    install_agent_runtime(project)
+    assert re.fullmatch(r"[0-9a-f]{64}", _env_of(app)["FORGE_INSIGHTS_USER_SALT"])
+    assert _env_of(app)["FORGE_INSIGHTS_USER_SALT"] != salt
+
+
+def test_a_salt_the_app_already_has_is_never_replaced(tmp_path):
+    project, app = make_app(tmp_path)
+    (app / ".env.local").write_text("FORGE_INSIGHTS_USER_SALT=chosen-by-the-builder\n", encoding="utf-8")
+    result = install_agent_runtime(project, graphs=[sample_graph()])
+    assert result["insights_salt"] == "kept"
+    assert _env_of(app)["FORGE_INSIGHTS_USER_SALT"] == "chosen-by-the-builder"
+    assert (app / ".forge-insights-salt").read_text(encoding="utf-8").strip() == "chosen-by-the-builder"
+    # one that lives only in .env (Next reads it second) counts as present too: it is not shadowed by a new one
+    p2, app2 = make_app(tmp_path / "other")
+    (app2 / ".env").write_text("FORGE_INSIGHTS_USER_SALT=in-dot-env\n", encoding="utf-8")
+    install_agent_runtime(p2, graphs=[sample_graph()])
+    assert "FORGE_INSIGHTS_USER_SALT" not in _env_of(app2)
+    assert (app2 / ".forge-insights-salt").read_text(encoding="utf-8").strip() == "in-dot-env"
+
+
+def test_the_install_never_writes_the_platforms_address_or_key(tmp_path):
+    project, app = make_app(tmp_path)
+    (app / ".env.local").write_text("FORGE_INSIGHTS_URL=https://builder.set/this\nFORGE_INSIGHTS_KEY=fik_builderset\n", encoding="utf-8")
+    install_agent_runtime(project, graphs=[sample_graph()])
+    install_agent_runtime(project)
+    env = _env_of(app)
+    assert env["FORGE_INSIGHTS_URL"] == "https://builder.set/this" and env["FORGE_INSIGHTS_KEY"] == "fik_builderset", "what the builder set is left as it was"
+    bare_project, bare_app = make_app(tmp_path / "bare")
+    install_agent_runtime(bare_project, graphs=[sample_graph()])
+    bare = _env_of(bare_app)
+    assert "FORGE_INSIGHTS_URL" not in bare and "FORGE_INSIGHTS_KEY" not in bare and "FORGE_INSIGHTS_INCLUDE_TEXT" not in bare
+    assert "FORGE_INSIGHTS_KEY" not in (bare_app / ".forge-insights-salt").read_text(encoding="utf-8")
+
+
+def test_an_app_with_no_agent_gets_no_salt(tmp_path):
+    project, app = make_app(tmp_path)
+    result = install_agent_runtime(project)
+    assert result["installed"] is False
+    assert not (app / ".env.local").exists() and not (app / ".forge-insights-salt").exists()

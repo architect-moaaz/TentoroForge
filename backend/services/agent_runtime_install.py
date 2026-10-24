@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import secrets
 import shutil
 from pathlib import Path
 from typing import Any
@@ -33,9 +34,17 @@ _TOOL_MARKER = "// forge-agent-tool"
 _LAYOUT_MARK = "forge-agent"
 _NAV_MARK = "forge-handoffs-nav"
 
+#: What hashes each person before the platform's insights hear of them (templates/runtime/agents/insights-shipper.ts).
+#: Made once per app and never changed: a new one would turn every person into a new person in the numbers.
+INSIGHTS_SALT_KEY = "FORGE_INSIGHTS_USER_SALT"
+#: A second copy, beside the app's other secret files. An assembly rewrites `.env.local` whole and would drop the key
+#: from it; this copy is what puts the SAME salt back.
+INSIGHTS_SALT_FILE = ".forge-insights-salt"
+
 #: runtime template -> destination, relative to the app root
 _CORE = ("types", "guardrails", "memory", "tools", "runtime", "io", "store", "handoff", "handoff-store", "handoff-nav",
-         "confirm", "limits", "usage-store", "debug", "watch")
+         "confirm", "limits", "usage-store", "debug", "watch", "turns-store", "insights", "insights-shipper",
+         "insights-outbox")
 
 
 def resolve_roots(path: str | Path) -> tuple[Path, Path]:
@@ -129,18 +138,23 @@ def _patch_layout(app_root: Path) -> bool:
 
 
 def _open_debug_route(app_root: Path) -> None:
-    """Let the platform reach /api/agent/debug without a session. The app's sign-in guard would otherwise send it to
-    /login; the route guards itself (development only, the platform's secret, a plain 404 otherwise)."""
+    """Let the platform reach /api/agent/debug and /api/agent/insights without a session. The app's sign-in guard would
+    otherwise send them to /login; both routes guard themselves (development only, the platform's secret, a plain 404
+    otherwise). An app that already opened the debug route (an earlier install) gets the insights route added."""
     mw = app_root / "src" / "middleware.ts"
     if not mw.is_file():
         return
     try:
         txt = mw.read_text(encoding="utf-8")
-        if "api/agent/debug" in txt or "(?!api/auth|" not in txt:
-            return
-        mw.write_text(txt.replace("(?!api/auth|", "(?!api/auth|api/agent/debug|", 1), encoding="utf-8")
+        new = txt
+        if "api/agent/debug" not in new and "(?!api/auth|" in new:
+            new = new.replace("(?!api/auth|", "(?!api/auth|api/agent/debug|", 1)
+        if "api/agent/insights" not in new and "api/agent/debug|" in new:
+            new = new.replace("api/agent/debug|", "api/agent/debug|api/agent/insights|", 1)
+        if new != txt:
+            mw.write_text(new, encoding="utf-8")
     except OSError:
-        logger.warning("[agents] could not open the debug route in the middleware", exc_info=True)
+        logger.warning("[agents] could not open the debug and insights routes in the middleware", exc_info=True)
 
 
 def _refresh_bell(app_root: Path, written: list[str]) -> None:
@@ -171,6 +185,57 @@ def _merge_manifest(app_root: Path, paths: list[str]) -> None:
     merged = sorted(set(existing) | set(paths))
     manifest.parent.mkdir(parents=True, exist_ok=True)
     manifest.write_text(json.dumps({"version": 1, "paths": merged}, indent=2) + "\n", encoding="utf-8")
+
+
+def _env_value(path: Path, key: str) -> str:
+    """``key``'s value in a .env-style file, or "" (no file, no line, an empty line)."""
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            k, sep, v = line.partition("=")
+            if sep and k.strip() == key and v.strip():
+                return v.strip().strip("\"'")
+    except OSError:
+        pass
+    return ""
+
+
+def ensure_insights_salt(app_root: Path) -> str:
+    """Give the app the salt its people are hashed with, once, and keep it for the life of the app.
+
+    Returns ``"created"`` (a new one was made) or ``"kept"`` (the app already had one). Never prints the value. The key
+    goes into ``.env.local`` (what the app reads first, and where the other generated secrets are); a copy goes into
+    ``.forge-insights-salt`` (kept out of git) because a rebuild rewrites ``.env.local`` and would otherwise drop it. An
+    app that already has one, in either place, keeps it: changing it would split every person's history in two.
+
+    The platform's address and key are NOT written here: they come from the builder (the Insights page), not from the app.
+    """
+    app_root = Path(app_root)
+    env_local = app_root / ".env.local"
+    side = app_root / INSIGHTS_SALT_FILE
+    have = _env_value(env_local, INSIGHTS_SALT_KEY) or _env_value(app_root / ".env", INSIGHTS_SALT_KEY)
+    kept_copy = ""
+    try:
+        kept_copy = side.read_text(encoding="utf-8").strip()
+    except OSError:
+        pass
+    salt = have or kept_copy
+    created = not salt
+    if created:
+        salt = secrets.token_hex(32)
+    if not _env_value(env_local, INSIGHTS_SALT_KEY) and not _env_value(app_root / ".env", INSIGHTS_SALT_KEY):
+        from services.runtime_injector import _upsert_env_keys  # the same writer the other generated keys go through
+
+        _upsert_env_keys(env_local, {INSIGHTS_SALT_KEY: salt})
+    if kept_copy != salt:
+        try:
+            side.write_text(salt + "\n", encoding="utf-8")
+            gi = app_root / ".gitignore"
+            text = gi.read_text(encoding="utf-8") if gi.is_file() else ""
+            if INSIGHTS_SALT_FILE not in text.split():
+                gi.write_text(text.rstrip("\n") + ("\n" if text else "") + INSIGHTS_SALT_FILE + "\n", encoding="utf-8")
+        except OSError:
+            logger.warning("[agents] could not keep a copy of the insights salt", exc_info=True)
+    return "created" if created else "kept"
 
 
 def _ensure_deps(app_root: Path) -> None:
@@ -246,6 +311,9 @@ def install_agent_runtime(path: str | Path, *, graphs: list[dict[str, Any]] | No
           app_root / "src" / "app" / "api" / "agent" / "chat" / "route.ts", written, app_root)
     _copy(_TEMPLATES / "api-agent" / "conversations-route.ts",
           app_root / "src" / "app" / "api" / "agent" / "conversations" / "route.ts", written, app_root)
+    # The thumbs up / down under an answer (the signed-in person, in their own conversation).
+    _copy(_TEMPLATES / "api-agent" / "feedback-route.ts",
+          app_root / "src" / "app" / "api" / "agent" / "feedback" / "route.ts", written, app_root)
     dashboard = app_root / "src" / "app" / "(dashboard)"
     if dashboard.is_dir():
         _copy(_TEMPLATES / "agents" / "assistant-page.tsx", dashboard / "assistant" / "page.tsx", written, app_root)
@@ -254,7 +322,15 @@ def install_agent_runtime(path: str | Path, *, graphs: list[dict[str, Any]] | No
           app_root / "src" / "app" / "api" / "agent" / "debug" / "route.ts", written, app_root)
     from services.agent_debug import ensure_debug_secret
     ensure_debug_secret(app_root)
+    # What the assistants cost and how they do (the builder's cost-and-quality view); shut exactly like the debug route.
+    _copy(_TEMPLATES / "api-agent" / "insights-route.ts",
+          app_root / "src" / "app" / "api" / "agent" / "insights" / "route.ts", written, app_root)
     _open_debug_route(app_root)
+    # What the platform's insights are sent by, and the catch-up the cron tick asks for (it sits under /api/cron/, which
+    # the sign-in gate already lets through; the route guards itself with the tick's CRON_SECRET).
+    _copy(_TEMPLATES / "api-agent" / "insights-tick-route.ts",
+          app_root / "src" / "app" / "api" / "cron" / "insights" / "route.ts", written, app_root)
+    insights_salt = ensure_insights_salt(app_root)
     # The inbox for handoffs: only where an agent has a human-handoff box. (The store and the table go in
     # always, because io.ts loads the store on demand and the build must find it.)
     if any(c.config.get("handoff") for c in compiled):
@@ -277,6 +353,12 @@ def install_agent_runtime(path: str | Path, *, graphs: list[dict[str, Any]] | No
             schema_dir,
             'export { forgeAgentUsage } from "./_forge_agent_usage";',
             "_forge_agent_usage",
+        )
+        _copy(_TEMPLATES / "db" / "forge-agent-turns.schema.ts", schema_dir / "_forge_agent_turns.ts", written, app_root)
+        _barrel_export(
+            schema_dir,
+            'export { forgeAgentTurns } from "./_forge_agent_turns";',
+            "_forge_agent_turns",
         )
         _copy(_TEMPLATES / "db" / "forge-agent-handoffs.schema.ts", schema_dir / "_forge_agent_handoffs.ts", written, app_root)
         _barrel_export(
@@ -338,4 +420,5 @@ def install_agent_runtime(path: str | Path, *, graphs: list[dict[str, Any]] | No
         "written": sorted(set(written)),
         "widget_mounted": mounted,
         "warnings": warnings,
+        "insights_salt": insights_salt,
     }

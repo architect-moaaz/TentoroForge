@@ -198,9 +198,28 @@ async function handler(req: Request): Promise<Response> {
     console.warn("[cron] the audit prune failed:", err);
   }
 
+  // THE AGENTS' INSIGHTS CATCH-UP. Turns that could not be sent to the platform (it was down, the app crashed) are
+  // sent from here, and old sent ones are cleared out. It lives in its own route because only an app with agents has
+  // it: a 404 just means "no agents here". Not on a what-if clock (`?at=`), and never able to hurt the tick.
+  let insights: unknown = null;
+  if (!atDate) {
+    try {
+      const base = (process.env.FORGE_INTERNAL_URL || new URL(req.url).origin).replace(/\/$/, "");
+      const res = await fetch(`${base}/api/cron/insights`, {
+        method: "POST",
+        headers: secret ? { authorization: `Bearer ${secret}` } : {},
+        signal: AbortSignal.timeout(30000),
+      });
+      insights = res.ok ? await res.json().catch(() => null) : null;
+    } catch {
+      /* not reachable right now: the next tick tries again */
+    }
+  }
+
   return Response.json({
     at: now.toISOString(),
     ...(forced ? { forced } : {}),
+    ...(insights ? { insights } : {}),
     escalated,
     pruned,
     checked: scheduled.length,

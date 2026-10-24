@@ -154,8 +154,10 @@ export function memoryStore(): ConversationStore & { dump(): Record<string, Stor
     },
     async saveMessage(id, msg) {
       const list = msgs.get(id) ?? [];
-      list.push({ ...msg, id: msg.id ?? `m-${++n}` });
+      const saved = msg.id ?? `m-${++n}`;
+      list.push({ ...msg, id: saved });
       msgs.set(id, list);
+      return saved;
     },
     async getState(id) {
       const s = states.get(id);
