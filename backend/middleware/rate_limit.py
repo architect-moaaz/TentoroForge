@@ -57,6 +57,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # Skip rate limiting for health checks
         if request.url.path in ("/health", "/ready", "/metrics"):
             return await call_next(request)
+        # An app's event batches arrive from one server address at up to hundreds of requests a second: the per-IP bucket here would
+        # refuse them. That route has its own per-KEY limit (services/agent_insights_ingest.py).
+        if request.url.path == "/api/insights/ingest":
+            return await call_next(request)
         # SSE streams: one connection lives for minutes but the browser
         # frequently reopens them (nav, HMR, StrictMode double-mount).
         # Counting each reopen against the bucket starves the whole chat

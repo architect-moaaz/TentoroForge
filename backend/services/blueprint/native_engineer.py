@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Any
 
 from services.blueprint.native_projection import TEMPLATE_DIR
+from services.blueprint.tsc_gate import tsc_slot
 
 logger = logging.getLogger(__name__)
 
@@ -505,9 +506,10 @@ def typecheck(doc: dict, native_root: Path, page_id: str, screen: str, *, timeou
             },
             "include": [_posix(check / "screen.tsx"), _posix(project / "src") + "/**/*.d.ts"],
         }, indent=2), encoding="utf-8")
-        proc = run([node, _posix(modules / "typescript" / "bin" / "tsc"), "-p", _posix(check / "tsconfig.json"),
-                    "--pretty", "false"], cwd=str(check), capture_output=True, text=True, encoding="utf-8",
-                   timeout=timeout)
+        with tsc_slot():
+            proc = run([node, _posix(modules / "typescript" / "bin" / "tsc"), "-p", _posix(check / "tsconfig.json"),
+                        "--pretty", "false"], cwd=str(check), capture_output=True, text=True, encoding="utf-8",
+                       timeout=timeout)
         marker = check.name + "/"
         errors: list[str] = []
         ours = False

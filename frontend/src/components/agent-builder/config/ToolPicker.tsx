@@ -1,12 +1,13 @@
 "use client";
 
 import { Plus, X, Wand2 } from "lucide-react";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -210,6 +211,17 @@ export function ToolPicker({ config, onUpdate, projectId, orgId }: ToolPickerPro
     }));
     onUpdate({ parameters: params });
   };
+
+  const asksFirst = config.confirm ?? changesData(config);
+
+  // The fields the assistant is shown: typed as words with commas, kept as a list. The text is held here so a comma and a
+  // space being typed are not rubbed out by the list they make; it follows the list when something else changes it (a fix
+  // from Find problems, or taking one back out).
+  const filterKeys = fieldList(config.response_filter);
+  const [filterText, setFilterText] = useState(filterKeys.join(", "));
+  useEffect(() => {
+    setFilterText((text) => (sameList(fieldList(text.split(",")), filterKeys) ? text : filterKeys.join(", ")));
+  }, [filterKeys.join("\u0000")]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="space-y-3">
@@ -573,6 +585,62 @@ export function ToolPicker({ config, onUpdate, projectId, orgId }: ToolPickerPro
           ))}
         </div>
       </div>
+
+      {/* Hold back a change until the person has said yes. Enforced by the app, not left to the assistant. */}
+      <div className="space-y-1 rounded border p-2">
+        <div className="flex items-center gap-2">
+          <Switch checked={asksFirst} onCheckedChange={(v) => onUpdate({ confirm: v })} aria-label="Ask the person first" />
+          <Label className="text-xs">Ask the person first</Label>
+        </div>
+        <p className="text-[10px] text-muted-foreground">
+          {asksFirst
+            ? "The assistant must say what it is about to do and wait for a yes. The app enforces this: the change does not run until the person has replied."
+            : changesData(config)
+              ? "This tool changes data and will run as soon as the assistant decides to. Anything it gets wrong happens at once."
+              : "Reads run straight away. Switch this on for a tool that changes things."}
+        </p>
+      </div>
+
+      {/* What the assistant is shown of the tool's answer: anything it is not shown it cannot repeat. */}
+      <div className="space-y-1 rounded border p-2">
+        <Label className="text-xs" htmlFor="tool-fields">Fields the assistant can see</Label>
+        <Input
+          id="tool-fields"
+          className="h-8 text-xs"
+          placeholder="Everything the app returns"
+          value={filterText}
+          onChange={(e) => {
+            setFilterText(e.target.value);
+            const list = fieldList(e.target.value.split(","));
+            onUpdate({ response_filter: list.length ? list : undefined });
+          }}
+        />
+        <p className="text-[10px] text-muted-foreground">
+          {filterKeys.length
+            ? "Any other field of the tool's answer is hidden from the assistant, so it cannot repeat it."
+            : "Leave empty and the assistant sees everything the app returns. Passwords, keys and tokens are always removed. List the fields it needs (id, subject, status) to hide the rest."}
+        </p>
+      </div>
     </div>
   );
+}
+
+/** Field names from a list of words: trimmed, no blanks, no repeats. */
+function fieldList(items: unknown): string[] {
+  const out: string[] = [];
+  for (const raw of Array.isArray(items) ? items : []) {
+    const name = String(raw ?? "").trim();
+    if (name && !out.includes(name)) out.push(name);
+  }
+  return out;
+}
+
+const sameList = (a: string[], b: string[]) => a.length === b.length && a.every((x, i) => x === b[i]);
+
+/** Whether a tool changes anything: a create/update/delete, a call that is not a plain read, or a workflow. */
+export function changesData(c: ToolConfig): boolean {
+  if (c.tool_type === "workflow") return true;
+  if (c.tool_type === "data_engine") return c.operation === "create" || c.operation === "update" || c.operation === "delete";
+  if (c.tool_type === "api_call" || c.tool_type === "external") return !["", "GET", "HEAD"].includes((c.method || "GET").toUpperCase());
+  return false;
 }
