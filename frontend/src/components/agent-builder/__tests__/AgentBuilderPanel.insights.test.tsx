@@ -45,6 +45,8 @@ vi.mock("../useAgentWatch", () => ({
     link: "idle", reason: null, suggestedUrl: null, connect, disconnect: () => {}, select: () => {}, follow: () => {},
   }),
 }));
+// Insights shows "Coming soon" while INSIGHTS_READY is off; these tests are about the real page's wiring, so they switch it on.
+vi.mock("../insights-ready", () => ({ INSIGHTS_READY: true }));
 vi.mock("../AgentInsightsPanel", () => ({
   AgentInsightsPanel: (p: { appUrl: string; agentName: string; agentId: string; onOpenWatch?: () => void }) => (
     <div data-testid="insights-stub" data-app={p.appUrl} data-agent={p.agentName}>
