@@ -20,8 +20,8 @@ type Ui = {
 };
 type AgentInfo = { id: string; name: string; description: string | null; ui: Ui };
 type ToolNote = { id: string; tool: string; state: "running" | "ok" | "failed" | "held" };
-/** "human" is a person on the team who has taken the conversation over. */
-type Msg = { role: "user" | "assistant" | "human"; content: string; tools?: ToolNote[]; notice?: string };
+/** "human" is a person on the team who has taken the conversation over. `id` is the saved message, once known: what a thumbs up or down is sent against. */
+type Msg = { role: "user" | "assistant" | "human"; content: string; tools?: ToolNote[]; notice?: string; id?: string };
 /** The conversation is with a person: where it stands, as the person who asked sees it. */
 type HandoffInfo = { ref: string; status: "open" | "claimed" | "resolved"; assignedToName?: string | null; resolutionNote?: string | null };
 
@@ -44,6 +44,7 @@ const HEADING = "var(--font-heading, inherit)";
 const label = (tool: string) => tool.replace(/[_-]+/g, " ");
 
 type SavedMessage = {
+  id?: string;
   role: "user" | "assistant" | "human";
   content: string;
   toolCalls?: Array<{ name: string; error?: string | null; result?: { held?: boolean } | null }> | null;
@@ -52,6 +53,7 @@ type SavedMessage = {
 /** A saved turn as the chat draws it: the words, and a chip for each tool it used. */
 function fromSaved(m: SavedMessage, i: number): Msg {
   return {
+    id: m.id,
     role: m.role,
     content: m.content,
     tools: (m.toolCalls ?? []).map((t, k) => ({
@@ -199,6 +201,10 @@ export function ChatWidget({
   const [busy, setBusy] = React.useState(false);
   const [conversationId, setConversationId] = React.useState<string | null>(null);
   const [handoff, setHandoff] = React.useState<HandoffInfo | null>(null);
+  // Thumbs up (1) / down (-1) the person gave each answer, by message id; and the one answer whose "what went wrong?" line is open.
+  const [ratings, setRatings] = React.useState<Record<string, 1 | -1>>({});
+  const [noteFor, setNoteFor] = React.useState<string | null>(null);
+  const [noteText, setNoteText] = React.useState("");
   const endRef = React.useRef<HTMLDivElement>(null);
   const savedCount = React.useRef(0); // how many saved messages the chat has drawn
 
@@ -301,6 +307,29 @@ export function ChatWidget({
     setMsgs(agent.ui.welcomeMessage ? [{ role: "assistant", content: agent.ui.welcomeMessage }] : []);
   }
 
+  // Tell the app how an answer was received. The mark shows at once; if the app cannot keep it, it is taken back.
+  async function rate(id: string, rating: 1 | -1, note?: string) {
+    if (!conversationId) return;
+    const before = ratings[id];
+    setRatings((r) => ({ ...r, [id]: rating }));
+    try {
+      const res = await fetch(`${BASE}/api/agent/feedback`, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ conversationId, messageId: id, rating, ...(note ? { note } : {}) }),
+      });
+      if (!res.ok) throw new Error("not saved");
+    } catch {
+      setRatings((r) => {
+        const next = { ...r };
+        if (before) next[id] = before;
+        else delete next[id];
+        return next;
+      });
+    }
+  }
+
   // The last message is the one being written; every update replaces it.
   const patchLast = (fn: (m: Msg) => Msg) =>
     setMsgs((prev) => (prev.length ? [...prev.slice(0, -1), fn(prev[prev.length - 1])] : prev));
@@ -362,10 +391,12 @@ export function ChatWidget({
           else if (e.type === "handoff") setHandoff({ ref: e.ref, status: e.status });
           else if (e.type === "done") {
             setConversationId(e.conversationId);
-            // With a person, the assistant stays quiet: no empty bubble left behind.
+            // With a person, the assistant stays quiet: no empty bubble left behind. Otherwise the answer learns
+            // its saved id, which is what lets it be rated.
             setMsgs((p) => {
               const l = p[p.length - 1];
-              return l && l.role === "assistant" && !l.content && !(l.tools?.length) ? p.slice(0, -1) : p;
+              if (l && l.role === "assistant" && !l.content && !(l.tools?.length)) return p.slice(0, -1);
+              return l && l.role === "assistant" && typeof e.messageId === "string" ? [...p.slice(0, -1), { ...l, id: e.messageId }] : p;
             });
             // The assistant just handed over (the tool ran and worked): ask where it stands.
             if (handedOver) refreshHandoff(e.conversationId);
@@ -420,7 +451,7 @@ export function ChatWidget({
 
       <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3" aria-live="polite">
         {msgs.map((m, i) => (
-          <div key={i} className={m.role === "user" ? "flex justify-end" : "flex justify-start"}>
+          <div key={i} className={m.role === "user" ? "flex justify-end" : "flex flex-col items-start"}>
             <div
               className={
                 "max-w-[85%] rounded-2xl px-3 py-2 " + (m.role === "user" ? "whitespace-pre-wrap" : "")
@@ -451,6 +482,57 @@ export function ChatWidget({
               {m.role === "user" ? m.content : m.content ? <Markdown text={m.content} /> : busy && i === msgs.length - 1 ? "…" : ""}
               {m.notice && <div className="mt-1 text-[11px] opacity-70">{m.notice}</div>}
             </div>
+            {m.role === "assistant" && m.id && m.content && conversationId && !(busy && i === msgs.length - 1) && (
+              <div className="mt-1 flex flex-wrap items-center gap-1 pl-1">
+                {([1, -1] as const).map((v) => {
+                  const chosen = ratings[m.id!] === v;
+                  const name = v === 1 ? "Good answer" : "Bad answer";
+                  return (
+                    <button
+                      key={v}
+                      type="button"
+                      aria-label={name}
+                      title={name}
+                      aria-pressed={chosen}
+                      onClick={() => {
+                        rate(m.id!, v);
+                        if (v === -1) {
+                          setNoteFor(m.id!);
+                          setNoteText("");
+                        } else if (noteFor === m.id) setNoteFor(null);
+                      }}
+                      className="rounded px-1.5 py-0.5 text-xs hover:opacity-80"
+                      style={{ color: chosen ? C.primary : C.mutedText, border: `1px solid ${chosen ? C.primary : "transparent"}` }}
+                    >
+                      {v === 1 ? "👍" : "👎"}
+                    </button>
+                  );
+                })}
+                {noteFor === m.id && ratings[m.id] === -1 && (
+                  <form
+                    className="flex items-center gap-1"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      rate(m.id!, -1, noteText.trim());
+                      setNoteFor(null);
+                    }}
+                  >
+                    <input
+                      value={noteText}
+                      onChange={(e) => setNoteText(e.target.value)}
+                      maxLength={300}
+                      placeholder="What went wrong? (optional)"
+                      aria-label="What went wrong?"
+                      className="w-40 rounded border bg-transparent px-2 py-0.5 text-xs outline-none"
+                      style={{ borderColor: C.border, color: C.text }}
+                    />
+                    <button type="submit" className="rounded px-1.5 py-0.5 text-xs" style={{ color: C.primary }}>
+                      Send
+                    </button>
+                  </form>
+                )}
+              </div>
+            )}
           </div>
         ))}
         {msgs.length <= 1 && (ui.suggestedQuestions?.length ?? 0) > 0 && (

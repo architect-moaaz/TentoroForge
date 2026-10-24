@@ -19,6 +19,8 @@ import { AGENTS } from "@/agents/registry";
 import { runAgent } from "@/lib/agents/runtime";
 import { drizzleStore } from "@/lib/agents/store";
 import { instrumentIO } from "@/lib/agents/debug";
+import { insightsShipper } from "@/lib/agents/insights-outbox";
+import { holdForShipping } from "@/lib/agents/insights-shipper";
 import { realDeps, toolIO } from "@/lib/agents/io";
 import { feedEvent, newRunId, observeDeps, publish, watching, type WatchEvent } from "@/lib/agents/watch";
 import type { AgentEvent, AgentRuntimeConfig, AgentUser } from "@/lib/agents/types";
@@ -130,6 +132,10 @@ export async function POST(req: Request): Promise<Response> {
         deps,
         emit,
       );
+      // The answer is complete. Sending what the turn recorded to the platform's insights is housekeeping: on a host
+      // that freezes the process after the reply it is finished under the host's keep-running hook (or, if there is
+      // none, for a moment before the stream closes); anywhere else this returns at once. It never fails the chat.
+      await holdForShipping(insightsShipper(), process.env);
       try {
         controller.close();
       } catch {

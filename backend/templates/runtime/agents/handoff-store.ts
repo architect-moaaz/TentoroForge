@@ -11,6 +11,7 @@ import { forgeAgentHandoffs } from "@/db/schema/_forge_agent_handoffs";
 import { forgeAgentConversations, forgeAgentMessages } from "@/db/schema/_forge_agent";
 import { forgeNotifications } from "@/db/schema/_forge_notifications";
 import { and, asc, count, desc, eq, inArray, ne, sql } from "drizzle-orm";
+import { shipHandoff } from "./insights-outbox";
 import type { HandoffDeps, HandoffRecord, HandoffStatus, HandoffStore, Person, StoredMessage } from "./types";
 
 const toRecord = (r: any): HandoffRecord => ({
@@ -51,7 +52,10 @@ export const handoffStore: HandoffStore = {
       .insert(forgeAgentHandoffs)
       .values({ ref, ...h, requestedByName, claimedAt: null, resolvedAt: null })
       .returning();
-    return toRecord(row);
+    const made = toRecord(row);
+    // The platform's insights hear that it was opened. Best-effort and not waited for: see insights-shipper.ts.
+    shipHandoff(made);
+    return made;
   },
 
   async openFor(conversationId) {
@@ -267,5 +271,9 @@ export async function changeHandoff(id: string, change: HandoffAction): Promise<
       break;
   }
   await db.update(forgeAgentHandoffs).set(patch).where(eq(forgeAgentHandoffs.id, id));
-  return getHandoff(id);
+  const changed = await getHandoff(id);
+  // Claimed or resolved (or released back to open): the platform's insights hear of it. A change of who holds it
+  // (assign) is not a change of status and is sent as the status it already had, which the platform ignores.
+  if (changed) shipHandoff(changed);
+  return changed;
 }

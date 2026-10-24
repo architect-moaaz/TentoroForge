@@ -36,7 +36,7 @@ export async function callModel(req: ModelRequest, onText: (chunk: string) => vo
     const said = typeof last?.content === "string" ? last.content : "";
     const mock = `[mock reply — set ANTHROPIC_API_KEY for a real one] You said: ${said.slice(0, 200)}`;
     onText(mock);
-    return { content: [{ type: "text", text: mock }], usage: { inputTokens: 0, outputTokens: 0 } };
+    return { content: [{ type: "text", text: mock }], usage: { inputTokens: 0, outputTokens: 0 }, model: "mock" };
   }
 
   const model = req.model || (await secret("FORGE_AI_MODEL")) || process.env.ANTHROPIC_MODEL || DEFAULT_MODEL;
@@ -57,6 +57,8 @@ export async function callModel(req: ModelRequest, onText: (chunk: string) => vo
   return {
     content: (final.content ?? []) as ModelBlock[],
     usage: { inputTokens: final.usage?.input_tokens ?? 0, outputTokens: final.usage?.output_tokens ?? 0 },
+    // What the provider says answered, falling back to what was asked for: this is what a cost report is priced by.
+    model: typeof final.model === "string" && final.model ? final.model : model,
   };
 }
 
@@ -197,5 +199,13 @@ export async function realDeps(store: AgentDeps["store"], io: ToolIO = toolIO): 
   } catch {
     /* no usage store installed */
   }
-  return { callModel, runTool: createToolRunner(io, limiter), store, evalExpression, handoffs, usage };
+  // Where each turn's cost and outcome is kept. Absent when this app has no turns store: nothing is recorded.
+  let turns: AgentDeps["turns"];
+  try {
+    const ts: any = await import("./turns-store");
+    turns = ts.turnStore;
+  } catch {
+    /* no turns store installed */
+  }
+  return { callModel, runTool: createToolRunner(io, limiter), store, evalExpression, handoffs, usage, turns };
 }
