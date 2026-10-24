@@ -14,6 +14,10 @@ Amazon Linux 2023. Nothing outside this folder is touched.
 
 1. `setup.sh`-style prerequisites (done once): swap file, Docker, the compose and buildx plugins.
 2. Put the code in `/home/ec2-user/ttf/src` (`git archive`, or a tarball of the working tree).
+   **Include the compiled engine packages** (`packages/{schema,engine,library,renderer,patches}/dist`). They are gitignored, so a
+   plain `git archive` leaves them out; the server mounts `src/packages` read-only and cannot compile them, and without them every
+   generated app fails to build with "Can't resolve '@tentoroforge/engine'". Build them first (`npm run build` in each package)
+   and add `packages/*/dist` to the tarball.
 3. `bash make-env.sh` writes `.env` (fresh random secrets). Put the model key in `keys.env` (`ANTHROPIC_API_KEY=...`, mode 600).
    Set `PUBLIC_HOST` in `.env` to the address builders reach this server on (public IP or name).
 4. `bash build.sh` builds the images (`ttf-frontend`, `ttf-backend`, `ttf-tunnel`) with a throw-away builder and a disk watchdog.
