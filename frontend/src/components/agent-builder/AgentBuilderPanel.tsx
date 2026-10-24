@@ -15,6 +15,7 @@ import {
   Bomb,
   Radio,
   Sparkles,
+  BarChart3,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,6 +26,7 @@ import { useAgentBuilderStore } from "@/stores/agent-builder";
 import { AgentCanvas } from "./AgentCanvas";
 import { AgentChecksBar } from "./AgentChecksBar";
 import { AgentBlastPanel } from "./AgentBlastPanel";
+import { AgentInsightsPanel } from "./AgentInsightsPanel";
 import { AgentNodePalette } from "./AgentNodePalette";
 import { AgentNodeProperties } from "./AgentNodeProperties";
 import { AgentTemplateSelector } from "./AgentTemplateSelector";
@@ -94,6 +96,29 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
   // Watch the running app's real chats live: the canvas lights up as they happen.
   const [showWatch, setShowWatch] = useState(false);
   const watch = useAgentWatch({ projectId, agentId: currentAgent?.id ?? "", agentName: editName, nodes, edges });
+  // Cost and quality of the connected development app. It reads from the same app Watch live connects to ("tunnel" for the
+  // builder's own computer through the tunnel, or a localhost address), remembered per project so it survives a reload.
+  const [showInsights, setShowInsights] = useState(false);
+  const [insightsApp, setInsightsApp] = useState("");
+  useEffect(() => {
+    try {
+      setInsightsApp(window.localStorage.getItem(`forge.watch.insightsApp.${projectId}`) ?? "");
+    } catch {
+      /* a convenience only */
+    }
+  }, [projectId]);
+  const connectWatch = useCallback(
+    (where: string, who: Parameters<typeof watch.connect>[1]) => {
+      setInsightsApp(where);
+      try {
+        window.localStorage.setItem(`forge.watch.insightsApp.${projectId}`, where);
+      } catch {
+        /* a convenience only */
+      }
+      watch.connect(where, who);
+    },
+    [projectId, watch],
+  );
   // Recording the next X chats lives here, beside the watch, so it carries on while Find problems or Test is shown.
   const recording = useWatchRecording(projectId, watch.state);
   // Chats just sent from Watch live to Find problems (it says what arrived and shows the fixer's proposals once, then lets go of them).
@@ -122,6 +147,7 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
       };
       setArrived({ agentId: currentAgent.id, data: { ...result, leftOut: result.leftOut + skipped, key: Date.now(), fixRequested: fix } });
       setShowWatch(false);
+      setShowInsights(false);
       setShowTestConsole(false);
       setShowBlast(true);
       return sentence(result, { fix, skipped });
@@ -504,8 +530,9 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
     setShowTestConsole(false);
     setShowBlast(false);
     setShowWatch(false);
+    setShowInsights(false);
   }, []);
-  const onDiagramPage = !showTestConsole && !showBlast && !showWatch;
+  const onDiagramPage = !showTestConsole && !showBlast && !showWatch && !showInsights;
 
   // Update node data
   const updateNodeData = useCallback(
@@ -685,7 +712,8 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
             variant="outline"
             onClick={() => {
               setShowBlast(false);
-                      setShowTestConsole(!showTestConsole);
+              setShowInsights(false);
+              setShowTestConsole(!showTestConsole);
             }}
           >
             <FlaskConical className="mr-1 h-3.5 w-3.5" />
@@ -697,7 +725,8 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
             aria-pressed={showBlast}
             onClick={() => {
               setShowTestConsole(false);
-                      setShowBlast(!showBlast);
+              setShowInsights(false);
+              setShowBlast(!showBlast);
             }}
           >
             <Bomb className="mr-1 h-3.5 w-3.5" />
@@ -710,7 +739,8 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
             onClick={() => {
               setShowTestConsole(false);
               setShowBlast(false);
-                      setShowWatch(!showWatch);
+              setShowInsights(false);
+              setShowWatch(!showWatch);
             }}
           >
             <Radio className="mr-1 h-3.5 w-3.5" />
@@ -719,6 +749,20 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
               <span className="ml-1.5 rounded bg-amber-100 px-1 py-px text-[9px] font-semibold uppercase leading-none text-amber-800">Soon</span>
             )}
             {watch.link === "connected" && <span className="ml-1.5 inline-block h-2 w-2 rounded-full bg-green-500" aria-label="connected" />}
+          </Button>
+          <Button
+            size="sm"
+            variant={showInsights ? "default" : "outline"}
+            aria-pressed={showInsights}
+            onClick={() => {
+              setShowTestConsole(false);
+              setShowBlast(false);
+              setShowWatch(false);
+              setShowInsights(!showInsights);
+            }}
+          >
+            <BarChart3 className="mr-1 h-3.5 w-3.5" />
+            Insights
           </Button>
           <Button
             size="sm"
@@ -816,6 +860,19 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
               incoming={arrived && arrived.agentId === currentAgent.id ? arrived.data : undefined}
               onIncomingTaken={() => setArrived(null)}
             />
+          ) : showInsights ? (
+            <AgentInsightsPanel
+              projectId={projectId}
+              agentId={currentAgent.id}
+              agentName={editName}
+              appUrl={insightsApp}
+              onOpenWatch={() => {
+                setShowInsights(false);
+                setShowTestConsole(false);
+                setShowBlast(false);
+                setShowWatch(true);
+              }}
+            />
           ) : showTestConsole ? (
             <AgentTestConsole
               projectId={projectId}
@@ -862,7 +919,7 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
             reason={watch.reason}
             suggestedUrl={watch.suggestedUrl}
             projectId={projectId}
-            onConnect={watch.connect}
+            onConnect={connectWatch}
             onDisconnect={watch.disconnect}
             onSelect={watch.select}
             onFollow={watch.follow}
@@ -871,7 +928,7 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
             onSendToFix={(chats) => sendRecording(chats, true)}
           />
         )}
-        {selectedNode && !showTestConsole && !showWatch && (
+        {selectedNode && !showTestConsole && !showWatch && !showInsights && (
           <AgentNodeProperties
             nodeData={selectedNode.data}
             nodeId={selectedNode.id}

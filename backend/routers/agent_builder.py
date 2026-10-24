@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
@@ -96,6 +96,28 @@ async def get_handoff_options(
     if not project.output_dir:
         return {"roles": [], "people": [], "peopleNote": "No output directory."}
     return await asyncio.to_thread(handoff_options, project.output_dir)
+
+
+@router.get("/api/projects/{project_id}/agent-definitions/insights")
+async def agent_insights(
+    project_id: uuid.UUID,
+    app_url: str,
+    days: int = Query(7, ge=1, le=90),
+    agent_id: str = "",
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """How the agent is doing in the connected development app: what it costs (an estimate) and how good it is. The platform asks
+    the app with its secret; the browser never sees it. `app_url` is "tunnel" or a localhost address, exactly as for Watch live.
+    Answers `{ok: true, insights}` or `{ok: false, reason}` and never raises for an app that cannot be reached. Declared BEFORE
+    the `{agent_id}` route, which would otherwise read "insights" as an agent's id."""
+    from services.agent_debug import read_debug_secret
+    from services.agent_insights import fetch
+
+    project = await get_project_with_auth(project_id, user, db)
+    if app_url.strip().lower() == "tunnel":
+        return await fetch(str(project.id), "tunnel", None, days, agent_id)
+    return await fetch(str(project.id), app_url, read_debug_secret(_debug_roots(project)), days, agent_id)
 
 
 @router.get("/api/projects/{project_id}/agent-definitions/{agent_id}")
