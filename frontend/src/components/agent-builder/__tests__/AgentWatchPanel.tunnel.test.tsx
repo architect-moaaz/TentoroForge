@@ -49,17 +49,21 @@ afterEach(() => {
 
 const flush = () => act(async () => { await vi.advanceTimersByTimeAsync(0); });
 const tick = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
-async function mount(link: "idle" | "connected" = "idle") {
+// The connection is a popup behind the Connection button; most tests are about it, so it is opened (popup = false leaves it shut).
+async function mount(link: "idle" | "connected" = "idle", popup = true) {
   await act(async () => {
     root.render(
       <AgentWatchPanel state={initialWatch()} link={link} reason={null} suggestedUrl={null} projectId="p1" onConnect={connect} onDisconnect={vi.fn()} onSelect={vi.fn()} onFollow={vi.fn()} />,
     );
   });
   await flush();
+  if (popup && !document.body.querySelector('[data-testid="watch-dialog"]')) {
+    await act(async () => { (document.body.querySelector('[data-testid="watch-open-connection"]') as HTMLElement).click(); await vi.advanceTimersByTimeAsync(0); });
+  }
 }
-const q = (id: string) => container.querySelector(`[data-testid="${id}"]`);
-const text = () => container.textContent ?? "";
-const button = (label: string) => [...container.querySelectorAll("button")].find((b) => (b.textContent ?? "").trim() === label) as HTMLButtonElement | undefined;
+const q = (id: string) => document.body.querySelector(`[data-testid="${id}"]`);
+const text = () => document.body.textContent ?? "";
+const button = (label: string) => [...document.body.querySelectorAll("button")].find((b) => (b.textContent ?? "").trim() === label) as HTMLButtonElement | undefined;
 const click = (e: Element) => act(async () => { (e as HTMLElement).click(); await vi.advanceTimersByTimeAsync(0); });
 const type = (el: Element, value: string) =>
   act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(el, value); el.dispatchEvent(new Event("input", { bubbles: true })); });
@@ -68,7 +72,7 @@ describe("Watch live behind a tunnel", () => {
   it("shows Your computer instead of an address box, and holds Connect back until the computer is connected", async () => {
     await mount();
     expect(q("watch-tunnel")).not.toBeNull();
-    expect(container.querySelector('[aria-label="App address"]'), "no address to type: the server cannot see this computer's localhost").toBeNull();
+    expect(document.body.querySelector('[aria-label="App address"]'), "no address to type: the server cannot see this computer's localhost").toBeNull();
     expect(q("tunnel-state")?.textContent).toBe("No computer connected yet.");
     expect(button("Connect")!.disabled).toBe(true);
     expect(button("Connect")!.title).toContain("Connect your computer first");
@@ -92,7 +96,7 @@ describe("Watch live behind a tunnel", () => {
   it("puts the builder's own port into the command, remembers it, and refuses a port that is not one", async () => {
     await mount();
     await click(button("Connect your computer")!);
-    const port = container.querySelector('[aria-label="App port"]')!;
+    const port = document.body.querySelector('[aria-label="App port"]')!;
     await type(port, "3001");
     expect(q("command-unix")!.textContent).toContain("--app 3001");
     expect(window.localStorage.getItem("forge.watch.appPort.p1")).toBe("3001");
@@ -124,6 +128,35 @@ describe("Watch live behind a tunnel", () => {
     expect(q("tunnel-setup"), "the setup box has done its job").toBeNull();
     expect(button("Connect")!.disabled).toBe(false);
     expect(button("Connect again")).toBeDefined();
+  });
+
+  it("keeps the connection in a popup, so the panel is for the chats", async () => {
+    await mount("idle", false);
+    expect(q("watch-dialog"), "nothing is in the way of the chats until it is asked for").toBeNull();
+    expect(q("watch-tunnel")).toBeNull();
+    expect(q("watch-chats")).not.toBeNull();
+    expect(q("watch-summary")!.textContent).toBe("No computer connected yet.");
+    await click(q("watch-open-connection")!);
+    expect(q("watch-dialog")).not.toBeNull();
+    expect(q("watch-dialog")!.querySelector('[data-testid="watch-tunnel"]'), "Your computer is inside the popup").not.toBeNull();
+    expect(q("watch-top")!.querySelector('[data-testid="watch-tunnel"]'), "and not in the bar above the chats").toBeNull();
+    expect(q("watch-top")!.className).not.toContain("overflow");
+  });
+
+  it("closes the popup by itself once the watch is connected, and a second code opened while connected can be hidden", async () => {
+    tunnel = { enabled: true, registered: true, connected: true, appPort: 3001, clientIp: "1.2.3.4", label: "Ana laptop" };
+    await mount("idle");
+    expect(q("watch-dialog")).not.toBeNull();
+    await mount("connected", false);
+    expect(q("watch-dialog"), "connected: the popup has done its job").toBeNull();
+    expect(q("watch-link")!.textContent).toContain("Connected");
+    await click(q("watch-open-connection")!);
+    expect(q("tunnel-setup")).toBeNull();
+    await click(button("Connect again")!);
+    expect(q("tunnel-setup"), "Connect again shows the code even though a computer is connected").not.toBeNull();
+    await click(q("tunnel-setup-hide")!);
+    expect(q("tunnel-setup"), "Hide puts it away").toBeNull();
+    expect(q("tunnel-state")!.textContent).toContain("Connected");
   });
 
   it("connects through the tunnel, never through an address, and remembers whom to watch", async () => {
@@ -186,7 +219,7 @@ describe("Watch live behind a tunnel", () => {
     tunnel = { enabled: false, registered: false, connected: false };
     await mount();
     expect(q("watch-tunnel")).toBeNull();
-    expect(container.querySelector('[aria-label="App address"]')).not.toBeNull();
+    expect(document.body.querySelector('[aria-label="App address"]')).not.toBeNull();
     expect(button("Connect")!.disabled).toBe(false);
     await click(button("Connect")!);
     expect(connect).toHaveBeenCalledWith("http://localhost:3000", {});

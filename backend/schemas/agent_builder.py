@@ -70,6 +70,14 @@ class AgentBlastTool(BaseModel):
     per_angle: int = 2
 
 
+class AgentRecordingSend(BaseModel):
+    """Chats recorded in Watch live, sent to Find problems as saved tests and (when ``fix``) to the fixer."""
+    chats: list[dict] = []
+    fix: bool = False
+    #: The assistant as drawn. Needed only when ``fix`` is set.
+    graph: AgentDefinitionSave | None = None
+
+
 class AgentBlastFixes(BaseModel):
     """Propose fixes for the tests that exploded."""
     graph: AgentDefinitionSave

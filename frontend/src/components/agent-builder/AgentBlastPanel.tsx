@@ -27,6 +27,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import { parseEvents } from "@/lib/agent-live";
 import { appendLines, linesForEvent, type LogKind, type LogLine, type Printed } from "@/lib/blast-log";
+import { arrivalNote, type Incoming } from "@/lib/agent-recording";
 import { BlastTerminal } from "./BlastTerminal";
 import {
   applyFix, changesDrawing, didNotPass, emptyBlast, estimateCalls, fixKindLabel, fixOutcome, FIX_HINT, isBad, kindWords, outcomeSentence, reduceBlast,
@@ -48,6 +49,13 @@ interface Props {
   agentUnsaved?: boolean;
   /** Save the agent as drawn. */
   onSaveAgent?: () => Promise<void> | void;
+  /**
+   * Real chats just sent from Watch live (already saved as tests on the platform, so they are in My tests by themselves), and the
+   * fixes the fixer proposed from them when it was asked to. Taken in once per `key`.
+   */
+  incoming?: Incoming;
+  /** Said once the incoming chats have been taken in, so the builder lets go of them and they are not shown again on a later visit. */
+  onIncomingTaken?: () => void;
 }
 
 /** A proposed fix with a key of its own: the platform numbers fixes from 1 each time, and fixes from several rounds can be on screen. */
@@ -96,7 +104,7 @@ const toolCount = (graph: Record<string, unknown>) => ((graph.nodes as Array<{ d
 
 const asMessage = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-export function AgentBlastPanel({ projectId, agentId, graph, onApplyFix, onRevertFix, agentUnsaved, onSaveAgent }: Props) {
+export function AgentBlastPanel({ projectId, agentId, graph, onApplyFix, onRevertFix, agentUnsaved, onSaveAgent, incoming, onIncomingTaken }: Props) {
   const base = `/api/projects/${projectId}/agent-definitions`;
   const [bombs, setBombs] = useState<Bomb[]>([]);
   const [toolAngles, setToolAngles] = useState<ToolAngle[]>([]);
@@ -139,6 +147,9 @@ export function AgentBlastPanel({ projectId, agentId, graph, onApplyFix, onRever
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [showMine, setShowMine] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  // What arrived from Watch live, said at the top until it is dismissed.
+  const [arrival, setArrival] = useState<string | null>(null);
+  const arrivedKey = useRef<number | null>(null);
   // The AI is writing tests (not a blast): everything else waits, the same as while a blast runs.
   const [writing, setWriting] = useState(false);
   const busy = state.phase === "inventing" || state.phase === "running" || state.phase === "fixing" || writing;
@@ -185,6 +196,17 @@ export function AgentBlastPanel({ projectId, agentId, graph, onApplyFix, onRever
       })
       .finally(() => live.current && setMineLoaded(true));
   }, [base, agentId]);
+
+  // Real chats sent from Watch live: say what arrived, open My tests (they are in it already: they were saved before this page was
+  // shown), and put the fixer's proposals among the fixes so "Apply and test" works on them like on any other. Once per send.
+  useEffect(() => {
+    if (!incoming || arrivedKey.current === incoming.key) return;
+    arrivedKey.current = incoming.key;
+    setArrival(arrivalNote(incoming));
+    if (incoming.added > 0) setShowMine(true);
+    if (incoming.fixes.length > 0) setFixes((all) => [...all, ...incoming.fixes.map((fix) => ({ key: `rec${incoming.key}:${fix.id}`, fix }))]);
+    onIncomingTaken?.();
+  }, [incoming, onIncomingTaken]);
 
   // ── my tests, kept saved without anyone having to remember ───────────────
 
@@ -880,6 +902,23 @@ export function AgentBlastPanel({ projectId, agentId, graph, onApplyFix, onRever
             {savingAgent ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Save className="mr-1 h-3 w-3" />}
             Save agent
           </Button>
+        </div>
+      )}
+
+      {/* Real chats that have just arrived from Watch live */}
+      {arrival && (
+        <div role="note" className="flex items-start gap-2 border-b border-sky-200 bg-sky-50 px-3 py-1.5 text-xs text-sky-900" data-testid="blast-arrival">
+          <span className="min-w-0 flex-1">{arrival}</span>
+          <button
+            type="button"
+            aria-label="Dismiss this note"
+            title="Dismiss"
+            className="shrink-0 rounded px-1 text-sky-700 hover:bg-black/5"
+            onClick={() => setArrival(null)}
+            data-testid="blast-arrival-dismiss"
+          >
+            ×
+          </button>
         </div>
       )}
 

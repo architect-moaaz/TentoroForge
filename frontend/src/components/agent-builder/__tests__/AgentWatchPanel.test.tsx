@@ -54,7 +54,7 @@ afterEach(() => {
   container.remove();
 });
 
-async function mount(over: Partial<{ state: WatchState; link: Link; reason: string | null; suggestedUrl: string | null }> = {}) {
+async function mount(over: Partial<{ state: WatchState; link: Link; reason: string | null; suggestedUrl: string | null; popup: boolean }> = {}) {
   await act(async () => {
     root.render(
       <AgentWatchPanel
@@ -70,17 +70,25 @@ async function mount(over: Partial<{ state: WatchState; link: Link; reason: stri
       />,
     );
   });
+  // The connection controls are in a popup behind the Connection button; most tests are about them, so it is opened (popup: false leaves it shut).
+  if (over.popup !== false && !document.body.querySelector('[data-testid="watch-dialog"]')) {
+    await act(async () => { (document.body.querySelector('[data-testid="watch-open-connection"]') as HTMLElement).click(); });
+  }
 }
-const text = () => container.textContent ?? "";
-const button = (label: string) => [...container.querySelectorAll("button")].find((b) => (b.textContent ?? "").trim().startsWith(label))!;
+const text = () => document.body.textContent ?? "";
+const button = (label: string) => {
+  const all = [...document.body.querySelectorAll("button")];
+  // An exact label first: "Connect" must not pick "Connection", the button that opens the popup.
+  return (all.find((b) => (b.textContent ?? "").trim() === label) ?? all.find((b) => (b.textContent ?? "").trim().startsWith(label)))!;
+};
 const click = (e: Element) => act(async () => { (e as HTMLElement).click(); });
 
 describe("connecting", () => {
   it("starts with instructions, and connects to the address typed, remembering it", async () => {
     await mount();
-    expect(text()).toContain("Start your app, choose whose chats to watch, press Connect");
-    expect(container.querySelector('[data-testid="watch-link"]')?.textContent).toContain("Not connected");
-    const input = container.querySelector('[aria-label="App address"]') as HTMLInputElement;
+    expect(text()).toContain("Start your app, press Connection to connect it");
+    expect(document.body.querySelector('[data-testid="watch-link"]')?.textContent).toContain("Not connected");
+    const input = document.body.querySelector('[aria-label="App address"]') as HTMLInputElement;
     expect(input.value).toBe("http://localhost:3000");
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
     await act(async () => { setter.call(input, "http://localhost:3001"); input.dispatchEvent(new Event("input", { bubbles: true })); });
@@ -92,32 +100,32 @@ describe("connecting", () => {
   it("uses the address remembered for this project", async () => {
     window.localStorage.setItem("forge.liveRun.app.p1", "http://localhost:3001");
     await mount();
-    expect((container.querySelector('[aria-label="App address"]') as HTMLInputElement).value).toBe("http://localhost:3001");
+    expect((document.body.querySelector('[aria-label="App address"]') as HTMLInputElement).value).toBe("http://localhost:3001");
   });
 
   it("shows each stage of the connection, and offers to disconnect once it is working or open", async () => {
     await mount({ link: "checking" });
-    expect(container.querySelector('[data-testid="watch-link"]')?.textContent).toContain("Checking the app");
+    expect(document.body.querySelector('[data-testid="watch-link"]')?.textContent).toContain("Checking the app");
     expect(button("Disconnect")).toBeTruthy();
     await mount({ link: "connecting" });
-    expect(container.querySelector('[data-testid="watch-link"]')?.textContent).toContain("Connecting");
+    expect(document.body.querySelector('[data-testid="watch-link"]')?.textContent).toContain("Connecting");
     await mount({ link: "reconnecting" });
-    expect(container.querySelector('[data-testid="watch-link"]')?.textContent).toContain("reconnecting");
+    expect(document.body.querySelector('[data-testid="watch-link"]')?.textContent).toContain("reconnecting");
   });
 
   it("says it is verified and what it is connected to, and waits for a chat", async () => {
     await mount({ link: "connected", state: state([]) });
-    expect(container.querySelector('[data-testid="watch-link"]')?.textContent).toContain("Connected");
-    expect(container.querySelector('[data-testid="watch-connected-to"]')?.textContent).toContain("ResolveDesk Assistant");
-    expect(container.querySelector('[data-testid="watch-connected-to"]')?.textContent).toContain("Verified with this project's key");
-    expect(container.querySelector('[data-testid="watch-waiting"]')?.textContent).toContain("Waiting for a chat");
+    expect(document.body.querySelector('[data-testid="watch-link"]')?.textContent).toContain("Connected");
+    expect(document.body.querySelector('[data-testid="watch-connected-to"]')?.textContent).toContain("ResolveDesk Assistant");
+    expect(document.body.querySelector('[data-testid="watch-connected-to"]')?.textContent).toContain("Verified with this project's key");
+    expect(document.body.querySelector('[data-testid="watch-waiting"]')?.textContent).toContain("Waiting for a chat");
     await click(button("Disconnect"));
     expect(calls.disconnect).toHaveBeenCalled();
   });
 
   it("says why it could not connect, and offers this project's app when it is elsewhere", async () => {
     await mount({ link: "failed", reason: "Nothing at http://localhost:3000 accepted this project's key, but this project's app is running at http://localhost:3001.", suggestedUrl: "http://localhost:3001" });
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain("running at http://localhost:3001");
+    expect(document.body.querySelector('[role="alert"]')?.textContent).toContain("running at http://localhost:3001");
     await click(button("Use http://localhost:3001"));
     expect(calls.connect).toHaveBeenCalledWith("http://localhost:3001", {});
   });
@@ -131,7 +139,7 @@ describe("connecting", () => {
 });
 
 describe("whose chats to watch", () => {
-  const select = () => container.querySelector('[aria-label="Who to watch"]') as HTMLSelectElement;
+  const select = () => document.body.querySelector('[aria-label="Who to watch"]') as HTMLSelectElement;
   const choose = async (value: string) => { await act(async () => { select().value = value; select().dispatchEvent(new Event("change", { bubbles: true })); }); };
   const labels = () => [...select().querySelectorAll("option")].map((o) => o.textContent);
   const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 10)); });
@@ -185,13 +193,13 @@ describe("whose chats to watch", () => {
 
   it("says whose chats the app confirmed it is sending, and who it is waiting for", async () => {
     await mount({ link: "connected", state: { ...state([]), who: { role: "Admin" } } });
-    expect(container.querySelector('[data-testid="watch-connected-to"]')?.textContent).toContain("Watching Admin chats only.");
-    expect(container.querySelector('[data-testid="watch-waiting"]')?.textContent).toContain("anyone with the role Admin");
+    expect(document.body.querySelector('[data-testid="watch-connected-to"]')?.textContent).toContain("Watching Admin chats only.");
+    expect(document.body.querySelector('[data-testid="watch-waiting"]')?.textContent).toContain("anyone with the role Admin");
     await mount({ link: "connected", state: { ...state([]), who: { userId: "u-lena" } } });
     await settle();
-    expect(container.querySelector('[data-testid="watch-connected-to"]')?.textContent).toContain("Lena Ferraro's chats only.");
+    expect(document.body.querySelector('[data-testid="watch-connected-to"]')?.textContent).toContain("Lena Ferraro's chats only.");
     await mount({ link: "connected", state: state([]) });
-    expect(container.querySelector('[data-testid="watch-connected-to"]')?.textContent).toContain("Watching everyone's chats.");
+    expect(document.body.querySelector('[data-testid="watch-connected-to"]')?.textContent).toContain("Watching everyone's chats.");
   });
 
   it("still lets everyone be watched when the app's roles cannot be listed, and says so", async () => {
@@ -206,29 +214,29 @@ describe("whose chats to watch", () => {
 describe("following a chat", () => {
   it("shows the message that came in, who sent it, and the first stage", async () => {
     await mount({ link: "connected", state: state([START]) });
-    const card = container.querySelector('[data-testid="watch-message-in"]')!;
+    const card = document.body.querySelector('[data-testid="watch-message-in"]')!;
     expect(card.textContent).toContain("Message in from Lena (Support)");
     expect(card.textContent).toContain("How many open tickets are there?");
-    expect(container.querySelector('[data-testid="watch-stage"]')?.textContent).toContain("Message received");
+    expect(document.body.querySelector('[data-testid="watch-stage"]')?.textContent).toContain("Message received");
   });
 
   it("shows the AI being called, with what it was given", async () => {
     await mount({ link: "connected", state: state([START, ...CHECKS, CALL1, ev({ type: "text", content: "Let me look. " })]) });
-    expect(container.querySelector('[data-testid="watch-stage"]')?.textContent).toContain("Calling the AI (call 1)");
-    const running = container.querySelector('[data-testid="live-model-running"]')!;
+    expect(document.body.querySelector('[data-testid="watch-stage"]')?.textContent).toContain("Calling the AI (call 1)");
+    const running = document.body.querySelector('[data-testid="live-model-running"]')!;
     expect(running.textContent).toContain("Calling the AI…");
     expect(running.textContent).toContain("26 tools offered");
     expect(running.textContent).toContain("instructions 3,150 characters");
     expect(running.textContent).toContain("Let me look.");
-    expect(container.querySelector('[data-testid="watch-checklist"]')).toBeNull();
+    expect(document.body.querySelector('[data-testid="watch-checklist"]')).toBeNull();
   });
 
   it("makes the checklist the moment the AI chooses, and ticks it off one tool at a time", async () => {
     const chosen = state([START, ...CHECKS, CALL1, CHOSE]);
     await mount({ link: "connected", state: chosen });
-    let items = [...container.querySelectorAll('[data-testid="watch-check-item"]')];
+    let items = [...document.body.querySelectorAll('[data-testid="watch-check-item"]')];
     expect(items.map((i) => [i.textContent!.includes("list_tickets"), i.getAttribute("data-status")])).toEqual([[true, "waiting"], [false, "waiting"]]);
-    expect(container.querySelector('[data-testid="watch-stage"]')?.textContent).toContain("The AI chose: list_tickets, update_ticket");
+    expect(document.body.querySelector('[data-testid="watch-stage"]')?.textContent).toContain("The AI chose: list_tickets, update_ticket");
 
     const mid = state([
       ev({ type: "tool_call", id: "c1", tool: "list_tickets", input: { filters: { status: "open" } }, t: 3500 }),
@@ -237,12 +245,12 @@ describe("following a chat", () => {
       ev({ type: "tool_call", id: "c2", tool: "update_ticket", input: { id: "abc", data: {} }, t: 3801 }),
     ], chosen);
     await mount({ link: "connected", state: mid });
-    items = [...container.querySelectorAll('[data-testid="watch-check-item"]')];
+    items = [...document.body.querySelectorAll('[data-testid="watch-check-item"]')];
     expect(items.map((i) => i.getAttribute("data-status"))).toEqual(["ok", "running"]);
     expect(items[0].textContent).toContain("done");
     expect(items[0].textContent).toContain("300 ms");
-    expect(container.querySelector('[data-testid="watch-stage"]')?.textContent).toContain("Running update_ticket");
-    const tools = [...container.querySelectorAll('[data-testid="live-tool"]')];
+    expect(document.body.querySelector('[data-testid="watch-stage"]')?.textContent).toContain("Running update_ticket");
+    const tools = [...document.body.querySelectorAll('[data-testid="live-tool"]')];
     expect(tools).toHaveLength(2);
     expect(tools[0].querySelector('[data-testid="live-calls"]')?.textContent).toContain("GET /api/data/tickets");
     expect(tools[0].querySelector("table")?.textContent).toContain("Wrong colour");
@@ -255,7 +263,7 @@ describe("following a chat", () => {
       ev({ type: "tool_call", id: "c2", tool: "update_ticket", input: { id: "a", data: {} } }),
       ev({ type: "tool_result", id: "c2", tool: "update_ticket", ok: true, result: { held: true, needs_confirmation: true } })]);
     await mount({ link: "connected", state: s });
-    const items = [...container.querySelectorAll('[data-testid="watch-check-item"]')];
+    const items = [...document.body.querySelectorAll('[data-testid="watch-check-item"]')];
     expect(items.map((i) => i.getAttribute("data-status"))).toEqual(["failed", "held"]);
     expect(items[1].textContent).toContain("waiting for a yes");
   });
@@ -266,23 +274,23 @@ describe("following a chat", () => {
       ev({ type: "phase", phase: "output_check", ok: true }),
       ev({ type: "done", conversationId: "c1", t: 2100 })]);
     await mount({ link: "connected", state: s });
-    expect(container.querySelector('[data-testid="watch-stage"]')?.textContent).toContain("Answer sent");
-    expect(container.querySelector('[data-testid="watch-reply"]')?.textContent).toContain("There are 4 open tickets.");
-    expect(container.querySelector('[data-testid="watch-totals"]')?.textContent).toContain("1 AI call");
-    expect(container.querySelector('[data-testid="watch-totals"]')?.textContent).toContain("5,000 tokens in");
-    expect((container.textContent!.match(/There are 4 open tickets\./g) ?? []).length).toBe(1);
+    expect(document.body.querySelector('[data-testid="watch-stage"]')?.textContent).toContain("Answer sent");
+    expect(document.body.querySelector('[data-testid="watch-reply"]')?.textContent).toContain("There are 4 open tickets.");
+    expect(document.body.querySelector('[data-testid="watch-totals"]')?.textContent).toContain("1 AI call");
+    expect(document.body.querySelector('[data-testid="watch-totals"]')?.textContent).toContain("5,000 tokens in");
+    expect((document.body.textContent!.match(/There are 4 open tickets\./g) ?? []).length).toBe(1);
   });
 
   it("shows a refused message and a failed chat plainly", async () => {
     await mount({ link: "connected", state: state([START, ev({ type: "phase", phase: "input_check", ok: false, reason: "Too long" }), ev({ type: "blocked", stage: "input", reason: "That message is too long." })]) });
-    expect(container.textContent).toContain("Refused: That message is too long.");
+    expect(document.body.textContent).toContain("Refused: That message is too long.");
     await mount({ link: "connected", state: state([START, ev({ type: "error", message: "The model call failed" })]) });
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain("The model call failed");
+    expect(document.body.querySelector('[role="alert"]')?.textContent).toContain("The model call failed");
   });
 
   it("says when a chat is with a person and the assistant stays quiet", async () => {
     await mount({ link: "connected", state: state([START, ...CHECKS, ev({ type: "phase", phase: "with_person", ref: "HO-1" }), ev({ type: "done", conversationId: "c" })]) });
-    expect(container.querySelector('[data-testid="watch-stage"]')?.textContent).toContain("With a person on the team");
+    expect(document.body.querySelector('[data-testid="watch-stage"]')?.textContent).toContain("With a person on the team");
   });
 });
 
@@ -291,10 +299,10 @@ describe("several chats", () => {
 
   it("lists them, newest selected, and switches when one is picked", async () => {
     await mount({ link: "connected", state: two() });
-    const chips = [...container.querySelectorAll('[data-testid="watch-runs"] button')];
+    const chips = [...document.body.querySelectorAll('[data-testid="watch-runs"] button')];
     expect(chips.map((c) => c.getAttribute("aria-pressed"))).toEqual(["true", "false"]);
     expect(chips[0].textContent).toContain("Pat");
-    expect(container.querySelector('[data-testid="watch-message-in"]')?.textContent).toContain("Where is my order?");
+    expect(document.body.querySelector('[data-testid="watch-message-in"]')?.textContent).toContain("Where is my order?");
     await click(chips[1]);
     expect(calls.select).toHaveBeenCalledWith("r1");
   });
@@ -302,7 +310,7 @@ describe("several chats", () => {
   it("offers to follow the newest once an older one is picked", async () => {
     const s = { ...two(), follow: false, selected: "r1" };
     await mount({ link: "connected", state: s });
-    expect(container.querySelector('[data-testid="watch-message-in"]')?.textContent).toContain("How many open tickets");
+    expect(document.body.querySelector('[data-testid="watch-message-in"]')?.textContent).toContain("How many open tickets");
     await click(button("Follow the newest"));
     expect(calls.follow).toHaveBeenCalled();
   });
