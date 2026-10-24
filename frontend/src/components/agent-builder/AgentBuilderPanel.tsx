@@ -27,6 +27,8 @@ import { AgentCanvas } from "./AgentCanvas";
 import { AgentChecksBar } from "./AgentChecksBar";
 import { AgentBlastPanel } from "./AgentBlastPanel";
 import { AgentInsightsPanel } from "./AgentInsightsPanel";
+import { InsightsComingSoon } from "./InsightsComingSoon";
+import { INSIGHTS_READY } from "./insights-ready";
 import { AgentNodePalette } from "./AgentNodePalette";
 import { AgentNodeProperties } from "./AgentNodeProperties";
 import { AgentTemplateSelector } from "./AgentTemplateSelector";
@@ -763,6 +765,9 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
           >
             <BarChart3 className="mr-1 h-3.5 w-3.5" />
             Insights
+            {!INSIGHTS_READY && (
+              <span className="ml-1.5 rounded bg-amber-100 px-1 py-px text-[9px] font-semibold uppercase leading-none text-amber-800">Soon</span>
+            )}
           </Button>
           <Button
             size="sm"
@@ -860,6 +865,8 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
               incoming={arrived && arrived.agentId === currentAgent.id ? arrived.data : undefined}
               onIncomingTaken={() => setArrived(null)}
             />
+          ) : showInsights && !INSIGHTS_READY ? (
+            <InsightsComingSoon />
           ) : showInsights ? (
             <AgentInsightsPanel
               projectId={projectId}
