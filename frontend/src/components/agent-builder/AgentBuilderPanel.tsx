@@ -32,7 +32,9 @@ import { AgentTestConsole } from "./AgentTestConsole";
 import { AgentWatchPanel } from "./AgentWatchPanel";
 import { WatchComingSoon } from "./WatchComingSoon";
 import { useAgentWatch } from "./useAgentWatch";
+import { useWatchRecording } from "./useWatchRecording";
 import { nodeStates } from "@/lib/agent-watch";
+import { chatsFor, sentence, type Incoming, type RecordedChat, type Sent } from "@/lib/agent-recording";
 import { applyFix, revertFix } from "@/lib/agent-blast";
 import { AgentIOSchemaEditor } from "./config/AgentIOSchemaEditor";
 import type {
@@ -92,6 +94,40 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
   // Watch the running app's real chats live: the canvas lights up as they happen.
   const [showWatch, setShowWatch] = useState(false);
   const watch = useAgentWatch({ projectId, agentId: currentAgent?.id ?? "", agentName: editName, nodes, edges });
+  // Recording the next X chats lives here, beside the watch, so it carries on while Find problems or Test is shown.
+  const recording = useWatchRecording(projectId, watch.state);
+  // Chats just sent from Watch live to Find problems (it says what arrived and shows the fixer's proposals once, then lets go of them).
+  const [arrived, setArrived] = useState<{ agentId: string; data: Incoming } | null>(null);
+
+  // Send the recorded chats to Find problems as saved tests, and (when asked) have the fixer read them. Chats of another assistant
+  // are held back here, the platform leaves them out too. Resolves to a sentence for the Watch live strip; a refusal throws its sentence.
+  const sendRecording = useCallback(
+    async (chats: RecordedChat[], fix: boolean): Promise<string> => {
+      if (!currentAgent) throw new Error("Open an assistant first.");
+      const { mine, skipped } = chatsFor(chats, currentAgent.id);
+      if (mine.length === 0) throw new Error("None of these chats are from this assistant, so there is nothing to send.");
+      const res = await api.post<Partial<Sent>>(`/api/projects/${projectId}/agent-definitions/${currentAgent.id}/recordings/send`, {
+        chats: mine,
+        fix,
+        // the fixer needs the assistant as drawn now (the same drawing Find problems is given)
+        ...(fix ? { graph: { id: currentAgent.id, name: editName, description: editDescription || undefined, nodes, edges, config: currentAgent.config } } : {}),
+      });
+      const result: Sent = {
+        sent: res?.sent ?? mine.length,
+        added: res?.added ?? 0,
+        alreadyThere: res?.alreadyThere ?? 0,
+        leftOut: res?.leftOut ?? 0,
+        fixes: Array.isArray(res?.fixes) ? res.fixes : [],
+        problems: res?.problems ?? {},
+      };
+      setArrived({ agentId: currentAgent.id, data: { ...result, leftOut: result.leftOut + skipped, key: Date.now(), fixRequested: fix } });
+      setShowWatch(false);
+      setShowTestConsole(false);
+      setShowBlast(true);
+      return sentence(result, { fix, skipped });
+    },
+    [currentAgent, projectId, editName, editDescription, nodes, edges],
+  );
 
   // Fetch agent list
   const { data: agents = [], isLoading } = useQuery({
@@ -649,7 +685,7 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
             variant="outline"
             onClick={() => {
               setShowBlast(false);
-              setShowTestConsole(!showTestConsole);
+                      setShowTestConsole(!showTestConsole);
             }}
           >
             <FlaskConical className="mr-1 h-3.5 w-3.5" />
@@ -661,7 +697,7 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
             aria-pressed={showBlast}
             onClick={() => {
               setShowTestConsole(false);
-              setShowBlast(!showBlast);
+                      setShowBlast(!showBlast);
             }}
           >
             <Bomb className="mr-1 h-3.5 w-3.5" />
@@ -674,7 +710,7 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
             onClick={() => {
               setShowTestConsole(false);
               setShowBlast(false);
-              setShowWatch(!showWatch);
+                      setShowWatch(!showWatch);
             }}
           >
             <Radio className="mr-1 h-3.5 w-3.5" />
@@ -777,6 +813,8 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
               onRevertFix={(fix) => setNodes((current) => revertFix(current, fix))}
               agentUnsaved={saveState === "error"}
               onSaveAgent={() => autoSave()}
+              incoming={arrived && arrived.agentId === currentAgent.id ? arrived.data : undefined}
+              onIncomingTaken={() => setArrived(null)}
             />
           ) : showTestConsole ? (
             <AgentTestConsole
@@ -828,6 +866,9 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
             onDisconnect={watch.disconnect}
             onSelect={watch.select}
             onFollow={watch.follow}
+            recording={recording}
+            onSendToBlast={(chats) => sendRecording(chats, false)}
+            onSendToFix={(chats) => sendRecording(chats, true)}
           />
         )}
         {selectedNode && !showTestConsole && !showWatch && (

@@ -20,7 +20,7 @@ from models.project import (
     Version,
 )
 from schemas.agent_builder import (
-    AgentBlastFixes, AgentBlastInvent, AgentBlastRun, AgentBlastTool, AgentBlastWrite, AgentDefinitionSave, AgentListItem, AgentScenarioSave,
+    AgentBlastFixes, AgentBlastInvent, AgentBlastRun, AgentBlastTool, AgentBlastWrite, AgentDefinitionSave, AgentListItem, AgentRecordingSend, AgentScenarioSave,
     AgentTestRequest,
     AgentWatch,
 )
@@ -389,6 +389,29 @@ async def blast_fixes(
     try:
         return {"fixes": await propose_fixes(req.graph.model_dump(), req.results)}
     except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/api/projects/{project_id}/agent-definitions/{agent_id}/recordings/send")
+async def send_recorded_chats(
+    project_id: uuid.UUID,
+    agent_id: str,
+    req: AgentRecordingSend,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Chats recorded in Watch live: keep them with all their details, add each as a saved test in Find problems, and (when
+    ``fix`` is set) have the fixer propose fixes from what really happened. Nothing is applied: the builder decides."""
+    from services.agent_recording import send
+
+    project = await get_project_with_auth(project_id, user, db)
+    if not project.output_dir:
+        raise HTTPException(status_code=400, detail="This project has not been built yet, so there is nowhere to keep the chats.")
+    try:
+        return await send(project.output_dir, agent_id, req.chats, graph=req.graph.model_dump() if req.graph else None, fix=req.fix)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:  # the model could not be reached: said in plain words
         raise HTTPException(status_code=400, detail=str(e))
 
 
