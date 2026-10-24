@@ -64,6 +64,8 @@ scikit-learn>=1.4.0
 aiosqlite>=0.20.0
 # Same class: tests/deploy/* import respx to stub the Neon/Vercel HTTP clients.
 respx>=0.21.0
+# Tests of the agent-insights Redis stream (services/agent_insights_bus.py) run its real code on an in-memory Redis; skipped if absent.
+fakeredis>=2.26
 # Shuffles collection order every run, so a test that only passes because
 # something else ran first fails where it is, not three files later. Six
 # failures were exactly that and read as bugs in the files reporting them: a
