@@ -267,6 +267,77 @@ async def watch_stream(app_url: str, secret: str | None, role: str | None = None
                     if trusted else f"The connection to the app broke: {e}")
 
 
+NO_INSIGHTS = ("This app does not record insights yet: apply the agent again and push the database changes, then run the app "
+               "again.")
+#: What an app may send back for the insights page: a few hundred rows at most, so anything bigger is not one of our apps.
+_MAX_JSON_BYTES = 2_000_000
+
+
+async def tunnel_target(project_id: str) -> tuple[str, str, Any]:
+    """Where the builder's computer can be reached through its tunnel, the secret the connector made, and the port the app
+    runs on there. Raises ``DebugError`` with the same plain sentence Watch live gives when no computer is paired or the
+    tunnel is down, so a screen built on this says the same thing."""
+    state = await asyncio.to_thread(agent_tunnel.describe, project_id)
+    if not state["enabled"]:
+        raise DebugError("This platform runs on your own computer, so there is nothing to connect: use the app's address.")
+    if not state["registered"]:
+        raise DebugError(NOT_PAIRED)
+    if not state["connected"]:
+        raise DebugError(TUNNEL_DOWN)
+    reg = agent_tunnel.get(project_id) or {}
+    url = agent_tunnel.target_url(project_id)
+    if not url:
+        raise DebugError(NOT_PAIRED)
+    return url, reg.get("secret", ""), state.get("appPort")
+
+
+async def app_get_json(app_url: str, secret: str | None, path: str, params: dict[str, Any] | None = None, *,
+                       trusted: bool = False, app_port: Any = None) -> Any:
+    """One GET of a page of the app's debug-guarded API, the same safe way ``status`` does it: a typed address must be on this
+    computer (``trusted`` is only for the address the platform chose for a tunnel), the secret goes in the one header, nothing
+    else is sent, and the answer is read with a size limit. Every way it can fail is a ``DebugError`` in plain words.
+
+    A plain 404 is how the app answers both a wrong key and a route it does not have; it is told apart by asking the
+    always-present debug route: if that refuses the key too, the key is the problem, otherwise the app is too old."""
+    url = app_url.rstrip("/") if trusted else clean_app_url(app_url)
+    if not secret:
+        raise DebugError("This app has no live-run key yet. Apply the agent once to create it.")
+    headers = {HEADER: secret}
+    timeout = 15 if trusted else 60
+    where = "your computer" if trusted else url
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            async with client.stream("GET", f"{url}{path}", params=params or None, headers=headers) as r:
+                status_code = r.status_code
+                body = b""
+                if status_code < 400:
+                    async for chunk in r.aiter_bytes():
+                        body += chunk
+                        if len(body) > _MAX_JSON_BYTES:
+                            raise DebugError(f"The app at {where} sent far more than an insights page holds, so it does not look like one of your apps.")
+            if status_code == 404:
+                probe = await client.get(f"{url}/api/agent/debug", headers=headers)
+                if probe.status_code == 404:
+                    raise DebugError(WRONG_KEY if trusted else str(_off()))
+                raise DebugError(NO_INSIGHTS)
+    except DebugError:
+        raise
+    except httpx.ConnectError:
+        raise DebugError(TUNNEL_DOWN if trusted else str(_unreachable(url)))
+    except httpx.ReadTimeout:
+        raise DebugError(f"The app at {where} took too long to answer. Try again in a moment.")
+    except (httpx.RemoteProtocolError, httpx.ReadError, httpx.WriteError) as e:
+        raise DebugError(_nothing_answers(app_port) if trusted else f"The connection to the app broke: {e}")
+    except httpx.HTTPError as e:
+        raise DebugError(f"The connection to your computer broke ({type(e).__name__})." if trusted else f"The connection to the app broke: {e}")
+    if status_code >= 400:
+        raise DebugError(f"Something at {where} answered with an error ({status_code}), so it does not look like one of your apps.")
+    try:
+        return json.loads(body)
+    except ValueError:
+        raise DebugError(f"Something answered at {where}, but it is not one of your apps: it did not answer the way a generated app does.")
+
+
 def flow_map(graph: dict[str, Any]) -> dict[str, Any]:
     """Which box on the canvas each thing the runtime does belongs to, so the live view can light the right one.
 
