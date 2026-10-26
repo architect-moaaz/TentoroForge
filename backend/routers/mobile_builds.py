@@ -228,9 +228,22 @@ async def _run_build_and_poll(
             native_build.unstage(staged)
 
     await _apply_state(build_row_id, state)
+    await _poll_until_done(build_row_id, mobile_dir, state.build_id, creds)
 
-    # Poll loop.
-    started = asyncio.get_event_loop().time()
+
+async def _poll_until_done(
+    build_row_id: uuid.UUID,
+    mobile_dir: str,
+    eas_build_id: str,
+    creds: MobileCredentials,
+    *,
+    already_waited: float = 0.0,
+) -> None:
+    """Ask EAS about a build every `_POLL_INTERVAL_SEC` seconds and write what it says on the row, until it is over.
+
+    `already_waited` is how long the build has been going when this starts: a poll taken up again after the platform
+    restarted (`resume_open_builds`) does not get another whole hour."""
+    started = asyncio.get_event_loop().time() - already_waited
     while True:
         # Re-read to see if someone canceled the row externally.
         async with async_session() as sess:
@@ -246,13 +259,62 @@ async def _run_build_and_poll(
         await asyncio.sleep(_POLL_INTERVAL_SEC)
         try:
             state = await poll_build(
-                mobile_dir, state.build_id,
+                mobile_dir, eas_build_id,
                 expo_token=creds.expo_eas_token,
             )
         except EasClientError as exc:
-            logger.warning("poll_build failed for %s: %s", state.build_id, exc)
+            logger.warning("poll_build failed for %s: %s", eas_build_id, exc)
             continue
         await _apply_state(build_row_id, state)
+
+
+#: A build that has been going longer than this when the platform starts is not taken up again: EAS has long since finished or
+#: dropped it, and the row is ended with that said.
+_RESUME_MAX_AGE_SEC = 6 * 60 * 60
+
+#: The polls taken up again, held so they are not collected while they run.
+_resumed: set[asyncio.Task] = set()
+
+
+async def resume_open_builds() -> int:
+    """TAKE UP THE BUILDS THE LAST PROCESS WAS WATCHING. The check on a build lives in the platform's own process, so a restart
+    (the Claude app stops its servers now and then) left the row on "in progress" for ever, with the build long finished on
+    Expo (Gather, 2026-10-23). At start, every build still open is watched again; one that never reached Expo is ended and
+    says so, since nothing is left to watch. Returns how many were taken up."""
+    now = datetime.now(timezone.utc)
+    taken = 0
+    async with async_session() as sess:
+        rows = (await sess.execute(
+            select(MobileBuild).where(MobileBuild.status.notin_(("completed", "failed", "canceled")))
+        )).scalars().all()
+        open_builds = [(r.id, r.project_id, r.eas_build_id, r.created_at, r.platform) for r in rows]
+    for row_id, project_id, eas_id, created_at, platform in open_builds:
+        age = (now - created_at).total_seconds() if created_at else 0.0
+        if not eas_id:
+            await _mark_failed(row_id, "The platform restarted before this build reached Expo. Start it again.")
+            continue
+        if age > _RESUME_MAX_AGE_SEC:
+            await _mark_failed(row_id, "The platform restarted and this build is too old to follow. Look for it on Expo.")
+            continue
+        try:
+            async with async_session() as sess:
+                project = await sess.get(Project, project_id)
+                if project is None:
+                    continue
+                target = native_build.choose_target(project.output_dir, _blueprint_of(project.output_dir))
+                creds = await load_mobile_credentials(project.org_id, sess)
+            if target is None:
+                continue
+        except Exception as exc:  # noqa: BLE001 - one build that cannot be followed must not stop the others
+            logger.warning("[mobile_builds] build %s cannot be followed again: %s", row_id, exc)
+            continue
+        task = asyncio.create_task(_poll_until_done(row_id, str(target.dir), eas_id, creds, already_waited=age))
+        _resumed.add(task)
+        task.add_done_callback(_resumed.discard)
+        taken += 1
+    if open_builds:
+        logger.info("[mobile_builds] %d open build(s) found at start, %d followed again", len(open_builds), taken)
+    return taken
 
 
 async def _apply_state(build_row_id: uuid.UUID, state: BuildState) -> None:
