@@ -417,200 +417,6 @@ async def _shutdown():
         await app.state.timer_scheduler.stop()
 
 
-@app.post("/api/generate")
-async def generate(req: GenerateRequest):
-    """Start generation — streams SSE events as the agent works."""
-    project_id = str(uuid.uuid4())[:8]
-    output_dir = str(OUTPUT_BASE / project_id)
-
-    async def event_stream():
-        yield {
-            "event": "status",
-            "data": json.dumps({"message": "Fetching Figma design data...", "project_id": project_id}),
-        }
-
-        try:
-            # Pre-fetch phase: extract data, export images
-            parsed = parse_figma_url(req.figma_url)
-            prefetch_info = await _prefetch_figma_data(
-                file_key=parsed["file_key"],
-                node_id=parsed.get("node_id"),
-                output_dir=output_dir,
-                figma_token=req.figma_token,
-            )
-            frames = prefetch_info.get("frames_processed", [])
-            yield {
-                "event": "status",
-                "data": json.dumps({
-                    "message": f"Extracted {len(frames)} frame(s), exported images. Starting code generation..."
-                }),
-            }
-
-            # --- Phase 1: Code generation ---
-            gen_result = None
-            async for message in run_agent(
-                figma_url=req.figma_url,
-                figma_token=req.figma_token,
-                output_dir=output_dir,
-                prefetch_info=prefetch_info,
-            ):
-                if isinstance(message, AssistantMessage):
-                    for block in message.content:
-                        if isinstance(block, TextBlock) and block.text.strip():
-                            yield {
-                                "event": "log",
-                                "data": json.dumps({"text": block.text}),
-                            }
-                        elif isinstance(block, ToolUseBlock):
-                            tool_name = block.name
-                            # Detect file creation
-                            if tool_name == "Write":
-                                file_path = block.input.get("file_path", "")
-                                # Make path relative to output dir
-                                rel_path = file_path
-                                if file_path.startswith(output_dir):
-                                    rel_path = file_path[len(output_dir):].lstrip("/")
-                                yield {
-                                    "event": "file_created",
-                                    "data": json.dumps({"path": rel_path}),
-                                }
-                            yield {
-                                "event": "tool_call",
-                                "data": json.dumps({
-                                    "tool": tool_name,
-                                    "args": _safe_serialize(block.input),
-                                }),
-                            }
-                        elif isinstance(block, ToolResultBlock):
-                            pass  # Skip tool results in stream
-
-                elif isinstance(message, ResultMessage):
-                    gen_result = message
-
-            # --- Phase 2: Visual review loop ---
-            total_cost = gen_result.total_cost_usd if gen_result else 0
-            total_turns = gen_result.num_turns if gen_result else 0
-            total_duration = gen_result.duration_ms if gen_result else 0
-            review_iteration = 0
-
-            for iteration in range(MAX_REVIEW_ITERATIONS):
-                review_iteration = iteration + 1
-
-                # 2a. Screenshot the running app
-                yield {
-                    "event": "review_start",
-                    "data": json.dumps({
-                        "message": f"Taking screenshot and reviewing (iteration {review_iteration}/{MAX_REVIEW_ITERATIONS})...",
-                        "iteration": review_iteration,
-                        "max_iterations": MAX_REVIEW_ITERATIONS,
-                    }),
-                }
-
-                screenshot_path = await capture_screenshot(output_dir)
-                if not screenshot_path:
-                    yield {
-                        "event": "review_issues",
-                        "data": json.dumps({
-                            "message": "Could not capture screenshot — skipping review.",
-                            "issues": None,
-                            "iteration": review_iteration,
-                        }),
-                    }
-                    break
-
-                # 2b. Run reviewer agent
-                issues = await run_reviewer_agent(output_dir)
-
-                # 2c. Check if approved
-                if not issues or "APPROVED" in issues.upper():
-                    yield {
-                        "event": "review_approved",
-                        "data": json.dumps({
-                            "message": f"Design match approved after {review_iteration} review iteration(s)!",
-                            "iteration": review_iteration,
-                        }),
-                    }
-                    break
-
-                # 2d. Report issues found
-                yield {
-                    "event": "review_issues",
-                    "data": json.dumps({
-                        "message": f"Found visual differences (iteration {review_iteration}).",
-                        "issues": issues,
-                        "iteration": review_iteration,
-                    }),
-                }
-
-                # 2e. Run fixer agent
-                yield {
-                    "event": "fix_start",
-                    "data": json.dumps({
-                        "message": f"Applying fixes (iteration {review_iteration}/{MAX_REVIEW_ITERATIONS})...",
-                        "iteration": review_iteration,
-                    }),
-                }
-
-                async for message in run_fixer_agent(output_dir, issues):
-                    if isinstance(message, AssistantMessage):
-                        for block in message.content:
-                            if isinstance(block, TextBlock) and block.text.strip():
-                                yield {
-                                    "event": "log",
-                                    "data": json.dumps({"text": f"[Fix {review_iteration}] {block.text}"}),
-                                }
-                            elif isinstance(block, ToolUseBlock):
-                                tool_name = block.name
-                                if tool_name in ("Write", "Edit"):
-                                    file_path = block.input.get("file_path", "")
-                                    rel_path = file_path
-                                    if file_path.startswith(output_dir):
-                                        rel_path = file_path[len(output_dir):].lstrip("/")
-                                    yield {
-                                        "event": "file_created",
-                                        "data": json.dumps({"path": rel_path}),
-                                    }
-                                yield {
-                                    "event": "tool_call",
-                                    "data": json.dumps({
-                                        "tool": tool_name,
-                                        "args": _safe_serialize(block.input),
-                                    }),
-                                }
-                    elif isinstance(message, ResultMessage):
-                        total_cost += message.total_cost_usd or 0
-                        total_turns += message.num_turns or 0
-                        total_duration += message.duration_ms or 0
-            else:
-                # Exhausted all iterations without approval
-                yield {
-                    "event": "review_issues",
-                    "data": json.dumps({
-                        "message": f"Reached max review iterations ({MAX_REVIEW_ITERATIONS}). Finishing.",
-                        "issues": None,
-                        "iteration": review_iteration,
-                    }),
-                }
-
-            # --- Final complete event ---
-            yield {
-                "event": "complete",
-                "data": json.dumps({
-                    "project_id": project_id,
-                    "num_turns": total_turns,
-                    "cost_usd": total_cost,
-                    "duration_ms": total_duration,
-                    "review_iterations": review_iteration,
-                }),
-            }
-
-        except Exception as e:
-            yield {
-                "event": "error",
-                "data": json.dumps({"message": str(e)}),
-            }
-
-    return EventSourceResponse(event_stream(), ping=15)
 
 
 def _safe_serialize(obj: dict) -> str:
@@ -625,197 +431,50 @@ def _safe_serialize(obj: dict) -> str:
     return json.dumps(truncated)
 
 
-@app.get("/api/projects/{project_id}/files")
-async def list_files(project_id: str):
-    """List all files in a generated project."""
-    project_dir = OUTPUT_BASE / project_id
-    if not project_dir.exists():
-        raise HTTPException(status_code=404, detail="Project not found")
-
-    files = []
-    for path in sorted(project_dir.rglob("*")):
-        if path.is_file() and not path.name.startswith("."):
-            rel = str(path.relative_to(project_dir))
-            files.append(rel)
-
-    return {"project_id": project_id, "files": files}
 
 
-@app.get("/api/projects/{project_id}/file")
-async def read_file(project_id: str, path: str = Query(...)):
-    """Read a specific file from a generated project."""
-    project_dir = OUTPUT_BASE / project_id
-    file_path = project_dir / path
-
-    # Prevent path traversal
-    if not file_path.resolve().is_relative_to(project_dir.resolve()):
-        raise HTTPException(status_code=400, detail="Invalid path")
-
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail="File not found")
-
-    content = file_path.read_text(errors="replace")
-    return {"path": path, "content": content}
 
 
 @app.get("/api/projects/{project_id}/asset")
 async def serve_asset(project_id: str, path: str = Query(...)):
-    """Serve a raw file (image, font, etc.) from a generated project."""
+    """A picture or font from a project's PUBLIC folder: the legacy IR editor
+    draws `/images/...` through here, from an `<img>` that cannot send a sign-in.
+
+    It served any file under the project with no sign-in, the app's
+    `.env.local` (database address, secrets, encryption key) included, and a
+    published app's address names its project (2026-10-26). Only what the app
+    publishes anyway is served now: a path inside `public/` (or `app/public/`),
+    never a hidden file."""
     from fastapi.responses import FileResponse
     import mimetypes
 
-    project_dir = OUTPUT_BASE / project_id
-    file_path = project_dir / path
-
-    if not file_path.resolve().is_relative_to(project_dir.resolve()):
-        raise HTTPException(status_code=400, detail="Invalid path")
-
-    if not file_path.exists():
+    rel = Path(path)
+    if rel.is_absolute() or not rel.parts or rel.parts[0] != "public" or any(
+            part.startswith(".") for part in rel.parts):
         raise HTTPException(status_code=404, detail="File not found")
+    project_dir = (OUTPUT_BASE / project_id).resolve()
+    for base in (project_dir, project_dir / "app"):
+        public = (base / "public").resolve()
+        file_path = (base / rel).resolve()
+        if file_path.is_relative_to(public) and file_path.is_relative_to(project_dir) and file_path.is_file():
+            media_type = mimetypes.guess_type(str(file_path))[0] or "application/octet-stream"
+            return FileResponse(file_path, media_type=media_type)
+    raise HTTPException(status_code=404, detail="File not found")
 
-    media_type = mimetypes.guess_type(str(file_path))[0] or "application/octet-stream"
-    return FileResponse(file_path, media_type=media_type)
 
-
-@app.get("/api/projects/{project_id}/download")
-async def download_project(project_id: str):
-    """Download the entire generated project as a ZIP file."""
-    project_dir = OUTPUT_BASE / project_id
-    if not project_dir.exists():
-        raise HTTPException(status_code=404, detail="Project not found")
-
-    buf = BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for path in sorted(project_dir.rglob("*")):
-            if path.is_file():
-                arcname = str(path.relative_to(project_dir))
-                zf.write(path, arcname)
-
-    buf.seek(0)
-    return StreamingResponse(
-        buf,
-        media_type="application/zip",
-        headers={"Content-Disposition": f"attachment; filename=design2ui-{project_id}.zip"},
-    )
 
 
 # ---------------------------------------------------------------------------
 # Preview endpoints
 # ---------------------------------------------------------------------------
 
-@app.post("/api/projects/{project_id}/preview/start")
-async def preview_start(project_id: str):
-    """Start a Next.js dev server for live preview."""
-    project_dir = OUTPUT_BASE / project_id
-    if not project_dir.exists():
-        raise HTTPException(status_code=404, detail="Project not found")
-
-    try:
-        port = await start_preview(project_id, str(project_dir))
-        return {"port": port}
-    except RuntimeError as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/projects/{project_id}/preview/stop")
-async def preview_stop(project_id: str):
-    """Stop the dev server for a project."""
-    stopped = stop_preview(project_id)
-    return {"stopped": stopped}
 
 
-@app.get("/api/projects/{project_id}/preview/status")
-async def preview_status(project_id: str):
-    """Check if a preview dev server is running for a project."""
-    from preview import get_preview_port
-    port = get_preview_port(project_id)
-    return {"running": port is not None, "port": port}
 
 
 # ---------------------------------------------------------------------------
 # Refinement endpoint
 # ---------------------------------------------------------------------------
 
-@app.post("/api/projects/{project_id}/refine")
-async def refine(project_id: str, req: RefineRequest):
-    """Apply a natural language refinement — streams SSE events."""
-    project_dir = OUTPUT_BASE / project_id
-    if not project_dir.exists():
-        raise HTTPException(status_code=404, detail="Project not found")
-
-    async def event_stream():
-        yield {
-            "event": "refine_start",
-            "data": json.dumps({"message": f"Applying: {req.instruction}"}),
-        }
-
-        try:
-            result = None
-            async for message in run_refinement_agent(
-                output_dir=str(project_dir),
-                instruction=req.instruction,
-            ):
-                if isinstance(message, AssistantMessage):
-                    for block in message.content:
-                        if isinstance(block, TextBlock) and block.text.strip():
-                            yield {
-                                "event": "log",
-                                "data": json.dumps({"text": block.text}),
-                            }
-                        elif isinstance(block, ToolUseBlock):
-                            tool_name = block.name
-                            if tool_name in ("Write", "Edit"):
-                                file_path = block.input.get("file_path", "")
-                                rel_path = file_path
-                                if file_path.startswith(str(project_dir)):
-                                    rel_path = file_path[len(str(project_dir)):].lstrip("/")
-                                yield {
-                                    "event": "file_created",
-                                    "data": json.dumps({"path": rel_path}),
-                                }
-                            yield {
-                                "event": "tool_call",
-                                "data": json.dumps({
-                                    "tool": tool_name,
-                                    "args": _safe_serialize(block.input),
-                                }),
-                            }
-                elif isinstance(message, ResultMessage):
-                    result = message
-
-            # Post-refinement invariant restoration. The refinement agent uses
-            # Write/Edit on TSX files; if it clobbered a shell/nav artifact OR
-            # left the sidebar out of sync with newly-added routes, the app
-            # renders a blank dashboard with no menus (reported as B-008/B-010:
-            # "created a dashboard without any menus and functionalities").
-            # Re-running the same idempotent passes the generation pipeline
-            # uses restores shell.json's menu from nav-flow and reconciles any
-            # stale route.
-            try:
-                from services.shell_menu_sync import sync_shell_menu
-                from services.nav_route_reconcile_guard import reconcile_nav_routes
-                sync_shell_menu(str(project_dir))
-                reconcile_nav_routes(str(project_dir))
-            except Exception as _e:  # noqa: BLE001
-                # Non-fatal — the refinement itself already applied.
-                logging.getLogger(__name__).warning(
-                    "post-refinement invariant sync failed: %s", _e,
-                )
-
-            yield {
-                "event": "refine_complete",
-                "data": json.dumps({
-                    "message": "Refinement complete",
-                    "num_turns": result.num_turns if result else 0,
-                    "cost_usd": result.total_cost_usd if result else 0,
-                    "duration_ms": result.duration_ms if result else 0,
-                }),
-            }
-
-        except Exception as e:
-            yield {
-                "event": "error",
-                "data": json.dumps({"message": str(e)}),
-            }
-
-    return EventSourceResponse(event_stream(), ping=15)
