@@ -1,7 +1,9 @@
 """The background worker: takes batches off the stream and applies them, and does the small chores that keep the numbers honest.
 
-Started from the app's startup (main.py) in every backend process; each process is one consumer in the same group, so the stream's
-entries are shared between them. ``FORGE_INSIGHTS_WORKER=0`` switches it off (tests, or a process that should only serve requests).
+Started from the app's startup (main.py) in every backend process that has ``FORGE_INSIGHTS_WORKER=1``; each process is one consumer in
+the same group, so the stream's entries are shared between them. It is OFF unless asked for: the Insights page still says "Coming
+soon", so nothing should be running for it yet (and the production Redis evicts keys under pressure, which could silently drop stream
+entries). Switch it on, on the processes that should apply events, when the feature ships.
 
 Per loop:
 * READ a batch of entries, group them by project and apply each project's events in ONE transaction, then acknowledge them. If the
@@ -42,7 +44,7 @@ PEOPLE_EVERY_S = 5.0
 
 
 def enabled() -> bool:
-    return os.getenv("FORGE_INSIGHTS_WORKER", "1").strip().lower() not in ("0", "off", "false", "no")
+    return os.getenv("FORGE_INSIGHTS_WORKER", "0").strip().lower() in ("1", "on", "true", "yes")
 
 
 class InsightsWorker:

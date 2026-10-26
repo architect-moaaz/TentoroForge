@@ -211,13 +211,15 @@ async def test_the_worker_starts_works_and_stops_cleanly(db):
     assert (await totals())["turns"] == 5
 
 
-def test_the_worker_can_be_switched_off(monkeypatch):
+def test_the_worker_is_off_until_it_is_switched_on(monkeypatch):
     monkeypatch.setenv("FORGE_INSIGHTS_WORKER", "0")
     assert worker_mod.enabled() is False
     monkeypatch.setenv("FORGE_INSIGHTS_WORKER", "1")
     assert worker_mod.enabled() is True
+    monkeypatch.setenv("FORGE_INSIGHTS_WORKER", "")
+    assert worker_mod.enabled() is False
     monkeypatch.delenv("FORGE_INSIGHTS_WORKER")
-    assert worker_mod.enabled() is True
+    assert worker_mod.enabled() is False        # the Insights page still says "Coming soon": nothing runs by default
 
 
 @pytest.mark.asyncio

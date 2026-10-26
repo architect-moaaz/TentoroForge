@@ -428,7 +428,7 @@ async def _start_domain_watch():
 @app.on_event("startup")
 async def _start_insights_worker():
     """Applies the events apps push to /api/insights/ingest into the insights rollups — see `services.agent_insights_worker`.
-    `FORGE_INSIGHTS_WORKER=0` leaves it off."""
+    Off by default (the feature is not out yet): `FORGE_INSIGHTS_WORKER=1` turns it on."""
     from services import agent_insights_worker
 
     if agent_insights_worker.enabled():
