@@ -16,6 +16,7 @@ import pytest_asyncio
 from database import async_session
 from models.agent_insights import agent_turn_events
 from services import agent_insights_bus as bus_mod
+from services import agent_insights_people as people_mod
 from services import agent_insights_store as store
 from services import agent_insights_summary as summary
 from services import agent_insights_worker as worker_mod
@@ -195,7 +196,11 @@ async def test_the_same_entry_applied_twice_by_two_workers_counts_once(db, bus):
 
 
 @pytest.mark.asyncio
-async def test_the_worker_starts_works_and_stops_cleanly(db):
+async def test_the_worker_starts_works_and_stops_cleanly(db, monkeypatch):
+    # The events are dated NOW (a fixed day). The worker's retention chore runs on the real clock and, once NOW is more than 48 hours
+    # in the past, rightly deletes those minute rollups: the test then read 0 turns. Give the chores the same clock as the events.
+    monkeypatch.setattr(store, "utcnow", lambda: NOW)
+    monkeypatch.setattr(people_mod, "utcnow", lambda: NOW)
     memory = MemoryBus()
     bus_mod.use_bus(memory)
     w = worker_mod.InsightsWorker(consumer="w1", block_ms=50)
