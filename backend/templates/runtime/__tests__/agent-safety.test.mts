@@ -1,10 +1,11 @@
 /**
  * Confirm-before-changing and per-person limits, run from the SHIPPED files in templates/runtime/agents/.
  *
- * What is pinned: a tool that changes data does not run the first time it is called; it runs only when the very
- * same call is made in the turn after the person replied, and that reply is not a "no"; the assistant cannot
- * confirm for the person inside one reply; a different input is a new question; holds survive between requests
- * and lapse; a plain read is never held. And: messages per minute and hour and tokens per day stop a person with a
+ * What is pinned: a tool that changes data does not run the first time it is called; it runs only when the person
+ * pressed Go ahead on THAT hold (the button sends the hold's id) and the very same call is made in that turn; words
+ * typed in the chat release nothing, in any language; Cancel refuses it; the assistant cannot confirm for the person
+ * inside one reply; a different input is a new question; holds survive between requests and lapse; a plain read is
+ * never held. And: messages per minute and hour and tokens per day stop a person with a
  * friendly reason before anything is saved or paid for; 0 means unlimited; a counter that cannot be read means
  * "not limited"; talking to a person on the team is never limited.
  *
@@ -14,7 +15,7 @@ import { installHarness, ok, eqJson, done } from "./_harness.mts";
 
 installHarness();
 
-const { gate, actionKey, stableStringify, declined, HOLD_MINUTES } = await import("../agents/confirm.ts");
+const { gate, actionKey, stableStringify, confirmSignalOf, HOLD_MINUTES } = await import("../agents/confirm.ts");
 const { checkLimits, limitsOf, memoryUsage, DEFAULT_LIMITS } = await import("../agents/limits.ts");
 const { runAgent } = await import("../agents/runtime.ts");
 const { memoryStore } = await import("../agents/memory.ts");
@@ -42,70 +43,106 @@ console.log("the same input always gives the same key");
   ok(actionKey("t", undefined) === actionKey("t", {}), "no input and an empty input are the same");
 }
 
-console.log("what counts as a no");
+console.log("a button press is read from the request, and nothing else is");
 {
-  for (const no of ["no", "No thanks", "nope", "cancel that", "don't", "dont do it", "wait, not that one", "never mind", "not now", "stop"]) ok(declined(no), `"${no}" is a no`);
-  for (const yes of ["yes", "yes please", "go ahead", "ok do it", "sure", "yep, assign it to Maya", "nothing to add, proceed", "note: yes"]) ok(!declined(yes), `"${yes}" is not a no`);
+  eqJson(confirmSignalOf({ holdId: "abcdef12-3456", decision: "confirm" }), { holdId: "abcdef12-3456", decision: "confirm" }, "a Go ahead press is read");
+  eqJson(confirmSignalOf({ holdId: "abcdef12-3456", decision: "cancel" })?.decision, "cancel", "and so is Cancel");
+  for (const bad of [undefined, null, "yes", 1, {}, { decision: "confirm" }, { holdId: "abcdef12", decision: "yes" }, { holdId: "short", decision: "confirm" },
+    { holdId: "has a space in it", decision: "confirm" }, { holdId: 12345678, decision: "confirm" }, { holdId: "abcdef12", decision: "CONFIRM" }]) {
+    eqJson(confirmSignalOf(bad), null, `${JSON.stringify(bad)} is not a press`);
+  }
 }
 
-console.log("gate: a change is held, then released only on the next turn");
+const press = (holdId: string, decision: "confirm" | "cancel" = "confirm") => ({ holdId, decision });
+
+console.log("gate: a change is held, then released only by the person's button on the turn after");
 {
   const spec = write();
   const input = { id: "t1", data: { status: "closed" } };
   const state: any = { turn: 1, holds: [] };
-  const first: any = gate(state, spec, input, { now: 1000, reply: "close ticket t1" });
+  const first: any = gate(state, spec, input, { now: 1000 });
   ok(first.run === false && first.held?.held === true, "the first call is held");
   ok(first.held.message.includes("update ticket") && first.held.message.includes('"status":"closed"'), "and says exactly what it would do");
+  ok(typeof first.held.holdId === "string" && first.held.holdId.length >= 8, "under an id that the person's button press will carry");
+  ok(/Go ahead button/.test(first.held.message) && /Typing yes does not count/.test(first.held.message), "the assistant is told only the button counts, so it never asks for a typed yes");
   eqJson(state.holds.length, 1, "one hold is kept");
+  const id = first.held.holdId;
 
-  const again: any = gate(state, spec, input, { now: 1100, reply: "close ticket t1" });
-  ok(again.run === false && again.held, "calling it again in the SAME turn is held again: it cannot confirm for the person");
-  eqJson(state.holds.length, 1, "still one hold, not two");
+  const again: any = gate(state, spec, input, { now: 1100, confirm: press(id) });
+  ok(again.run === false && again.held, "calling it again in the SAME turn is held again, press or not: it cannot confirm for the person");
+  eqJson([again.held.holdId, state.holds.length], [id, 1], "under the same id (the one the person was shown), and still one hold");
 
   state.turn = 2;
-  const ack: any = gate(state, spec, input, { now: 2000, reply: "yes please" });
-  eqJson(ack.run, true, "next turn, same call, the person said yes: it runs");
+  const ack: any = gate(state, spec, input, { now: 2000, confirm: press(id) });
+  eqJson(ack.run, true, "next turn, same call, the person pressed Go ahead on it: it runs");
   eqJson(state.holds.length, 0, "and the hold is used up");
 
-  const replay: any = gate(state, spec, input, { now: 2100, reply: "yes please" });
-  ok(replay.run === false && replay.held, "running it a second time needs a new yes");
+  const replay: any = gate(state, spec, input, { now: 2100, confirm: press(id) });
+  ok(replay.run === false && replay.held, "running it a second time needs a new press");
 }
 
-console.log("gate: a no, a different input and a lapse");
+console.log("gate: words typed release nothing, in any language");
 {
   const spec = write();
   const input = { id: "t1", data: { status: "closed" } };
-  let state: any = { turn: 1, holds: [] };
-  gate(state, spec, input, { now: 1000, reply: "close it" });
+  const state: any = { turn: 1, holds: [] };
+  const id1 = (gate(state, spec, input, { now: 1000 }) as any).held.holdId;
+  // The next turn is the person TYPING "yes please" (or "sure", "oui", "kinda"): the request carries no press.
   state.turn = 2;
-  const no: any = gate(state, spec, input, { now: 2000, reply: "no, leave it open" });
-  ok(no.run === false && /said no/.test(no.refused), "a no is refused, and the assistant is told nothing changed");
+  const typed: any = gate(state, spec, input, { now: 2000 });
+  ok(typed.run === false && typed.held, "the same call after a typed yes is held again: only a press counts");
+  ok(typed.held.holdId !== id1, "as a new question, under a new id");
+  state.turn = 3;
+  const old: any = gate(state, spec, input, { now: 3000, confirm: press(id1) });
+  ok(old.run === false && old.held, "a press for the earlier question no longer answers it");
+  const id3 = old.held.holdId;
+  state.turn = 4;
+  eqJson(gate(state, spec, input, { now: 4000, confirm: press(id3) }).run, true, "a press for the question it is now asking does");
+}
+
+console.log("gate: Cancel, someone else's id, a different input, a lapse and an old hold");
+{
+  const spec = write();
+  const input = { id: "t1", data: { status: "closed" } };
+  const hold = (): [any, string] => {
+    const s: any = { turn: 1, holds: [] };
+    const id = (gate(s, spec, input, { now: 1000 }) as any).held.holdId;
+    s.turn = 2;
+    return [s, id];
+  };
+
+  let [state, id] = hold();
+  const no: any = gate(state, spec, input, { now: 2000, confirm: press(id, "cancel") });
+  ok(no.run === false && /cancelled/.test(no.refused), "Cancel is refused, and the assistant is told nothing changed");
   eqJson(state.holds.length, 0, "and the hold is gone");
 
-  state = { turn: 1, holds: [] };
-  gate(state, spec, input, { now: 1000, reply: "close it" });
-  state.turn = 2;
-  const other: any = gate(state, spec, { id: "t1", data: { status: "open" } }, { now: 2000, reply: "yes" });
-  ok(other.run === false && other.held, "a changed input is a new question, even right after a yes");
+  [state, id] = hold();
+  const other: any = gate(state, spec, input, { now: 2000, confirm: press("00000000-0000-4000-8000-000000000000") });
+  ok(other.run === false && other.held, "a press carrying some other id releases nothing");
 
-  state = { turn: 1, holds: [] };
-  gate(state, spec, input, { now: 1000, reply: "close it" });
-  state.turn = 3; // a turn in between: the yes was not for this
-  const stale: any = gate(state, spec, input, { now: 3000, reply: "yes" });
+  [state, id] = hold();
+  const changed: any = gate(state, spec, { id: "t1", data: { status: "open" } }, { now: 2000, confirm: press(id) });
+  ok(changed.run === false && changed.held, "a changed input is a new question, even right after a press");
+
+  [state, id] = hold();
+  state.turn = 3; // a turn in between: the press was not for this
+  const stale: any = gate(state, spec, input, { now: 3000, confirm: press(id) });
   ok(stale.run === false && stale.held, "a hold only lasts until the next turn: after a detour it is asked again");
 
-  state = { turn: 1, holds: [] };
-  gate(state, spec, input, { now: 1000, reply: "close it" });
-  state.turn = 2;
-  const late: any = gate(state, spec, input, { now: 1000 + (HOLD_MINUTES + 1) * 60_000, reply: "yes" });
+  [state, id] = hold();
+  const late: any = gate(state, spec, input, { now: 1000 + (HOLD_MINUTES + 1) * 60_000, confirm: press(id) });
   ok(late.run === false && late.held, "and it lapses after " + HOLD_MINUTES + " minutes");
+
+  const legacy: any = { turn: 2, holds: [{ tool: spec.name, key: actionKey(spec.name, input), summary: "x", at: 1000, turn: 1 }] };
+  const kept: any = gate(legacy, spec, input, { now: 2000, confirm: press("abcdef12-3456") });
+  ok(kept.run === false && kept.held, "a hold kept from before holds had ids can only be asked again");
 }
 
 console.log("gate: only tools that change data are held");
 {
   const state: any = { turn: 1, holds: [] };
-  eqJson(gate(state, read(), {}, { now: 1, reply: "show them" }).run, true, "a read runs at once");
-  eqJson(gate(state, write({ confirm: false }), {}, { now: 1, reply: "x" }).run, true, "a write switched to 'no need to ask' runs at once");
+  eqJson(gate(state, read(), {}, { now: 1 }).run, true, "a read runs at once");
+  eqJson(gate(state, write({ confirm: false }), {}, { now: 1 }).run, true, "a write switched to 'no need to ask' runs at once");
   eqJson(state.holds.length, 0, "and nothing is held for either");
 }
 
@@ -137,18 +174,21 @@ function scriptedModel(script: Array<"call" | "talk">, input: Record<string, unk
   };
 }
 
-async function run(config: any, message: string, deps: any, conversationId: string | null = null) {
+async function run(config: any, message: string, deps: any, conversationId: string | null = null, confirm: any = null) {
   const events: any[] = [];
-  await runAgent(config, { message, conversationId, user, cookie: "", origin: "" }, deps, (e: any) => events.push(e));
+  await runAgent(config, { message, confirm, conversationId, user, cookie: "", origin: "" }, deps, (e: any) => events.push(e));
   return events;
 }
 
-console.log("the loop: held first, run after the person says yes, across separate requests");
+/** The id the chat was given for the change a request held. */
+const heldId = (events: any[]): string => events.find((e: any) => e.type === "tool_result" && e.result?.held)?.result.holdId;
+
+console.log("the loop: held first, run only after the person presses Go ahead, across separate requests");
 {
   const store = memoryStore();
   const ran: any[] = [];
   const input = { id: "t1", data: { status: "closed" } };
-  const model = scriptedModel(["call", "talk", "call", "talk"], input);
+  const model = scriptedModel(["call", "talk", "call", "talk", "call", "talk", "call", "talk"], input);
   const deps: any = { store, ...model, async runTool(_s: any, i: any) { ran.push(i); return { ok: true }; } };
   const cfg = baseConfig([write()]);
 
@@ -157,12 +197,21 @@ console.log("the loop: held first, run after the person says yes, across separat
   eqJson(ran.length, 0, "the first request changes nothing");
   const held = a.find((e: any) => e.type === "tool_result");
   ok(held.ok === true && held.result.held === true, "the chat is told the change is waiting");
+  ok(typeof heldId(a) === "string", "with the id its buttons answer");
   ok(model.seenResults.some((r) => r.includes("Nothing has been changed yet")), "and so is the model, in words it can pass on");
 
   const b = await run(cfg, "yes go ahead", deps, cid);
-  eqJson(ran.length, 1, "after the person says yes, the same call runs");
+  eqJson(ran.length, 0, "a typed yes changes nothing: the assistant calls it again and it is held again");
+  ok(b.some((e: any) => e.type === "tool_result" && e.result?.held === true) && heldId(b) !== heldId(a), "as a new question, with a new id for the buttons");
+
+  const stale = await run(cfg, "Yes, go ahead.", deps, cid, press(heldId(a)));
+  eqJson(ran.length, 0, "a press for the earlier question releases nothing");
+
+  const cid2 = stale.at(-1).conversationId;
+  const c = await run(cfg, "Yes, go ahead.", deps, cid2, press(heldId(stale)));
+  eqJson(ran.length, 1, "after the person presses Go ahead on the question that is open, the same call runs");
   eqJson(ran[0], input, "with exactly that input");
-  ok(b.some((e: any) => e.type === "tool_result" && e.ok === true && !e.result?.held), "and the chat sees it done");
+  ok(c.some((e: any) => e.type === "tool_result" && e.ok === true && !e.result?.held), "and the chat sees it done");
 }
 
 console.log("the loop: the model cannot confirm for the person within one reply");
@@ -182,7 +231,7 @@ console.log("the loop: the model cannot confirm for the person within one reply"
   eqJson(ran.length, 0, "calling again and again in one reply never runs it");
 }
 
-console.log("the loop: a no, and a store that cannot keep holds");
+console.log("the loop: Cancel, and a store that cannot keep holds");
 {
   const store = memoryStore();
   const ran: any[] = [];
@@ -191,14 +240,14 @@ console.log("the loop: a no, and a store that cannot keep holds");
   const deps: any = { store, ...model, async runTool(_s: any, i: any) { ran.push(i); return { ok: true }; } };
   const cfg = baseConfig([write()]);
   const a = await run(cfg, "close t1", deps);
-  const b = await run(cfg, "no, leave it", deps, a.at(-1).conversationId);
-  eqJson(ran.length, 0, "a no means it never runs");
-  ok(b.some((e: any) => e.type === "tool_result" && e.ok === false && /said no/.test(e.error)), "and the assistant is told why");
+  const b = await run(cfg, "No, cancel that.", deps, a.at(-1).conversationId, press(heldId(a), "cancel"));
+  eqJson(ran.length, 0, "Cancel means it never runs");
+  ok(b.some((e: any) => e.type === "tool_result" && e.ok === false && /cancelled/.test(e.error)), "and the assistant is told why");
 
   const dumb = memoryStore();
   const noState: any = { store: { ...dumb, getState: undefined, setState: undefined }, ...scriptedModel(["call", "talk", "call", "talk"], input), async runTool(_s: any, i: any) { ran.push(i); return { ok: true }; } };
   const c1 = await run(cfg, "close t1", noState);
-  await run(cfg, "yes", noState, c1.at(-1).conversationId);
+  await run(cfg, "Yes, go ahead.", noState, c1.at(-1).conversationId, press(heldId(c1)));
   eqJson(ran.length, 0, "a store that cannot keep holds can never release one: it is asked about, never skipped");
 }
 

@@ -261,7 +261,7 @@ export async function runAgent(
           toolResults.push({ type: "tool_result", tool_use_id: use.id, content: msg, is_error: true });
           continue;
         }
-        const verdict = gate(confirmState, spec, use.input, { now: (deps.now ?? Date.now)(), reply: input.message });
+        const verdict = gate(confirmState, spec, use.input, { now: (deps.now ?? Date.now)(), confirm: input.confirm });
         if (!verdict.run) {
           await saveConfirmState();
           if ("held" in verdict) {

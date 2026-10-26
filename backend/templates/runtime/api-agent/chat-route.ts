@@ -3,8 +3,11 @@
  * GET  /api/agent/chat — the agents this person may talk to: name and look, never
  *                        the prompt, the tools or the guardrails.
  *
- * Body: { agentId?, message, conversationId?, attachments?: string[] }
+ * Body: { agentId?, message, conversationId?, attachments?: string[], confirm?: { holdId, decision } }
  *   agentId       which agent; the app's first enabled one when omitted.
+ *   confirm       the person pressed Go ahead (decision "confirm") or Cancel ("cancel") on a change the app is holding.
+ *                 `holdId` is the id that change was held under (sent with its tool_result). This is the ONLY way a
+ *                 held change is released: what is typed in `message` is never read as a yes.
  *   attachments   forge_files ids. The model is told they exist; a tool that takes
  *                 a file (identify a product, extract a document) is how it reads them.
  *
@@ -23,10 +26,15 @@ import { insightsShipper } from "@/lib/agents/insights-outbox";
 import { holdForShipping } from "@/lib/agents/insights-shipper";
 import { realDeps, toolIO } from "@/lib/agents/io";
 import { feedEvent, newRunId, observeDeps, publish, watching, type WatchEvent } from "@/lib/agents/watch";
+import { confirmSignalOf } from "@/lib/agents/confirm";
 import type { AgentEvent, AgentRuntimeConfig, AgentUser } from "@/lib/agents/types";
 
-/** A change the app is holding until the person agrees. Only this fact goes to the browser, never the result. */
+/** A change the app is holding until the person agrees. Only this fact (and the id their button press must carry) goes to the browser, never the result. */
 const isHeld = (result: unknown): boolean => !!result && typeof result === "object" && (result as { held?: unknown }).held === true;
+const holdIdOf = (result: unknown): string | undefined => {
+  const id = (result as { holdId?: unknown } | null)?.holdId;
+  return typeof id === "string" ? id : undefined;
+};
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -114,7 +122,7 @@ export async function POST(req: Request): Promise<Response> {
         // for a column to leak.
         const wire: AgentEvent =
           e.type === "tool_result"
-            ? { type: "tool_result", id: e.id, tool: e.tool, ok: e.ok, error: e.error, ...(isHeld(e.result) ? { held: true } : {}) }
+            ? { type: "tool_result", id: e.id, tool: e.tool, ok: e.ok, error: e.error, ...(isHeld(e.result) ? { held: true, holdId: holdIdOf(e.result) } : {}) }
             : e;
         try {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(wire)}\n\n`));
@@ -126,6 +134,7 @@ export async function POST(req: Request): Promise<Response> {
         agent,
         {
           message,
+          confirm: confirmSignalOf(body.confirm),
           conversationId: typeof body.conversationId === "string" ? body.conversationId : null,
           user,
           cookie: req.headers.get("cookie") ?? "",

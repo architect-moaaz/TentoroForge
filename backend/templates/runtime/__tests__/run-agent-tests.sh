@@ -15,6 +15,9 @@ node --experimental-strip-types --no-warnings "$DIR/agent-handoff-inbox.test.mts
 # Confirm before changing, and per-person limits.
 node --experimental-strip-types --no-warnings "$DIR/agent-safety.test.mts"
 
+# Confirm before changing at the chat route: only a button press (a structured field) releases a held change, never typed words.
+node --experimental-strip-types --no-warnings "$DIR/agent-confirm-route.test.mts"
+
 # Watching the app live: the secret, what goes to the builder, and what the tools did in the app.
 node --experimental-strip-types --no-warnings "$DIR/agent-debug.test.mts"
 

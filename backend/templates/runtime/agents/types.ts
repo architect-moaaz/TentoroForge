@@ -100,11 +100,19 @@ export interface GuardrailSpec {
 
 /** An action waiting for the person's yes: made on `turn`, released only on the turn after. */
 export interface Hold {
+  /** What the person's button press names. Made when the hold is made; a hold kept from before this existed has none and can only be asked again. */
+  id?: string;
   tool: string;
   key: string;
   summary: string;
   at: number;
   turn: number;
+}
+
+/** The person's answer to one held change: a button pressed in the chat, never words they typed. */
+export interface ConfirmSignal {
+  holdId: string;
+  decision: "confirm" | "cancel";
 }
 
 /** What a conversation remembers between requests about changes it has held back. */
@@ -397,6 +405,8 @@ export interface AgentDeps {
 
 export interface AgentRunInput {
   message: string;
+  /** Set only when the person pressed Go ahead or Cancel on a held change. Typed words are never a confirmation. */
+  confirm?: ConfirmSignal | null;
   conversationId: string | null;
   user: AgentUser | null;
   cookie: string;

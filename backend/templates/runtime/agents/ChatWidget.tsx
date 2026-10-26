@@ -19,7 +19,10 @@ type Ui = {
   position: "bottom-right" | "bottom-left" | "full-page";
 };
 type AgentInfo = { id: string; name: string; description: string | null; ui: Ui };
-type ToolNote = { id: string; tool: string; state: "running" | "ok" | "failed" | "held" };
+/** `holdId` is set on a held change: it is what the Go ahead and Cancel buttons answer. */
+type ToolNote = { id: string; tool: string; state: "running" | "ok" | "failed" | "held"; holdId?: string };
+/** A press of Go ahead or Cancel, sent with the message. Typed words never release a held change; only this does. */
+type Confirm = { holdId: string; decision: "confirm" | "cancel" };
 /** "human" is a person on the team who has taken the conversation over. `id` is the saved message, once known: what a thumbs up or down is sent against. */
 type Msg = { role: "user" | "assistant" | "human"; content: string; tools?: ToolNote[]; notice?: string; id?: string };
 /** The conversation is with a person: where it stands, as the person who asked sees it. */
@@ -43,11 +46,15 @@ const HEADING = "var(--font-heading, inherit)";
 
 const label = (tool: string) => tool.replace(/[_-]+/g, " ");
 
+/** The changes this message is still waiting on the person for: one per hold, however often the assistant asked. */
+const pendingHolds = (m: Msg): ToolNote[] =>
+  (m.tools ?? []).filter((t, k, all) => t.state === "held" && t.holdId && all.findIndex((x) => x.holdId === t.holdId) === k);
+
 type SavedMessage = {
   id?: string;
   role: "user" | "assistant" | "human";
   content: string;
-  toolCalls?: Array<{ name: string; error?: string | null; result?: { held?: boolean } | null }> | null;
+  toolCalls?: Array<{ name: string; error?: string | null; result?: { held?: boolean; holdId?: string } | null }> | null;
 };
 
 /** A saved turn as the chat draws it: the words, and a chip for each tool it used. */
@@ -60,6 +67,7 @@ function fromSaved(m: SavedMessage, i: number): Msg {
       id: `saved-${i}-${k}`,
       tool: t.name,
       state: t.error ? ("failed" as const) : t.result?.held ? ("held" as const) : ("ok" as const),
+      ...(t.result?.held && typeof t.result.holdId === "string" ? { holdId: t.result.holdId } : {}),
     })),
   };
 }
@@ -334,7 +342,7 @@ export function ChatWidget({
   const patchLast = (fn: (m: Msg) => Msg) =>
     setMsgs((prev) => (prev.length ? [...prev.slice(0, -1), fn(prev[prev.length - 1])] : prev));
 
-  async function send(text: string) {
+  async function send(text: string, confirm?: Confirm) {
     const message = text.trim();
     if (!message || busy || !agent) return;
     setInput("");
@@ -345,7 +353,7 @@ export function ChatWidget({
         method: "POST",
         credentials: "same-origin",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agentId: agent.id, message, conversationId }),
+        body: JSON.stringify({ agentId: agent.id, message, conversationId, ...(confirm ? { confirm } : {}) }),
       });
       if (!res.ok || !res.body) {
         const err = await res.json().catch(() => ({}));
@@ -381,7 +389,9 @@ export function ChatWidget({
             patchLast((m) => ({
               ...m,
               tools: (m.tools ?? []).map((t) =>
-                t.id === e.id ? { ...t, state: !e.ok ? "failed" : e.held ? "held" : "ok" } : t,
+                t.id === e.id
+                  ? { ...t, state: !e.ok ? "failed" : e.held ? "held" : "ok", ...(e.held && typeof e.holdId === "string" ? { holdId: e.holdId } : {}) }
+                  : t,
               ),
             }));
           }
@@ -482,6 +492,33 @@ export function ChatWidget({
               {m.role === "user" ? m.content : m.content ? <Markdown text={m.content} /> : busy && i === msgs.length - 1 ? "…" : ""}
               {m.notice && <div className="mt-1 text-[11px] opacity-70">{m.notice}</div>}
             </div>
+            {m.role === "assistant" && i === msgs.length - 1 && !busy && pendingHolds(m).length > 0 && (
+              // A change the app is holding is released only by these buttons, never by words typed below.
+              <div className="mt-1 flex flex-col gap-1 pl-1">
+                {pendingHolds(m)
+                  .map((t) => (
+                    <div key={t.holdId} className="flex flex-wrap items-center gap-1 text-xs">
+                      <span style={{ color: C.mutedText }}>{label(t.tool)}</span>
+                      <button
+                        type="button"
+                        onClick={() => send("Yes, go ahead.", { holdId: t.holdId!, decision: "confirm" })}
+                        className="rounded px-2 py-1 font-medium hover:opacity-90"
+                        style={{ background: C.primary, color: C.onPrimary }}
+                      >
+                        Go ahead
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => send("No, cancel that.", { holdId: t.holdId!, decision: "cancel" })}
+                        className="rounded border px-2 py-1 hover:opacity-80"
+                        style={{ borderColor: C.border, color: C.text }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ))}
+              </div>
+            )}
             {m.role === "assistant" && m.id && m.content && conversationId && !(busy && i === msgs.length - 1) && (
               <div className="mt-1 flex flex-wrap items-center gap-1 pl-1">
                 {([1, -1] as const).map((v) => {
