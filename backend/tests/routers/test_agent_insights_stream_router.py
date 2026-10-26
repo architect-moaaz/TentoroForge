@@ -51,6 +51,7 @@ async def clean(monkeypatch):
     bus_mod.use_bus(None)           # no Redis unless a test says so
     keys.forget_cache()
     ingest.RATE_LIMITER._b.clear()
+    ingest.AUTH_FAILURES._b.clear()
     ingest.DROPPED.pending.clear()
     yield
     bus_mod.reset_bus()
@@ -159,6 +160,45 @@ async def test_a_missing_wrong_or_malformed_key_is_401(auth_client, nobody, proj
             h["Authorization"] = header
         r = await nobody.post("/api/insights/ingest", content=b"{}", headers=h)
         assert r.status_code == 401 and "key" in r.json()["error"]
+
+
+def _wrong_key(i: int) -> str:
+    return "fik_" + f"{i:040d}"
+
+
+@pytest.mark.asyncio
+async def test_wrong_keys_are_limited_per_caller_and_a_repeated_one_costs_no_lookup(auth_client, nobody, project, monkeypatch):
+    key = await make_key(auth_client, project)
+    assert (await post(nobody, key, [t(1)])).status_code == 202          # now a known good key
+    clock = [0.0]
+    monkeypatch.setattr(ingest, "AUTH_FAILURES", ingest.AuthFailureLimiter(rate=0.5, burst=3, clock=lambda: clock[0]))
+    lookups = []
+    real = keys.authenticate
+
+    async def counting(token):
+        lookups.append(token)
+        return await real(token)
+
+    monkeypatch.setattr(keys, "authenticate", counting)
+    codes = [(await post(nobody, _wrong_key(i), [t(2)])).status_code for i in range(3)]
+    assert codes == [401, 401, 401] and len(lookups) == 3
+    r = await post(nobody, _wrong_key(99), [t(2)])                       # the caller used up its wrong keys: a new one is not even looked up
+    assert r.status_code == 429 and int(r.headers["retry-after"]) >= 1 and len(lookups) == 3
+    assert (await post(nobody, _wrong_key(0), [t(2)])).status_code == 401   # one it has seen: answered from memory, still 401
+    assert len(lookups) == 3
+    assert (await post(nobody, key, [t(3)])).status_code == 202           # a good key is never slowed by the caller's bad ones
+    clock[0] += 4                                                          # two seconds of refill is one more try
+    assert (await post(nobody, _wrong_key(100), [t(2)])).status_code == 401 and len(lookups) == 4
+
+
+@pytest.mark.asyncio
+async def test_good_batches_never_use_up_the_wrong_key_allowance(auth_client, nobody, project, monkeypatch):
+    key = await make_key(auth_client, project)
+    monkeypatch.setattr(ingest, "AUTH_FAILURES", ingest.AuthFailureLimiter(rate=0.5, burst=2))
+    monkeypatch.setattr(ingest, "RATE_LIMITER", ingest.KeyRateLimiter(rate=10_000, burst=10_000))
+    codes = {(await post(nobody, key, [t(i)])).status_code for i in range(40)}
+    assert codes == {202}
+    assert (await post(nobody, _wrong_key(1), [t(1)])).status_code == 401  # the allowance is still whole
 
 
 @pytest.mark.asyncio

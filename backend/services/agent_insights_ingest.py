@@ -283,6 +283,41 @@ class KeyRateLimiter:
 RATE_LIMITER = KeyRateLimiter()
 
 
+class AuthFailureLimiter:
+    """Failed keys, counted per caller address. The route is exempt from the general per-IP limit (an app's server sends hundreds of good
+    batches a second), so without this a caller could try made-up keys as fast as it likes, each unseen one costing a database query.
+    Only FAILURES draw from the bucket: a good key never does. Once a caller has used up its failures, keys the platform has not seen
+    before are refused without a lookup (see the route); keys already known, good or bad, are still answered from memory."""
+
+    def __init__(self, rate: float = 0.5, burst: float = 30.0, clock=time.monotonic) -> None:
+        self.rate, self.burst, self.clock = rate, burst, clock
+        self._b: dict[str, list[float]] = {}   # caller -> [tokens, last time]
+
+    def _fill(self, caller: str) -> list[float]:
+        now = self.clock()
+        b = self._b.get(caller)
+        if b is None:
+            if len(self._b) > 5000:
+                self._b = {k: v for k, v in self._b.items() if now - v[1] < 300}
+            b = self._b[caller] = [self.burst, now]
+        b[0] = min(self.burst, b[0] + (now - b[1]) * self.rate)
+        b[1] = now
+        return b
+
+    def record(self, caller: str) -> None:
+        """One failed key from this caller."""
+        b = self._fill(caller)
+        b[0] = max(0.0, b[0] - 1)
+
+    def blocked(self, caller: str) -> tuple[bool, float]:
+        """(blocked, seconds until it may look up a new key again)."""
+        b = self._fill(caller)
+        return (True, (1 - b[0]) / self.rate) if b[0] < 1 else (False, 0.0)
+
+
+AUTH_FAILURES = AuthFailureLimiter()
+
+
 # ---------------------------------------------------------------------------
 # counting what was turned away
 # ---------------------------------------------------------------------------

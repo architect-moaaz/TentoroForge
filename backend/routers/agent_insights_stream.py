@@ -45,6 +45,15 @@ router = APIRouter(tags=["agent-insights"], dependencies=[Depends(feature_gate("
 _HOST = re.compile(r"^[A-Za-z0-9.\-]+(:\d{1,5})?$|^\[[0-9A-Fa-f:]+\](:\d{1,5})?$")
 
 
+def _caller(request: Request) -> str:
+    """Who is calling, for the wrong-key limit: the address the proxy in front of the platform wrote (the LAST forwarded entry; earlier
+    ones came from the caller and could be made up to dodge the limit)."""
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if forwarded:
+        return forwarded.split(",")[-1].strip()[:64]
+    return request.client.host if request.client else "unknown"
+
+
 def _error(status: int, message: str, headers: dict[str, str] | None = None) -> JSONResponse:
     return JSONResponse({"error": message}, status_code=status, headers=headers)
 
@@ -94,8 +103,17 @@ async def ingest_events(request: Request):
     """Take a batch of an app's events: ``{"schema": 1, "events": [...]}``, key in ``Authorization: Bearer fik_...``."""
     header = request.headers.get("authorization", "")
     token = header[7:].strip() if header[:7].lower() == "bearer " else ""
-    ident = await keys.authenticate(token)
+    caller = _caller(request)
+    known, ident = keys.cached(token)
+    if not known:
+        # A key the platform has not seen: this is the one thing that costs a database query. A caller that has already sent a run of wrong
+        # keys is turned away here, before the query; a key that is already known (good or bad) never reaches this and is never slowed.
+        blocked, wait = ingest.AUTH_FAILURES.blocked(caller)
+        if blocked:
+            return _error(429, "Too many wrong keys from this address. Check the key and retry later.", {"Retry-After": str(max(1, int(wait + 0.999)))})
+        ident = await keys.authenticate(token)
     if ident is None:
+        ingest.AUTH_FAILURES.record(caller)
         return _error(401, "The key is missing, wrong or revoked. Send it as 'Authorization: Bearer fik_...' (make a new one on the Insights page).")
     ok, wait = ingest.RATE_LIMITER.allow(ident.key_hash)
     if not ok:

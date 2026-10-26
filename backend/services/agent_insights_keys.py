@@ -51,31 +51,56 @@ def hash_key(key: str) -> str:
 
 
 _cache: dict[str, tuple[float, KeyIdentity | None]] = {}
+#: Keys that were looked up and are not (or no longer) valid, by hash. Kept apart from the good ones so a flood of made-up keys can only
+#: push out other bad keys, never make a working app's key be looked up again. A repeated bad key costs no query while it is here.
+_missing: dict[str, float] = {}
+_MISSING_LIMIT = 5000
 _touched: dict[uuid.UUID, datetime] = {}
 
 
 def forget_cache() -> None:
     _cache.clear()
+    _missing.clear()
+
+
+def cached(token: str) -> tuple[bool, KeyIdentity | None]:
+    """(known, identity) answered from memory only: ``known`` is False when the platform would have to look this key up in the database.
+    A token that cannot be a key at all is known (and bad) without any lookup."""
+    if not looks_like_key(token):
+        return True, None
+    h = hash_key(token)
+    now = time.monotonic()
+    hit = _cache.get(h)
+    if hit and hit[0] > now:
+        return True, hit[1]
+    if _missing.get(h, 0.0) > now:
+        return True, None
+    return False, None
 
 
 async def authenticate(token: str) -> KeyIdentity | None:
     """The project this key belongs to, or None when it is unknown or revoked (the caller answers 401)."""
     if not looks_like_key(token):
         return None
+    known, ident = cached(token)
+    if known:
+        return ident
     h = hash_key(token)
-    hit = _cache.get(h)
     now = time.monotonic()
-    if hit and hit[0] > now:
-        return hit[1]
     from database import async_session
 
     async with async_session() as db:
         row = (await db.execute(select(AgentInsightKey.id, AgentInsightKey.project_id).where(
             and_(AgentInsightKey.key_hash == h, AgentInsightKey.revoked_at.is_(None))))).first()
     ident = KeyIdentity(row.project_id, row.id, h) if row else None
-    if len(_cache) > 5000:  # a flood of made-up keys must not grow memory without limit
+    if ident is None:
+        if len(_missing) >= _MISSING_LIMIT:  # a flood of made-up keys must not grow memory without limit
+            _missing.clear()
+        _missing[h] = now + MISSING_CACHE_SECONDS
+        return None
+    if len(_cache) > 5000:
         _cache.clear()
-    _cache[h] = (now + (CACHE_SECONDS if ident else MISSING_CACHE_SECONDS), ident)
+    _cache[h] = (now + CACHE_SECONDS, ident)
     return ident
 
 
