@@ -436,3 +436,38 @@ async def test_an_address_a_person_typed_is_still_limited_to_this_computer(paire
     assert "this computer" in said
     # while the platform's own tunnel address (not on loopback) is accepted only when it says so
     assert "this computer" not in b"".join([c async for c in agent_debug.watch_stream("http://tunnel:22001", None, trusted=True)]).decode()
+
+
+def test_only_the_person_who_registered_a_computer_or_an_admin_may_replace_or_remove_it(tunnel):
+    ana, bob = "user-ana", "user-bob"
+    agent_tunnel.pair(agent_tunnel.new_pairing(PID, user_id=ana)["code"], key(), 3001, SECRET, client_ip="1.2.3.4")
+    assert agent_tunnel.get(PID)["registeredBy"] == ana
+    # offline (nothing listening): a colleague may not ask for a code to take it over, nor remove it
+    with pytest.raises(TunnelError) as e:
+        agent_tunnel.new_pairing(PID, user_id=bob)
+    assert e.value.status_code == 403 and "colleague" in str(e.value)
+    with pytest.raises(TunnelError) as e:
+        agent_tunnel.revoke(PID, user_id=bob)
+    assert e.value.status_code == 403
+    assert agent_tunnel.get(PID)["publicKey"] == key(), "nothing changed"
+    # the one who registered it may, and so may an admin, who leaves the computer still belonging to Ana
+    agent_tunnel.new_pairing(PID, user_id=ana)
+    code = agent_tunnel.new_pairing(PID, user_id=bob, is_admin=True)["code"]
+    agent_tunnel.pair(code, key(2), 3001, "n" * 43, client_ip="1.2.3.4")
+    assert agent_tunnel.get(PID)["publicKey"] == key(2) and agent_tunnel.get(PID)["registeredBy"] == ana
+    assert agent_tunnel.revoke(PID, user_id=bob, is_admin=True) is True
+
+
+def test_a_code_asked_for_before_a_colleague_registered_cannot_take_their_computer_over(tunnel):
+    bob_code = agent_tunnel.new_pairing(PID, user_id="user-bob")["code"]            # nothing registered yet, so Bob may ask
+    agent_tunnel.pair(agent_tunnel.new_pairing(PID, user_id="user-ana")["code"], key(), 3001, SECRET, client_ip="1.2.3.4")
+    with pytest.raises(TunnelError) as e:
+        agent_tunnel.pair(bob_code, key(2), 3001, "n" * 43, client_ip="1.2.3.4")
+    assert e.value.status_code == 403 and agent_tunnel.get(PID)["publicKey"] == key()
+
+
+def test_a_computer_registered_before_owners_were_recorded_stays_open_to_any_member(tunnel):
+    redeem(code_for())                                                               # no user on the code: no owner recorded
+    assert agent_tunnel.get(PID)["registeredBy"] is None
+    agent_tunnel.new_pairing(PID, user_id="user-bob")
+    assert agent_tunnel.revoke(PID, user_id="user-bob") is True

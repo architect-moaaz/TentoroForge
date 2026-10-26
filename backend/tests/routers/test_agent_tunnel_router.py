@@ -33,6 +33,10 @@ class _User:
     id = "u-1"
 
 
+class _Colleague:
+    id = "u-2"
+
+
 class _Rows:
     def __init__(self, row):
         self._row = row
@@ -59,7 +63,7 @@ def server(tmp_path, monkeypatch):
     monkeypatch.setenv("FORGE_TUNNEL_HOST", "127.0.0.1")
     (tmp_path / "host_key.pub").write_text(key(9) + " root@t\n", encoding="utf-8")
     agent_tunnel._bad.clear()
-    proj = SimpleNamespace(id=PID, output_dir=None)
+    proj = SimpleNamespace(id=PID, output_dir=None, org_id=uuid.uuid4())
 
     async def fake_get(project_id, user, db):
         if str(project_id) != str(PID):
@@ -252,7 +256,63 @@ async def test_the_stream_through_the_tunnel_passes_the_events_and_a_typed_addre
     assert 'watch_ready' in raw
 
     unpaired = await debug_watch(PID, AgentWatch(app_url="Tunnel"), _User(), None)
-    agent_tunnel.revoke(str(PID))
+    agent_tunnel.revoke(str(PID), user_id=_User.id)
     again = b"".join([c async for c in (await debug_watch(PID, AgentWatch(app_url="tunnel"), _User(), None)).body_iterator]).decode()
     assert agent_debug.NOT_PAIRED in again, "with the computer removed it says how to connect, instead of reaching for an address"
     assert unpaired is not None
+
+
+@pytest.mark.asyncio
+async def test_a_colleague_cannot_re_pair_or_remove_a_computer_that_is_offline_but_an_org_admin_can(server, monkeypatch):
+    from routers.agent_tunnel import tunnel_pair, tunnel_revoke
+
+    await pair_now()                                              # registered by u-1; nothing is listening, so it is offline
+    seen = []
+
+    async def not_admin(org_id, user, db, min_role=None, request=None):
+        seen.append((user.id, min_role.value))
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+    monkeypatch.setattr("services.org_access.require_org_member", not_admin)
+    for call in (tunnel_pair, tunnel_revoke):
+        with pytest.raises(HTTPException) as e:
+            await call(PID, _Colleague(), _Db())
+        assert e.value.status_code == 403 and "colleague" in e.value.detail
+    assert agent_tunnel.get(str(PID))["publicKey"] == key()
+    assert (await tunnel_pair(PID, _User(), _Db()))["code"], "the person who registered it may ask again"
+
+    async def admin_only(org_id, user, db, min_role=None, request=None):
+        seen.append((user.id, min_role.value))
+
+    monkeypatch.setattr("services.org_access.require_org_member", admin_only)
+    assert (await tunnel_pair(PID, _Colleague(), _Db()))["code"]
+    assert (await tunnel_revoke(PID, _Colleague(), _Db())) == {"removed": True}
+    assert seen and seen[0] == ("u-2", "admin")
+
+
+@pytest.mark.asyncio
+async def test_a_member_who_is_not_an_admin_is_refused_when_the_admin_check_says_no(server, monkeypatch):
+    from routers.agent_tunnel import tunnel_revoke
+
+    await pair_now()
+
+    async def not_admin(org_id, user, db, min_role=None, request=None):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+    monkeypatch.setattr("services.org_access.require_org_member", not_admin)
+    with pytest.raises(HTTPException) as e:
+        await tunnel_revoke(PID, _Colleague(), _Db())
+    assert e.value.status_code == 403 and "colleague" in e.value.detail
+
+
+def test_the_builders_tunnel_routes_need_the_agents_feature_and_the_connectors_routes_do_not():
+    from routers.agent_tunnel import router
+
+    def gated(route):
+        return any(getattr(d.call, "__name__", "") == "feature_gate_agents" for d in route.dependant.dependencies)
+
+    by_path = {(r.path, tuple(sorted(r.methods))): gated(r) for r in router.routes}
+    builder = {k: v for k, v in by_path.items() if k[0].startswith("/api/projects/")}
+    public = {k: v for k, v in by_path.items() if k[0].startswith("/api/tunnel/")}
+    assert len(builder) == 3 and all(builder.values()), builder
+    assert len(public) == 3 and not any(public.values()), public

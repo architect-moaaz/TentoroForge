@@ -1,6 +1,7 @@
 """Connecting the builder's own computer to a platform that runs on a server (see services/agent_tunnel.py).
 
-Signed-in members of a project: see the tunnel's state, ask for a one-time pairing code, disconnect.
+Signed-in members of a project (with the Agents feature on): see the tunnel's state, ask for a one-time pairing code, disconnect. A
+computer belongs to the person who registered it: only they, or an admin of the organisation, may replace or remove it.
 Anyone with a valid code (the connector program on the builder's computer): redeem it, and download the connector.
 """
 from __future__ import annotations
@@ -19,6 +20,7 @@ from database import get_db
 from models.auth import PlatformUser
 from services import agent_tunnel
 from services.agent_debug import hosting
+from services.features import feature_gate
 from services.project_service import get_project_with_auth
 
 router = APIRouter()
@@ -42,11 +44,30 @@ def _client_ip(request: Request) -> str:
     return request.client.host if request.client else ""
 
 
+async def _is_admin_for_tunnel(project, user: PlatformUser, db: AsyncSession) -> bool:
+    """Whether this person is an admin of the project's organisation. Asked only when someone else's computer is registered, because
+    that is the only time the answer changes what they may do."""
+    current = await asyncio.to_thread(agent_tunnel.get, str(project.id))
+    owner = (current or {}).get("registeredBy")
+    if not owner or owner == str(user.id):
+        return False
+    from fastapi import HTTPException as _HTTPException
+    from models.org import OrgMemberRole
+    from services.org_access import require_org_member
+
+    try:
+        await require_org_member(project.org_id, user, db, min_role=OrgMemberRole.admin)
+    except _HTTPException:
+        return False
+    return True
+
+
 def _fail(e: agent_tunnel.TunnelError):
     raise HTTPException(status_code=e.status_code, detail=str(e))
 
 
-@router.get("/api/projects/{project_id}/agent-definitions/debug/tunnel")
+# The three builder routes are gated like the other agent routes; the public ones below (the connector's) cannot be, as they have no sign-in.
+@router.get("/api/projects/{project_id}/agent-definitions/debug/tunnel", dependencies=[Depends(feature_gate("agents"))])
 async def tunnel_state(
     project_id: uuid.UUID,
     user: PlatformUser = Depends(get_current_user),
@@ -58,7 +79,7 @@ async def tunnel_state(
     return {**state, "hosted": await hosting(db, project.id)}
 
 
-@router.post("/api/projects/{project_id}/agent-definitions/debug/tunnel/pair")
+@router.post("/api/projects/{project_id}/agent-definitions/debug/tunnel/pair", dependencies=[Depends(feature_gate("agents"))])
 async def tunnel_pair(
     project_id: uuid.UUID,
     user: PlatformUser = Depends(get_current_user),
@@ -69,12 +90,13 @@ async def tunnel_pair(
     if not agent_tunnel.enabled():
         raise HTTPException(status_code=409, detail="This platform runs on your own computer, so there is nothing to connect: use the app's address.")
     try:
-        return await asyncio.to_thread(agent_tunnel.new_pairing, str(project.id))
+        return await asyncio.to_thread(agent_tunnel.new_pairing, str(project.id), user_id=str(user.id),
+                                       is_admin=await _is_admin_for_tunnel(project, user, db))
     except agent_tunnel.TunnelError as e:
         _fail(e)
 
 
-@router.delete("/api/projects/{project_id}/agent-definitions/debug/tunnel")
+@router.delete("/api/projects/{project_id}/agent-definitions/debug/tunnel", dependencies=[Depends(feature_gate("agents"))])
 async def tunnel_revoke(
     project_id: uuid.UUID,
     user: PlatformUser = Depends(get_current_user),
@@ -83,7 +105,8 @@ async def tunnel_revoke(
     """Forget the connected computer. Its key stops being accepted for new connections at once."""
     project = await get_project_with_auth(project_id, user, db)
     try:
-        return {"removed": await asyncio.to_thread(agent_tunnel.revoke, str(project.id))}
+        return {"removed": await asyncio.to_thread(agent_tunnel.revoke, str(project.id), user_id=str(user.id),
+                                                   is_admin=await _is_admin_for_tunnel(project, user, db))}
     except agent_tunnel.TunnelError as e:
         _fail(e)
 

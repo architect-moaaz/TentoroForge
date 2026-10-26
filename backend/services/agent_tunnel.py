@@ -11,7 +11,9 @@ This module is the platform's half of that, with no network code of its own exce
 
 * a PAIRING: the signed-in builder asks for a one-time code (10 minutes, one use); the connector program on the builder's
   computer redeems it together with its OWN public key and a fresh debug secret. Nothing secret ever travels the other way.
-* a REGISTRY (``registry.json``, private) of one tunnel per project: its port, its key, its secret, who connected from where.
+* a REGISTRY (``registry.json``, private) of one tunnel per project: its port, its key, its secret, who connected from where, and
+  which signed-in person registered it. Only that person (or an organisation admin) may replace or remove the computer: another
+  member of the project must not be able to take over a colleague's computer while it happens to be offline.
 * the SSH server's ``authorized_keys`` (written from the registry, atomically): each key may ONLY open the one listening
   port it was given, run no command and open no shell, so a key for one project can never reach another project's port.
 
@@ -145,6 +147,15 @@ def _exclusive(d: Path) -> Iterator[None]:
                 fcntl.flock(handle, fcntl.LOCK_UN)
 
 
+def _check_may_replace(current: dict[str, Any] | None, user_id: str | None, is_admin: bool) -> None:
+    """A computer that someone registered may be replaced or removed only by them or by an admin. One registered before owners were
+    recorded has no owner and stays open to any member, as it was."""
+    owner = (current or {}).get("registeredBy")
+    if owner and owner != user_id and not is_admin:
+        raise TunnelError("A colleague connected the computer that is registered for this project. Only they, or an admin of the "
+                          "organisation, can replace or remove it.", 403)
+
+
 def _purge(reg: dict[str, Any], now: float) -> None:
     reg["pending"] = {h: v for h, v in reg.get("pending", {}).items() if v.get("expires", 0) > now}
 
@@ -162,8 +173,9 @@ def normal_code(code: str) -> str:
     return re.sub(r"[^A-Z0-9]", "", str(code or "").upper())
 
 
-def new_pairing(project_id: str, *, now: float | None = None) -> dict[str, Any]:
-    """A one-time code for this project's owner to give the connector. Shown as ABCD-EFGH."""
+def new_pairing(project_id: str, *, user_id: str | None = None, is_admin: bool = False, now: float | None = None) -> dict[str, Any]:
+    """A one-time code for this person to give the connector. Shown as ABCD-EFGH. The code remembers who asked, so the computer it
+    registers belongs to them. Refused when someone else's computer is registered and this person is neither them nor an admin."""
     if not _PROJECT_RX.match(str(project_id)):
         raise TunnelError("Not a valid project.", 400)
     now = time.time() if now is None else now
@@ -171,11 +183,12 @@ def new_pairing(project_id: str, *, now: float | None = None) -> dict[str, Any]:
     with _exclusive(d):
         reg = _read(d)
         _purge(reg, now)
+        _check_may_replace(reg["projects"].get(project_id), user_id, is_admin)
         mine = [h for h, v in reg["pending"].items() if v.get("project") == project_id]
         for h in mine[: max(0, len(mine) - MAX_PENDING_PER_PROJECT + 1)]:
             reg["pending"].pop(h, None)  # the oldest go, so asking again always works
         raw = "".join(secrets.choice(CODE_ALPHABET) for _ in range(8))
-        reg["pending"][_hash(raw)] = {"project": project_id, "expires": now + PAIR_TTL_S}
+        reg["pending"][_hash(raw)] = {"project": project_id, "expires": now + PAIR_TTL_S, "by": user_id, "admin": bool(is_admin)}
         _write(d, reg)
     return {"code": f"{raw[:4]}-{raw[4:]}", "expiresAt": int(now + PAIR_TTL_S)}
 
@@ -256,6 +269,8 @@ def pair(code: str, public_key: str, app_port: Any, secret: str, *, client_ip: s
             who = current.get("label") or "another computer"
             raise TunnelError(f"{who} is already connected to this project. Close its connector first (or wait up to a minute if that "
                               "computer is gone), then run this again. Your code has not been used.", 409)
+        # The code was asked for by someone; if a colleague's computer was registered since, it may not be taken over by this code.
+        _check_may_replace(current, entry.get("by"), bool(entry.get("admin")))
         reg["pending"].pop(_hash(normal_code(code)), None)  # one use
         key = " ".join(str(public_key or "").split())
         if not _KEY_RX.match(key):
@@ -280,6 +295,8 @@ def pair(code: str, public_key: str, app_port: Any, secret: str, *, client_ip: s
         reg["projects"][project_id] = {
             "port": port, "publicKey": key, "secret": secret, "appPort": port_of_app,
             "clientIp": public_address(ip), "label": re.sub(r"[^\w .@-]", "", str(label))[:64], "pairedAt": int(now),
+            # kept when an admin replaces the computer, so the person who first registered it is still the one it belongs to
+            "registeredBy": (current or {}).get("registeredBy") or entry.get("by"),
         }
         _write(d, reg)
     return {"port": port, "projectId": project_id, "yourAddress": public_address(ip), **info()}
@@ -293,11 +310,13 @@ def get(project_id: str) -> dict[str, Any] | None:
     return _read(_dir()).get("projects", {}).get(project_id) if enabled() else None
 
 
-def revoke(project_id: str) -> bool:
-    """Forget this project's tunnel: its key stops being accepted for new connections at once."""
+def revoke(project_id: str, *, user_id: str | None = None, is_admin: bool = False) -> bool:
+    """Forget this project's tunnel: its key stops being accepted for new connections at once. Only the person who registered the
+    computer, or an admin, may."""
     d = _dir()
     with _exclusive(d):
         reg = _read(d)
+        _check_may_replace(reg["projects"].get(project_id), user_id, is_admin)
         gone = reg["projects"].pop(project_id, None) is not None
         for h in [h for h, v in reg["pending"].items() if v.get("project") == project_id]:
             reg["pending"].pop(h, None)
