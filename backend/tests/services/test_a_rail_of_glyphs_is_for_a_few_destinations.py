@@ -69,8 +69,9 @@ def test_a_sixty_four_pixel_foot_holds_the_bell_and_the_avatar_only():
     assert "<NotificationBell />" in block
     assert "compact={compact} extras={compact ? extras : undefined}" in block
     extras = block[block.index("const extras = ("):block.index(");", block.index("const extras = ("))]
-    for ctl in ("<OrgSwitcher />", "<LanguageSwitch />", "<InstallButton />"):
+    for ctl in ("<OrgSwitcher />", "<LanguageSwitch />"):
         assert ctl in extras, ctl
+    assert "InstallButton" not in extras, "the menu has no Install app (2026-10-26)"
     # The account menu takes them in, shows the avatar alone, and opens to the
     # right of a rail that sits on the left edge.
     assert "extras?: React.ReactNode;" in ACCOUNT
