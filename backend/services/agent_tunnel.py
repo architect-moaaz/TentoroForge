@@ -75,6 +75,9 @@ def settings() -> dict[str, Any]:
         "dir": os.getenv("FORGE_TUNNEL_DIR") or None,
         #: how the platform reaches the tunnel service's listeners (its name on the server's private network)
         "host": os.getenv("FORGE_TUNNEL_HOST", "tunnel"),
+        #: the tunnel service's gateway (deploy/ec2/tunnel/gateway.Caddyfile). When set, the platform reaches a computer only
+        #: through it, so the backend, which also runs generated apps' dev servers, cannot open raw tunnel ports.
+        "gateway": (os.getenv("FORGE_TUNNEL_GATEWAY") or "").rstrip("/"),
         #: how the builder's computer reaches the tunnel service's SSH port from outside
         "public_host": os.getenv("FORGE_TUNNEL_PUBLIC_HOST") or None,
         "ssh_port": int(os.getenv("FORGE_TUNNEL_SSH_PORT", "2222")),
@@ -326,8 +329,18 @@ def revoke(project_id: str, *, user_id: str | None = None, is_admin: bool = Fals
 
 def listener_open(port: int, timeout: float = 1.5) -> bool:
     """Is the builder's computer connected right now? Its listener exists exactly as long as its SSH session does."""
+    s = settings()
+    if s["gateway"]:
+        # Through the gateway: 200 when a computer holds that port, 404 when none does. A refused connection or a gateway that
+        # is down is "not connected" too. HTTPError is an OSError, so every failure lands in the except.
+        import urllib.request
+        try:
+            with urllib.request.urlopen(f"{s['gateway']}/up/{int(port)}", timeout=timeout) as reply:
+                return reply.status == 200
+        except OSError:
+            return False
     try:
-        with socket.create_connection((settings()["host"], int(port)), timeout=timeout):
+        with socket.create_connection((s["host"], int(port)), timeout=timeout):
             return True
     except OSError:
         return False
@@ -336,7 +349,10 @@ def listener_open(port: int, timeout: float = 1.5) -> bool:
 def target_url(project_id: str) -> str | None:
     """Where the platform reaches this project's app through its tunnel, or None when it was never paired."""
     reg = get(project_id)
-    return f"http://{settings()['host']}:{int(reg['port'])}" if reg else None
+    if not reg:
+        return None
+    s = settings()
+    return f"{s['gateway']}/t/{int(reg['port'])}" if s["gateway"] else f"http://{s['host']}:{int(reg['port'])}"
 
 
 def describe(project_id: str) -> dict[str, Any]:

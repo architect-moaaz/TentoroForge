@@ -11,11 +11,15 @@ PubkeyAuthentication yes
 # The key list is written by the platform. Each line carries its own limits (restrict, one permitlisten port, no command).
 AuthorizedKeysFile none
 AuthorizedKeysCommand /usr/local/bin/ttf-authkeys %u %k
-AuthorizedKeysCommandUser root
+# An unprivileged user made for this one job (see the Dockerfile): it can read the public key list and write the per-connection notes, nothing else.
+AuthorizedKeysCommandUser ttf-keys
 
-# Remote forwards only; the listener is bound on the service's network address so the platform backend can reach it by name.
+# Remote forwards only. "GatewayPorts no" makes sshd bind every forwarded port on 127.0.0.1 INSIDE this container, whatever address the
+# connector asks for (its 0.0.0.0 still matches the key's permitlisten). Nothing else on the network can open those ports: the platform
+# backend, which also runs generated apps' code, reaches a builder's app only through the gateway (gateway.Caddyfile), which forwards
+# just the live-run and insights routes.
 AllowTcpForwarding remote
-GatewayPorts clientspecified
+GatewayPorts no
 PermitTunnel no
 PermitTTY no
 X11Forwarding no

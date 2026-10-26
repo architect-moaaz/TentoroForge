@@ -182,6 +182,13 @@ def _nothing_answers(app_port: Any) -> str:
             "(for example `npm run dev`) and press Connect again.")
 
 
+def _gateway_nothing_answers(status_code: int) -> bool:
+    """Through the tunnel's gateway, a 502 is how "the computer is connected but nothing listens on its port" arrives (the
+    gateway could reach the tunnel's listener, and the listener had nothing behind it). Without the gateway that case is a
+    broken or reset connection, which is handled where each call is made."""
+    return status_code == 502 and bool(agent_tunnel.settings()["gateway"])
+
+
 async def tunnel_status(project_id: str) -> dict[str, Any]:
     """Can the app on the builder's computer be watched? Checked in the order a builder can fix things: is a computer paired,
     is its tunnel up, does the app answer behind it, does the app accept this project's key. Each failure is one plain
@@ -205,6 +212,8 @@ async def tunnel_status(project_id: str) -> dict[str, Any]:
         return {"ok": False, "reason": _nothing_answers(state.get("appPort")), "tunnel": state}
     except httpx.HTTPError as e:
         return {"ok": False, "reason": f"The connection to your computer broke: {e}", "tunnel": state}
+    if _gateway_nothing_answers(info.status_code):
+        return {"ok": False, "reason": _nothing_answers(state.get("appPort")), "tunnel": state}
     if info.status_code == 404:
         return {"ok": False, "reason": WRONG_KEY, "tunnel": state}
     if info.status_code >= 400:
@@ -254,6 +263,9 @@ async def watch_stream(app_url: str, secret: str | None, role: str | None = None
         async with httpx.AsyncClient(timeout=httpx.Timeout(None, connect=10)) as client:
             params = {"watch": "1", **({"user": user_id} if user_id else {"role": role} if role else {})}
             async with client.stream("GET", f"{url}/api/agent/debug", params=params, headers={HEADER: secret}) as r:
+                if trusted and _gateway_nothing_answers(r.status_code):
+                    yield event(_nothing_answers(None))
+                    return
                 if r.status_code >= 400:
                     body = (await r.aread()).decode("utf-8", "ignore")
                     yield event(_message_of(body) or str(_off()))
@@ -315,6 +327,8 @@ async def app_get_json(app_url: str, secret: str | None, path: str, params: dict
                         body += chunk
                         if len(body) > _MAX_JSON_BYTES:
                             raise DebugError(f"The app at {where} sent far more than an insights page holds, so it does not look like one of your apps.")
+            if trusted and _gateway_nothing_answers(status_code):
+                raise DebugError(_nothing_answers(app_port))
             if status_code == 404:
                 probe = await client.get(f"{url}/api/agent/debug", headers=headers)
                 if probe.status_code == 404:

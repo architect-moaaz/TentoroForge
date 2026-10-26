@@ -68,6 +68,11 @@ services:
       FORGE_TSC_PARALLEL: "2"
       FORGE_TUNNEL_DIR: /tunnel
       FORGE_TUNNEL_HOST: tunnel
+      # The backend reaches a builder's computer ONLY through the tunnel service's gateway (tunnel/gateway.Caddyfile), which forwards
+      # just GET /api/agent/debug and /api/agent/insights. The raw tunnel ports (22000-22999) listen on 127.0.0.1 inside the tunnel
+      # container, so the backend (which also runs generated apps' code) cannot open them. Needs the matching change in
+      # services/agent_tunnel.py (it reads this variable); without it Watch live cannot reach any computer.
+      FORGE_TUNNEL_GATEWAY: http://tunnel:8080
       FORGE_TUNNEL_PUBLIC_HOST: ${PUBLIC_HOST:-}
       FORGE_TUNNEL_SSH_PORT: ${TUNNEL_SSH_PORT:-2222}
       FORGE_SELF_HEAL: "1"
@@ -94,6 +99,7 @@ services:
 
   # The only other way in: an SSH server that accepts reverse port forwards (key login, no shell, no commands).
   # Open TCP ${TUNNEL_SSH_PORT:-2222} in the server's security group for the computers that will connect.
+  # Inside it, forwarded ports listen on 127.0.0.1 only; port 8080 (not published) is a gateway that the backend uses.
   tunnel:
     image: ttf-tunnel:1
     container_name: ttf-tunnel
@@ -103,7 +109,7 @@ services:
     volumes:
       - ./data/tunnel:/keys
       - ./data/tunnel-host:/hostkeys
-    mem_limit: 64m
+    mem_limit: 128m
 
   proxy:
     image: caddy:2-alpine

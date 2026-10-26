@@ -471,3 +471,58 @@ def test_a_computer_registered_before_owners_were_recorded_stays_open_to_any_mem
     assert agent_tunnel.get(PID)["registeredBy"] is None
     agent_tunnel.new_pairing(PID, user_id="user-bob")
     assert agent_tunnel.revoke(PID, user_id="user-bob") is True
+
+
+# ── the gateway: the platform reaches a computer only through it ─────────────
+
+class _Reply:
+    def __init__(self, status):
+        self.status = status
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+def test_through_the_gateway_the_platform_asks_it_and_never_opens_a_tunnel_port(tunnel, monkeypatch):
+    import urllib.error
+    import urllib.request
+
+    monkeypatch.setenv("FORGE_TUNNEL_GATEWAY", "http://tunnel:8080/")
+    out = redeem(code_for())
+    port = out["port"]
+    assert agent_tunnel.settings()["gateway"] == "http://tunnel:8080"
+    assert agent_tunnel.target_url(PID) == f"http://tunnel:8080/t/{port}"
+
+    asked = []
+    answer = {"status": 200}
+
+    def fake_urlopen(url, timeout=None):
+        asked.append(url)
+        if answer["status"] == 200:
+            return _Reply(200)
+        if answer["status"] == "down":
+            raise urllib.error.URLError("refused")
+        raise urllib.error.HTTPError(url, answer["status"], "no", {}, None)
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    assert agent_tunnel.describe(PID)["connected"] is True
+    assert asked == [f"http://tunnel:8080/up/{port}"], "it asks the gateway, on the one path it answers"
+
+    # A raw listener on the tunnel port is not what counts: the gateway says no computer holds the port, so it is not connected.
+    answer["status"] = 404
+    with socket.socket() as srv:
+        srv.bind(("127.0.0.1", port))
+        srv.listen(1)
+        assert agent_tunnel.describe(PID)["connected"] is False
+    answer["status"] = "down"
+    assert agent_tunnel.describe(PID)["connected"] is False, "a gateway that is down is not connected either"
+
+
+def test_without_a_gateway_nothing_changes(tunnel, monkeypatch):
+    monkeypatch.delenv("FORGE_TUNNEL_GATEWAY", raising=False)
+    out = redeem(code_for())
+    assert agent_tunnel.settings()["gateway"] == ""
+    assert agent_tunnel.target_url(PID) == f"http://127.0.0.1:{out['port']}"

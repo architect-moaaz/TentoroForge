@@ -30,7 +30,8 @@ and `2222` (the tunnel service). **Open TCP 2222 in the security group** to the 
 
 ```
 builder's computer                          this server
-[app :3001] <-- ssh -R 0.0.0.0:P:localhost:3001 -- [tunnel :2222] <-- [backend]  http://tunnel:P
+[app :3001] <-- ssh -R 0.0.0.0:P:localhost:3001 -- [tunnel :2222] <-- [backend]  http://tunnel:8080/t/P/api/agent/debug
+                                                     (sshd listens on 127.0.0.1:P, the gateway on :8080 passes on the two routes)
 ```
 
 In Watch live the builder presses **Connect your computer**: a one-time code (10 minutes, one use) and one command appear.
@@ -41,8 +42,19 @@ keeps the tunnel up (reconnecting with a growing wait; stopping, with a reason, 
 
 Security: the tunnel service has one user (`tunnel`), key login only, no shell, no commands. Each project's key is limited to
 **its own** port (`permitlisten`) and the key list is written by the platform from a registry it keeps in `data/tunnel`. The
-listeners are bound inside the tunnel container's network, so only the backend reaches them. The SSH host key is created
-once (`data/tunnel-host`) and pinned by the connector, so it cannot be led to another server.
+forwarded ports listen on `127.0.0.1` **inside the tunnel container only** (`GatewayPorts no`), so no other container can open
+them. That matters because the backend container also runs generated apps' code: it reaches a builder's computer only through a small
+gateway (Caddy, `tunnel/gateway.Caddyfile`, port 8080 inside the stack, not published) that forwards just
+`GET /api/agent/debug` and `GET /api/agent/insights` of ports 22000-22999 and refuses everything else. Those two routes need the
+app's debug secret, which only the platform holds. The backend needs `FORGE_TUNNEL_GATEWAY=http://tunnel:8080` (set in
+`docker-compose.yml`) for this; the SSH host key is created once (`data/tunnel-host`) and pinned by the connector, so it cannot be
+led to another server.
+
+Inside the tunnel container three accounts do the work, none of them root except sshd and the reaper: `tunnel` (the only login), `ttf-keys`
+(runs the key command: reads the public key list, writes the per-connection notes, cannot read `registry.json`), `ttf-gw` (runs the gateway).
+
+To check all of this on a machine with Docker: `bash src/deploy/ec2/check-tunnel-isolation.sh` from `/home/ec2-user/ttf` (best with one
+computer connected through Watch live).
 
 ## Operations
 
@@ -56,4 +68,5 @@ docker compose down                       # stop (data stays in ./data)
 * The public address changes if the instance is stopped and started without an Elastic IP: update `PUBLIC_HOST` in `.env`
   and `docker compose up -d backend`.
 * Tunnel key list: `data/tunnel/authorized_keys`; registry (private, holds each project's debug secret): `data/tunnel/registry.json`.
+* After changing anything under `tunnel/`: `bash build.sh tunnel`, then `docker compose up -d tunnel backend` (the backend restarts too, so it sees the new gateway).
 * To remove everything: `docker compose down`, then delete this folder and the three `ttf-*:1` images.

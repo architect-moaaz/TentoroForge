@@ -308,3 +308,22 @@ async def test_a_program_that_answers_200_to_everything_is_never_offered_as_this
     assert await agent_debug.find_app("mine") is None
     r = await status("http://localhost:3050", "mine")
     assert r["ok"] is False and "suggestedUrl" not in r
+
+
+# ── through the tunnel's gateway ─────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_a_502_from_the_gateway_means_the_computer_is_connected_but_nothing_answers(monkeypatch):
+    from services.agent_debug import app_get_json
+
+    mock_app(monkeypatch, lambda request: httpx.Response(502))
+    monkeypatch.setenv("FORGE_TUNNEL_GATEWAY", "http://tunnel:8080")
+    with pytest.raises(DebugError) as err:
+        await app_get_json("http://tunnel:8080/t/22001", "s" * 43, "/api/agent/insights", trusted=True, app_port=3001)
+    assert "nothing answered on port 3001" in str(err.value)
+
+    # With no gateway a 502 is just an error from something that is not one of our apps.
+    monkeypatch.delenv("FORGE_TUNNEL_GATEWAY")
+    with pytest.raises(DebugError) as err:
+        await app_get_json("http://tunnel:8080/t/22001", "s" * 43, "/api/agent/insights", trusted=True, app_port=3001)
+    assert "nothing answered" not in str(err.value) and "502" in str(err.value)
