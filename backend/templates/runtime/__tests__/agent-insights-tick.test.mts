@@ -9,6 +9,10 @@
  * Run: __tests__/run-agent-tests.sh
  */
 import { installHarness, ok, eqJson, done } from "./_harness.mts";
+import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const g = globalThis as any;
 g.__secret = undefined;
@@ -58,9 +62,26 @@ console.log("the catch-up route");
   g.__secret = undefined;
 }
 
-console.log("the tick asks for it");
+// The tick as the agent install leaves it: the same file with its one switch turned on (agent_runtime_install.py).
+const shipped = readFileSync(new URL("../api-cron/route.ts", import.meta.url), "utf8");
+const off = "const HAS_AGENT_INSIGHTS = false; // forge-agent-insights";
+ok(shipped.includes(off), "as shipped, the tick's insights call is switched off");
+const withAgents = join(mkdtempSync(join(tmpdir(), "forge-tick-")), "route.ts");
+writeFileSync(withAgents, shipped.replace(off, off.replace("false", "true")));
+
+console.log("an app without agents");
 {
   const tick = await import("../api-cron/route.ts");
+  let calls = 0;
+  g.fetch = async () => { calls++; return Response.json({ configured: true, sent: 2 }); };
+  const res = await tick.GET(new Request("http://app.test/api/cron/tick"));
+  const body: any = await res.json();
+  ok(calls === 0 && res.status === 200 && !("insights" in body) && Array.isArray(body.fired), "the tick never asks for the catch-up (no wasted 404), and still runs");
+}
+
+console.log("the tick asks for it");
+{
+  const tick = await import(pathToFileURL(withAgents).href);
   const asked: Array<{ url: string; auth: string | null; method: string }> = [];
   let answer: () => Response | Promise<Response> = () => Response.json({ configured: true, sent: 2 });
   g.fetch = async (url: string, init: any) => {

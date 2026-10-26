@@ -173,6 +173,23 @@ def _refresh_bell(app_root: Path, written: list[str]) -> None:
         logger.warning("[agents] could not refresh the notification bell", exc_info=True)
 
 
+def _enable_tick_insights(app_root: Path) -> None:
+    """Switch on the cron tick's call to the insights catch-up. The tick ships with it off (an app without agents has
+    no such route, so the call could only be a 404); this app now has the route. A tick the app changed, or one from
+    before the switch existed, has no marker and is left as it is (the old tick always called, and still does)."""
+    tick = app_root / "src" / "app" / "api" / "cron" / "tick" / "route.ts"
+    if not tick.is_file():
+        return
+    try:
+        # bytes, so the file keeps its own line endings (the template is CRLF on some checkouts)
+        raw = tick.read_bytes()
+        off = b"const HAS_AGENT_INSIGHTS = false; // forge-agent-insights"
+        if off in raw:
+            tick.write_bytes(raw.replace(off, off.replace(b"false", b"true"), 1))
+    except OSError:
+        logger.warning("[agents] could not switch on the cron tick's insights catch-up", exc_info=True)
+
+
 def _merge_manifest(app_root: Path, paths: list[str]) -> None:
     """Add what this install wrote to the runtime-injection manifest, so the route prune
     treats the agent routes as infrastructure rather than redundant CRUD."""
@@ -330,6 +347,7 @@ def install_agent_runtime(path: str | Path, *, graphs: list[dict[str, Any]] | No
     # the sign-in gate already lets through; the route guards itself with the tick's CRON_SECRET).
     _copy(_TEMPLATES / "api-agent" / "insights-tick-route.ts",
           app_root / "src" / "app" / "api" / "cron" / "insights" / "route.ts", written, app_root)
+    _enable_tick_insights(app_root)
     insights_salt = ensure_insights_salt(app_root)
     # The inbox for handoffs: only where an agent has a human-handoff box. (The store and the table go in
     # always, because io.ts loads the store on demand and the build must find it.)

@@ -849,6 +849,16 @@ def test_an_app_with_no_agent_gets_no_salt(tmp_path):
     assert result["installed"] is False
     assert not (app / ".env.local").exists() and not (app / ".forge-insights-salt").exists()
 
+_TICK_TEMPLATE = Path(__file__).resolve().parents[2] / "templates" / "runtime" / "api-cron" / "route.ts"
+_TICK_OFF = b"const HAS_AGENT_INSIGHTS = false; // forge-agent-insights"
+
+
+def _put_tick(app: Path, raw: bytes) -> Path:
+    tick = app / "src" / "app" / "api" / "cron" / "tick" / "route.ts"
+    tick.parent.mkdir(parents=True, exist_ok=True)
+    tick.write_bytes(raw)
+    return tick
+
 
 def test_the_install_brings_the_visitor_module_the_usage_limits_need(tmp_path):
     project, app = make_app(tmp_path)
@@ -856,3 +866,27 @@ def test_the_install_brings_the_visitor_module_the_usage_limits_need(tmp_path):
     # runtime.ts imports it: a missing copy would fail every chat build
     assert (app / "src" / "lib" / "agents" / "visitor.ts").is_file()
     assert './visitor' in (app / "src" / "lib" / "agents" / "runtime.ts").read_text(encoding="utf-8")
+
+
+def test_the_cron_tick_asks_for_the_insights_catch_up_only_where_there_are_agents(tmp_path):
+    shipped = _TICK_TEMPLATE.read_bytes()
+    assert _TICK_OFF in shipped, "as shipped, the tick makes no call: an app without agents has no such route"
+    # no agents: the tick is left exactly as it was
+    p0, a0 = make_app(tmp_path / "none")
+    tick0 = _put_tick(a0, shipped)
+    install_agent_runtime(p0)
+    assert tick0.read_bytes() == shipped
+    # agents: switched on, nothing else changed (line endings included), and again changes nothing
+    project, app = make_app(tmp_path / "agents")
+    tick = _put_tick(app, shipped)
+    install_agent_runtime(project, graphs=[sample_graph()])
+    on = tick.read_bytes()
+    assert on == shipped.replace(_TICK_OFF, _TICK_OFF.replace(b"false", b"true"))
+    install_agent_runtime(project)
+    assert tick.read_bytes() == on
+    # a tick from before the switch existed has no marker and is not touched
+    p2, a2 = make_app(tmp_path / "old")
+    old = _put_tick(a2, b"export const GET = () => 1;\n")
+    install_agent_runtime(p2, graphs=[sample_graph()])
+    assert old.read_bytes() == b"export const GET = () => 1;\n"
+
