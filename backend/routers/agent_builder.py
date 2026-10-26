@@ -321,11 +321,14 @@ async def blast_invent(
     db: AsyncSession = Depends(get_db),
 ):
     """Have an AI invent tricky tests for this agent as drawn. Nothing is run or saved."""
-    from services.agent_blast import invent_bombs
+    from services.agent_blast import client_for, invent_bombs
+    from services.agent_spend import MAX_HELPER_CALLS, gate, meter_for
 
-    await get_project_with_auth(project_id, user, db)
+    project = await get_project_with_auth(project_id, user, db)
+    await gate(db, project, user, calls=2)  # this spends the platform's model key: 402 when the organisation cannot pay
+    meter = meter_for(project, user, "agent_blast", MAX_HELPER_CALLS)
     try:
-        return {"tests": await invent_bombs(req.graph.model_dump(), req.bombs, req.per_bomb)}
+        return {"tests": await invent_bombs(req.graph.model_dump(), req.bombs, req.per_bomb, client=client_for(meter))}
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -340,11 +343,14 @@ async def blast_tool_tests(
 ):
     """Have an AI study ONE tool and write the tests that would break it, with a short analysis of what the tool does and how
     it could go wrong. One model call. Nothing is run or saved here: the builder runs them with the blast."""
-    from services.agent_blast import invent_tool_tests
+    from services.agent_blast import client_for, invent_tool_tests
+    from services.agent_spend import MAX_HELPER_CALLS, gate, meter_for
 
-    await get_project_with_auth(project_id, user, db)
+    project = await get_project_with_auth(project_id, user, db)
+    await gate(db, project, user, calls=4)
+    meter = meter_for(project, user, "agent_blast", MAX_HELPER_CALLS)
     try:
-        return await invent_tool_tests(req.graph.model_dump(), req.tool, req.angles, req.per_angle)
+        return await invent_tool_tests(req.graph.model_dump(), req.tool, req.angles, req.per_angle, client=client_for(meter))
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -359,11 +365,14 @@ async def write_agent_tests(
 ):
     """Have an AI write everyday test cases for this agent as drawn, each with a note on what a good reply does. One
     model call. Nothing is run or saved here: the builder keeps them in My tests."""
-    from services.agent_blast import write_tests
+    from services.agent_blast import client_for, write_tests
+    from services.agent_spend import MAX_HELPER_CALLS, gate, meter_for
 
-    await get_project_with_auth(project_id, user, db)
+    project = await get_project_with_auth(project_id, user, db)
+    await gate(db, project, user, calls=2)
+    meter = meter_for(project, user, "agent_blast", MAX_HELPER_CALLS)
     try:
-        return {"tests": await write_tests(req.graph.model_dump(), req.count)}
+        return {"tests": await write_tests(req.graph.model_dump(), req.count, client=client_for(meter))}
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -383,12 +392,17 @@ async def blast_run(
 
     from fastapi.responses import StreamingResponse
 
-    from services.agent_blast import blast
+    from services.agent_blast import blast, estimate_blast_calls
+    from services.agent_spend import MAX_BLAST_CALLS, gate, meter_for
 
-    await get_project_with_auth(project_id, user, db)
+    project = await get_project_with_auth(project_id, user, db)
+    # Priced and checked BEFORE the stream starts (once it has, a refusal can no longer be an HTTP 402); the run itself is
+    # capped at MAX_BLAST_CALLS model calls and its real usage is recorded under this application and person.
+    await gate(db, project, user, calls=estimate_blast_calls(req.tests, req.repeats))
+    meter = meter_for(project, user, "agent_blast", MAX_BLAST_CALLS)
 
     async def events():
-        async for e in blast(req.graph.model_dump(), req.tests, repeats=req.repeats):
+        async for e in blast(req.graph.model_dump(), req.tests, repeats=req.repeats, meter=meter):
             yield f"data: {_json.dumps(e)}\n\n".encode()
 
     return StreamingResponse(events(), media_type="text/event-stream",
@@ -405,11 +419,14 @@ async def blast_fixes(
 ):
     """Proposed fixes for the tests that exploded: a sentence for the instructions, a clearer tool description,
     or "ask first". Nothing is applied: the builder decides."""
-    from services.agent_blast import propose_fixes
+    from services.agent_blast import client_for, propose_fixes
+    from services.agent_spend import MAX_HELPER_CALLS, gate, meter_for
 
-    await get_project_with_auth(project_id, user, db)
+    project = await get_project_with_auth(project_id, user, db)
+    await gate(db, project, user, calls=2)
+    meter = meter_for(project, user, "agent_blast", MAX_HELPER_CALLS)
     try:
-        return {"fixes": await propose_fixes(req.graph.model_dump(), req.results)}
+        return {"fixes": await propose_fixes(req.graph.model_dump(), req.results, client=client_for(meter))}
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -424,13 +441,20 @@ async def send_recorded_chats(
 ):
     """Chats recorded in Watch live: keep them with all their details, add each as a saved test in Find problems, and (when
     ``fix`` is set) have the fixer propose fixes from what really happened. Nothing is applied: the builder decides."""
+    from services.agent_blast import client_for
     from services.agent_recording import send
+    from services.agent_spend import MAX_HELPER_CALLS, gate, meter_for
 
     project = await get_project_with_auth(project_id, user, db)
     if not project.output_dir:
         raise HTTPException(status_code=400, detail="This project has not been built yet, so there is nowhere to keep the chats.")
+    meter = None
+    if req.fix:  # only the fixer calls the model; keeping the chats costs nothing
+        await gate(db, project, user, calls=2)
+        meter = meter_for(project, user, "agent_blast", MAX_HELPER_CALLS)
     try:
-        return await send(project.output_dir, agent_id, req.chats, graph=req.graph.model_dump() if req.graph else None, fix=req.fix)
+        return await send(project.output_dir, agent_id, req.chats, graph=req.graph.model_dump() if req.graph else None, fix=req.fix,
+                          client=client_for(meter) if meter else None)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except RuntimeError as e:  # the model could not be reached: said in plain words
@@ -694,10 +718,14 @@ async def test_agent(
     if not agent_file.exists():
         raise HTTPException(status_code=404, detail="Agent definition not found")
 
+    from services.agent_spend import MAX_CONSOLE_CALLS, gate, meter_for
     from services.agent_test_run import run_agent_test
 
     agent_data = json.loads(agent_file.read_text())
-    return await run_agent_test(agent_data, req.message, req.conversation_history)
+    # One real model call on the platform's key: checked against the balance and limits like any other paid work, capped, and recorded.
+    await gate(db, project, user, calls=1)
+    return await run_agent_test(agent_data, req.message, req.conversation_history,
+                                meter=meter_for(project, user, "agent_test", MAX_CONSOLE_CALLS))
 
 
 # ---------------------------------------------------------------------------

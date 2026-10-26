@@ -191,7 +191,7 @@ async def test_the_test_endpoint_runs_the_saved_definition(project, monkeypatch)
 
     seen = {}
 
-    async def fake_run(agent_data, message, history):
+    async def fake_run(agent_data, message, history, **kw):
         seen.update(agent=agent_data["id"], message=message, history=history)
         return {"response": "real", "trace": [], "total_tokens": 1, "total_duration_ms": 2}
 

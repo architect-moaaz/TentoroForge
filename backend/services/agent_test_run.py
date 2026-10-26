@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from services.agent_runtime_config import compile_agent
+from services.agent_spend import MAX_CONSOLE_CALLS, Meter, clamp_max_tokens, clamp_model
 
 
 def _now() -> str:
@@ -82,11 +83,16 @@ def _entry(node: dict[str, Any], status: str, *, started: str, ms: int = 0, toke
 
 async def run_agent_test(agent_data: dict[str, Any], message: str,
                          history: list[dict[str, Any]] | None = None, *,
-                         client: Any = None) -> dict[str, Any]:
+                         client: Any = None, meter: Meter | None = None) -> dict[str, Any]:
     """Run one test message. ``client`` is injectable for tests (anything with
-    ``messages.create``); by default a real Anthropic client from ANTHROPIC_API_KEY."""
+    ``messages.create``); by default a real Anthropic client from ANTHROPIC_API_KEY.
+
+    The call spends the platform's key, so it goes through ``meter`` (``services.agent_spend``): counted and capped, the model
+    and answer length held to what the server allows (the drawing may ask for anything), and its real usage recorded."""
     compiled = compile_agent(agent_data)
     cfg = compiled.config
+    meter = meter or Meter(agent="agent_test", max_calls=MAX_CONSOLE_CALLS)
+    warnings = list(compiled.warnings)
     nodes = [n for n in (agent_data.get("nodes") or []) if isinstance(n, dict)]
     started_all = time.perf_counter()
     t0 = _now()
@@ -101,7 +107,7 @@ async def run_agent_test(agent_data: dict[str, Any], message: str,
             "total_tokens": tokens,
             "total_duration_ms": int((time.perf_counter() - started_all) * 1000),
             "dry_run": True,
-            "warnings": compiled.warnings,
+            "warnings": warnings,
             **extra,
         }
 
@@ -128,13 +134,16 @@ async def run_agent_test(agent_data: dict[str, Any], message: str,
         import anthropic
 
         client = anthropic.AsyncAnthropic(api_key=key)
+    client = meter.wrap(client)
 
     tools = [{"name": t["name"], "description": t["description"], "input_schema": t["inputSchema"]}
              for t in cfg["tools"]]
-    model_name = cfg["model"].get("name") or os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+    model_name, model_note = clamp_model(cfg["model"].get("name"))
+    if model_note:
+        warnings.append(model_note)
     req: dict[str, Any] = {
         "model": model_name,
-        "max_tokens": cfg["model"]["maxTokens"],
+        "max_tokens": clamp_max_tokens(cfg["model"]["maxTokens"]),
         "system": cfg["systemPrompt"],
         "messages": _history(history) + [{"role": "user", "content": message}],
     }

@@ -303,22 +303,41 @@ async def test_a_test_run_several_times_says_which_run_each_step_belongs_to():
 
 @pytest.mark.asyncio
 async def test_stopping_a_blast_early_stops_the_work_too():
+    """The watcher goes away while model calls are in flight: those calls are cancelled, not left running.
+
+    It used to read ``asyncio.all_tasks()`` and expect NOTHING pending, and it stopped the blast before the work had even
+    begun. With one event loop shared by the whole run, any task another test left behind (the insights tests leave two) was
+    counted against this one, so it failed in the full run and passed alone. Now the model really hangs, the blast is stopped
+    after its work has started, and only the tasks THIS test created are looked at."""
     import asyncio
 
-    gate = asyncio.Event()
+    class Hangs:
+        """A model that never answers, and counts the calls that were cancelled."""
 
-    def slow(req):
-        return [text("ok")]
+        def __init__(self):
+            self.started, self.cancelled = asyncio.Event(), 0
+            self.messages = SimpleNamespace(create=self._create)
 
-    s = Script(agent=slow)
-    gen = blast(agent_graph(), [TEST_RULES, {**TEST_RULES, "id": "t7"}, {**TEST_RULES, "id": "t8"}], client=s)
-    first = await gen.__anext__()
-    assert first["type"] == "start"
+        async def _create(self, **req):
+            self.started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                self.cancelled += 1
+                raise
+
+    before = set(asyncio.all_tasks())
+    model = Hangs()
+    gen = blast(agent_graph(), [TEST_RULES, {**TEST_RULES, "id": "t7"}, {**TEST_RULES, "id": "t8"}], client=model)
+    assert (await gen.__anext__())["type"] == "start"
+    assert (await gen.__anext__())["type"] == "test_start"
+    await asyncio.wait_for(model.started.wait(), 5)  # the work is really under way
     await gen.aclose()
-    await asyncio.sleep(0.05)
-    pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task() and not t.done()]
-    assert pending == [], "nothing is left running after the watcher goes away"
-    gate.set()
+    mine = asyncio.all_tasks() - before - {asyncio.current_task()}
+    assert mine, "the blast has a worker running when the watcher goes away"
+    await asyncio.wait_for(asyncio.gather(*mine, return_exceptions=True), 5)
+    assert all(t.done() for t in mine), "nothing this blast started is left running after the watcher goes away"
+    assert model.cancelled == 3, "every call in flight was cancelled, not left to finish on the platform's key"
 
 
 @pytest.mark.asyncio
@@ -872,3 +891,87 @@ async def test_every_argument_of_a_plain_run_is_one_the_sdk_takes_and_a_run_with
     await run_of(s, {"message": "show"})
     for req in s.who("agent"):
         assert set(req) <= sdk_takes() and "extra_body" not in req
+
+
+# ── what a blast costs: counted, capped, held to the server's model and recorded ──
+
+def greedy_graph():
+    """A drawing that asks for an expensive model and a huge answer: the drawing is not trusted for either."""
+    return graph(node("sp", "system_prompt", "P", {"prompt": "You help.", "model": "claude-opus-4-8", "max_tokens": 900000}))
+
+
+@pytest.mark.asyncio
+async def test_the_drawing_cannot_choose_the_model_or_the_answer_length_of_a_blast(monkeypatch):
+    from services import agent_spend
+
+    monkeypatch.delenv("ANTHROPIC_MODEL", raising=False)
+    monkeypatch.delenv("FORGE_BLAST_MODEL", raising=False)
+    s = Script(agent=agent_says(reply="I can't do that."))
+    events = await collect(blast(greedy_graph(), [TEST_RULES], client=s))
+    sent = s.who("agent")[0]
+    assert sent["model"] == "claude-sonnet-4-6" and sent["max_tokens"] == agent_spend.MAX_OUTPUT_TOKENS
+    result = [e for e in events if e["type"] == "result"][0]["result"]
+    assert any("claude-opus-4-8" in n for n in result["notes"]), "the builder is told which model was really used"
+
+
+@pytest.mark.asyncio
+async def test_a_blast_stops_at_its_call_cap_and_says_so_instead_of_running_on():
+    from services.agent_spend import Meter
+
+    s = Script(agent=agent_says(reply="no"))
+    tests = [{**TEST_RULES, "id": f"t{i}"} for i in range(6)]
+    events = await collect(blast(agent_graph(), tests, repeats=2, client=s, meter=Meter(agent="agent_blast", max_calls=5)))
+    assert len(s.calls) == 5, "not one call past the cap reaches the platform's key"
+    done = events[-1]
+    assert done["type"] == "done" and done["calls"] == 5
+    assert "limit of 5 model calls" in done["stopped"]
+    results = [e["result"] for e in events if e["type"] == "result"]
+    assert len(results) == 6 and done["summary"]["total"] == 6, "every test is still reported"
+    not_run = [r for r in results if r["status"] == "error" and "limit of 5 model calls" in r["error"]]
+    assert not_run, "a test that never got to run says why, in words"
+    assert all(r["status"] in ("passed", "error") for r in results)
+
+
+@pytest.mark.asyncio
+async def test_a_blast_inside_its_cap_reports_the_calls_made_and_no_stop():
+    from services.agent_spend import Meter
+
+    s = Script(agent=agent_says(reply="no"))
+    events = await collect(blast(agent_graph(), [TEST_RULES, {**TEST_RULES, "id": "t2"}], client=s, meter=Meter(agent="agent_blast", max_calls=50)))
+    assert events[-1]["calls"] == 2 and "stopped" not in events[-1]
+
+
+@pytest.mark.asyncio
+async def test_the_default_cap_is_a_named_constant_a_blast_uses_when_nobody_gives_a_meter(monkeypatch):
+    from services import agent_spend
+
+    monkeypatch.setattr(agent_spend, "MAX_BLAST_CALLS", 1)
+    s = Script(agent=agent_says(reply="no"))
+    events = await collect(blast(agent_graph(), [TEST_RULES, {**TEST_RULES, "id": "t2"}], client=s))
+    assert len(s.calls) == 1 and "limit of 1 model calls" in events[-1]["stopped"]
+
+
+@pytest.mark.asyncio
+async def test_a_blasts_real_usage_is_written_to_the_ledger_under_who_spent_it(tmp_path, monkeypatch):
+    from services.agent_spend import Meter
+
+    path = tmp_path / "usage.jsonl"
+    monkeypatch.setenv("FORGE_USAGE_LOG", str(path))
+    s = Script(agent=agent_says(call=("lookup", {"q": "1"}), then="Done."), judge={"pass": True, "reason": "ok"})
+    meter = Meter(agent="agent_blast", project="abc123", user="pat@example.com", org="org-1")
+    await collect(blast(agent_graph(), [{**TEST_JUDGED}], client=s, meter=meter))
+    rows = [json.loads(line) for line in path.read_text().splitlines()]
+    assert len(rows) == len(s.calls) >= 2, "every call the blast made, the assistant's and the judge's, is a row"
+    assert {(r["project"], r["user"], r["org"], r["agent"], r["kind"]) for r in rows} == {("abc123", "pat@example.com", "org-1", "agent_blast", "agent_test")}
+    assert all(r["input_tokens"] == 10 and r["output_tokens"] == 5 for r in rows), "the real usage the model reported"
+
+
+@pytest.mark.asyncio
+async def test_the_helpers_without_a_client_of_their_own_are_metered_and_capped_too(monkeypatch):
+    """invent / tool-tests / write / fixes all build their own client when given none: it is never a bare platform client."""
+    monkeypatch.setattr(ab, "MAX_HELPER_CALLS", 1)
+    s = Script(invent="I refuse to answer in JSON")
+    monkeypatch.setattr(ab, "_raw_client", lambda: s)
+    with pytest.raises(RuntimeError, match="limit of 1 model calls"):
+        await invent_bombs(agent_graph(), None, 1)
+    assert len(s.calls) == 1, "the retry that would have been the second call was refused"

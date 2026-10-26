@@ -37,6 +37,7 @@ from typing import Any, AsyncIterator
 from services.agent_check import _kind, _tool_nodes_by_name
 from services.agent_runtime_config import changes_data, compile_agent
 from services.agent_scenarios import evaluate, normalise, reply_text
+from services.agent_spend import (MAX_BLAST_CALLS, MAX_HELPER_CALLS, Meter, MeteredClient, clamp_max_tokens, clamp_model)
 from services.agent_test_run import _pattern, check_input
 
 #: The most tests one blast throws, and the most times one is run. Cost is the reason: each is a model call.
@@ -104,13 +105,26 @@ def _model_name() -> str:
     return os.getenv("FORGE_BLAST_MODEL") or os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 
 
-def _make_client() -> Any:
+def _raw_client() -> Any:
     key = os.getenv("ANTHROPIC_API_KEY", "")
     if not key:
         raise RuntimeError("Finding problems needs a model key. Set ANTHROPIC_API_KEY for the platform and try again.")
     import anthropic
 
     return anthropic.AsyncAnthropic(api_key=key)
+
+
+def _make_client(meter: Meter | None = None) -> MeteredClient:
+    """The platform's model client, always behind a meter: the calls are counted and capped, the model and the answer length are
+    kept inside what the server allows, and the usage is recorded when the meter knows who is spending. A caller that has no
+    meter of its own still gets one with the small-action cap."""
+    return (meter or Meter(agent="agent_blast", max_calls=MAX_HELPER_CALLS)).wrap(_raw_client())
+
+
+def client_for(meter: Meter) -> MeteredClient:
+    """A metered client for ``meter`` whose real client is made on its first call (so a missing key is said where the first
+    call is made, not before the caller's own checks)."""
+    return meter.client(_raw_client)
 
 
 async def _ask(client: Any, system: str, user: str, max_tokens: int = 4000) -> str:
@@ -938,8 +952,10 @@ async def simulate(graph: dict[str, Any], test: dict[str, Any], client: Any, emi
     tools = [{"name": t["name"], "description": t["description"], "input_schema": t["inputSchema"]} for t in cfg["tools"]]
     messages: list[dict[str, Any]] = [{"role": m["role"], "content": m["content"]} for m in test.get("history") or []]
     messages.append({"role": "user", "content": test["message"]})
-    req: dict[str, Any] = {"model": cfg["model"].get("name") or os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
-                           "max_tokens": cfg["model"]["maxTokens"], "system": cfg["systemPrompt"]}
+    # The model and the answer length come from the drawing, which anyone with edit rights can change, and they decide what
+    # each call costs: so they are held to what the server allows (the meter holds them again on every call).
+    model_name, model_note = clamp_model(cfg["model"].get("name"))
+    req: dict[str, Any] = {"model": model_name, "max_tokens": clamp_max_tokens(cfg["model"]["maxTokens"]), "system": cfg["systemPrompt"]}
     if tools:
         req["tools"] = tools
     if cfg["model"].get("temperature") is not None:
@@ -948,7 +964,7 @@ async def simulate(graph: dict[str, Any], test: dict[str, Any], client: Any, emi
     texts: list[str] = []
     calls: list[dict[str, Any]] = []
     held_before: set[str] = set()
-    notes: list[str] = []
+    notes: list[str] = [model_note] if model_note else []
     invented: list[dict[str, str]] = []
     # everything the assistant could have got an id from: the person, its instructions, what lookups already returned
     known = " ".join([str(cfg["systemPrompt"]), test["message"], *(str(m["content"]) for m in messages)]).casefold()
@@ -1047,19 +1063,24 @@ def summarise(results: list[dict[str, Any]]) -> dict[str, int]:
 
 
 async def blast(graph: dict[str, Any], tests: Any, *, repeats: int = 1, client: Any = None,
-                concurrency: int = 4) -> AsyncIterator[dict[str, Any]]:
+                concurrency: int = 4, meter: Meter | None = None) -> AsyncIterator[dict[str, Any]]:
     """Run the tests and report as it goes: ``start`` (how many), then for each test ``test_start``, a ``step`` for each
     thing it does (a tool asked for and what came back, the reply, the rules, the judge) and a ``result`` when it is
     done, then ``done`` with the totals. Tests are the stored kind (saved scenarios) or invented bombs; a bomb keeps its
-    kind and its criterion. Several run at once, so their steps interleave: each carries its test's ``id`` and ``index``."""
+    kind and its criterion. Several run at once, so their steps interleave: each carries its test's ``id`` and ``index``.
+
+    Every model call goes through ``meter`` (a default one when none is given): at most ``MAX_BLAST_CALLS`` of them. When the
+    cap is reached the runs not yet started are not run, the test they belonged to is reported as an error that says why, and
+    ``done`` carries ``stopped`` (a plain sentence) and ``calls`` (how many were made)."""
     todo = _runnable(tests)[:MAX_TESTS * 2]
     times = max(1, min(int(repeats or 1), MAX_REPEATS))
     yield {"type": "start", "total": len(todo), "repeats": times}
     if not todo:
         yield {"type": "done", "summary": summarise([])}
         return
+    meter = meter or Meter(agent="agent_blast")
     try:
-        client = client or _make_client()
+        client = meter.wrap(client if client is not None else _raw_client())
     except RuntimeError as e:
         yield {"type": "error", "message": str(e)}
         return
@@ -1070,6 +1091,9 @@ async def blast(graph: dict[str, Any], tests: Any, *, repeats: int = 1, client: 
         async with gate:
             runs = []
             for k in range(times):
+                if meter.exhausted:  # no budget left: the run is not started, and the report says so
+                    meter.stopped = meter.limit_message()
+                    break
                 queue.put_nowait({"type": "test_start", "id": t["id"], "name": t["name"], "bomb": t.get("bomb"), "kind": t.get("kind"),
                                   "tool": t.get("tool"), "index": i + 1,
                                   "total": len(todo), "run": k + 1, "runs": times})
@@ -1078,6 +1102,9 @@ async def blast(graph: dict[str, Any], tests: Any, *, repeats: int = 1, client: 
                     queue.put_nowait({"type": "step", "id": _id, "index": _i + 1, "run": _k + 1, **step})
 
                 runs.append(await _one_run(graph, t, client, emit))
+            if not runs:
+                runs.append({"status": "error", "failures": [], "response": "", "toolCalls": [],
+                             "error": "Not run. " + meter.limit_message()})
             result = combine(t, runs)
             queue.put_nowait({"type": "result", "result": result, "index": i + 1})
             return result
@@ -1085,7 +1112,8 @@ async def blast(graph: dict[str, Any], tests: Any, *, repeats: int = 1, client: 
     async def produce() -> None:
         try:
             results = await asyncio.gather(*(one(i, t) for i, t in enumerate(todo)))
-            queue.put_nowait({"type": "done", "summary": summarise(list(results))})
+            queue.put_nowait({"type": "done", "summary": summarise(list(results)), "calls": meter.calls,
+                              **({"stopped": meter.stopped} if meter.stopped else {})})
         finally:
             queue.put_nowait(None)
 
@@ -1255,6 +1283,17 @@ def _failed_brief(r: dict[str, Any]) -> dict[str, Any]:
     if r.get("tool"):
         out["tool_under_test"], out["angle"] = r["tool"], str(r.get("kind") or "").replace("tool_", "")
     return out
+
+
+def estimate_blast_calls(tests: Any, repeats: int) -> int:
+    """How many model calls a blast of these tests is expected to make (never more than the cap): what the check before it starts
+    prices."""
+    n = len(_runnable(tests)[:MAX_TESTS * 2])
+    try:
+        times = max(1, min(int(repeats or 1), MAX_REPEATS))
+    except (TypeError, ValueError):
+        times = 1
+    return min(estimate_calls(n, times), MAX_BLAST_CALLS)
 
 
 def estimate_calls(n_tests: int, repeats: int, judged: int | None = None) -> int:
