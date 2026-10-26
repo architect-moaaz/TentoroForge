@@ -111,7 +111,7 @@ export function HandoffEditor({ config, onUpdate, projectId }: HandoffEditorProp
         {options?.peopleNote && <p className="text-[10px] text-muted-foreground">{options.peopleNote}</p>}
         {nobody && (
           <p role="note" className="text-[10px] text-amber-700">
-            Nobody is named, so nobody will be notified. Handoffs still land in the inbox, where any signed-in person can see them.
+            Nobody is named, so the assistant cannot hand a chat to a person and will say that handing over is not set up. Name at least one role or person.
           </p>
         )}
         <p className="text-[10px] text-muted-foreground">

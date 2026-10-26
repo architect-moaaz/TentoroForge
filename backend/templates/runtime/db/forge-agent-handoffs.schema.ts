@@ -20,6 +20,8 @@ export const forgeAgentHandoffs = pgTable(
     agentId: text("agent_id").notNull(),
     requestedById: text("requested_by_id").notNull(),
     requestedByName: text("requested_by_name"),
+    /** The organisation the person was acting in, in an app of several; null otherwise. The inbox filters on it. */
+    orgId: text("org_id"),
     reason: text("reason").notNull(),
     // "low" | "normal" | "urgent"
     urgency: text("urgency").notNull().default("normal"),
@@ -37,5 +39,6 @@ export const forgeAgentHandoffs = pgTable(
   (t) => ({
     byConversation: index("idx_forge_agent_handoff_conv").on(t.conversationId),
     byStatus: index("idx_forge_agent_handoff_status").on(t.status, t.createdAt),
+    byOrg: index("idx_forge_agent_handoff_org").on(t.orgId),
   }),
 );

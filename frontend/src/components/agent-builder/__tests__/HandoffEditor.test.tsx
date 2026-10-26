@@ -131,9 +131,9 @@ describe("HandoffEditor", () => {
     expect(container.querySelector('input[placeholder="Manager, Support Agent"]')).toBeTruthy();
   });
 
-  it("naming nobody says nobody will be notified, and naming someone clears it", async () => {
+  it("naming nobody says handing over is not set up, and naming someone clears it", async () => {
     await mount();
-    expect(container.querySelector('[role="note"]')?.textContent).toContain("nobody will be notified");
+    expect(container.querySelector('[role="note"]')?.textContent).toContain("handing over is not set up");
     await mount({ handlers: { roles: ["Manager"] } });
     expect(container.querySelector('[role="note"]')).toBeNull();
   });

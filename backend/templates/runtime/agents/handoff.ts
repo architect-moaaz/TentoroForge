@@ -16,14 +16,33 @@ import type { AgentUser, HandoffDeps, HandoffRecord, HandoffSpec, HandoffUrgency
 
 const URGENCIES: HandoffUrgency[] = ["low", "normal", "urgent"];
 
-/** Whether this person may work the inbox: a handler by role or by name. With nobody named, any signed-in person may. */
+/** Whether anyone is named to work the inbox. A handoff with nobody named is not set up: see canHandle. */
+export const hasHandlers = (spec: HandoffSpec | null | undefined): boolean =>
+  !!spec && (spec.handlers.roles.length > 0 || spec.handlers.people.length > 0);
+
+/** Whether this person may work the inbox: a handler by role or by name. With nobody named, NOBODY may: the inbox holds
+ *  other people's conversations and contact details, and "any signed-in person" is every customer of an app with open
+ *  sign-up. */
 export function canHandle(spec: HandoffSpec | null | undefined, user: AgentUser | null): boolean {
   if (!spec || !user) return false;
   const { roles, people } = spec.handlers;
-  if (roles.length === 0 && people.length === 0) return true;
+  if (!hasHandlers(spec)) return false;
   if (people.some((p) => p.id === user.id)) return true;
   const role = (user.role ?? "").toLowerCase();
   return !!role && roles.some((r) => r.toLowerCase() === role);
+}
+
+/** Whose handoffs a person's inbox reaches: every one (an app of one organisation, or a platform role that is in all of
+ *  them) or one organisation's. */
+export type Reach = { all: true } | { orgId: string };
+
+/** What a person's inbox reaches. In an app of several organisations a person reaches the handoffs of the organisation
+ *  they act in and no other's (a platform role, held everywhere, reaches all). Someone who acts in none reaches nothing:
+ *  null. The caller says whether the app has organisations and whether the person's role is a platform one. */
+export function reachOf(user: AgentUser | null, app: { organisations: boolean; platform: boolean }): Reach | null {
+  if (!user) return null;
+  if (!app.organisations || app.platform) return { all: true };
+  return user.orgId ? { orgId: user.orgId } : null;
 }
 
 /** Who takes it. `queue` = nobody yet (anyone on the team claims it); `owner` = the named person;
@@ -56,9 +75,13 @@ async function tell(deps: HandoffDeps, spec: HandoffSpec, h: HandoffRecord, assi
     ` Open Handoffs (/handoffs) to take it (${h.ref}).`;
 
   if (spec.notify.inApp) {
+    // A bell addressed to a role rings that role in EVERY organisation, with the person's contact details in it. In an
+    // app of several organisations the handoff belongs to one, so it rings the people found in that organisation.
     const targets: Array<{ userId?: string; role?: string }> = assignee
       ? [{ userId: assignee.id }]
-      : [...spec.handlers.roles.map((role) => ({ role })), ...spec.handlers.people.map((p) => ({ userId: p.id }))];
+      : h.orgId
+        ? pool.map((p) => ({ userId: p.id }))
+        : [...spec.handlers.roles.map((role) => ({ role })), ...spec.handlers.people.map((p) => ({ userId: p.id }))];
     for (const t of targets) {
       try {
         await deps.notify({ title, message, userId: t.userId ?? null, role: t.role ?? null, entityId: h.id });
@@ -100,6 +123,14 @@ export async function requestHandoff(
   const spec = ctx.handoff;
   if (!spec) throw new ToolError("Handing over to a person is not set up for this assistant.", "unavailable");
   if (!ctx.user) throw new ToolError("The person needs to be signed in before they can be handed to the team.", "auth");
+  // Nobody can open the inbox when nobody is named (see canHandle), so a handoff would be recorded and then sit there.
+  // Better to say it is not set up than to tell a person "passed to the team" when no one will ever see it.
+  if (!hasHandlers(spec)) {
+    throw new ToolError(
+      "Handing over to a person is not set up for this assistant: nobody is named to take it. Say so plainly and suggest contacting the app's administrator.",
+      "unavailable",
+    );
+  }
   if (!ctx.conversationId) throw new ToolError("There is no conversation to hand over.", "invalid");
 
   const reason = String(input.reason ?? "").trim().slice(0, 1000);
@@ -115,7 +146,7 @@ export async function requestHandoff(
 
   let found: Person[] = [];
   try {
-    found = spec.handlers.roles.length ? await deps.people(spec.handlers.roles) : [];
+    found = spec.handlers.roles.length ? await deps.people(spec.handlers.roles, ctx.user.orgId ?? null) : [];
   } catch {
     /* no way to look people up: the queue still works */
   }
@@ -138,6 +169,7 @@ export async function requestHandoff(
       agentId: ctx.agentId ?? "",
       requestedById: ctx.user.id,
       requestedByName: null,
+      orgId: ctx.user.orgId ?? null,
       reason,
       urgency,
       contact: contact || null,

@@ -7,29 +7,38 @@
  *                                                  handoff is claimed by whoever replies; one someone else holds is not.
  *
  * "Handlers" are the people the agent's human-handoff settings name (by role or by person); with nobody named,
- * any signed-in person. A person never reads anyone else's handoff, and a handler only the agents they handle.
+ * nobody. A person never reads anyone else's handoff, a handler only the agents they handle, and in an app of several
+ * organisations only the handoffs of the organisation they act in (a platform role reaches all).
  * Forge runtime — do not remove.
  */
 import { auth } from "@/auth";
 import { AGENTS } from "@/agents/registry";
-import { canHandle } from "@/lib/agents/handoff";
+import { canHandle, reachOf, type Reach } from "@/lib/agents/handoff";
 import { changeHandoff, getHandoff, handoffForConversation, listHandoffs, sendReply, teamWrote, transcript } from "@/lib/agents/handoff-store";
 import { drizzleStore } from "@/lib/agents/store";
+import * as tenancy from "@/lib/tenancy";
 import type { AgentUser, HandoffRecord } from "@/lib/agents/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type Me = AgentUser & { name?: string | null };
+type Me = AgentUser & { name?: string | null; reach: Reach | null };
 
 async function me(): Promise<Me | null> {
   const u = (await auth())?.user as Record<string, unknown> | undefined;
   if (!u?.id) return null;
-  return {
+  await tenancy.policy();
+  const who: AgentUser = {
     id: String(u.id),
     role: u.role ? String(u.role) : undefined,
     email: u.email ? String(u.email) : undefined,
+    orgId: u.activeOrgId ? String(u.activeOrgId) : null,
+  };
+  return {
+    ...who,
     name: (u.displayName ?? u.name ?? u.email ?? null) as string | null,
+    // Whose handoffs this person's inbox reaches: their own organisation's, never another's.
+    reach: reachOf(who, { organisations: tenancy.tenancyOn(), platform: tenancy.isPlatformRole(who.role) }),
   };
 }
 
@@ -61,13 +70,13 @@ export async function GET(req: Request): Promise<Response> {
 
     const id = url.searchParams.get("id");
     if (id) {
-      const h = await getHandoff(id);
+      const h = await getHandoff(id, user.reach);
       if (!h || !handles(user, h)) return Response.json({ error: "No such handoff." }, { status: 404 });
       return Response.json({ handoff: h, messages: await transcript(h.conversationId), me: user });
     }
 
     const status = url.searchParams.get("status");
-    const rows = await listHandoffs({ status: status === "resolved" || status === "all" ? status : "active" });
+    const rows = await listHandoffs(user.reach, { status: status === "resolved" || status === "all" ? status : "active" });
     return Response.json({ handoffs: rows.filter((h) => handles(user, h)), me: user });
   } catch (err) {
     console.error("[api/agent/handoffs] GET", err);
@@ -88,7 +97,7 @@ export async function POST(req: Request): Promise<Response> {
     return Response.json({ error: "Expected a JSON body." }, { status: 400 });
   }
   try {
-    const current = typeof body?.id === "string" ? await getHandoff(body.id) : null;
+    const current = typeof body?.id === "string" ? await getHandoff(body.id, user.reach) : null;
     if (!current || !handles(user, current)) return Response.json({ error: "No such handoff." }, { status: 404 });
 
     if (body.action === "reply") {
@@ -98,7 +107,7 @@ export async function POST(req: Request): Promise<Response> {
       if (current.status === "claimed" && current.assignedToId !== user.id) {
         return Response.json({ error: `${current.assignedToName ?? "Someone else"} has this one. Take it over first.` }, { status: 409 });
       }
-      const held = current.status === "claimed" ? current : await changeHandoff(current.id, { action: "claim", by: { id: user.id, name: user.name } });
+      const held = current.status === "claimed" ? current : await changeHandoff(current.id, { action: "claim", by: { id: user.id, name: user.name } }, user.reach);
       if (!held) return Response.json({ error: "That is not possible: it may already be resolved." }, { status: 409 });
       await sendReply(held, text);
       await teamWrote(held, text).catch(() => {});
@@ -125,7 +134,7 @@ export async function POST(req: Request): Promise<Response> {
       default:
         return Response.json({ error: "Unknown action." }, { status: 400 });
     }
-    const next = await changeHandoff(current.id, change);
+    const next = await changeHandoff(current.id, change, user.reach);
     if (!next) return Response.json({ error: "That is not possible: it may already be resolved." }, { status: 409 });
     return Response.json({ handoff: next });
   } catch (err) {

@@ -188,6 +188,8 @@ export interface HandoffRecord {
   status: HandoffStatus;
   assignedToId?: string | null;
   assignedToName?: string | null;
+  /** The organisation the person who asked was acting in; the inbox only shows a handoff to its own organisation. */
+  orgId?: string | null;
   resolutionNote?: string | null;
   createdAt: string | Date;
   claimedAt?: string | Date | null;
@@ -205,8 +207,8 @@ export interface HandoffStore {
 /** Everything a handoff touches outside the loop. Each side effect after the record is saved is best-effort. */
 export interface HandoffDeps {
   store: HandoffStore;
-  /** People who hold any of these roles. */
-  people(roles: string[]): Promise<Person[]>;
+  /** People who hold any of these roles, in this organisation when one is given. */
+  people(roles: string[], orgId?: string | null): Promise<Person[]>;
   /** One in-app notification (the bell). A userId addresses a person; a role (no userId) addresses everyone in it. */
   notify(n: { title: string; message: string; userId?: string | null; role?: string | null; entityId?: string }): Promise<void>;
   /** Optional. `sent: false` with a reason is the normal answer from an app with no email set up. */
@@ -288,6 +290,8 @@ export interface AgentUser {
   id: string;
   role?: string;
   email?: string;
+  /** The organisation the person acts in (the session's active one). Absent in an app of one organisation. */
+  orgId?: string | null;
 }
 
 export type AgentEvent =

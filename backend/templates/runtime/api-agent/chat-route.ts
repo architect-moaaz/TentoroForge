@@ -35,12 +35,14 @@ export const maxDuration = 120;
 const FILE_ID = /^[0-9a-zA-Z-]{8,64}$/;
 
 async function sessionUser(): Promise<AgentUser | null> {
-  const u = (await auth())?.user as { id?: unknown; role?: unknown; email?: unknown } | undefined;
+  const u = (await auth())?.user as { id?: unknown; role?: unknown; email?: unknown; activeOrgId?: unknown } | undefined;
   if (!u?.id) return null;
   return {
     id: String(u.id),
     role: u.role ? String(u.role) : undefined,
     email: u.email ? String(u.email) : undefined,
+    // Kept on a handoff, so the inbox of one organisation never shows another's.
+    orgId: u.activeOrgId ? String(u.activeOrgId) : null,
   };
 }
 

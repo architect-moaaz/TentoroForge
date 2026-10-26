@@ -129,7 +129,10 @@ def _classify_compile_warning(text: str) -> tuple[str, str] | None:
     if "router box has no routes" in t:
         return "warning", "router_empty"
     if "human-handoff box names no one" in t:
-        return "warning", "handoff_no_handlers"
+        # An error, not a warning: handoffs hold a person's conversation and contact details, so the inbox opens only
+        # for the people the box names. With nobody named nobody can open it, and the assistant says handing over is
+        # not set up rather than promise a team that can never see the request.
+        return "error", "handoff_no_handlers"
     if "handoff assignment" in t:
         return "warning", "handoff_assignment"
     if "more than one human-handoff box" in t:
@@ -149,6 +152,11 @@ def _classify_compile_warning(text: str) -> tuple[str, str] | None:
     if "custom input filter" in t:
         return "warning", "custom_filter"
     return "warning", "compile"
+
+
+_NO_HANDLERS = ("The human-handoff box names no one to handle it. Only the people it names can open the handoff inbox, "
+                "so with nobody named no one could read or answer a handoff, and the assistant will say that handing over "
+                "is not set up. Name a role or a person.")
 
 
 def _friendly(text: str) -> str:
@@ -189,7 +197,8 @@ def check_agent(graph: dict[str, Any], app_root: Path | None = None) -> dict[str
             node_id = next((str(n.get("id")) for n in nodes if _kind(n) == "router"), None)
         elif code.startswith("handoff_"):
             node_id = next((str(n.get("id")) for n in nodes if _kind(n) == "human_handoff"), None)
-        findings.append(_finding(severity, code, _friendly(w), node_id))
+        message = _NO_HANDLERS if code == "handoff_no_handlers" else _friendly(w)
+        findings.append(_finding(severity, code, message, node_id))
 
     # 2 — (the router is real now: its routes are given to the agent as a routing guide; an empty one is said above)
 

@@ -13,7 +13,7 @@ import { installHarness, ok, eqJson, done } from "./_harness.mts";
 
 installHarness();
 
-const { requestHandoff, canHandle, pickAssignee, handoffNotice } = await import("../agents/handoff.ts");
+const { requestHandoff, canHandle, pickAssignee, handoffNotice, reachOf } = await import("../agents/handoff.ts");
 const { ToolError } = await import("../agents/tools.ts");
 const { runAgent } = await import("../agents/runtime.ts");
 const { memoryStore } = await import("../agents/memory.ts");
@@ -80,8 +80,20 @@ console.log("who may work the inbox");
   ok(canHandle(s, { id: "u9", role: "Customer" }), "a named person may, whatever their role");
   ok(!canHandle(s, { id: "x", role: "Support Agent" }), "someone else may not");
   ok(!canHandle(s, null), "nobody signed out may");
-  ok(canHandle(spec({ handlers: { roles: [], people: [] } }), user), "with nobody named, any signed-in person may, so no handoff is stranded");
+  ok(!canHandle(spec({ handlers: { roles: [], people: [] } }), user), "with nobody named, nobody may: a signed-in customer must not read the team's inbox");
+  ok(!canHandle(spec({ handlers: { roles: [], people: [] } }), { id: "x", role: "Admin" }), "not even an admin, for there is no one to say they handle it");
   ok(!canHandle(null, user), "and no handoff settings means no inbox");
+}
+
+console.log("whose handoffs an inbox reaches");
+{
+  const org = { organisations: true, platform: false };
+  eqJson(reachOf({ id: "a", orgId: "o1" }, org), { orgId: "o1" }, "in an app of several organisations: the one they act in");
+  eqJson(reachOf({ id: "a" }, org), null, "acting in none: nothing");
+  eqJson(reachOf({ id: "a", orgId: null }, org), null, "an explicit none is nothing too");
+  eqJson(reachOf({ id: "a", orgId: "o1" }, { organisations: true, platform: true }), { all: true }, "a platform role is in all of them");
+  eqJson(reachOf({ id: "a", orgId: "o1" }, { organisations: false, platform: false }), { all: true }, "an app of one organisation: everything, as before");
+  eqJson(reachOf(null, { organisations: false, platform: false }), null, "nobody signed in: nothing");
 }
 
 // ── who takes it ──────────────────────────────────────────────────────────
@@ -113,6 +125,33 @@ console.log("a handoff is recorded, then the team is told");
   eqJson(deps.notes.map((n: any) => [n.userId, n.role]), [[null, "Manager"]], "the queue is told through the role, so every manager's bell rings");
   ok(deps.notes[0].title.includes("urgent") && deps.notes[0].message.includes("555-0100") && deps.notes[0].entityId === rec.id, "the notice carries the reason, how to reach them and the handoff");
   eqJson(out.notified, { inApp: 1, emailed: 0 }, "and says who was told");
+}
+
+console.log("the organisation the person acts in goes with the handoff, and only its people are told");
+{
+  const deps = fakeDeps();
+  const seen: any[] = [];
+  deps.people = async (roles: string[], orgId?: string | null) => {
+    seen.push([roles, orgId]);
+    return [{ id: "m1", name: "Maya", email: "maya@a.test", role: "Manager" }];
+  };
+  await requestHandoff(deps, ctxFor(spec(), { user: { ...user, orgId: "org-a" } }), { reason: "x", contact: "555-0100" });
+  eqJson(deps.records[0].orgId, "org-a", "the record says which organisation it belongs to");
+  eqJson(seen, [[["Manager"], "org-a"]], "the people are looked up in that organisation");
+  eqJson(deps.notes.map((n: any) => [n.userId, n.role]), [["m1", null]], "the bell rings them by name, never the whole role, which would ring every organisation's managers with this person's contact details");
+
+  const one = fakeDeps();
+  await requestHandoff(one, ctxFor(spec()), { reason: "x" });
+  eqJson([one.records[0].orgId, one.notes.map((n: any) => [n.userId, n.role])], [null, [[null, "Manager"]]], "an app of one organisation is as before: no organisation, the role is rung");
+}
+
+console.log("a handoff nobody is named to take is not set up, and says so");
+{
+  const deps = fakeDeps();
+  const err = await refusal(requestHandoff(deps, ctxFor(spec({ handlers: { roles: [], people: [] } })), { reason: "x" }));
+  ok(err instanceof ToolError && err.code === "unavailable" && /nobody is named/.test(err.message) && /administrator/.test(err.message),
+     "the assistant is told plainly, rather than promising a team that can never see it");
+  eqJson([deps.records.length, deps.notes.length], [0, 0], "nothing is recorded or sent: it would only sit where no one can open it");
 }
 
 console.log("defaults, and what is refused");

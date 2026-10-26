@@ -168,9 +168,33 @@ def handoff_box(**cfg):
     return node("h", "human_handoff", "Hand over", {"handlers": {"roles": ["Admin"]}, **cfg})
 
 
-def test_a_handoff_that_names_no_one_is_a_warning_on_its_box():
+def test_a_handoff_that_names_no_one_is_an_error_on_its_box():
+    # Nobody named means nobody may open the inbox (it holds other people's conversations and contact details), so the
+    # drawing is wrong, and a save that is not forced is held back.
     f = by_code(check_agent(graph(PROMPT, node("h", "human_handoff", "Hand over", {}))), "handoff_no_handlers")
-    assert len(f) == 1 and f[0]["nodeId"] == "h" and f[0]["severity"] == "warning" and "nobody is notified" in f[0]["message"]
+    assert len(f) == 1 and f[0]["nodeId"] == "h" and f[0]["severity"] == "error"
+    assert "no one could read or answer" in f[0]["message"] and "Name a role or a person" in f[0]["message"]
+
+
+def test_a_handoff_that_names_a_role_or_a_person_is_not_flagged():
+    for handlers in ({"roles": ["Admin"]}, {"people": [{"id": "u1", "name": "Pat"}]}):
+        g = graph(PROMPT, node("h", "human_handoff", "Hand over", {"handlers": handlers}))
+        assert not by_code(check_agent(g), "handoff_no_handlers")
+
+
+def test_an_unnamed_handoff_holds_a_save_back_unless_forced(tmp_path):
+    from types import SimpleNamespace
+
+    import pytest
+    from fastapi import HTTPException
+    from routers.agent_builder import _verified_for_save
+
+    g = graph(PROMPT, node("h", "human_handoff", "Hand over", {}))
+    project = SimpleNamespace(output_dir=str(tmp_path))
+    with pytest.raises(HTTPException) as e:
+        _verified_for_save(project, g, False)
+    assert e.value.status_code == 422 and e.value.detail["problems"][0]["code"] == "handoff_no_handlers"
+    _verified_for_save(project, g, True)  # "save it anyway, on purpose" still saves
 
 
 def test_a_sound_handoff_has_nothing_to_report(tmp_path):

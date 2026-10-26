@@ -12,6 +12,7 @@ import { forgeAgentConversations, forgeAgentMessages } from "@/db/schema/_forge_
 import { forgeNotifications } from "@/db/schema/_forge_notifications";
 import { and, asc, count, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { shipHandoff } from "./insights-outbox";
+import type { Reach } from "./handoff";
 import type { HandoffDeps, HandoffRecord, HandoffStatus, HandoffStore, Person, StoredMessage } from "./types";
 
 const toRecord = (r: any): HandoffRecord => ({
@@ -21,6 +22,7 @@ const toRecord = (r: any): HandoffRecord => ({
   agentId: r.agentId,
   requestedById: r.requestedById,
   requestedByName: r.requestedByName,
+  orgId: r.orgId ?? null,
   reason: r.reason,
   urgency: r.urgency === "urgent" || r.urgency === "low" ? r.urgency : "normal",
   contact: r.contact,
@@ -81,12 +83,25 @@ export const handoffStore: HandoffStore = {
 
 // ── who, and how they are told ────────────────────────────────────────────
 
-/** People who hold any of these roles, from the app's own users table. Column names differ app to app. */
-async function people(roles: string[]): Promise<Person[]> {
+/** People who hold any of these roles, from the app's own users table. Column names differ app to app.
+ *  With an organisation, only the members of it, by the role they hold THERE (a person's role is per organisation),
+ *  and anyone whose own role is a platform one (held everywhere): the handoff is not for another organisation's staff. */
+async function people(roles: string[], orgId?: string | null): Promise<Person[]> {
   if (!roles.length) return [];
   const wanted = roles.map((r) => r.toLowerCase());
-  const res: any = await (db as any).execute(sql`SELECT * FROM users LIMIT 500`);
-  const rows: any[] = Array.isArray(res) ? res : (res?.rows ?? []);
+  let rows: any[];
+  if (orgId) {
+    const tenancy = await import("@/lib/tenancy");
+    await tenancy.policy();
+    const res: any = await (db as any).execute(
+      sql`SELECT u.*, m.role AS org_role FROM users u LEFT JOIN forge_memberships m ON m.user_id = u.id::text AND m.org_id = ${orgId} AND m.status = 'active' LIMIT 500`,
+    );
+    rows = (Array.isArray(res) ? res : (res?.rows ?? []))
+      .map((r: any) => ({ ...r, role: r.org_role ?? (tenancy.isPlatformRole(r.role) ? r.role : null) }));
+  } else {
+    const res: any = await (db as any).execute(sql`SELECT * FROM users LIMIT 500`);
+    rows = Array.isArray(res) ? res : (res?.rows ?? []);
+  }
   return rows
     .filter((r) => r.role && wanted.includes(String(r.role).toLowerCase()) && r.is_active !== false)
     .map((r) => ({
@@ -148,11 +163,22 @@ export function handoffDeps(): HandoffDeps {
 
 const RANK = sql`CASE ${forgeAgentHandoffs.urgency} WHEN 'urgent' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END`;
 
+// Every read and change below says WHOSE handoffs it may reach (`Reach`, from reachOf in handoff.ts) and has no default:
+// a handoff holds a person's conversation and contact details, and the inbox must never show one organisation's to
+// another. `null` reaches nothing.
+const reaches = (reach: Reach | null, h: { orgId?: string | null }): boolean =>
+  !!reach && ("all" in reach || (!!h.orgId && h.orgId === reach.orgId));
+
 /** Unresolved first (urgent, then oldest), then the recently resolved. */
-export async function listHandoffs(opts: { status?: HandoffStatus | "active" | "all"; limit?: number } = {}): Promise<HandoffRecord[]> {
+export async function listHandoffs(
+  reach: Reach | null,
+  opts: { status?: HandoffStatus | "active" | "all"; limit?: number } = {},
+): Promise<HandoffRecord[]> {
+  if (!reach) return [];
   const status = opts.status ?? "active";
-  const where =
+  const byStatus =
     status === "all" ? undefined : status === "active" ? ne(forgeAgentHandoffs.status, "resolved") : eq(forgeAgentHandoffs.status, status);
+  const where = and(byStatus, "all" in reach ? undefined : eq(forgeAgentHandoffs.orgId, reach.orgId));
   const q = db.select().from(forgeAgentHandoffs);
   const rows = await (where ? q.where(where) : q)
     .orderBy(status === "resolved" || status === "all" ? desc(forgeAgentHandoffs.createdAt) : asc(RANK), asc(forgeAgentHandoffs.createdAt))
@@ -160,10 +186,11 @@ export async function listHandoffs(opts: { status?: HandoffStatus | "active" | "
   return rows.map(toRecord);
 }
 
-export async function getHandoff(id: string): Promise<HandoffRecord | null> {
+export async function getHandoff(id: string, reach: Reach | null): Promise<HandoffRecord | null> {
   if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
   const rows = await db.select().from(forgeAgentHandoffs).where(eq(forgeAgentHandoffs.id, id)).limit(1);
-  return rows[0] ? toRecord(rows[0]) : null;
+  const found = rows[0] ? toRecord(rows[0]) : null;
+  return found && reaches(reach, found) ? found : null;
 }
 
 /** The person's own handoff for one of their conversations (any status, newest). */
@@ -247,9 +274,9 @@ export type HandoffAction =
   | { action: "resolve"; note?: string }
   | { action: "assign"; to: { id: string; name?: string | null } };
 
-/** Move a handoff along. Returns the new record, or null when it does not exist or the move is not allowed. */
-export async function changeHandoff(id: string, change: HandoffAction): Promise<HandoffRecord | null> {
-  const current = await getHandoff(id);
+/** Move a handoff along. Returns the new record, or null when it does not exist (for this reach) or the move is not allowed. */
+export async function changeHandoff(id: string, change: HandoffAction, reach: Reach | null): Promise<HandoffRecord | null> {
+  const current = await getHandoff(id, reach);
   if (!current) return null;
   const now = new Date();
   let patch: Record<string, unknown>;
@@ -271,7 +298,7 @@ export async function changeHandoff(id: string, change: HandoffAction): Promise<
       break;
   }
   await db.update(forgeAgentHandoffs).set(patch).where(eq(forgeAgentHandoffs.id, id));
-  const changed = await getHandoff(id);
+  const changed = await getHandoff(id, reach);
   // Claimed or resolved (or released back to open): the platform's insights hear of it. A change of who holds it
   // (assign) is not a change of status and is sent as the status it already had, which the platform ignores.
   if (changed) shipHandoff(changed);

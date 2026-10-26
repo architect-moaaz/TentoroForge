@@ -334,7 +334,7 @@ def _compile_handoff(cfg: dict[str, Any], warnings: list[str]) -> dict[str, Any]
     notify = cfg.get("notify") if isinstance(cfg.get("notify"), dict) else {}
     keywords = _str_list((cfg.get("conditions") or {}).get("keyword_triggers") if isinstance(cfg.get("conditions"), dict) else [])
     if not roles and not people:
-        warnings.append("the human-handoff box names no one to handle it — handoffs are saved in the inbox but nobody is notified")
+        warnings.append("the human-handoff box names no one to handle it — the assistant will say that handing over is not set up")
     return {
         "handlers": {"roles": roles, "people": people},
         "assignment": assignment,
