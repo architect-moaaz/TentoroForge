@@ -212,8 +212,9 @@ async def _heal_batch(project_id: uuid.UUID, output_dir: str, batch: list[dict])
         # every call it makes; nobody asked for it in person.
         from services.build_usage import acting
         with acting(org=await _org_of(proj_id)):
+            from services.blueprint.run_ledger import with_ledger
             smith_result = await asyncio.to_thread(
-                _smith_turn, str(proj_id), output_dir, prompt_with_anchors,
+                with_ledger, output_dir, "heal", _smith_turn, str(proj_id), output_dir, prompt_with_anchors,
                 commit=False, unattended=True,
             )
     except Exception as exc:  # noqa: BLE001

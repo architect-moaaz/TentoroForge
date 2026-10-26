@@ -101,4 +101,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 # running — a tester's post-build trials — vanished with no end in its ledger
 # (forge-v3, 2026-10-09 10:40, "Child process [9] died"). A worker that is
 # truly hung still goes, after a minute instead of five seconds.
-CMD ["sh", "-c", "alembic upgrade head && exec uvicorn main:app --host 0.0.0.0 --port 6500 --workers 2 --timeout-worker-healthcheck 60"]
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn main:app --host 0.0.0.0 --port 6500 --workers 2 --timeout-worker-healthcheck 60 --timeout-graceful-shutdown 30"]

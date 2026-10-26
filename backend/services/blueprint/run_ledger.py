@@ -37,6 +37,8 @@ drifts from the run.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+
 import json
 import os
 import time
@@ -388,6 +390,28 @@ def explain(output_dir: str | Path, run_id: str | None = None) -> dict[str, Any]
     }
 
 
+#: What a ledger records, by how its name ends. Every long job writes one, so
+#: the cutover gate and the lost-run watch can see it; anything not listed is
+#: a build. One table, so a publish's ledger is never taken for a build that
+#: "carry on" should resume.
+JOB_SUFFIXES: dict[str, str] = {
+    "-smith-turn": "turn", "-checks": "check", "-app-check": "check",
+    "-publish": "publish", "-smith-fix": "fix", "-self-heal": "heal", "-drafts": "drafts",
+}
+#: The suffix a `TurnLedger` of each kind is written under.
+_SUFFIX_OF = {"turn": "-smith-turn", "publish": "-publish", "fix": "-smith-fix", "heal": "-self-heal",
+              "drafts": "-drafts"}
+
+
+def ledger_kind(path: str | Path) -> str:
+    """`turn`, `check`, `publish`, `fix`, `heal`, `drafts` or `build`."""
+    stem = Path(path).name.removesuffix(".jsonl")
+    for suffix, kind in JOB_SUFFIXES.items():
+        if stem.endswith(suffix):
+            return kind
+    return "build"
+
+
 class TurnLedger:
     """A Smith turn's own ledger: when it began, a pulse while it works, and
     how it ended.
@@ -401,9 +425,14 @@ class TurnLedger:
 
     SUFFIX = "-smith-turn"
 
-    def __init__(self, output_dir: str | Path, *, phase: str = "") -> None:
+    def __init__(self, output_dir: str | Path, *, phase: str = "", kind: str = "turn") -> None:
+        """`kind` is any of `_SUFFIX_OF`: a publish, a fix or a self-heal keeps
+        the same pulse, so the cutover gate waits for it and the lost-run
+        watch can say it was cut off. Only a turn is the project's turn
+        (`run_registry.TURNS`)."""
         import threading
-        run_id = time.strftime("%Y%m%d-%H%M%S", time.gmtime()) + self.SUFFIX
+        self.kind = kind
+        run_id = time.strftime("%Y%m%d-%H%M%S", time.gmtime()) + _SUFFIX_OF.get(kind, self.SUFFIX)
         self.ledger = RunLedger(output_dir, run_id, phase=phase)
         self._stop = threading.Event()
 
@@ -414,8 +443,9 @@ class TurnLedger:
         # Registered while it lives, so the loop inside can say its steps
         # (`run_registry.turn_step`) without being handed the ledger.
         self.key = str(Path(output_dir).resolve())
-        from services import run_registry
-        run_registry.TURNS[self.key] = self
+        if kind == "turn":
+            from services import run_registry
+            run_registry.TURNS[self.key] = self
 
     def step(self, text: str) -> None:
         self.ledger.step(text)
@@ -433,3 +463,81 @@ class TurnLedger:
         else:
             from types import SimpleNamespace
             self.ledger.finish(SimpleNamespace())
+
+
+@contextmanager
+def job_ledger(output_dir: str | Path | None, kind: str, *, phase: str = ""):
+    """A long job's ledger for as long as the block runs: a pulse every 20 s,
+    `run:end` when it returns, `run:crashed` when it raises. Without an
+    `output_dir` (no app to write under) it records nothing."""
+    if not output_dir:
+        yield None
+        return
+    try:
+        ledger = TurnLedger(output_dir, phase=phase, kind=kind)
+    except OSError:                                   # a ledger that cannot be written never stops the job
+        yield None
+        return
+    try:
+        yield ledger
+    except BaseException as exc:
+        ledger.end(exc)
+        raise
+    else:
+        ledger.end()
+
+
+def with_ledger(output_dir: str | Path | None, kind: str, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    """`fn(*args, **kwargs)` inside `job_ledger(output_dir, kind)`: for work
+    handed to a thread, so the ledger lives exactly as long as the work does
+    (a cancelled request does not stop the thread, and must not end its
+    ledger)."""
+    with job_ledger(output_dir, kind):
+        return fn(*args, **kwargs)
+
+
+def own_open_ledgers(root: str | Path, *, within_s: float = 86400.0) -> list[Path]:
+    """The ledgers this process opened and has not ended (written in the
+    last `within_s`): the work a stop of this process would cut off."""
+    out: list[Path] = []
+    root = Path(root)
+    if not root.is_dir():
+        return out
+    now, me = time.time(), os.getpid()
+    for path in root.glob("*/.forge/runs/*.jsonl"):
+        try:
+            if now - path.stat().st_mtime > within_s:
+                continue
+            with path.open("r", encoding="utf-8") as fh:
+                first = json.loads(fh.readline() or "{}")
+            if int(first.get("pid") or 0) != me:
+                continue
+            with path.open("rb") as fh:
+                fh.seek(0, os.SEEK_END)
+                fh.seek(max(0, fh.tell() - 4096))
+                tail = fh.read().decode("utf-8", "replace").strip().splitlines()
+            last = str(json.loads(tail[-1]).get("event") or "") if tail else ""
+        except (OSError, ValueError, TypeError):
+            continue
+        if last not in ("run:end", "run:crashed"):
+            out.append(path)
+    return out
+
+
+def wait_for_own_jobs(root: str | Path, wait_s: float, *, poll_s: float = 2.0) -> list[Path]:
+    """Wait until this process's open ledgers have ended, or `wait_s` passes.
+    Returns what is still open then.
+
+    A STOP CUT EVERY JOB OFF. Docker gave the backend ten seconds and nothing
+    waited for the turn, check or publish under way; 13 checks and 11 turns
+    were lost to restarts in a month (forge-v3, 2026-10). The cutover waits
+    for them before it stops anything (`deploy/v3-cutover.sh`); this is the
+    last, short wait for what started after it looked. What is still open at
+    the end is closed by the next start (`run_registry.close_orphaned_ledgers`)
+    and said to the person."""
+    deadline = time.monotonic() + max(0.0, wait_s)
+    open_now = own_open_ledgers(root)
+    while open_now and time.monotonic() < deadline:
+        time.sleep(poll_s)
+        open_now = own_open_ledgers(root)
+    return open_now

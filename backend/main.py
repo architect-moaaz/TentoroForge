@@ -406,6 +406,15 @@ async def _start_domain_watch():
 
 @app.on_event("shutdown")
 async def _shutdown():
+    # THE WORK UNDER WAY FINISHES FIRST — and before the previews go, since a
+    # check runs against its app's server (`run_ledger.wait_for_own_jobs`).
+    import logging as _logging
+    from services.blueprint.run_ledger import wait_for_own_jobs
+    from services.project_paths import OUTPUT_ROOT
+    left = await asyncio.to_thread(wait_for_own_jobs, OUTPUT_ROOT, float(os.environ.get("FORGE_STOP_WAIT_S") or 90))
+    if left:
+        _logging.getLogger("forge.shutdown").warning("[shutdown] stopping with %d job(s) still running: %s",
+                                                      len(left), ", ".join(p.stem for p in left[:6]))
     stop_all_previews()
     from services import phone_live
     phone_live.stop_all()

@@ -441,10 +441,15 @@ async def smith_turn(project_id: str, req: SmithTurnRequest, user: PlatformUser 
         )
         return _turn_payload(turn)
 
+    from services.blueprint.run_ledger import job_ledger
+
     async with _turn_lock(project_id):
         try:
             # `to_thread` copies the context, so the actor rides into the turn.
-            with acting(user=user.email, org=str(project.org_id)):
+            # A LEDGER, SO A DEPLOY WAITS FOR IT. This turn kept none: the
+            # cutover gate could not see it and a restart cut it off without a
+            # trace (2026-10-26).
+            with acting(user=user.email, org=str(project.org_id)), job_ledger(root, "turn", phase="change"):
                 return await asyncio.to_thread(_run)
         except HTTPException:
             raise

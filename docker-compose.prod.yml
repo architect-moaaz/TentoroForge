@@ -61,6 +61,11 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
+    # A STOP LETS THE WORK UNDER WAY FINISH. Docker's default is 10 s, then
+    # SIGKILL: every turn, check and publish in flight was cut off. uvicorn
+    # waits up to 30 s for open connections (--timeout-graceful-shutdown),
+    # then the shutdown hook up to FORGE_STOP_WAIT_S (90 s) for running jobs.
+    stop_grace_period: 150s
     depends_on:
       postgres:
         condition: service_healthy

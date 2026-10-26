@@ -258,7 +258,8 @@ async def publish(
             from services import mobile_autobuild
             await mobile_autobuild.start_phone_app(project.id, user.id)
 
-    queue = runs.start(publish_then_phone_app, async_sessionmaker(db.bind, expire_on_commit=False))
+    queue = runs.start(publish_then_phone_app, async_sessionmaker(db.bind, expire_on_commit=False),
+                       output_dir=project.output_dir)
 
     return StreamingResponse(
         runs.frames(queue),

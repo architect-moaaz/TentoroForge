@@ -39,23 +39,32 @@ _RUNNING: set[asyncio.Task] = set()
 
 
 def start(publish: Callable[[AsyncSession], AsyncIterator[Any]],
-          sessions: async_sessionmaker) -> asyncio.Queue:
+          sessions: async_sessionmaker, output_dir: str | None = None) -> asyncio.Queue:
     """Run `publish(session)` to its end on its own task and session; return a
     queue of its progress frames (dicts), closed with `None`. Whoever reads the
-    queue may stop at any time: the publish goes on and closes its own row."""
+    queue may stop at any time: the publish goes on and closes its own row.
+
+    With `output_dir` it keeps a ledger while it runs (`job_ledger`): the
+    cutover gate waits for it, and a restart that cuts it off is said."""
+    from services.blueprint.run_ledger import job_ledger
+
     queue: asyncio.Queue = asyncio.Queue()
 
     async def run() -> None:
         try:
-            async with sessions() as own:
-                async for evt in publish(own):
-                    queue.put_nowait({"stage": evt.stage, "message": evt.message,
-                                      "progress": evt.progress, "data": evt.data})
+            with job_ledger(output_dir, "publish", phase="publish"):
+                await _publish(own_sessions=sessions)
         except Exception as exc:  # noqa: BLE001 — the provider catches its own; this is the backstop
             log.exception("publish task leaked an exception")
             queue.put_nowait({"stage": "error", "message": str(exc)})
         finally:
             queue.put_nowait(None)
+
+    async def _publish(own_sessions: async_sessionmaker) -> None:
+        async with own_sessions() as own:
+            async for evt in publish(own):
+                queue.put_nowait({"stage": evt.stage, "message": evt.message,
+                                  "progress": evt.progress, "data": evt.data})
 
     task = asyncio.create_task(run())
     _RUNNING.add(task)
