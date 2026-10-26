@@ -44,7 +44,7 @@ INSIGHTS_SALT_FILE = ".forge-insights-salt"
 #: runtime template -> destination, relative to the app root
 _CORE = ("types", "guardrails", "memory", "tools", "runtime", "io", "store", "handoff", "handoff-store", "handoff-nav",
          "confirm", "limits", "usage-store", "debug", "watch", "turns-store", "insights", "insights-shipper",
-         "insights-outbox")
+         "insights-outbox", "visitor")
 
 
 def resolve_roots(path: str | Path) -> tuple[Path, Path]:

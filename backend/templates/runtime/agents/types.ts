@@ -409,6 +409,9 @@ export interface AgentRunInput {
   confirm?: ConfirmSignal | null;
   conversationId: string | null;
   user: AgentUser | null;
+  /** Who a signed-out visitor is, for their usage limits (visitor.ts): their guest id and the address the app's proxy saw.
+   *  Left out, the guest id is read from `cookie`. Ignored for a signed-in person, who is counted by their account. */
+  visitor?: { guest?: string | null; ip?: string | null } | null;
   cookie: string;
   origin: string;
 }

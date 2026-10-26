@@ -44,3 +44,6 @@ node --experimental-strip-types --no-warnings "$DIR/agent-insights-outbox.test.m
 
 # The catch-up route and the cron tick's call to it.
 node --experimental-strip-types --no-warnings "$DIR/agent-insights-tick.test.mts"
+
+# A signed-out visitor to a public assistant is limited like anyone else: by guest cookie and by address.
+node --experimental-strip-types --no-warnings "$DIR/agent-visitor-limits.test.mts"

@@ -27,6 +27,7 @@ import { holdForShipping } from "@/lib/agents/insights-shipper";
 import { realDeps, toolIO } from "@/lib/agents/io";
 import { feedEvent, newRunId, observeDeps, publish, watching, type WatchEvent } from "@/lib/agents/watch";
 import { confirmSignalOf } from "@/lib/agents/confirm";
+import { visitorOf } from "@/lib/agents/visitor";
 import type { AgentEvent, AgentRuntimeConfig, AgentUser } from "@/lib/agents/types";
 
 /** A change the app is holding until the person agrees. Only this fact (and the id their button press must carry) goes to the browser, never the result. */
@@ -91,6 +92,8 @@ export async function POST(req: Request): Promise<Response> {
     : body.message.trim();
 
   const user = await sessionUser();
+  // A signed-out visitor is counted against the usage limits by a guest cookie and by their address (agents/visitor.ts).
+  const visitor = user ? null : visitorOf(req);
 
   // A builder watching this development app live (see agents/watch.ts) is sent a COPY of what happens here. The
   // chat itself is unchanged: `observeDeps` only reports, and nothing is kept unless someone is watching.
@@ -137,6 +140,7 @@ export async function POST(req: Request): Promise<Response> {
           confirm: confirmSignalOf(body.confirm),
           conversationId: typeof body.conversationId === "string" ? body.conversationId : null,
           user,
+          visitor,
           cookie: req.headers.get("cookie") ?? "",
           origin: new URL(req.url).origin,
         },
@@ -155,12 +159,12 @@ export async function POST(req: Request): Promise<Response> {
     },
   });
 
-  return new Response(stream, {
-    headers: {
-      "content-type": "text/event-stream; charset=utf-8",
-      "cache-control": "no-cache, no-transform",
-      connection: "keep-alive",
-      "x-accel-buffering": "no",
-    },
+  const headers = new Headers({
+    "content-type": "text/event-stream; charset=utf-8",
+    "cache-control": "no-cache, no-transform",
+    connection: "keep-alive",
+    "x-accel-buffering": "no",
   });
+  if (visitor?.setCookie) headers.append("set-cookie", visitor.setCookie);
+  return new Response(stream, { headers });
 }

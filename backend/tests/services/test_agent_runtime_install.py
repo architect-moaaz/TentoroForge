@@ -848,3 +848,11 @@ def test_an_app_with_no_agent_gets_no_salt(tmp_path):
     result = install_agent_runtime(project)
     assert result["installed"] is False
     assert not (app / ".env.local").exists() and not (app / ".forge-insights-salt").exists()
+
+
+def test_the_install_brings_the_visitor_module_the_usage_limits_need(tmp_path):
+    project, app = make_app(tmp_path)
+    install_agent_runtime(project, graphs=[sample_graph()])
+    # runtime.ts imports it: a missing copy would fail every chat build
+    assert (app / "src" / "lib" / "agents" / "visitor.ts").is_file()
+    assert './visitor' in (app / "src" / "lib" / "agents" / "runtime.ts").read_text(encoding="utf-8")

@@ -20,6 +20,7 @@ import { handoffNotice } from "./handoff";
 import { checkLimits, limitsOf } from "./limits";
 import { loadHistory, summarizeIfNeeded } from "./memory";
 import { toModelTools } from "./tools";
+import { guestFromCookie, visitorKeys } from "./visitor";
 import type {
   AgentDeps,
   AgentEvent,
@@ -94,6 +95,12 @@ export async function runAgent(
   const startedAt = clock();
   const tokens = { input: 0, output: 0 };
   const userId = input.user?.id ?? "anonymous";
+  // WHO IS COUNTED against the limits: a signed-in person by their account, a signed-out visitor by their guest cookie
+  // AND the address they came from (visitor.ts), so a public assistant cannot be run without limit on the owner's key
+  // by clearing cookies, nor by one office's worth of visitors being mistaken for one. Nothing identifies them: not counted.
+  const limitKeys = input.user
+    ? [input.user.id]
+    : visitorKeys({ guest: input.visitor?.guest ?? guestFromCookie(input.cookie), ip: input.visitor?.ip ?? null });
   // What this turn did, kept for the record at the end (see recordTurnSafely). The conversation goes in it only once
   // it is known to be the person's: an id a visitor made up is never written down as theirs.
   const turn = {
@@ -151,17 +158,21 @@ export async function runAgent(
     const handed = conversationId ? await deps.handoffs?.openFor(conversationId).catch(() => null) : null;
 
     // The person's own limits, before anything is created, saved or paid for. Talking to a person on the team costs
-    // nothing, so it is never limited. Counts that cannot be read (no table yet) mean "not limited".
-    if (!handed && deps.usage && input.user) {
-      const used = await deps.usage.read(input.user.id).catch(() => null);
-      const over = used ? checkLimits(limitsOf(config.guardrails.limits), used) : null;
-      if (over) {
-        turn.status = "blocked";
-        turn.error = over.reason ?? "Limit reached.";
-        emit({ type: "blocked", stage: "input", reason: over.reason ?? "Limit reached." });
-        return;
+    // nothing, so it is never limited. Counts that cannot be read (no table yet) mean "not limited". A visitor is over
+    // when ANY of their keys is; all are read before any is counted, so a refused message is not counted as used.
+    if (!handed && deps.usage && limitKeys.length) {
+      const limits = limitsOf(config.guardrails.limits);
+      for (const key of limitKeys) {
+        const used = await deps.usage.read(key).catch(() => null);
+        const over = used ? checkLimits(limits, used) : null;
+        if (over) {
+          turn.status = "blocked";
+          turn.error = over.reason ?? "Limit reached.";
+          emit({ type: "blocked", stage: "input", reason: over.reason ?? "Limit reached." });
+          return;
+        }
       }
-      await deps.usage.add(input.user.id, { messages: 1 }).catch(() => {});
+      for (const key of limitKeys) await deps.usage.add(key, { messages: 1 }).catch(() => {});
     }
 
     if (!conversationId) conversationId = await deps.store.createConversation(config.id, userId);
@@ -336,7 +347,7 @@ export async function runAgent(
       tokenCount: tokens.input + tokens.output,
     });
     turn.messageId = typeof savedId === "string" ? savedId : null;
-    if (deps.usage && input.user) await deps.usage.add(input.user.id, { tokens: tokens.input + tokens.output }).catch(() => {});
+    if (deps.usage) for (const key of limitKeys) await deps.usage.add(key, { tokens: tokens.input + tokens.output }).catch(() => {});
     try {
       await summarizeIfNeeded(deps.store, conversationId, summary, config.memory, async (transcript) => {
         const r = await deps.callModel(
