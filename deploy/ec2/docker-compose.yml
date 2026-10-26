@@ -1,8 +1,8 @@
-# TentoroForge test stack on its own EC2 box (t3.medium, 30 GB).
+# TentoroForge test stack on its own EC2 box (t3.xlarge, 30 GB).
 #
 #  - everything lives in ./data (bind mounts), so removing this folder removes everything the stack ever wrote
 #  - one published port, on 127.0.0.1 only (reach it with an SSH tunnel); nothing else is published
-#  - memory caps sized for a 3.8 GB machine with 4 GB of swap
+#  - memory caps sized for a 16 GB machine (4 vCPU) with 4 GB of swap
 #
 # Images are built by ./build.sh (an isolated builder whose cache is removed afterwards).
 name: ttf
@@ -65,7 +65,7 @@ services:
       FORGE_INTEGRATIONS_SECRET: ${FORGE_INTEGRATIONS_SECRET}
       # Watch live: reaching the app on a builder's own computer through its reverse SSH tunnel (services/agent_tunnel.py)
       # A build checks every page with its own tsc; ten at once swamp a small server, so only a few run together (services/blueprint/tsc_gate.py)
-      FORGE_TSC_PARALLEL: "2"
+      FORGE_TSC_PARALLEL: "4"
       FORGE_TUNNEL_DIR: /tunnel
       FORGE_TUNNEL_HOST: tunnel
       FORGE_TUNNEL_PUBLIC_HOST: ${PUBLIC_HOST:-}
@@ -77,8 +77,8 @@ services:
       - ./data/output:/output
       - ./data/tunnel:/tunnel
       - ./src/packages:/packages:ro
-    mem_limit: 2560m
-    cpus: 2
+    mem_limit: 8g
+    cpus: 4
     # no published ports: the proxy is the only way in
 
   frontend:
@@ -90,7 +90,7 @@ services:
     environment:
       NEXT_PUBLIC_API_URL: ""
       FASTAPI_URL: "http://backend:6500"
-    mem_limit: 768m
+    mem_limit: 1536m
 
   # The only other way in: an SSH server that accepts reverse port forwards (key login, no shell, no commands).
   # Open TCP ${TUNNEL_SSH_PORT:-2222} in the server's security group for the computers that will connect.

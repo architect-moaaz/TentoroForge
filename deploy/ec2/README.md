@@ -5,7 +5,7 @@ Watch live reach the app running on a builder's own computer.
 
 | Machine | Minimum | Used for the first setup |
 |---|---|---|
-| CPU / RAM | 2 vCPU / 4 GB | `t3.medium` (2 vCPU, 3.8 GB) + 4 GB swap |
+| CPU / RAM | 4 vCPU / 16 GB | `t3.xlarge` (4 vCPU, 15.8 GB) + 4 GB swap |
 | Disk | 30 GB | 30 GB; the images are ~3 GB, and a build needs ~8 GB of scratch space that is given back |
 
 Amazon Linux 2023. Nothing outside this folder is touched.
