@@ -438,6 +438,8 @@ async def test_a_change_is_held_exactly_as_the_real_app_holds_it_and_nothing_is_
     held = given["message"]
     assert held.startswith("Nothing has been changed yet: this changes data, so the person has to agree first.")
     assert 'update ticket with {"data":{"status":"closed"},"id":"abc"}' in held and "Do not call update_ticket again in this reply" in held
+    # the real app (confirm.ts) sends the person to a button, and says typing yes releases nothing: the simulation says the same
+    assert "Go ahead button" in held and "Typing yes does not count" in held and "type it" in held
 
 
 @pytest.mark.asyncio

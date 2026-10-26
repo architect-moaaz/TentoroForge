@@ -824,8 +824,9 @@ def _hold_message(spec: dict[str, Any], inp: Any) -> str:
     what = f"{str(spec['name']).replace('_', ' ').replace('-', ' ')} with {_stable(inp or {})}"
     what = what[:300] + "…" if len(what) > 300 else what
     return (f"Nothing has been changed yet: this changes data, so the person has to agree first. Tell them plainly what "
-            f"you are about to do ({what}) and ask them to confirm. Do not call {spec['name']} again in this reply. "
-            "When they answer and agree, call it again with exactly the same input.")
+            f"you are about to do ({what}) and tell them to press the Go ahead button under your message to agree, or Cancel. "
+            "Typing yes does not count: only the button does, so do not ask them to type it. "
+            f"Do not call {spec['name']} again in this reply. When they have pressed Go ahead, call it again with exactly the same input.")
 
 
 _HANDOFF_OK = ("Recorded and escalated to the team. Tell the person, in your own words: it has been escalated (reference "
@@ -981,7 +982,7 @@ async def simulate(graph: dict[str, Any], test: dict[str, Any], client: Any, emi
             note({"kind": "tool_result", "tool": use.name, "toolKind": tool_kind, "held": held, "error": is_error,
                   "outcome": _outcome_text(result, is_error, held, tool_kind)})
             content = result if isinstance(result, str) else _stable(result)
-            calls.append({"name": use.name, "input": inp, "held": held, "kind": tool_kind, "output": content[:500],
+            calls.append({"name": use.name, "input": inp, "held": held, "kind": tool_kind, "output": content[:800],
                           **({"fields": meta["fields"]} if meta.get("fields") else {})})
             known += " " + content.casefold()  # an id a lookup returned is fair to use from here on
             results.append({"type": "tool_result", "tool_use_id": use.id, "content": f"Error: {content}" if is_error else content,
