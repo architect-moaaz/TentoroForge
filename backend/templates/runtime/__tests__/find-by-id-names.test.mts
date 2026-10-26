@@ -7,6 +7,10 @@
  * now attaches them too, best-effort, and a label that cannot be found never fails
  * the read.
  *
+ * A name is data the caller reads, so it obeys what the caller may read of the record it names: a sealed or masked
+ * name stays masked for a role that may not unmask it, a field the role may not view is left out, and the lookups are
+ * batched (one query per target entity, however many foreign keys point at it).
+ *
  * Runs the SHIPPED data-engine.ts against a small fake db. Via __tests__/run-query-tests.sh.
  */
 import { installHarness, eqJson, ok, done } from "./_harness.mts";
@@ -22,6 +26,8 @@ writeFileSync(
   JSON.stringify({
     Ticket: { customerId: { labelField: "name", targetEntity: "Customer" }, assignedToId: { labelField: "name", targetEntity: "Customer" } },
     tickets: { customerId: { labelField: "name", targetEntity: "Customer" }, assignedToId: { labelField: "name", targetEntity: "Customer" } },
+    // A label that is a sensitive field of its target (the customer's email).
+    contacts: { customerId: { labelField: "email", targetEntity: "Customer" } },
   }),
 );
 process.chdir(cwd);
@@ -41,7 +47,8 @@ const table = (name: string, cols: string[]) => {
   return t;
 };
 const tickets = table("tickets", ["id", "subject", "customerId", "assignedToId", "createdAt"]);
-const customers = table("customers", ["id", "name"]);
+const customers = table("customers", ["id", "name", "email", "email_encrypted", "email_mask"]);
+const contacts = table("contacts", ["id", "customerId", "createdAt"]);
 
 let ROWS: Record<string, any[]> = {};
 function builder(shape: any) {
@@ -56,11 +63,14 @@ function builder(shape: any) {
     where(c: Cond) { st.where = c; return b; },
     orderBy() { return b; },
     limit(n: number) { st.limit = n; return b; },
+    offset() { return b; },
     then(res: any, rej: any) { return Promise.resolve(run()).then(res, rej); },
   };
   return b;
 }
-(globalThis as any).__FAKE_DB__ = { select: (shape?: any) => builder(shape) };
+// Every query the engine sends, so a test can say how many a read cost.
+let SELECTS = 0;
+(globalThis as any).__FAKE_DB__ = { select: (shape?: any) => { SELECTS++; return builder(shape); } };
 
 const DRIZZLE = `
 export const eq = (col, val) => ({ op: "eq", col: col.__col, val });
@@ -89,13 +99,15 @@ installHarness({
     "./embedding-columns": "export const EMBEDDING_DIMENSIONS = 512;\nexport const embeddingColumnsFor = () => [];\n",
     "drizzle-orm": DRIZZLE,
     "./fk-roles": "export const FK_ROLES = {};\nexport const fkRole = () => undefined;\nexport const isDomainFk = () => false;\n",
-    "./sensitive-columns": "export const sensitiveColumnsFor = () => ({});\n",
+    // The customer's email is sensitive; only an admin may read it unmasked.
+    "./sensitive-columns": "export const sensitiveColumnsFor = (e) => /^customers?$/i.test(e) ? { email: { mask: 'email', readers: ['admin'] } } : {};\n",
     "./searchable-columns": "export const searchableColumnsFor = () => [];\n",
     "./sensitive-crypto":
-      "export const encryptSensitive = async (v) => v;\nexport const decryptSensitive = async (v) => v;\n" +
+      "export const encryptSensitive = async (v) => v;\nexport const decryptSensitive = async (v) => String(v).replace(/^sealed:/, '');\n" +
       "export const mask = (v) => v;\nexport const looksMasked = () => false;\n",
     "@/lib/rules":
-      "export const filterFields = async (_e, r) => r;\n" +
+      // A field the test lists in globalThis.__HIDDEN__[entity] is one the role may not view.
+      "export const filterFields = async (e, r) => Object.fromEntries(Object.entries(r).filter(([k]) => !(globalThis.__HIDDEN__?.[e] ?? []).includes(k)));\n" +
       "export const validateEntity = async () => ({ valid: true, errors: [] });\n" +
       "export const evaluateRuleSet = async () => ({ errors: [], patches: {}, sideEffects: [] });\n" +
       "export const rowAccessRulesFor = async () => [];\n",
@@ -107,6 +119,7 @@ installHarness({
 const engine = await import("../data-engine.ts");
 engine.registerEntity("tickets", tickets, { slug: "tickets" });
 engine.registerEntity("Customer", customers, { slug: "customers", aliases: ["customers"] });
+engine.registerEntity("Contact", contacts, { slug: "contacts" });
 
 const user = { user: { id: "u1", role: "agent" } };
 
@@ -144,6 +157,41 @@ console.log("the opt-out reaches a single record too");
   const t = await engine.findById("tickets", "t3", user);
   ok(!("customerIdLabel" in t), "FORGE_FK_LABELS=false leaves raw ids only");
   delete process.env.FORGE_FK_LABELS;
+}
+
+console.log("a name obeys what the reader may read of it");
+{
+  const SEALED = { id: "c1", name: "Alice Moreau", email: "", email_encrypted: "sealed:alice@example.com", email_mask: "a•••@example.com" };
+  ROWS = { contacts: [{ id: "k1", customerId: "c1" }], customers: [SEALED] };
+  const asAgent = await engine.findById("contacts", "k1", user);
+  eqJson(asAgent.customerIdLabel, "a•••@example.com", "a sealed label is its mask for a role that may not unmask it");
+  ok(!JSON.stringify(asAgent).includes("alice@example.com") && !JSON.stringify(asAgent).includes("sealed:"), "neither the plain value nor the ciphertext is in the record");
+  const asAdmin = await engine.findById("contacts", "k1", { user: { id: "u9", role: "admin" } });
+  eqJson(asAdmin.customerIdLabel, "alice@example.com", "a role that may unmask it gets the real value");
+  ROWS = { contacts: [{ id: "k1", customerId: "c1" }], customers: [SEALED] };
+  // a list is held to the same rule
+  const list = await engine.query("contacts", {}, user);
+  eqJson(list.data[0].customerIdLabel, "a•••@example.com", "and so is a list");
+  // a field the role may not view of the target gives no name
+  (globalThis as any).__HIDDEN__ = { Customer: ["name"] };
+  ROWS = { tickets: [{ id: "t5", subject: "Hidden", customerId: "c1" }], customers: [{ id: "c1", name: "Alice Moreau" }] };
+  const t = await engine.findById("tickets", "t5", user);
+  eqJson(t.customerIdLabel, "", "a name the role may not view is left empty, not shown");
+  delete (globalThis as any).__HIDDEN__;
+}
+
+console.log("the lookups are batched");
+{
+  ROWS = { tickets: [{ id: "t6", subject: "Two refs", customerId: "c1", assignedToId: "c2" }],
+           customers: [{ id: "c1", name: "Alice Moreau" }, { id: "c2", name: "Ben Carter" }] };
+  SELECTS = 0;
+  const t = await engine.findById("tickets", "t6", user);
+  eqJson([t.customerIdLabel, t.assignedToIdLabel], ["Alice Moreau", "Ben Carter"], "both references still get their name");
+  eqJson(SELECTS, 2, "the record and ONE lookup for both references (not one per foreign key)");
+  ROWS = { tickets: [{ id: "t7", subject: "None" }], customers: [] };
+  SELECTS = 0;
+  await engine.findById("tickets", "t7", user);
+  eqJson(SELECTS, 1, "a record with no references costs no lookup at all");
 }
 
 done("single-record names");

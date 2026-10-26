@@ -75,7 +75,14 @@ function fkMap(): Record<string, Record<string, FkMeta>> {
   return _fkMap!;
 }
 
-async function attachFkLabels(entityName: string, entity: any, rows: any[]): Promise<void> {
+/**
+ * A label is data the caller reads, so it is held to what the caller may read of the TARGET record: its ownership and
+ * row-access scope ride in the lookup (a row they may not see gets no name, exactly like a record that is gone), a
+ * sealed or masked label field comes back as the mask unless their role may unmask it, and a field their role may not
+ * view is left out. Without this a ticket's `ownerIdLabel` read around every rule the owner entity enforces.
+ * The lookups are batched: one query per TARGET entity, however many foreign keys point at it.
+ */
+async function attachFkLabels(entityName: string, entity: any, rows: any[], ctx: DataEngineContext = {}): Promise<void> {
   if (!rows || rows.length === 0) return;
   // P1-O11: opt-out for API consumers that don't want `<fkProp>Label` bloat.
   // Set FORGE_FK_LABELS=false to skip label expansion globally (raw ids only).
@@ -98,19 +105,45 @@ async function attachFkLabels(entityName: string, entity: any, rows: any[]): Pro
     }
   }
   if (!map) return;
+  // Group the foreign keys by the entity they point at: one lookup each.
+  const byTarget = new Map<string, { target: any; props: Array<[string, string]> }>();
   for (const [fkProp, meta] of Object.entries(map)) {
     const target = getEntity(meta.targetEntity);
     if (!target || !(target.table as any).id || !(target.table as any)[meta.labelField]) continue;
-    const ids = Array.from(new Set(rows.map(r => r[fkProp]).filter(Boolean)));
-    if (ids.length === 0) continue;
+    if (!rows.some((r) => r[fkProp])) continue;
+    const group = byTarget.get(meta.targetEntity) ?? { target, props: [] };
+    group.props.push([fkProp, meta.labelField]);
+    byTarget.set(meta.targetEntity, group);
+  }
+  for (const [targetName, { target, props }] of byTarget) {
+    const cols = target.table as any;
+    const ids = Array.from(new Set(props.flatMap(([fkProp]) => rows.map((r) => r[fkProp]).filter(Boolean))));
     try {
-      const found = await db
-        .select({ id: (target.table as any).id, label: (target.table as any)[meta.labelField] })
-        .from(target.table)
-        .where(inArray((target.table as any).id, ids as any));
-      const byId = new Map(found.map((f: any) => [String(f.id), f.label]));
-      for (const r of rows) {
-        if (r[fkProp] != null) r[`${fkProp}Label`] = byId.get(String(r[fkProp])) ?? "";
+      // The label fields, plus the sealed pair of one that is sensitive (the plain column of a sealed field is empty).
+      const specs = sensitiveColumnsFor(targetName);
+      const shape: Record<string, any> = { id: cols.id };
+      for (const [, field] of props) {
+        shape[field] = cols[field];
+        if (specs[field]) for (const k of [`${field}_encrypted`, `${field}_mask`]) if (cols[k]) shape[k] = cols[k];
+      }
+      const where = allOf([inArray(cols.id, ids as any), ...await accessConditions(targetName, target, ctx, "read")])!;
+      const found: any[] = await db.select(shape).from(target.table).where(where);
+      const byId = new Map<string, Record<string, any>>();
+      for (const f of found) {
+        const seen = await _maskOrUnmaskOnRead(targetName, { ...f }, ctx);
+        let visible: Record<string, any> = seen;
+        try {
+          const { filterFields } = await import("@/lib/rules");
+          visible = await filterFields(targetName, seen, { role: ctx.user?.role }) as Record<string, any>;
+        } catch {
+          /* rules not available: the row as read */
+        }
+        byId.set(String(f.id), visible);
+      }
+      for (const [fkProp, field] of props) {
+        for (const r of rows) {
+          if (r[fkProp] != null) r[`${fkProp}Label`] = byId.get(String(r[fkProp]))?.[field] ?? "";
+        }
       }
     } catch {
       /* best-effort — a lookup must never break the list */
@@ -1382,7 +1415,7 @@ export async function findById(
 
   // The same name labels a list carries (`<fkProp>Label`), so one record says "Alice Johnson" and
   // not only the id of her row. Best-effort: a lookup never fails the read.
-  await attachFkLabels(entityName, entity, [visible]);
+  await attachFkLabels(entityName, entity, [visible], ctx);
   return visible;
 }
 
@@ -1463,7 +1496,7 @@ export async function query(
 
   // Resolve FK ids → their referenced record's label (memberId → "Alice Johnson"),
   // attached as `<fkProp>Label` so tables can show names instead of raw UUIDs.
-  await attachFkLabels(entityName, entity, filtered);
+  await attachFkLabels(entityName, entity, filtered, ctx);
 
   return { data: filtered, total, page, limit };
 }
@@ -2202,7 +2235,7 @@ export async function resolveQuery(
     });
   }
   const out = rows.slice(0, limit);
-  await attachFkLabels(source.entity, entity, out);
+  await attachFkLabels(source.entity, entity, out, ctx);
   return out;
 }
 
@@ -2425,7 +2458,7 @@ export async function resolveSimilar(
     similarity: Math.max(0, Math.min(100, Math.round((1 - Number(__distance)) * 100))),
   }));
   await Promise.all(out.map((r) => _maskOrUnmaskOnRead(source.entity, r, ctx)));
-  await attachFkLabels(source.entity, entity, out);
+  await attachFkLabels(source.entity, entity, out, ctx);
   return out;
 }
 
