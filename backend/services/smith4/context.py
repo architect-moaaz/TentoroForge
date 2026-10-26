@@ -53,7 +53,8 @@ def opening(project_id: str, output_dir: str, ask: str, *, brief: str = "",
                 "change, read or compose: the verbs below do not apply. What the person has "
                 "said so far is the brief:\n\n" + (brief.strip() or "(nothing yet)")
                 + "\n\nRead `open_decisions` to see what it leaves unsaid; ask ONE of them "
-                "with `ask_user` and its chips; when nothing is open, `define_application`. "
+                "with `ask_user` and its chips (where people will use the app is always asked first, in the "
+                "words it gives you); when nothing is open, `define_application`. "
                 "Do not ask what the brief already answers.")
     bp = Blueprint.load(project_id=project_id, output_dir=output_dir)
     page = blueprint_to_context(pick_relevant_slice(bp, ask=ask))

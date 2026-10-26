@@ -16,7 +16,7 @@ class ProjectCreate(BaseModel):
     description: str | None = None
     # What the app is for: `responsive` (a website that works on phones) or `native` (a website AND a mobile app).
     # Unset keeps the old behaviour (the server's default decides); the create dialog always sends one.
-    mobile_target: Literal["responsive", "native"] | None = None
+    mobile_target: Literal["responsive", "native", "web", "web_native", "web_pwa", "native_only", "pwa_only"] | None = None
 
 
 class ProjectUpdate(BaseModel):

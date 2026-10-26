@@ -42,6 +42,12 @@ const APP_NAME: string =
  * URLs that should open in the system browser rather than inside the
  * WebView — anything outside our app's origin.
  */
+// Whether the app uses the phone's camera (a barcode scanner or photo capture page). Written into app.json by the
+// platform; absent means yes, so a shell made before this existed keeps its camera. Without it there is no Scan button
+// and no camera permission prompt: a habit tracker asking for the camera at start-up is a reason people delete it.
+const CAMERA_ENABLED: boolean = Constants.expoConfig?.extra?.camera !== false;
+const BRAND: string = (Constants.expoConfig?.splash?.backgroundColor as string | undefined) ?? "#6D28D9";
+
 function isExternal(url: string): boolean {
   if (!APP_URL) return false;
   try {
@@ -66,7 +72,7 @@ function MissingConfig(): JSX.Element {
 }
 
 export default function App(): JSX.Element {
-  const [loading, setLoading] = useState(true);
+  const [progress, setProgress] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -79,6 +85,14 @@ export default function App(): JSX.Element {
   }, [error]);
 
   const webRef = useRef<WebView>(null);
+
+  // A page that never reports "finished" (a sign-in redirect that supersedes a load, a long-lived connection) must not
+  // leave the progress bar up for good: it gives up after ten seconds.
+  useEffect(() => {
+    if (progress >= 1) return;
+    const t = setTimeout(() => setProgress(1), 10000);
+    return () => clearTimeout(t);
+  }, [progress]);
   const [scannerOpen, setScannerOpen] = useState(false);
   const [camPermission, requestCamPermission] = useCameraPermissions();
 
@@ -87,7 +101,7 @@ export default function App(): JSX.Element {
   // covers the web layer, not the OS layer. Ask once at startup so "Start
   // Camera" on any page just works.
   useEffect(() => {
-    if (camPermission && !camPermission.granted && camPermission.canAskAgain) {
+    if (CAMERA_ENABLED && camPermission && !camPermission.granted && camPermission.canAskAgain) {
       void requestCamPermission();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -164,16 +178,17 @@ export default function App(): JSX.Element {
             source={{ uri: APP_URL }}
             originWhitelist={["*"]}
             onLoadStart={() => {
-              setLoading(true);
+              setProgress(0.05);
               setError(null);
             }}
+            onLoadProgress={({ nativeEvent }) => setProgress(nativeEvent.progress)}
             onLoadEnd={() => {
-              setLoading(false);
+              setProgress(1);
               setRefreshing(false);
             }}
             onError={(e) => {
               setError(e.nativeEvent.description);
-              setLoading(false);
+              setProgress(1);
               setRefreshing(false);
             }}
             onNavigationStateChange={onNavStateChange}
@@ -195,14 +210,17 @@ export default function App(): JSX.Element {
             )}
             style={styles.webview}
           />
-          {loading && !refreshing && (
-            <View style={styles.overlay} pointerEvents="none">
-              <ActivityIndicator size="large" />
+          {progress < 1 && !refreshing && (
+            <View style={styles.progressTrack} pointerEvents="none">
+              <View style={[styles.progressBar, { width: `${Math.round(Math.max(progress, 0.05) * 100)}%`, backgroundColor: BRAND }]} />
             </View>
           )}
-          <Pressable style={styles.scanFab} onPress={openScanner}>
-            <Text style={styles.scanFabText}>▦ Scan</Text>
-          </Pressable>
+          {CAMERA_ENABLED && (
+            <Pressable style={styles.scanFab} onPress={openScanner}>
+              <Text style={styles.scanFabText}>▦ Scan</Text>
+            </Pressable>
+          )}
+          {CAMERA_ENABLED && (
           <Modal
             visible={scannerOpen}
             animationType="slide"
@@ -234,6 +252,7 @@ export default function App(): JSX.Element {
               </Pressable>
             </View>
           </Modal>
+          )}
           {error && (
             <View style={styles.centered}>
               <Text style={styles.title}>Couldn&apos;t load</Text>
@@ -313,11 +332,15 @@ const styles = StyleSheet.create({
   webview: {
     flex: 1,
   },
-  overlay: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: "center",
-    justifyContent: "center",
+  progressTrack: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 3,
+    backgroundColor: "rgba(0,0,0,0.06)",
   },
+  progressBar: { height: 3 },
   centered: {
     flex: 1,
     alignItems: "center",

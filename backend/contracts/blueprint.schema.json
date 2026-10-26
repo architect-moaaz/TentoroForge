@@ -3171,6 +3171,16 @@
           },
           "additionalProperties": false,
           "default": {}
+        },
+        "surface": {
+          "type": "string",
+          "enum": [
+            "web",
+            "web_native",
+            "web_pwa",
+            "native_only",
+            "pwa_only"
+          ]
         }
       },
       "additionalProperties": false,

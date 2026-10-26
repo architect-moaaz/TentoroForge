@@ -190,8 +190,8 @@ async def _run_build_and_poll(
 ) -> None:
     """Background task: kick off the EAS build, then poll until terminal.
 
-    ``kind`` is "native" for the project's own Expo project: it is linked to an EAS project first (once; the shell's
-    owner ran `eas init` by hand) and EAS is told the folder has no git repository.
+    ``kind`` is "native" for the project's own Expo project and "shell" for a PWA's WebView app: each is linked to an EAS
+    project first (once), built from a clean staged copy, and EAS is told the folder has no git repository.
 
     Any failure updates the DB row with a human-readable
     ``error_message`` so the UI surfaces it — the task itself never
@@ -200,7 +200,9 @@ async def _run_build_and_poll(
     staged = None
     try:
         build_dir = mobile_dir
-        if kind == "native":
+        if kind in ("native", "shell"):
+            # Expo reads the app's plugins on this machine first, so the phone project's packages must be installed.
+            await native_build.ensure_packages(Path(mobile_dir))
             await native_build.ensure_eas_project(Path(mobile_dir), creds.expo_eas_token)
             # EAS is run in a clean copy of the phone project, alone: see `native_build.stage`.
             staged = native_build.stage(Path(mobile_dir))
@@ -213,9 +215,9 @@ async def _run_build_and_poll(
             deployed_url=deployed_url,
             apple_env=_apple_env(creds) if platform == "ios" else None,
             google_env=_google_env(creds) if platform == "android" else None,
-            extra_env=NO_VCS if kind == "native" else None,
+            extra_env=NO_VCS,
         )
-    except EasClientError as exc:
+    except (EasClientError, native_build.NativeBuildError) as exc:
         await _mark_failed(build_row_id, str(exc))
         return
     except OSError as exc:
@@ -398,6 +400,13 @@ async def create_mobile_build(
                 "the web app first, then build the mobile shell."
             ),
         )
+
+    # A PWA'S PHONE APP IS THE SHELL: made now if the application has none, with the address it opens.
+    if target.kind == "shell":
+        try:
+            native_build.prepare_shell(project.output_dir, doc, deployed_url)
+        except native_build.NativeBuildError as exc:
+            raise HTTPException(status_code=400, detail={"message": str(exc), "problems": [str(exc)], "action": "fix_app"}) from exc
 
     # A NATIVE BUILD IS PREPARED AND CHECKED BEFORE IT IS QUEUED: the phone project made current, the web app's address
     # written into it, and every reason it cannot work said now, not 15 minutes into an EAS build.

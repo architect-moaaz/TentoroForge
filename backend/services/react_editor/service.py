@@ -91,7 +91,9 @@ def _live(rows: Any) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def pages(doc: dict) -> dict[str, Any]:
+    from services.react_editor import phone
     coded = {str(r.get("page")) for r in _live(doc.get("pageCode"))}
+    screens = phone.screen_pages(doc)
     nav = doc.get("navigation") or {}
     entry = str(nav.get("initialPage") or nav.get("entryPage") or "")
     out = []
@@ -102,6 +104,8 @@ def pages(doc: dict) -> dict[str, Any]:
             "purpose": p.get("purpose") or "", "pattern": p.get("pattern"),
             "access": p.get("access") or "authenticated",
             "coded": pid in coded,
+            # A phone screen is written for this page: the Editor's phone side lists it.
+            "phone": pid in screens,
             "module": p.get("module"),
             "navigatesTo": [str(x) for x in (p.get("navigatesTo") or [])],
         })
@@ -112,7 +116,7 @@ def pages(doc: dict) -> dict[str, Any]:
     if not entry:
         entry = next((p["id"] for p in out if p["route"] == "/"), out[0]["id"] if out else "")
     from services.react_editor.pages import navigation
-    return {"entryPage": entry, "pages": out, "navigation": navigation(doc)}
+    return {"entryPage": entry, "pages": out, "navigation": navigation(doc), "surfaces": phone.surfaces(doc)}
 
 
 def _page(doc: dict, page_id: str) -> dict:

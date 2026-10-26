@@ -659,9 +659,17 @@ def project_frontend(doc: dict, app_root: str | Path,
     root.mkdir(parents=True, exist_ok=True)
 
     pages = {p.get("id"): p for p in doc.get("pages") or []}
+    planned = result["planned"]
+    # A PHONE-ONLY APP HAS NO WEB PAGES. Its pages are phone screens, so no content page schema is written for it (a page
+    # with no layout would otherwise get a "not laid out yet" placeholder, and one composed earlier would be kept), and
+    # the sweep below removes any left from before. The sign-in pair stays: it is the scaffold's own, and the phone app
+    # signs in through the same backend.
+    from services.blueprint.app_target import web_pages_enabled
+    if not web_pages_enabled(doc):
+        planned = {pid: sch for pid, sch in planned.items() if str((pages.get(pid) or {}).get("pattern") or "") == "auth"}
     written: list[str] = []
     code_map: list[dict] = []
-    for page_id, schema in sorted(result["planned"].items()):
+    for page_id, schema in sorted(planned.items()):
         name = _route_slug((pages.get(page_id) or {}).get("route") or page_id)
         rel = f"src/schemas/{name}.json"
         target = root / f"{name}.json"
@@ -813,6 +821,11 @@ def _entry_route(doc: dict | None) -> str:
     the application genuinely has a page at "/" — then the catch-all renders it
     and there is nothing to redirect to.
     """
+    # A phone-only app has no web page at any route, "/" included: its front door is the sign-in page.
+    from services.blueprint.app_target import web_pages_enabled
+    if doc is not None and not web_pages_enabled(doc):
+        return "/login"
+
     pages = [p for p in ((doc or {}).get("pages") or []) if isinstance(p, dict)]
     live = [p for p in pages if str(p.get("status") or "") not in ("DEPRECATED", "SUPERSEDED")]
     routes = {str(p.get("route") or "") for p in live}
@@ -5116,7 +5129,7 @@ def project_pwa(doc: dict, app_root: str | Path, output_dir: str | Path | None =
         f"export const MOBILE: MobilePolicy = {json.dumps(policy, indent=2)};\n", "utf-8")
     files = [MOBILE_POLICY_FILE]
     if not policy["installable"]:
-        for stale in ("public/manifest.webmanifest", "public/sw.js"):
+        for stale in ("public/manifest.webmanifest", "public/sw.js", "src/app/install/page.tsx"):
             if (root / stale).exists():
                 (root / stale).unlink()
         return {"files": files, **policy}
@@ -5155,6 +5168,13 @@ def project_pwa(doc: dict, app_root: str | Path, output_dir: str | Path | None =
         (public / "sw.js").write_text(sw_src.read_text("utf-8").replace("__BASE__", "").replace("__VERSION__", version)
                                       .replace("__SHELL__", json.dumps(shell)), "utf-8")
         files.append("public/sw.js")
+    # THE INSTALL PAGE: where a link or a QR code sends someone who wants the app on their phone. Public.
+    install_src = Path(__file__).resolve().parents[2] / "templates" / "app-foundation" / "src" / "app" / "install" / "page.tsx"
+    if install_src.is_file():
+        install_dst = root / "src" / "app" / "install" / "page.tsx"
+        install_dst.parent.mkdir(parents=True, exist_ok=True)
+        install_dst.write_text(install_src.read_text("utf-8"), "utf-8")
+        files.append("src/app/install/page.tsx")
     return {"files": files, **policy}
 
 

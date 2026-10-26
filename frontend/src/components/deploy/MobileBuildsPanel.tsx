@@ -37,6 +37,7 @@ import { Button } from "@/components/ui/button";
 import { useAuthStore } from "@/stores/auth";
 import { toast } from "sonner";
 import { authFetch } from "@/lib/api";
+import { QRCode } from "@tentoroforge/library";
 
 interface MobileBuild {
   id: string;
@@ -100,9 +101,11 @@ export function MobileBuildsPanel({ projectId, orgId }: Props) {
     return () => { mounted.current = false; };
   }, []);
 
-  const authHeaders = useMemo<Record<string, string>>(() => (
-    token ? { Authorization: `Bearer ${token}` } : {}
-  ), [token]);
+  const authHeaders = useMemo<Record<string, string>>(() => {
+    const headers: Record<string, string> = {};
+    if (token) headers.Authorization = `Bearer ${token}`;
+    return headers;
+  }, [token]);
 
   const fetchList = useCallback(async () => {
     try {
@@ -199,6 +202,8 @@ export function MobileBuildsPanel({ projectId, orgId }: Props) {
   );
 
   const settingsHref = `/org/${orgId}/settings/integrations`;
+  // The newest finished Android build that has a file to install.
+  const installable = builds.find((b) => b.platform === "android" && b.status === "completed" && !!b.artifact_url);
 
   return (
     <div className="space-y-4">
@@ -245,6 +250,9 @@ export function MobileBuildsPanel({ projectId, orgId }: Props) {
           )}
         </div>
       )}
+
+      {/* The way to put a finished Android app on a phone: a code to scan, a link to open, the steps. */}
+      {installable && <InstallCard url={installable.artifact_url ?? ""} />}
 
       {/* History */}
       <div className="space-y-1.5">
@@ -404,6 +412,56 @@ function BuildRow({ build, onSubmit }: { build: MobileBuild; onSubmit: () => voi
           {build.error_message}
         </span>
       )}
+    </div>
+  );
+}
+
+// --------------------------------------------------------------------------- //
+// Install card — how a person puts the finished Android app on their phone     //
+// --------------------------------------------------------------------------- //
+
+function InstallCard({ url }: { url: string }) {
+  if (!url) return null;
+  return (
+    <div className="rounded border bg-background p-3 space-y-3" data-testid="install-card">
+      <div className="flex items-start gap-3">
+        <div className="shrink-0 rounded bg-white p-2">
+          <QRCode value={url} size={104} />
+        </div>
+        <div className="space-y-2 text-xs leading-snug">
+          <div className="text-sm font-medium">Install on Android</div>
+          <p className="text-muted-foreground">
+            Scan the code with your phone, or open the link on it. When Android asks, allow installs from your
+            browser, then tap Install.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <a
+              href={url}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex h-7 items-center gap-1 rounded bg-primary px-3 text-xs font-medium text-primary-foreground hover:opacity-90"
+            >
+              <Download className="h-3 w-3" />
+              Download app (.apk)
+            </a>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs"
+              onClick={() => {
+                void navigator.clipboard.writeText(url);
+                toast.success("Link copied");
+              }}
+            >
+              Copy link
+            </Button>
+          </div>
+        </div>
+      </div>
+      <p className="text-[11px] text-muted-foreground leading-snug">
+        iPhone: open the web address in Safari, tap Share, then Add to Home Screen. Every installable app also has an
+        /install page with these steps.
+      </p>
     </div>
   );
 }

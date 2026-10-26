@@ -117,7 +117,8 @@ useQuery(entity, { measures, dimensions?, where?, range?, timeField?, sort?, lim
 useWidget(widgets.x, { range?, where? }) // WidgetData { rows, value, previous?, delta? }
 useSimilar(entity, { image?, text?, field?, limit? })      // { rows (+similarity), error }
 useNear(entity, field, from: GeoPoint | null, { where?, radiusKm?, limit?, scan? })  // rows + distanceKm
-useMe()                                  // { user, account }
+useMe()                                  // ReadState: data = { user, account } — `const { data } = useMe(); data?.account`; + loading, error, refetch
+                                         // (`account` is NOT a field of what useMe() returns: `const { account } = useMe()` is always undefined)
 useLive(seconds = 10)                    // refresh what is on screen while this screen is in front
 ```
 
@@ -137,6 +138,8 @@ workflow's own sentence; any other failure toasts "<Name> failed". The run's own
 
 ```ts
 useSession()          // { user, status: "loading"|"signedIn"|"signedOut"|"offline", signIn(email, password), signOut(), refresh() }
+                      // SIGNING OUT IS `useSession().signOut()` — it ends the session and the app returns to the sign-in screen.
+                      // A workflow called "Sign Out" only records an end; running it leaves the person signed in.
 useOrganisations()    // { organisations, activeOrgId, needsOrganisation, switchOrganisation(orgId) }
 useSignInMethods()    // { methods, loading, error, retry }
 useNav()              // { push(to), replace(to), back(), canGoBack() } — `to` is what href() builds

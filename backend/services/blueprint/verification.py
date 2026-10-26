@@ -339,11 +339,19 @@ def check_page_layout(doc: dict) -> list[Finding]:
     """
     from services.blueprint.page_planner import load_catalog, validate_template
 
+    from services.blueprint import app_target
+
     authored = {l.get("page"): l for l in _live(doc.get("pageLayouts"))}
     out: list[Finding] = []
+    # A PHONE-ONLY APP WRITES NO WEB PAGES. Its pages are phone screens (`nativeCode`), so a page with no web tree is not
+    # a page that "cannot be projected": asking for one sent App Flow back for a repair on every phone-only build
+    # (PAGE-004 and PAGE-005, the sign-in pair, 2026-10-22), which cost a model call and changed nothing.
+    web = app_target.web_pages_enabled(doc)
 
     for page in _live(doc.get("pages")):
         if page.get("id") not in authored:
+            if not web:
+                continue
             out.append(Finding(
                 "Page↔Layout", section="pages",
                 artifact_id=page.get("id"),

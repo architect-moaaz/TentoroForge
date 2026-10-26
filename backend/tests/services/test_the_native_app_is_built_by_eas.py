@@ -262,12 +262,16 @@ def test_eas_is_told_a_native_folder_has_no_git_repository_and_a_shell_is_not_ch
     assert seen[0]["EAS_NO_VCS"] == "1" and "EAS_NO_VCS" not in seen[1]
 
 
-def test_the_runner_links_and_builds_a_native_project_and_only_builds_a_shell(tmp_path, monkeypatch):
+def test_the_runner_links_and_builds_a_native_project_and_a_shell_the_same_way(tmp_path, monkeypatch):
     calls = []
 
     async def fake_link(root, token):
         calls.append(("link", str(root), token))
         return "p"
+
+    async def fake_packages(root, **kw):
+        calls.append(("packages", str(root)))
+        return False
 
     async def fake_create(mobile_dir, **kw):
         calls.append(("create", mobile_dir, kw.get("extra_env")))
@@ -286,6 +290,7 @@ def test_the_runner_links_and_builds_a_native_project_and_only_builds_a_shell(tm
     async def noop(*a, **k):
         return None
 
+    monkeypatch.setattr(mb.native_build, "ensure_packages", fake_packages)
     monkeypatch.setattr(mb.native_build, "ensure_eas_project", fake_link)
     monkeypatch.setattr(mb, "create_build", fake_create)
     monkeypatch.setattr(mb, "_apply_state", noop)
@@ -297,13 +302,22 @@ def test_the_runner_links_and_builds_a_native_project_and_only_builds_a_shell(tm
     (tmp_path / "native").mkdir()
     (tmp_path / "native" / "app.json").write_text("{}", "utf-8")
     asyncio.run(mb._run_build_and_poll("row", str(tmp_path / "native"), "preview", "android", creds, URL, "native"))
+    (tmp_path / "mobile").mkdir()
+    (tmp_path / "mobile" / "app.json").write_text("{}", "utf-8")
     asyncio.run(mb._run_build_and_poll("row", str(tmp_path / "mobile"), "preview", "android", creds, URL))
-    assert calls[0] == ("link", str(tmp_path / "native"), "tok")
-    assert calls[1][0] == "create" and calls[1][2] == eas_client.NO_VCS
-    assert calls[1][1] != str(tmp_path / "native"), "EAS is run in a clean staged copy, not in the real folder"
-    assert not Path(calls[1][1]).exists(), "and the copy is removed afterwards"
-    assert calls[2] == ("create", str(tmp_path / "mobile"), None), "the shell is built as it always was: no link, no change"
-    assert len(calls) == 3
+    # The packages are installed BEFORE the link: Expo reads the app's plugins on this machine first.
+    assert calls[0] == ("packages", str(tmp_path / "native"))
+    assert calls[1] == ("link", str(tmp_path / "native"), "tok")
+    assert calls[2][0] == "create" and calls[2][2] == eas_client.NO_VCS
+    assert calls[2][1] != str(tmp_path / "native"), "EAS is run in a clean staged copy, not in the real folder"
+    assert not Path(calls[2][1]).exists(), "and the copy is removed afterwards"
+    # A PWA's WebView shell is an Expo project like any other: a robot token needs its owner, and EAS must not pack the
+    # output folder, so it is linked and built from a staged copy too.
+    assert calls[3] == ("packages", str(tmp_path / "mobile"))
+    assert calls[4] == ("link", str(tmp_path / "mobile"), "tok")
+    assert calls[5][0] == "create" and calls[5][2] == eas_client.NO_VCS and calls[5][1] != str(tmp_path / "mobile")
+    assert not Path(calls[5][1]).exists()
+    assert len(calls) == 6
 
 
 # ---- the folder EAS is run in ------------------------------------------------------------------------------------------
@@ -405,6 +419,10 @@ def test_a_failed_link_fails_the_build_with_the_reason(tmp_path, monkeypatch):
     async def mark(row, message):
         failed.append(message)
 
+    async def installed(root, **kw):
+        return False
+
+    monkeypatch.setattr(mb.native_build, "ensure_packages", installed)
     monkeypatch.setattr(mb.native_build, "ensure_eas_project", refuse)
     monkeypatch.setattr(mb, "_mark_failed", mark)
     creds = types.SimpleNamespace(expo_eas_token="tok", apple=None, google=None)

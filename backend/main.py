@@ -57,6 +57,8 @@ from routers.mobile_builds import router as mobile_builds_router
 from routers.platform_integrations import router as platform_integrations_router
 from routers.platform_mcp_servers import router as platform_mcp_servers_router
 from routers.preview_proxy import router as preview_proxy_router
+from routers.phone_preview import router as phone_preview_router
+from routers.phone_live import router as phone_live_router
 from routers.deployments import router as deployments_router
 from routers.domains import router as domains_router
 from routers.verify import router as verify_router
@@ -195,6 +197,8 @@ app.include_router(mobile_builds_router)
 app.include_router(platform_integrations_router)
 app.include_router(platform_mcp_servers_router)
 app.include_router(preview_proxy_router)
+app.include_router(phone_preview_router)
+app.include_router(phone_live_router)
 app.include_router(deployments_router)
 app.include_router(app_mcp_router)
 app.include_router(domains_router)
@@ -403,6 +407,8 @@ async def _start_domain_watch():
 @app.on_event("shutdown")
 async def _shutdown():
     stop_all_previews()
+    from services import phone_live
+    phone_live.stop_all()
     if hasattr(app.state, "dev_server_reaper"):
         app.state.dev_server_reaper.cancel()
     if hasattr(app.state, "domain_watch"):

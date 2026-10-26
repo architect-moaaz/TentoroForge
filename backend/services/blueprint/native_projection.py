@@ -382,9 +382,13 @@ def theme_module(doc: dict) -> str:
 def can_sign_up(doc: dict) -> bool:
     """Whether the phone can create an account: the application has a sign-up page and people hold passwords
     (the phone signs in with email and password; single sign-on and email links need a browser)."""
-    from services.blueprint.account_model import is_auth_page, passwords_on
-    if not passwords_on(doc):
+    from services.blueprint.account_model import auth_page_bodies, has_sign_in, is_auth_page, passwords_on
+    if not passwords_on(doc) or not has_sign_in(doc):
         return False
+    # The sign-up page a plan with a sign-in is given (`auth_page_bodies`) counts even before it is written into the plan's pages:
+    # FocusFlow had a sign-in and no create-account link because the page was not yet in its list (2026-10-22).
+    if any(b.get("auth") == "signup" for b in auth_page_bodies(doc)):
+        return True
     return any(is_auth_page(p) and re.search(r"sign.?up|regist|join|create.?account", f"{p.get('route')} {p.get('name')}", re.I)
                for p in _live(doc.get("pages")))
 

@@ -209,4 +209,7 @@ def update(project: Project, patch: dict[str, Any]) -> dict[str, Any]:
     except Exception:  # a decision is a courtesy to Smith, not the change itself
         pass
     project_design_tokens(svc.doc, project.app_root)
+    # The phone app builds its theme from the same design system: it follows the edit.
+    from services.react_editor import phone
+    phone.reproject(svc.doc, project.root)
     return get(project)
