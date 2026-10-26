@@ -1248,6 +1248,38 @@ discouraged, because a pattern is advice a decoder does not enforce.
 two modules naming the same entity update one record rather than duplicating \
 it — which makes a near-miss spelling the one thing that creates a duplicate."""
 
+# WHEN A STEP IS AN ASSISTANT. The `ai_*` steps judge what the workflow already holds, in one cheap call; an assistant
+# step goes and LOOKS (several records, dependent reasoning) and costs three to ten times as much, so choosing it
+# for a one-line judgement is the mistake this paragraph exists to prevent. Said in `workflow_steps` only, the one
+# task that authors steps (the same place the `ai_*` guidance already is).
+AGENT_STEP_GUIDANCE = (
+    "AN ASSISTANT STEP (`type: \"agent_step\"`) IS FOR A JUDGEMENT THAT NEEDS LOOKUPS. One judgement on "
+    "data the workflow already holds — label a message, pick a branch, draft a reply, read fields from a document — is "
+    "an `ai_classify`, `ai_decide`, `ai_generate` or `ai_extract` step: one cheap call. Use `agent_step` only when the "
+    "answer depends on looking things up across records, or on several dependent steps of reasoning; it costs three to "
+    "ten times as much. Its `config`: `agentBrief` {`purpose` (what it decides, 600 characters at most), `reads` (the "
+    "records it may look at, by name — only those this step needs), `mayChange` [{`tool`: the NAME of a workflow it may "
+    "ask to run (a wrong name is refused with the names there are), `why`}] only if a change is part of the job, `instructions` (rules of this job, 1500 characters at "
+    "most)} — the build makes the assistant from it; `task` (what to do this time, with {{references}}); `input` "
+    "({name: \"{{reference}}\"}); `outputFields` [{`name`, `type` (string, number, boolean, array, object or enum), "
+    "`values` for an enum, `description`}] — only values a LATER STEP uses, typed so a decision can compare them; "
+    "`autonomy`; `allowedWriteTools`; `onFailure`. The step stores `{{<key>.result.<field>}}` for each output field, "
+    "and always `{{<key>.confidence}}`, `{{<key>.needsHuman}}`, `{{<key>.summary}}`, `{{<key>.proposals}}`; read "
+    "nothing else. AUTONOMY: leave it `suggest` (the assistant only proposes; nothing it asks for happens) for anything "
+    "that can change data. Use `limited` only when the brief says the change is routine and reversible, and then name "
+    "the exact workflows in `allowedWriteTools`; it acts alone only when it is sure and says no person need look. Never "
+    "allow deleting records, moving money, or medical, legal or financial advice to the customer. `onFailure` is "
+    "`human` (a person takes it) for anything risky. ALWAYS FOLLOW the step with a condition on its result and, when "
+    "autonomy is `suggest` or it may be unsure (`{{<key>.needsHuman}}`), an `approval` step for the role that decides, "
+    "whose `description` shows `{{<key>.summary}}`. Model case, a vet clinic's request for an appointment: "
+    "`find_pet` (db_query the owner and pet) → `triage` (agent_step: `reads` Pet, MedicalRecord, Prescription, "
+    "VaccinationRecord, Appointment, Veterinarian; `mayChange` the workflow that books an appointment, to propose it; "
+    "`outputFields` urgency (enum emergency, urgent, routine), reason, appointmentType, suggestedVet, suggestedSlots "
+    "(array), questionsForOwner (array), redFlags (array); `autonomy` suggest; `onFailure` human) → `check` (condition "
+    "`triage.result.urgency = \"emergency\" or triage.needsHuman = true`: then the vet's `approval`, else on) → create "
+    "the appointment → send the owner a confirmation in fixed wording."
+)
+
 NODE_TASKS: dict[str, str] = {
     "figma_intelligence": (
         "Read a connected Figma design and record what it is evidence for.\n\n"
@@ -2033,6 +2065,7 @@ NODE_TASKS: dict[str, str] = {
         "is the person acting. A whole team is `recipientRole`. Where the "
         "application has an email integration, a `send_email` step beside it "
         "reaches them away from the app."
+        "\n\n" + AGENT_STEP_GUIDANCE
     ),
     "business_rules": (
         "State the rules that constrain the application, each as a sentence a "

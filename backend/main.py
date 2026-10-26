@@ -74,6 +74,7 @@ from routers.open_decisions import router as open_decisions_router
 from routers.pages import router as pages_router
 from routers.navigation import router as navigation_router
 from routers.agent_builder import router as agent_builder_router
+from routers.agent_step_definitions import router as agent_step_definitions_router
 from routers.agent_insights_stream import router as agent_insights_stream_router, ingest_router as agent_insights_ingest_router
 from routers.agent_tunnel import router as agent_tunnel_router
 from routers.ai_features import router as ai_features_router
@@ -231,6 +232,9 @@ app.include_router(navigation_router)
 # agent-definitions router so its `.../insights/...` paths can never be read as an agent id.
 app.include_router(agent_insights_ingest_router)
 app.include_router(agent_insights_stream_router)
+# The assistants a workflow step uses (`from-brief`, `used-by`): BEFORE the agent-definitions router, whose
+# `GET /{agent_id}` would otherwise be asked about them first.
+app.include_router(agent_step_definitions_router)
 app.include_router(agent_builder_router)
 app.include_router(agent_tunnel_router)
 app.include_router(ai_features_router)

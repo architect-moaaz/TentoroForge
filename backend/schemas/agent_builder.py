@@ -82,3 +82,27 @@ class AgentBlastFixes(BaseModel):
     """Propose fixes for the tests that exploded."""
     graph: AgentDefinitionSave
     results: list[dict] = []
+
+
+class AgentBriefChange(BaseModel):
+    """A change the assistant of a workflow step may propose: the workflow it asks to run, and why."""
+    tool: str
+    why: str = ""
+
+
+class AgentBrief(BaseModel):
+    """What a workflow step's assistant is for, in a few lines: the build draws the assistant from it."""
+    purpose: str
+    reads: list[str] = []
+    mayChange: list[AgentBriefChange] = []
+    instructions: str | None = None
+
+
+class AgentFromBrief(BaseModel):
+    """Make the workflow-only assistant a workflow step needs, from its brief (see services/agent_suggest.agent_for_brief).
+    ``workflowId`` and ``stepId`` say which step it is for, when the caller knows (the id the assistant gets, and the
+    workflow it must not be able to start again, come from them)."""
+    brief: AgentBrief
+    workflowId: str | None = None
+    stepId: str | None = None
+    name: str | None = None

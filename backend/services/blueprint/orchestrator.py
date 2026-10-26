@@ -462,10 +462,25 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # AND CALLED FOR REAL, where it can be: a reading step whose key is stored.
     _n("service_check", "integration", ("workflow_steps",), (), kind="service",
        note="one real read-only call per outside step whose key is stored, against what the workflow reads"),
+    # THE ASSISTANTS THE STEPS HAND WORK TO. A step of type `agent_step` that
+    # carries a brief and no assistant gets one made here, read-only plus
+    # exactly the workflows its brief names, saved to the project's
+    # agent-definitions/ (where the install picks it up with the app), and its
+    # id written back into the step. After `workflow_steps` (it reads the steps)
+    # and before `integration`, which projects the steps into the app's
+    # definitions. After `security` too: it also records, in the ownership
+    # rules, that the role assistants run as may READ the records they read.
+    # Deterministic: no model is asked, so a rebuild gives the
+    # same assistant and leaves one a builder has edited alone. Produces
+    # `workflows` because it writes the assistant's id into them. Optional: a
+    # step whose assistant could not be made is reported and answers its own
+    # `onFailure` when it runs; the rest of the app is not held back for it.
+    _n("workflow_agents", "workflow", ("workflow_steps", "security"), ("workflows",), kind="service", optional=True,
+       note="the workflow-only assistant for each assistant step that has a brief and no assistant yet"),
 
     # join
     _n("integration", "backend",
-       ("backend", "frontend", "workflow_steps", "business_rules", "security", "integrations"),
+       ("backend", "frontend", "workflow_steps", "workflow_agents", "business_rules", "security", "integrations"),
        (), kind="projection"),
     # NO `testing` NODE. It declared tests — names and file paths — that were
     # never written and never run; the one reader counted them against the
@@ -3795,9 +3810,21 @@ def _check_services(svc: BlueprintService) -> None:
     logger.info("[service-check] %s", "; ".join(f"{r['workflow']}/{r['step']}: {r['ok']}" for r in results) or "no outside calls")
 
 
+def _make_workflow_agents(svc: BlueprintService) -> None:
+    """Make the assistant each assistant step needs, and write its id into the step (see `agent_steps`)."""
+    from services.blueprint import agent_steps
+
+    report = agent_steps.build_workflow_assistants(svc, commit=True)
+    logger.info("[workflow-agents] built=%s kept=%s%s", report.built, report.kept,
+                f" problems={report.problems}" if report.problems else "")
+    if report.problems:
+        raise RuntimeError("an assistant could not be made for: " + "; ".join(report.problems))
+
+
 SERVICE_HANDLERS: dict[str, Any] = {
     "api_reference": _read_api_documentation,
     "service_check": _check_services,
+    "workflow_agents": _make_workflow_agents,
     "imagery": _find_imagery,
     "page_layouts": _compose_page_layouts,
     "auth_pages": _declare_auth_pages,

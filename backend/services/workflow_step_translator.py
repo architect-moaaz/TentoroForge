@@ -330,7 +330,7 @@ def _resolve_node_type(step: dict) -> tuple[str, str | None]:
     if t in ("trigger", "action", "user_task", "approval", "wait", "end", "end_event",
              "exclusive_gateway", "condition", "decision", "parallel_gateway", "fork", "join",
              "escalation",
-             "ai_generate", "ai_classify", "ai_extract", "ai_decide"):
+             "ai_generate", "ai_classify", "ai_extract", "ai_decide", "agent_step"):
         return t, None
     # fall back: infer from the config's actionType if present. A legacy
     # config.actionType of an AI type still resolves as an action node (the runtime

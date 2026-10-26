@@ -1447,6 +1447,9 @@ role-based permissions. Do NOT ask the user "what roles do you need?" — infer 
      - classify/categorize/sentiment    → ai_classify  (pick a label)
      - extract/parse fields             → ai_extract   (pull structured data)
      - decide/route/recommend           → ai_decide    (choose an option)
+     - judge after LOOKING UP records     → agent_step   (an assistant step; several times the cost of the
+       ai_ steps above, so only when the answer needs lookups across records — a triage that reads a customer's
+       history and the staff schedules. One judgement on data already in hand stays an ai_ step.)
      - OCR / scan / digitize document   → ocr_document (PaddleOCR sidecar —
        on-prem OCR with bounding boxes; use INSTEAD of ai_extract when the
        doc has plain typed/handwritten text, no complex reasoning needed)
@@ -2173,6 +2176,10 @@ Node `type` and its `config`:
 - `"exclusive_gateway"` — a branch. `config: {"condition":"<boolean expression over prior variables, e.g. amount > 1000>"}`. A gateway has NO `next`; instead it has `"branches": {"true":"<id>","false":"<id>"}`.
 - `"approval"`/`"user_task"` — a human step that blocks. `config: {"assigneeRole":"<role>"}`
 - `"wait"` — a pause. `config: {"durationHours": <n>}` or `{"untilEvent":"..."}`
+- `"agent_step"` — an assistant looks things up and hands back a structured result. `config`:
+  `{"agentBrief":{"purpose":"...","reads":["<Entity>",...]},"task":"...","outputFields":[{"name":"urgency","type":"enum","values":["urgent","routine"],"description":"..."}],"autonomy":"suggest","onFailure":"human"}`
+  (only for judgements that need lookups across records; later steps read `{{<id>.result.urgency}}`, `{{<id>.needsHuman}}`;
+  follow it with a gateway on its result and, for autonomy "suggest", an `approval`).
 - `"end"` — the single terminal. No `config`, no `next`.
 
 Aliases the translator also accepts as `type` values (map to the shapes above): `condition`

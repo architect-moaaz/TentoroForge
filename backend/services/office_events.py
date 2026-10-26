@@ -123,6 +123,7 @@ NODE_LABEL: dict[str, str] = {
     "integrations": "Connecting the outside services",
     "api_reference": "Reading each service's API documentation",
     "service_check": "Calling each outside service once",
+    "workflow_agents": "Making the assistants the workflows hand work to",
     "integration": "Assembling the application",
     "memory": "Recording decisions and coverage",
     "verification": "Checking the blueprint against itself",

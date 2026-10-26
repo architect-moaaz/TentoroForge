@@ -45,9 +45,9 @@ def _required_from_catalog() -> dict[str, tuple[tuple[str, ...], ...]]:
         for key, variant in cat.variants("action").items()
     }
     # Older workflows spell an AI node as `action` + `actionType: ai_*`; the
-    # contract is the top-level AI node's.
+    # contract is the top-level AI node's. An assistant step is an AI node too.
     for ntype in cat.node_types:
-        if ntype.startswith("ai_"):
+        if ntype.startswith("ai_") or ntype == "agent_step":
             out[ntype] = tuple(tuple(g) for g in cat.required_groups(ntype))
     out["api_call"] = out["http_call"]
     return out

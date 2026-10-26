@@ -932,6 +932,37 @@
           "aiTone": "professional"
         }
       }
+    },
+    {
+      "type": "agent_step",
+      "category": "ai",
+      "label": "Assistant Step",
+      "icon": "Bot",
+      "gradient": "bg-gradient-to-br from-indigo-500 to-violet-700",
+      "description": "Hand a judgement that needs lookups across records to an app assistant; it returns a structured result (config.outputFields) and may only propose changes unless autonomy allows them",
+      "handles": {
+        "in": true,
+        "out": true,
+        "else": false
+      },
+      "config": {
+        "required": [
+          [
+            "agentId",
+            "agentBrief"
+          ],
+          [
+            "task"
+          ],
+          [
+            "outputFields"
+          ]
+        ],
+        "defaults": {
+          "autonomy": "suggest",
+          "onFailure": "human"
+        }
+      }
     }
   ]
 }

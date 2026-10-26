@@ -2074,7 +2074,8 @@
                     "ai_classify",
                     "ai_extract",
                     "ai_decide",
-                    "ai_generate"
+                    "ai_generate",
+                    "agent_step"
                   ]
                 },
                 "entity": {
@@ -2974,6 +2975,14 @@
                       "type": "string"
                     },
                     "description": "Role names that read and write this entity unscoped. Name a role only where the product genuinely grants it every row.",
+                    "default": []
+                  },
+                  "readRoles": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Role names that read every row of this entity and may not change any of them. The workflow assistant step's role `workflow` is added by the build for the records an assistant step reads.",
                     "default": []
                   },
                   "actorColumn": {

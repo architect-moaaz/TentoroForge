@@ -531,7 +531,8 @@ WHERE_COMPARISONS = frozenset({"ne", "neq", "not", "!=", "gt", ">", "gte", ">=",
 
 def check_workflow_steps(result: "AgentResult", doc: dict | None = None,
                          mcp_servers: list[dict] | None = None,
-                         api_refs: list[dict] | None = None) -> None:
+                         api_refs: list[dict] | None = None,
+                         assistants: Any = None) -> None:
     """Reject workflows whose steps are not configured catalog nodes.
 
     The same argument as :func:`check_pattern_templates`: accepting a step
@@ -624,6 +625,14 @@ def check_workflow_steps(result: "AgentResult", doc: dict | None = None,
     problems.extend(f["detail"] for f in authoring_findings(
         {"workflows": [p.body for p in proposals], "businessRules": [],
          "data": (doc or {}).get("data") or {}}))
+    # AN ASSISTANT STEP IS HELD TO ITS CONTRACT: an assistant that exists (or a brief the build can make one from),
+    # what it hands back being what later steps read, and nothing it may change that the step did not name.
+    # `assistants` is the project's own, read only when a proposal has such a step.
+    from services.blueprint.agent_steps import agent_step_problems
+    said: list[str] = []
+    problems.extend(agent_step_problems([p.body for p in proposals], doc, assistants, said))
+    for line in said:        # worth knowing, never a refusal
+        logger.warning("[agent-step] %s", line)
     if problems:
         raise InvalidWorkflowStep(_all_of(problems),
                                   settle=_process_off(result, proposals, problems, "check_workflow_steps"))
@@ -2375,6 +2384,9 @@ def mend_mechanics(result: "AgentResult", doc: dict | None) -> list[str]:
             trigger = p.body.get("trigger") if isinstance(p.body.get("trigger"), dict) else {}
             mend_steps(p.body.get("steps") or [], name, trigger)
             said += _record_fields_by_entity(p.body, doc, name)
+    # A tool an assistant step names the way a person says it is the tool's real name.
+    from services.blueprint.agent_steps import mend as mend_agent_steps
+    said += mend_agent_steps([p.body for p in result.proposals if p.section == "workflows" and isinstance(p.body, dict)], doc)
     return said
 
 
@@ -2775,8 +2787,9 @@ def apply_agent_result(
     from services.blueprint.mcp_catalog import load as _mcp_servers
     from services.blueprint.api_reference import load as _api_refs
     run(check_pattern_templates, result, svc.doc)
+    from services.blueprint.agent_steps import load_assistants as _assistants
     run(check_workflow_steps, result, svc.doc, _mcp_servers(getattr(svc, "output_dir", None)),
-        _api_refs(getattr(svc, "output_dir", None)))
+        _api_refs(getattr(svc, "output_dir", None)), lambda: _assistants(getattr(svc, "output_dir", None)))
     for check in (check_workflow_triggers, check_integrations, check_audit, check_tenancy, check_sign_in,
                   check_mobile, check_requirements, check_business_rules, check_entity_fields,
                   check_page_content, check_page_access, check_role_doors, check_navigation,

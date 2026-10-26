@@ -3997,6 +3997,9 @@ def ownership_rules(doc: dict) -> dict[str, list[dict]]:
             "scope": item.get("scope") or "user",
             "unscopedRoles": list(item.get("unscopedRoles") or []),
         }
+        # ROLES THAT ONLY READ. Exempt from the rule on a read, never on a write: the assistant step's service role.
+        if item.get("readRoles"):
+            rule["readRoles"] = [str(r) for r in item["readRoles"]]
         # WHERE THE ACTOR'S VALUE COMES FROM. The users column a workspace
         # scope compares against; the session carries it and the engine reads
         # it. Without one, `scope: "workspace"` compared every row to nothing.
@@ -4084,6 +4087,8 @@ def render_ownership_rules_module(manifest: dict[str, list[dict]]) -> str:
         '  scope: "user" | "workspace";\n'
         "  /** Roles exempt: they read unscoped, and may write the column themselves. */\n"
         "  unscopedRoles: string[];\n"
+        "  /** Roles that read every row and change none: exempt from the rule on a read only. */\n"
+        "  readRoles?: string[];\n"
         "  /** For scope \"workspace\": the users column whose value is the actor's workspace. */\n"
         "  actorColumn?: string;\n"
         "  /** The entity `column` references when the row is owned through it: reachable\n"

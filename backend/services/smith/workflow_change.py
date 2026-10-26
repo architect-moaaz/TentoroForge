@@ -241,6 +241,15 @@ def _apply(svc: Any, request: str, proposals: list, *, interpretation: str, agen
 def _project_runtime(svc: Any, app_root: str | None) -> list[str]:
     if not app_root:
         return []
+    # A step that hands work to an assistant gets it (and its read access) now, as in a build, and the app learns of it.
+    try:
+        from services.blueprint import agent_steps
+        made = agent_steps.build_workflow_assistants(svc, commit=False)
+        if made.built:
+            from services.agent_runtime_install import install_agent_runtime
+            install_agent_runtime(svc.output_dir)
+    except Exception as exc:  # noqa: BLE001 — the workflow stands; the step answers its own onFailure until fixed
+        logging.getLogger(__name__).warning("[workflow-change] assistants for assistant steps: %s", exc)
     from services.blueprint.orchestrator import _project_integration
     _project_integration(svc, app_root)
     return ["src/lib/workflows/definitions"]

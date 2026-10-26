@@ -1,0 +1,967 @@
+{
+  "application": {
+    "id": "APP-001",
+    "name": "VET Clinic",
+    "domain": "veterinary",
+    "description": "A veterinary clinic: owners, pets, appointments, medical history, vaccinations, prescriptions and invoices."
+  },
+  "product": {
+    "objectives": [
+      "Staff book and run appointments",
+      "Vets keep each pet's history"
+    ]
+  },
+  "roles": [
+    {
+      "id": "ROLE-001",
+      "name": "Admin",
+      "description": "Runs the clinic."
+    },
+    {
+      "id": "ROLE-002",
+      "name": "Veterinarian",
+      "description": "Examines pets and keeps their records."
+    },
+    {
+      "id": "ROLE-003",
+      "name": "Receptionist",
+      "description": "Books appointments and takes payments."
+    }
+  ],
+  "data": {
+    "entities": [
+      {
+        "id": "ENTITY-001",
+        "name": "User",
+        "table": "users",
+        "account": true,
+        "fields": [
+          {
+            "name": "id",
+            "type": "uuid",
+            "primaryKey": true,
+            "unique": true
+          },
+          {
+            "name": "email",
+            "type": "string",
+            "sensitive": true
+          },
+          {
+            "name": "passwordHash",
+            "type": "string"
+          },
+          {
+            "name": "role",
+            "type": "string"
+          }
+        ]
+      },
+      {
+        "id": "ENTITY-002",
+        "name": "PetOwner",
+        "table": "pet_owners",
+        "fields": [
+          {
+            "name": "id",
+            "type": "uuid",
+            "primaryKey": true,
+            "unique": true
+          },
+          {
+            "name": "fullName",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "phone",
+            "type": "string",
+            "sensitive": true
+          },
+          {
+            "name": "email",
+            "type": "string",
+            "sensitive": true
+          },
+          {
+            "name": "address",
+            "type": "string",
+            "sensitive": true
+          },
+          {
+            "name": "preferredContactMethod",
+            "type": "string"
+          },
+          {
+            "name": "dateRegistered",
+            "type": "date",
+            "required": true
+          }
+        ]
+      },
+      {
+        "id": "ENTITY-003",
+        "name": "Pet",
+        "table": "pets",
+        "fields": [
+          {
+            "name": "id",
+            "type": "uuid",
+            "primaryKey": true,
+            "unique": true
+          },
+          {
+            "name": "name",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "species",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "breed",
+            "type": "string"
+          },
+          {
+            "name": "dateOfBirth",
+            "type": "date"
+          },
+          {
+            "name": "sex",
+            "type": "string"
+          },
+          {
+            "name": "weightKg",
+            "type": "integer"
+          },
+          {
+            "name": "microchipNumber",
+            "type": "string"
+          },
+          {
+            "name": "status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "ownerId",
+            "type": "uuid",
+            "required": true
+          }
+        ]
+      },
+      {
+        "id": "ENTITY-004",
+        "name": "Veterinarian",
+        "table": "veterinarians",
+        "fields": [
+          {
+            "name": "id",
+            "type": "uuid",
+            "primaryKey": true,
+            "unique": true
+          },
+          {
+            "name": "fullName",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "email",
+            "type": "string"
+          },
+          {
+            "name": "phone",
+            "type": "string"
+          },
+          {
+            "name": "specialization",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "licenseNumber",
+            "type": "string"
+          },
+          {
+            "name": "weeklyAvailability",
+            "type": "text"
+          },
+          {
+            "name": "active",
+            "type": "boolean",
+            "required": true
+          },
+          {
+            "name": "accountId",
+            "type": "uuid"
+          }
+        ]
+      },
+      {
+        "id": "ENTITY-005",
+        "name": "Appointment",
+        "table": "appointments",
+        "fields": [
+          {
+            "name": "id",
+            "type": "uuid",
+            "primaryKey": true,
+            "unique": true
+          },
+          {
+            "name": "ownerId",
+            "type": "uuid",
+            "required": true
+          },
+          {
+            "name": "petId",
+            "type": "uuid",
+            "required": true
+          },
+          {
+            "name": "veterinarianId",
+            "type": "uuid",
+            "required": true
+          },
+          {
+            "name": "date",
+            "type": "date",
+            "required": true
+          },
+          {
+            "name": "time",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "durationMinutes",
+            "type": "integer",
+            "required": true
+          },
+          {
+            "name": "reason",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "notes",
+            "type": "text"
+          },
+          {
+            "name": "status",
+            "type": "string",
+            "required": true,
+            "enumValues": [
+              "Scheduled",
+              "Completed",
+              "Cancelled"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "ENTITY-006",
+        "name": "MedicalRecord",
+        "table": "medical_records",
+        "fields": [
+          {
+            "name": "id",
+            "type": "uuid",
+            "primaryKey": true,
+            "unique": true
+          },
+          {
+            "name": "petId",
+            "type": "uuid",
+            "required": true
+          },
+          {
+            "name": "veterinarianId",
+            "type": "uuid",
+            "required": true
+          },
+          {
+            "name": "visitDate",
+            "type": "date",
+            "required": true
+          },
+          {
+            "name": "weightKg",
+            "type": "integer"
+          },
+          {
+            "name": "symptoms",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "diagnosis",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "treatment",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "clinicalNotes",
+            "type": "text"
+          },
+          {
+            "name": "followUpDate",
+            "type": "date"
+          }
+        ]
+      },
+      {
+        "id": "ENTITY-007",
+        "name": "VaccinationRecord",
+        "table": "vaccination_records",
+        "fields": [
+          {
+            "name": "id",
+            "type": "uuid",
+            "primaryKey": true,
+            "unique": true
+          },
+          {
+            "name": "petId",
+            "type": "uuid",
+            "required": true
+          },
+          {
+            "name": "administeringVeterinarianId",
+            "type": "uuid",
+            "required": true
+          },
+          {
+            "name": "vaccineName",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "dateAdministered",
+            "type": "date",
+            "required": true
+          },
+          {
+            "name": "nextDueDate",
+            "type": "date"
+          },
+          {
+            "name": "lotNumber",
+            "type": "string"
+          },
+          {
+            "name": "notes",
+            "type": "text"
+          }
+        ]
+      },
+      {
+        "id": "ENTITY-008",
+        "name": "Prescription",
+        "table": "prescriptions",
+        "fields": [
+          {
+            "name": "id",
+            "type": "uuid",
+            "primaryKey": true,
+            "unique": true
+          },
+          {
+            "name": "petId",
+            "type": "uuid",
+            "required": true
+          },
+          {
+            "name": "ownerId",
+            "type": "uuid",
+            "required": true
+          },
+          {
+            "name": "prescribingVeterinarianId",
+            "type": "uuid",
+            "required": true
+          },
+          {
+            "name": "medicationName",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "dosage",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "frequency",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "startDate",
+            "type": "date",
+            "required": true
+          },
+          {
+            "name": "endDate",
+            "type": "date"
+          },
+          {
+            "name": "instructions",
+            "type": "text"
+          }
+        ]
+      },
+      {
+        "id": "ENTITY-009",
+        "name": "Invoice",
+        "table": "invoices",
+        "fields": [
+          {
+            "name": "id",
+            "type": "uuid",
+            "primaryKey": true,
+            "unique": true
+          },
+          {
+            "name": "invoiceNumber",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "ownerId",
+            "type": "uuid",
+            "required": true
+          },
+          {
+            "name": "petId",
+            "type": "uuid",
+            "required": true
+          },
+          {
+            "name": "totalAmount",
+            "type": "decimal",
+            "required": true
+          },
+          {
+            "name": "paymentStatus",
+            "type": "string",
+            "required": true
+          }
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "from": "ENTITY-003",
+        "fromField": "ownerId",
+        "kind": "one_to_many",
+        "onDelete": "restrict",
+        "to": "ENTITY-002",
+        "toField": "id"
+      },
+      {
+        "from": "ENTITY-005",
+        "fromField": "petId",
+        "kind": "one_to_many",
+        "onDelete": "restrict",
+        "to": "ENTITY-003",
+        "toField": "id"
+      },
+      {
+        "from": "ENTITY-005",
+        "fromField": "ownerId",
+        "kind": "one_to_many",
+        "onDelete": "restrict",
+        "to": "ENTITY-002",
+        "toField": "id"
+      },
+      {
+        "from": "ENTITY-005",
+        "fromField": "veterinarianId",
+        "kind": "one_to_many",
+        "onDelete": "restrict",
+        "to": "ENTITY-004",
+        "toField": "id"
+      },
+      {
+        "from": "ENTITY-006",
+        "fromField": "petId",
+        "kind": "one_to_many",
+        "onDelete": "restrict",
+        "to": "ENTITY-003",
+        "toField": "id"
+      },
+      {
+        "from": "ENTITY-006",
+        "fromField": "veterinarianId",
+        "kind": "one_to_many",
+        "onDelete": "restrict",
+        "to": "ENTITY-004",
+        "toField": "id"
+      },
+      {
+        "from": "ENTITY-007",
+        "fromField": "petId",
+        "kind": "one_to_many",
+        "onDelete": "restrict",
+        "to": "ENTITY-003",
+        "toField": "id"
+      },
+      {
+        "from": "ENTITY-008",
+        "fromField": "petId",
+        "kind": "one_to_many",
+        "onDelete": "restrict",
+        "to": "ENTITY-003",
+        "toField": "id"
+      },
+      {
+        "from": "ENTITY-009",
+        "fromField": "ownerId",
+        "kind": "one_to_many",
+        "onDelete": "restrict",
+        "to": "ENTITY-002",
+        "toField": "id"
+      }
+    ]
+  },
+  "pages": [],
+  "businessRules": [
+    {
+      "id": "RULE-001",
+      "name": "One vet, one slot",
+      "statement": "A veterinarian cannot have two scheduled appointments at the same date and time.",
+      "appliesTo": [
+        "ENTITY-005",
+        "FLOW-001"
+      ],
+      "kind": "statement",
+      "scope": "server",
+      "requirements": [],
+      "confidence": 0.9,
+      "status": "PROPOSED"
+    }
+  ],
+  "security": {
+    "ownershipRules": [
+      {
+        "entity": "Veterinarian",
+        "column": "accountId",
+        "kind": "scope",
+        "scope": "user",
+        "unscopedRoles": [
+          "Admin",
+          "Receptionist"
+        ],
+        "reads": "scoped",
+        "note": "A vet sees and changes only their own row; the front desk sees every vet."
+      },
+      {
+        "entity": "Prescription",
+        "column": "prescribingVeterinarianId",
+        "kind": "scope",
+        "scope": "user",
+        "unscopedRoles": [
+          "Admin"
+        ],
+        "reads": "scoped",
+        "note": "A vet reaches only the prescriptions they wrote."
+      },
+      {
+        "entity": "Invoice",
+        "column": "ownerId",
+        "kind": "scope",
+        "scope": "user",
+        "unscopedRoles": [
+          "Admin",
+          "Receptionist"
+        ],
+        "reads": "scoped",
+        "note": "Money records stay with the front desk."
+      },
+      {
+        "entity": "Appointment",
+        "column": "veterinarianId",
+        "kind": "attribution",
+        "scope": "user",
+        "unscopedRoles": [],
+        "reads": "scoped",
+        "note": "Records which vet an appointment is with; filters nothing."
+      }
+    ]
+  },
+  "workflows": [
+    {
+      "id": "FLOW-001",
+      "name": "Book Appointment",
+      "purpose": "Staff books an appointment for a pet with a veterinarian at a date and time.",
+      "trigger": {
+        "kind": "manual",
+        "detail": "Staff press Save Appointment."
+      },
+      "launchedFrom": [],
+      "status": "PROPOSED",
+      "inputs": [
+        {
+          "name": "pet",
+          "kind": "record",
+          "entity": "ENTITY-003",
+          "required": true
+        },
+        {
+          "name": "owner",
+          "kind": "record",
+          "entity": "ENTITY-002",
+          "required": true
+        },
+        {
+          "name": "veterinarian",
+          "kind": "record",
+          "entity": "ENTITY-004",
+          "required": true
+        },
+        {
+          "name": "date",
+          "kind": "field",
+          "type": "date",
+          "required": true
+        },
+        {
+          "name": "time",
+          "kind": "field",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "durationMinutes",
+          "kind": "field",
+          "type": "integer",
+          "required": true
+        },
+        {
+          "name": "reason",
+          "kind": "field",
+          "type": "text",
+          "required": true
+        }
+      ],
+      "steps": [
+        {
+          "key": "start",
+          "name": "Start",
+          "type": "trigger",
+          "config": {
+            "type": "manual"
+          },
+          "next": [
+            "find_conflicts"
+          ]
+        },
+        {
+          "key": "find_conflicts",
+          "name": "Find Overlapping Appointments",
+          "type": "action",
+          "config": {
+            "actionType": "db_query",
+            "table": "appointments",
+            "where": {
+              "date": "{{date}}",
+              "status": "Scheduled",
+              "time": "{{time}}",
+              "veterinarianId": "{{veterinarian.id}}"
+            }
+          },
+          "next": [
+            "check_conflict"
+          ]
+        },
+        {
+          "key": "check_conflict",
+          "name": "Is Slot Already Booked?",
+          "type": "condition",
+          "config": {
+            "expression": "count(find_conflicts.output) > 0"
+          },
+          "next": [
+            "refuse_booking",
+            "insert_appointment"
+          ]
+        },
+        {
+          "key": "refuse_booking",
+          "name": "Refuse: Slot Unavailable",
+          "type": "end",
+          "config": {
+            "refused": true,
+            "message": "This veterinarian already has an appointment at that time. Choose another slot."
+          },
+          "next": []
+        },
+        {
+          "key": "insert_appointment",
+          "name": "Create Appointment",
+          "type": "action",
+          "config": {
+            "actionType": "db_insert",
+            "table": "appointments",
+            "values": {
+              "ownerId": "{{owner.id}}",
+              "petId": "{{pet.id}}",
+              "veterinarianId": "{{veterinarian.id}}",
+              "date": "{{date}}",
+              "time": "{{time}}",
+              "durationMinutes": "{{durationMinutes}}",
+              "reason": "{{reason}}",
+              "status": "Scheduled"
+            }
+          },
+          "next": [
+            "booked"
+          ]
+        },
+        {
+          "key": "booked",
+          "name": "Booked",
+          "type": "end",
+          "config": {
+            "refused": false
+          },
+          "next": []
+        }
+      ]
+    },
+    {
+      "id": "FLOW-002",
+      "name": "Cancel Appointment",
+      "purpose": "Staff cancels a scheduled appointment.",
+      "trigger": {
+        "kind": "manual"
+      },
+      "launchedFrom": [],
+      "status": "PROPOSED",
+      "inputs": [
+        {
+          "name": "appointment",
+          "kind": "record",
+          "entity": "ENTITY-005",
+          "required": true
+        }
+      ],
+      "steps": [
+        {
+          "key": "start",
+          "name": "Start",
+          "type": "trigger",
+          "config": {
+            "type": "manual"
+          },
+          "next": [
+            "cancel"
+          ]
+        },
+        {
+          "key": "cancel",
+          "name": "Mark Cancelled",
+          "type": "action",
+          "config": {
+            "actionType": "db_update",
+            "table": "appointments",
+            "values": {
+              "status": "Cancelled"
+            },
+            "where": {
+              "id": "{{appointment.id}}"
+            }
+          },
+          "next": [
+            "done"
+          ]
+        },
+        {
+          "key": "done",
+          "name": "Done",
+          "type": "end",
+          "config": {
+            "refused": false
+          },
+          "next": []
+        }
+      ]
+    },
+    {
+      "id": "FLOW-003",
+      "name": "Delete Prescription",
+      "purpose": "A vet removes a prescription entered by mistake.",
+      "trigger": {
+        "kind": "manual"
+      },
+      "launchedFrom": [],
+      "status": "PROPOSED",
+      "inputs": [
+        {
+          "name": "prescription",
+          "kind": "record",
+          "entity": "ENTITY-008",
+          "required": true
+        }
+      ],
+      "steps": [
+        {
+          "key": "start",
+          "name": "Start",
+          "type": "trigger",
+          "config": {
+            "type": "manual"
+          },
+          "next": [
+            "remove"
+          ]
+        },
+        {
+          "key": "remove",
+          "name": "Remove",
+          "type": "action",
+          "config": {
+            "actionType": "db_delete",
+            "table": "prescriptions",
+            "where": {
+              "id": "{{prescription.id}}"
+            }
+          },
+          "next": [
+            "done"
+          ]
+        },
+        {
+          "key": "done",
+          "name": "Done",
+          "type": "end",
+          "config": {
+            "refused": false
+          },
+          "next": []
+        }
+      ]
+    },
+    {
+      "id": "FLOW-004",
+      "name": "Refund Invoice",
+      "purpose": "Staff refunds a paid invoice.",
+      "trigger": {
+        "kind": "manual"
+      },
+      "launchedFrom": [],
+      "status": "PROPOSED",
+      "inputs": [
+        {
+          "name": "invoice",
+          "kind": "record",
+          "entity": "ENTITY-009",
+          "required": true
+        }
+      ],
+      "steps": [
+        {
+          "key": "start",
+          "name": "Start",
+          "type": "trigger",
+          "config": {
+            "type": "manual"
+          },
+          "next": [
+            "refund"
+          ]
+        },
+        {
+          "key": "refund",
+          "name": "Refund",
+          "type": "action",
+          "config": {
+            "actionType": "refund_payment",
+            "paymentId": "{{invoice.id}}"
+          },
+          "next": [
+            "done"
+          ]
+        },
+        {
+          "key": "done",
+          "name": "Done",
+          "type": "end",
+          "config": {
+            "refused": false
+          },
+          "next": []
+        }
+      ]
+    },
+    {
+      "id": "FLOW-005",
+      "name": "Nightly Reminder",
+      "purpose": "Remind owners of the next day's appointments.",
+      "trigger": {
+        "kind": "schedule",
+        "cron": "0 18 * * *",
+        "timezone": "UTC"
+      },
+      "launchedFrom": [],
+      "status": "PROPOSED",
+      "inputs": [],
+      "steps": [
+        {
+          "key": "start",
+          "name": "Start",
+          "type": "trigger",
+          "config": {
+            "type": "manual"
+          },
+          "next": [
+            "done"
+          ]
+        },
+        {
+          "key": "done",
+          "name": "Done",
+          "type": "end",
+          "config": {
+            "refused": false
+          },
+          "next": []
+        }
+      ]
+    },
+    {
+      "id": "FLOW-006",
+      "name": "Handle Appointment Request",
+      "purpose": "Staff handle an owner's request for an appointment: find the pet, triage how urgent it is, then book it.",
+      "trigger": {
+        "kind": "manual",
+        "detail": "Staff press Handle Request."
+      },
+      "launchedFrom": [],
+      "status": "PROPOSED",
+      "inputs": [
+        {
+          "name": "pet",
+          "kind": "record",
+          "entity": "ENTITY-003",
+          "required": true
+        },
+        {
+          "name": "reason",
+          "kind": "field",
+          "type": "text",
+          "required": true
+        }
+      ],
+      "steps": []
+    }
+  ]
+}

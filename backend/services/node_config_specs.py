@@ -235,6 +235,18 @@ NODE_CONFIG_SPECS: dict[str, list[ConfigKey]] = {
             help_url="https://console.anthropic.com/settings/keys",
         ),
     ],
+    # An assistant step runs the app's own assistant against the model, so it
+    # needs the same key as the other AI steps.
+    "agent_step": [
+        ConfigKey(
+            key="ANTHROPIC_API_KEY",
+            provider="anthropic",
+            label="Anthropic API key",
+            kind="password",
+            required=True,
+            help_url="https://console.anthropic.com/settings/keys",
+        ),
+    ],
     # --- Document OCR (PaddleOCR sidecar) ------------------------------- #
     # First-class OCR primitive. Runs against a PaddleOCR HTTP sidecar the
     # operator hosts (e.g. paddlepaddle/paddleocr container behind a thin

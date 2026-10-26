@@ -1126,8 +1126,12 @@ def queue_findings(doc: dict) -> list[dict]:
 
 def functional_findings(doc: dict) -> list[dict]:
     """Everything, for verification."""
+    from services.blueprint.agent_steps import agent_step_findings
+
+    # An assistant step is checked against the whole document (the records it may read, the workflows it may run), so
+    # it is here and not in `authoring_findings`, which the apply gate feeds one workflow's body at a time.
     return (page_findings(doc) + launcher_findings(doc) + queue_findings(doc) + authoring_findings(doc)
-            + handoff_findings(doc))
+            + agent_step_findings(doc) + handoff_findings(doc))
 
 
 # ---------------------------------------------------------------------------

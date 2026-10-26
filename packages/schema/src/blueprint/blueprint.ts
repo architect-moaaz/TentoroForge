@@ -1870,6 +1870,7 @@ export const WORKFLOW_NODE_TYPES = [
     "ai_extract",
     "ai_decide",
     "ai_generate",
+    "agent_step",
 ] as const;
 
 export const WorkflowStep = z.object({
@@ -2266,6 +2267,21 @@ export const RecordScopeRule = z.object({
     .describe(
       "Role names that read and write this entity unscoped. Name a role only " +
       "where the product genuinely grants it every row.",
+    )
+    .default([]),
+  /**
+   * ROLES THAT ONLY READ. `unscopedRoles` read AND write unscoped; a role that
+   * must see every row and change none of them is named here. The assistant
+   * step's service role (`workflow`) is granted this, and only for the records
+   * its brief reads, so an assistant can look at what a person's own rule
+   * would hide from it without being able to write anything.
+   */
+  readRoles: z
+    .array(z.string())
+    .describe(
+      "Role names that read every row of this entity and may not change any " +
+      "of them. The workflow assistant step's role `workflow` is added by the " +
+      "build for the records an assistant step reads.",
     )
     .default([]),
   /**
