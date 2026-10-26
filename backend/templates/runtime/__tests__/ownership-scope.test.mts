@@ -391,6 +391,25 @@ console.log("query(): a role the rule exempts reads every row");
   eqJson(ids(admin.data), ["i1", "i2", "i3"], "admin is unscoped, as declared");
 }
 
+console.log("query(): a role in readRoles reads every row, and still changes none");
+{
+  // The assistant step runs as role `workflow`, with no person behind it. The Invoice rule lists it under readRoles only: it can read the whole
+  // table (a step reads across people, a clinic's vet schedules) but `unscopedRoles` is not granted, so the write side stays scoped.
+  const asWorkflow = { user: { role: "workflow" } };
+  const reader = await engine.query(invoices.__name, {}, asWorkflow);
+  eqJson(ids(reader.data), ["i1", "i2", "i3"], "role workflow reads every invoice");
+  eqJson(reader.total, 3, "and the total agrees");
+  eqJson(await engine.stats(invoices.__name, asWorkflow), { total: 3 }, "and so does the count");
+  const stranger = await engine.query(invoices.__name, {}, { user: { role: "member" } });
+  eqJson(ids(stranger.data), [], "another role with no id is not helped by it");
+  await throwsNamed(
+    () => engine.update(invoices.__name, "i1", { title: "rewritten by a workflow" }, asWorkflow),
+    "NotFoundError",
+    "a role in readRoles still cannot change a row it does not own",
+  );
+  eqJson(ids((await engine.query(invoices.__name, {}, asAlice)).data), ["i1", "i2"], "Alice's view is unchanged");
+}
+
 console.log("query(): a scoped entity with no actor returns nothing");
 {
   const anon = await engine.query(invoices.__name, {}, {});

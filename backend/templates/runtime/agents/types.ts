@@ -147,6 +147,10 @@ export interface AgentRuntimeConfig {
   router?: Record<string, unknown> | null;
   /** The human-handoff box: who handles it, how it is assigned, what is asked, who is told. */
   handoff?: HandoffSpec | null;
+  /** Made for a workflow step: no person talks to it. Not listed and not answered by the chat route (workflow-only.ts).
+   *  Absent = a normal assistant. The definition's own spelling (`workflow_only`) is read too. */
+  workflowOnly?: boolean;
+  workflow_only?: boolean;
 }
 
 // ── human handoff ─────────────────────────────────────────────────────────

@@ -248,7 +248,10 @@
         "unscopedRoles": [
           "admin"
         ],
-        "note": "An invoice belongs to the user who raised it."
+        "note": "An invoice belongs to the user who raised it.",
+        "readRoles": [
+          "workflow"
+        ]
       },
       {
         "entity": "Ticket",
@@ -301,7 +304,7 @@
         "unscopedRoles": [
           "admin"
         ],
-        "note": "A cart is its customer's \u2014 or, before they sign in, the guest's who filled it."
+        "note": "A cart is its customer's — or, before they sign in, the guest's who filled it."
       },
       {
         "entity": "CartItem",

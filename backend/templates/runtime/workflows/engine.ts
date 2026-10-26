@@ -437,6 +437,11 @@ const _MAX_STEPS = 5000;
 // run re-walks the same path rather than a deeper one.
 const _MAX_DEPTH = 200;
 
+/** Whether this node is an assistant step: the one handler whose `{ error }` answer is a result, not a crash. */
+function answersItsOwnFailure(node: WorkflowNode): boolean {
+  return node.type === "agent_step" || String((node.data?.config as any)?.actionType ?? "") === "agent_step";
+}
+
 async function executeNode(
   node: WorkflowNode,
   workflow: WorkflowDefinition,
@@ -602,7 +607,8 @@ async function executeNode(
       case "ai_generate":
       case "ai_classify":
       case "ai_extract":
-      case "ai_decide": {
+      case "ai_decide":
+      case "agent_step": {
         // ─── R3: wait_for_event — pause until a matching bus event ────
         // Reuses the ONE pause/persist/resume mechanism the engine has
         // (the human-task path): the log entry stays "running" with
@@ -649,9 +655,13 @@ async function executeNode(
         // A handler that returns { error } (e.g. db_insert "unknown table") failed
         // without throwing. Surface it so the workflow reports `failed` instead of a
         // misleading `completed` that makes the UI look like nothing happened.
+        // AN ASSISTANT STEP ANSWERS ITS OWN FAILURE. Its envelope carries `error` (and `reason`) when it could not
+        // finish and the step's onFailure is "human" or "skip": the run goes on and a decision after the step
+        // routes it. onFailure "fail" is a throw by the handler, which lands in the catch below like any other.
         if (
           actionOutput && typeof actionOutput === "object" &&
-          (actionOutput as { error?: unknown }).error
+          (actionOutput as { error?: unknown }).error &&
+          !answersItsOwnFailure(node)
         ) {
           // A BUSINESS RULE SAYING NO is a refusal, not a crash: its message
           // is the person's sentence ("A task in progress needs a due date."),
@@ -1243,7 +1253,8 @@ async function handleAction(
     node.type === "ai_generate" ||
     node.type === "ai_classify" ||
     node.type === "ai_extract" ||
-    node.type === "ai_decide"
+    node.type === "ai_decide" ||
+    node.type === "agent_step"
   ) {
     actionType = node.type;
   }
@@ -1423,7 +1434,7 @@ async function handleAction(
   // on it, but the row said "completed" with the error tucked in its output:
   // RK_Test's insert of patientId "001" read as a success in the log Smith
   // and the owner look at (2026-09-28).
-  const answered = !runError && result && typeof result === "object"
+  const answered = !runError && result && typeof result === "object" && actionType !== "agent_step"
     ? (result as { error?: unknown }).error : undefined;
   void writeExecutionLog({
     runId: String(runId),

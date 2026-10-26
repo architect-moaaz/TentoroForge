@@ -96,6 +96,22 @@ export function instrumentIO(io: ToolIO, send: (e: DebugEvent) => void): ToolIO 
         },
         (note) => io.fetchInternal(path, { ...init, onResponse: (status) => { init.onResponse?.(status); note({ status }); } }, ctx),
       ),
+    // An in-process data call (an assistant step) is reported like the request it replaces, so the builder sees the same thing.
+    ...(io.data
+      ? {
+          data: (call: Parameters<NonNullable<ToolIO["data"]>>[0], ctx: Parameters<NonNullable<ToolIO["data"]>>[1]) =>
+            timed(
+              {
+                kind: "request",
+                label: `/api/data/${call.entity}${call.id ? `/${call.id}` : ""}`,
+                method: ({ list: "GET", get: "GET", create: "POST", update: "PUT", delete: "DELETE" } as Record<string, string>)[call.operation],
+                ...(call.operation === "list" && call.query && Object.keys(call.query).length ? { query: call.query } : {}),
+                ...(call.body !== undefined ? { body: clipBody(call.body) } : {}),
+              },
+              () => io.data!(call, ctx),
+            ),
+        }
+      : {}),
     triggerWorkflow: (id, input, user) => timed({ kind: "workflow", label: id, body: clipBody(input) }, () => io.triggerWorkflow(id, input, user)),
     callMcp: (serverId, tool, args) => timed({ kind: "mcp", label: `${serverId}/${tool}`, body: clipBody(args) }, () => io.callMcp(serverId, tool, args)),
     runAi: (action, config, input, user) => timed({ kind: "ai", label: action }, () => io.runAi(action, config, input, user)),

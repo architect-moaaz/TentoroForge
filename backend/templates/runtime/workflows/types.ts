@@ -48,6 +48,7 @@ export type ActionType =
   | "ai_classify"
   | "ai_extract"
   | "ai_decide"
+  | "agent_step"
   | "mcp_tool_call"
   | "ocr_document"
   | "create_checkout"
@@ -75,7 +76,8 @@ export type NodeType =
   | "ai_generate"
   | "ai_classify"
   | "ai_extract"
-  | "ai_decide";
+  | "ai_decide"
+  | "agent_step";
 
 // ── Process Variable ───────────────────────────────────────────────
 

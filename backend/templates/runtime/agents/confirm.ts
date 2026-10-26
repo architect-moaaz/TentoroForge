@@ -34,6 +34,29 @@ export const actionKey = (tool: string, input: unknown): string => `${tool}:${st
 /** Whether the person's reply says no. Anything else is taken as going ahead. */
 export const declined = (reply: string): boolean => DECLINE.test(reply);
 
+/**
+ * Whether a tool changes anything. The compiler marks such a tool `confirm` (services/agent_runtime_config.py,
+ * changes_data), and that mark is what the chat holds on. A workflow step cannot rest on the mark alone: a builder
+ * may have switched "ask first" off for the CHAT, and a step that reads that as "harmless" would run the change in the
+ * middle of the model's thinking. So the mark counts, and so does the tool's own shape: a create/update/delete, any
+ * call that is not a plain read, a workflow (which is an action) and a handoff all change something. A function or an
+ * MCP tool is left to the mark, as the compiler leaves it.
+ */
+export function changesData(spec: AgentToolSpec): boolean {
+  if (spec.confirm === true) return true;
+  switch (spec.kind) {
+    case "data":
+      return spec.operation === "create" || spec.operation === "update" || spec.operation === "delete";
+    case "api":
+      return !["GET", "HEAD"].includes(String(spec.method ?? "GET").toUpperCase());
+    case "workflow":
+    case "handoff":
+      return true;
+    default:
+      return false;
+  }
+}
+
 /** The change in a line the assistant can repeat to the person. */
 export function describeChange(spec: AgentToolSpec, input: unknown): string {
   const what = spec.name.replace(/[_-]+/g, " ");

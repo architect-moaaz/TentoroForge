@@ -4,7 +4,8 @@
  *                        the prompt, the tools or the guardrails.
  *
  * Body: { agentId?, message, conversationId?, attachments?: string[] }
- *   agentId       which agent; the app's first enabled one when omitted.
+ *   agentId       which agent; the app's first enabled one when omitted. An assistant made for a workflow step
+ *                 (workflowOnly) is neither listed nor answered: "No such agent." (404), like an unknown id.
  *   attachments   forge_files ids. The model is told they exist; a tool that takes
  *                 a file (identify a product, extract a document) is how it reads them.
  *
@@ -22,6 +23,7 @@ import { instrumentIO } from "@/lib/agents/debug";
 import { insightsShipper } from "@/lib/agents/insights-outbox";
 import { holdForShipping } from "@/lib/agents/insights-shipper";
 import { realDeps, toolIO } from "@/lib/agents/io";
+import { isWorkflowOnly } from "@/lib/agents/workflow-only";
 import { feedEvent, newRunId, observeDeps, publish, watching, type WatchEvent } from "@/lib/agents/watch";
 import type { AgentEvent, AgentRuntimeConfig, AgentUser } from "@/lib/agents/types";
 
@@ -45,7 +47,8 @@ async function sessionUser(): Promise<AgentUser | null> {
 }
 
 function pickAgent(id: unknown): AgentRuntimeConfig | undefined {
-  const list = (AGENTS as AgentRuntimeConfig[]).filter((a) => a.enabled);
+  // An assistant made for a workflow step is not one a person talks to: it is as good as unknown here.
+  const list = (AGENTS as AgentRuntimeConfig[]).filter((a) => a.enabled && !isWorkflowOnly(a));
   if (typeof id === "string" && id) return list.find((a) => a.id === id);
   return list[0];
 }
@@ -53,7 +56,7 @@ function pickAgent(id: unknown): AgentRuntimeConfig | undefined {
 export async function GET(): Promise<Response> {
   const user = await sessionUser();
   const agents = (AGENTS as AgentRuntimeConfig[])
-    .filter((a) => a.enabled)
+    .filter((a) => a.enabled && !isWorkflowOnly(a))
     // An agent that needs a person is not offered to a visitor.
     .filter((a) => user || !a.guardrails.input.requireAuth)
     .map((a) => ({ id: a.id, name: a.name, description: a.description ?? null, ui: a.ui }));

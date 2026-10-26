@@ -20,7 +20,8 @@ export type WatchEvent =
   | AgentEvent
   | DebugEvent
   | TraceEvent
-  | { type: "run_start"; agentId: string; agentName: string; user: { id: string; name: string | null; role: string | null; email: string | null }; message: string; conversationId: string | null }
+  /** `workflow` is present when the run is an assistant step of a workflow (no person is chatting): which workflow, which run, which step. */
+  | { type: "run_start"; agentId: string; agentName: string; user: { id: string; name: string | null; role: string | null; email: string | null }; message: string; conversationId: string | null; workflow?: { id: string; runId: string; stepId: string } }
   | { type: "model_start"; n: number; messages: number; tools: number; systemChars: number }
   | { type: "model_failed"; n: number; ms: number; error: string };
 

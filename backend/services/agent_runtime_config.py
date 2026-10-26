@@ -605,6 +605,11 @@ def compile_agent(agent_data: dict[str, Any]) -> CompiledAgent:
     }
     if description:
         config["description"] = str(description)
+    # An assistant made for a workflow step works only inside that workflow: the runtime leaves it out of the chat's
+    # list, refuses a chat to it and mounts no widget for it. Omitted when false, so every other assistant compiles
+    # exactly as it always did. This one flag is all the runtime reads of the step's bookkeeping.
+    if config_in.get("workflow_only") is True:
+        config["workflowOnly"] = True
     if len(handoffs) > 1:
         warnings.append("more than one human-handoff box — the first is used")
     if handoffs:

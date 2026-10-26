@@ -39,6 +39,7 @@ import {
   getActionHandler,
 } from "./engine";
 import { registerAIActions } from "./ai";
+import { registerAgentStepAction } from "./agent-step";
 import { registerOcrActions } from "./ocr";
 // A workflow write fills embedding columns exactly as a form write does.
 import { embedWrittenRow } from "../embeddings";
@@ -2275,6 +2276,10 @@ export function registerDefaultActions(): void {
   // Real AI handlers (Claude-backed, mock fallback when no ANTHROPIC_API_KEY).
   // ai_generate / ai_classify / ai_extract / ai_decide — see ./ai.ts.
   registerAIActions();
+
+  // An assistant as one step (agent_step). A stub that does nothing, unless the app has assistants: installing them
+  // replaces ./agent-step with the real handler (services/agent_runtime_install.py).
+  registerAgentStepAction();
 
   // PaddleOCR sidecar handler — ocr_document. First-class OCR primitive for
   // banking / healthcare / doc-intelligence apps. See ./ocr.ts.

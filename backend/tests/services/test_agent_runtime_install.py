@@ -848,3 +848,130 @@ def test_an_app_with_no_agent_gets_no_salt(tmp_path):
     result = install_agent_runtime(project)
     assert result["installed"] is False
     assert not (app / ".env.local").exists() and not (app / ".forge-insights-salt").exists()
+
+
+# ---------------------------------------------------------------------------
+# an assistant as one step of a workflow (agent_step)
+# ---------------------------------------------------------------------------
+
+STEP_FILES = ("workflow-only", "workflow-actor", "workflow-run", "workflow-step")
+HOOK_MARK = "@/lib/agents/workflow-step"
+
+
+def workflow_graph(**config) -> dict:
+    """An assistant made for a workflow step: read-only lookups, flagged `workflow_only` in its config."""
+    g = graph(
+        node("sp", "system_prompt", "P", {"prompt": "You triage."}),
+        tool("t1", "list_pets", tool_type="data_engine", entity="pets", operation="list"),
+    )
+    g["id"] = "wf_handle_triage"
+    g["config"] = config
+    return g
+
+
+@pytest.mark.parametrize("name", STEP_FILES + ("agent-step-hook",))
+def test_every_assistant_step_template_exists(name):
+    from services.agent_runtime_install import _TEMPLATES
+
+    assert (_TEMPLATES / "agents" / f"{name}.ts").is_file()
+
+
+def test_the_install_brings_the_assistant_step_runtime(tmp_path):
+    project, app = make_app(tmp_path)
+    r = install_agent_runtime(project, graphs=[sample_graph()])
+    for stem in STEP_FILES:
+        assert (app / "src" / "lib" / "agents" / f"{stem}.ts").is_file(), stem
+        assert f"src/lib/agents/{stem}.ts" in r["written"]
+    manifest = json.loads((app / "contracts" / "runtime-injection-manifest.json").read_text())["paths"]
+    assert "src/lib/agents/workflow-run.ts" in manifest
+
+
+def test_an_app_with_no_workflow_runtime_gets_no_hook_and_no_complaint(tmp_path):
+    project, app = make_app(tmp_path)
+    r = install_agent_runtime(project, graphs=[sample_graph()])
+    assert not (app / "src" / "lib" / "workflows").exists(), "the install does not invent a workflow runtime"
+    assert not any("agent_step" in w or "workflow runtime" in w for w in r["warnings"])
+
+
+def test_the_hook_goes_over_the_stub_every_app_ships(tmp_path):
+    from services.agent_runtime_install import _TEMPLATES
+    from services.runtime_injector import inject_runtime
+
+    project, app = make_app(tmp_path)
+    inject_runtime(str(app), app_name="X")
+    stub = (app / "src" / "lib" / "workflows" / "agent-step.ts").read_text(encoding="utf-8")
+    assert "no assistants installed" in stub and HOOK_MARK not in stub, "an app without assistants ships the stub"
+    assert not (app / "src" / "lib" / "agents").exists()
+    assert '"./agent-step"' in (app / "src" / "lib" / "workflows" / "index.ts").read_text(encoding="utf-8"),         "the engine always imports it, so an app without assistants still compiles"
+
+    r = install_agent_runtime(project, graphs=[sample_graph()])
+    hook = (app / "src" / "lib" / "workflows" / "agent-step.ts").read_bytes()
+    assert hook == (_TEMPLATES / "agents" / "agent-step-hook.ts").read_bytes()
+    assert HOOK_MARK.encode() in hook
+    assert "src/lib/workflows/agent-step.ts" in r["written"]
+    assert not any("older than the assistant step" in w for w in r["warnings"])
+
+
+def test_a_regenerate_puts_the_stub_back_and_the_install_puts_the_hook_back_again(tmp_path):
+    from services.runtime_injector import inject_runtime
+
+    project, app = make_app(tmp_path)
+    inject_runtime(str(app), app_name="X")
+    install_agent_runtime(project, graphs=[sample_graph()])
+    inject_runtime(str(app), app_name="X")  # a rebuild: copies the workflow runtime over, then installs the assistants again
+    assert HOOK_MARK in (app / "src" / "lib" / "workflows" / "agent-step.ts").read_text(encoding="utf-8")
+    assert (app / "src" / "lib" / "agents" / "workflow-step.ts").is_file()
+
+
+def test_installing_the_assistant_step_twice_changes_nothing(tmp_path):
+    from services.runtime_injector import inject_runtime
+
+    project, app = make_app(tmp_path)
+    inject_runtime(str(app), app_name="X")
+    install_agent_runtime(project, graphs=[workflow_graph(workflow_only=True)])
+    first = {p.relative_to(app).as_posix(): p.read_bytes() for p in app.rglob("*") if p.is_file()}
+    install_agent_runtime(project)
+    second = {p.relative_to(app).as_posix(): p.read_bytes() for p in app.rglob("*") if p.is_file()}
+    assert first == second
+
+
+def test_a_workflow_runtime_older_than_the_step_is_told_to_reinject(tmp_path):
+    project, app = make_app(tmp_path)
+    wf = app / "src" / "lib" / "workflows"
+    wf.mkdir(parents=True)
+    (wf / "index.ts").write_text("export function registerDefaultActions() {}\n", encoding="utf-8")
+    r = install_agent_runtime(project, graphs=[sample_graph()])
+    assert any("re-inject the runtime" in w for w in r["warnings"])
+    assert (wf / "index.ts").read_text(encoding="utf-8") == "export function registerDefaultActions() {}\n", "the engine file is not patched in place"
+    assert HOOK_MARK in (wf / "agent-step.ts").read_text(encoding="utf-8")
+
+
+def test_a_workflow_only_definition_is_flagged_in_the_runtime_config(tmp_path):
+    project, app = make_app(tmp_path)
+    install_agent_runtime(project, graphs=[workflow_graph(workflow_only=True), sample_graph()])
+    flagged = json.loads((app / "src" / "agents" / "definitions" / "wf_handle_triage.json").read_text())
+    normal = json.loads((app / "src" / "agents" / "definitions" / "support.json").read_text())
+    assert flagged["workflowOnly"] is True
+    assert "workflowOnly" not in normal, "an ordinary assistant carries no flag at all: it behaves exactly as before"
+
+
+@pytest.mark.parametrize("value", [False, "true", 1, None, "yes"])
+def test_only_a_real_true_makes_an_assistant_workflow_only(tmp_path, value):
+    project, app = make_app(tmp_path)
+    install_agent_runtime(project, graphs=[workflow_graph(workflow_only=value)])
+    cfg = json.loads((app / "src" / "agents" / "definitions" / "wf_handle_triage.json").read_text())
+    assert "workflowOnly" not in cfg
+
+
+def test_the_flag_can_also_sit_on_the_definition_itself(tmp_path):
+    from services.agent_runtime_install import is_workflow_only
+
+    assert is_workflow_only({"workflow_only": True}) and is_workflow_only({"config": {"workflow_only": True}})
+    assert not is_workflow_only({}) and not is_workflow_only({"config": None}) and not is_workflow_only({"config": {"workflow_only": "true"}})
+
+
+def test_the_registry_still_lists_a_workflow_only_assistant(tmp_path):
+    """The workflow engine finds its assistant in the same registry the chat route uses; it is the chat route that leaves it out."""
+    project, app = make_app(tmp_path)
+    install_agent_runtime(project, graphs=[workflow_graph(workflow_only=True)])
+    assert "definitions/wf_handle_triage.json" in (app / "src" / "agents" / "registry.ts").read_text()

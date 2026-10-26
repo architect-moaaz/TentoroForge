@@ -8,6 +8,11 @@ output) into ``src/agents/definitions/<id>.json`` and copies the runtime beside
 them. No model is involved, so applying an agent twice yields the same files, and
 the result is something a test can check.
 
+It also wires the assistant step of the workflow engine (``agent_step``): the step's runtime goes into
+``src/lib/agents`` and a one-line hook is put over the stub that every app's ``src/lib/workflows/agent-step.ts``
+ships as, so an app without assistants still compiles. An assistant the definition marks ``workflow_only`` is flagged
+in its compiled config so the chat neither lists nor answers it.
+
 Idempotent: re-running rewrites what it owns and removes definitions and tool
 modules whose agent no longer exists. It touches nothing it did not write — the
 widget mount is a marker-delimited patch to the dashboard layout, the schema
@@ -44,7 +49,15 @@ INSIGHTS_SALT_FILE = ".forge-insights-salt"
 #: runtime template -> destination, relative to the app root
 _CORE = ("types", "guardrails", "memory", "tools", "runtime", "io", "store", "handoff", "handoff-store", "handoff-nav",
          "confirm", "limits", "usage-store", "debug", "watch", "turns-store", "insights", "insights-shipper",
-         "insights-outbox")
+         "insights-outbox",
+         # an assistant as one step of a workflow: the run, the identity it acts as, the engine handler, the flag
+         "workflow-only", "workflow-actor", "workflow-run", "workflow-step")
+
+#: The workflow engine registers its assistant step through ``src/lib/workflows/agent-step.ts``. Every app ships a stub
+#: there (templates/runtime/workflows/agent-step.ts) so the engine compiles without assistants; an app WITH assistants
+#: gets this hook over it, which points the engine at ``src/lib/agents/workflow-step.ts``.
+_AGENT_STEP_HOOK = "agent-step-hook.ts"
+_AGENT_STEP_IMPORT = '"./agent-step"'
 
 
 def resolve_roots(path: str | Path) -> tuple[Path, Path]:
@@ -81,6 +94,31 @@ def has_agents(path: str | Path) -> bool:
     """True when the project has at least one agent definition to install."""
     project_root, _ = resolve_roots(path)
     return bool(load_graphs(project_root))
+
+
+def is_workflow_only(graph: dict[str, Any]) -> bool:
+    """True when the definition says the assistant is made for a workflow step (``config.workflow_only: true``).
+
+    Only a real ``true`` counts, so every assistant that existed before the flag stays a normal, chattable one."""
+    cfg = graph.get("config") if isinstance(graph.get("config"), dict) else {}
+    return cfg.get("workflow_only") is True or graph.get("workflow_only") is True
+
+
+def _install_agent_step_hook(app_root: Path, written: list[str], warnings: list[str]) -> None:
+    """Point the workflow engine at the real assistant step. The engine imports ``./agent-step`` in every app; this puts
+    the hook over the stub the workflow runtime ships. An app whose workflow runtime predates the step has no such
+    import yet: it is told to re-inject the runtime rather than having a 2000-line engine file patched in place."""
+    workflows = app_root / "src" / "lib" / "workflows"
+    if not workflows.is_dir():
+        return
+    _copy(_TEMPLATES / "agents" / _AGENT_STEP_HOOK, workflows / "agent-step.ts", written, app_root)
+    index = workflows / "index.ts"
+    try:
+        if index.is_file() and _AGENT_STEP_IMPORT not in index.read_text(encoding="utf-8"):
+            warnings.append("the app's workflow runtime is older than the assistant step: re-inject the runtime "
+                            "(src/lib/workflows/index.ts does not register agent_step yet)")
+    except OSError:
+        pass
 
 
 def _copy(src: Path, dst: Path, written: list[str], app_root: Path) -> None:
@@ -290,6 +328,10 @@ def install_agent_runtime(path: str | Path, *, graphs: list[dict[str, Any]] | No
     seen: set[str] = set()
     for g in all_graphs:
         c = compile_agent(g)
+        # The compiled config carries the flag the runtime reads (agents/workflow-only.ts): the chat route neither lists
+        # nor answers such an assistant. Set here as well as by the compile step, so the install never depends on it.
+        if is_workflow_only(g):
+            c.config["workflowOnly"] = True
         # The app is on disk: a tool that asks it for something it refuses is fixed or
         # dropped now, not discovered as a 403 in the chat (services/agent_access.py).
         c.warnings.extend(reconcile_agent(c.config, app_root))
@@ -331,6 +373,8 @@ def install_agent_runtime(path: str | Path, *, graphs: list[dict[str, Any]] | No
     _copy(_TEMPLATES / "api-agent" / "insights-tick-route.ts",
           app_root / "src" / "app" / "api" / "cron" / "insights" / "route.ts", written, app_root)
     insights_salt = ensure_insights_salt(app_root)
+    # The assistant step of the workflow engine: the real handler goes over the stub every app ships.
+    _install_agent_step_hook(app_root, written, warnings)
     # The inbox for handoffs: only where an agent has a human-handoff box. (The store and the table go in
     # always, because io.ts loads the store on demand and the build must find it.)
     if any(c.config.get("handoff") for c in compiled):

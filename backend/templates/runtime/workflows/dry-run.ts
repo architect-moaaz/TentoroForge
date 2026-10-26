@@ -23,7 +23,7 @@ import {
   _buildWhere, _resolveTable, _resolveValueMap, listWorkflows,
 } from "./index";
 import type { WorkflowDefinition, WorkflowExecutionContext } from "./types";
-import { STEP_OUTPUT, setVariableNames } from "./dry-run-stand-in";
+import { STEP_OUTPUT, agentStepNodes, agentStepSample, agentStepView, setVariableNames } from "./dry-run-stand-in";
 
 export interface DryRunProblem {
   node: string;
@@ -65,6 +65,15 @@ export function dryRunWorkflow(
   // A set_variable step stores its value under `variableName`, not its node id —
   // supplied by the run, like any step output (see _supplied_by_workflow).
   for (const name of setVariableNames(def)) if (!(name in variables)) variables[name] = _STEP_OUTPUT;
+  // An assistant step's answer is its sample envelope (model-free, deterministic: see agentStepSample), under the step's
+  // id and any name it publishes its output as, so the steps after it are resolved against real-looking values.
+  for (const { id, config } of agentStepNodes(def)) {
+    const sample = agentStepView(agentStepSample(config));
+    variables[id] = sample;
+    for (const key of ["outputVar", "resultVar", "resultVariable", "outputVariable"]) {
+      if (typeof config?.[key] === "string" && config[key]) variables[config[key]] = sample;
+    }
+  }
   const ctx = { input, variables, log: [], user } as unknown as WorkflowExecutionContext;
   const steps = _actionNodes(def);
   for (const { id, config } of steps) {

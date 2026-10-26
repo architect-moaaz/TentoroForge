@@ -15,6 +15,7 @@
 import type {
   AgentToolSpec,
   AgentUser,
+  DataOperation,
   ModelToolDef,
   ToolContext,
 } from "./types";
@@ -199,8 +200,25 @@ export interface FetchInit {
   onResponse?: (status: number) => void;
 }
 
+/** One data tool's request, before it becomes a URL: what an in-process back-end (a workflow step) answers directly. */
+export interface DataCall {
+  operation: DataOperation;
+  entity: string;
+  id?: string;
+  /** list: search, page, limit, sort, order and filters, as the model gave them. */
+  query?: Record<string, unknown>;
+  /** create / update: the record's fields. */
+  body?: unknown;
+}
+
 export interface ToolIO {
   fetchInternal(path: string, init: FetchInit, ctx: ToolContext): Promise<unknown>;
+  /**
+   * Optional. When present, a `data` tool is answered here instead of by an HTTP call to the app's own route. Chat has
+   * none (it must travel the person's session cookie through the route); an assistant step has no person and no
+   * cookie, so it answers through the data layer in-process, as a named service actor (workflow-actor.ts).
+   */
+  data?(call: DataCall, ctx: ToolContext): Promise<unknown>;
   triggerWorkflow(id: string, input: Record<string, unknown>, user: AgentUser | null): Promise<unknown>;
   callMcp(serverId: string, tool: string, args: Record<string, unknown>): Promise<unknown>;
   runAi(
@@ -250,6 +268,19 @@ async function runData(spec: AgentToolSpec, input: Record<string, unknown>, ctx:
   if (!entity) throw new ToolError(`${spec.name} names no entity.`, "invalid");
   const base = `/api/data/${encodeURIComponent(entity)}`;
   const id = input.id != null ? encodeURIComponent(String(input.id)) : "";
+  if (io.data) {
+    // Same arguments, same checks as below, answered without a URL (see ToolIO.data).
+    const rawId = input.id != null ? String(input.id) : "";
+    const op = spec.operation ?? "list";
+    if (op === "list") {
+      const { filters, ...flat } = input as { filters?: Record<string, unknown> } & Record<string, unknown>;
+      return io.data({ operation: "list", entity, query: { ...(filters ?? {}), ...flat } }, ctx);
+    }
+    if (op === "create") return io.data({ operation: "create", entity, body: input.data ?? input }, ctx);
+    if (!rawId) throw new ToolError("An id is required.", "invalid");
+    if (op === "get" || op === "delete") return io.data({ operation: op, entity, id: rawId }, ctx);
+    return io.data({ operation: "update", entity, id: rawId, body: input.data ?? {} }, ctx);
+  }
   switch (spec.operation ?? "list") {
     case "list": {
       const { filters, ...flat } = input as { filters?: Record<string, unknown> } & Record<string, unknown>;

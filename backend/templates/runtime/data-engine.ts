@@ -540,6 +540,9 @@ function scopeConditions(
     // 2026-10-11). `reads: "everyone"` lifts the rule from reads only.
     if (op === "read" && rule.reads === "everyone") continue;
     if (role && (rule.unscopedRoles || []).includes(role)) continue;
+    // READ-ONLY EXEMPTION. `readRoles` lifts a rule from reads only: an assistant step runs as role `workflow` and may read the records its
+    // brief names across people (a clinic's vet schedules), but `unscopedRoles` would also let it write them.
+    if (op === "read" && role && (rule.readRoles || []).includes(role)) continue;
     const col = cols[rule.column];
     if (col === undefined) {
       console.error(

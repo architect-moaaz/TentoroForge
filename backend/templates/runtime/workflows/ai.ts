@@ -36,7 +36,7 @@ function getPath(obj: any, pathStr: string): unknown {
 
 /** Resolve a config ref to its RAW value. A lone `{{token}}` returns the raw
  *  variable (may be an object); an interpolated string returns a string. */
-function resolveValue(ref: unknown, vars: Record<string, unknown>): unknown {
+export function resolveValue(ref: unknown, vars: Record<string, unknown>): unknown {
   if (typeof ref !== "string") return ref;
   const single = ref.match(SINGLE_TOKEN);
   if (single) {
@@ -53,7 +53,7 @@ function resolveValue(ref: unknown, vars: Record<string, unknown>): unknown {
   return ref;
 }
 
-function resolveString(ref: unknown, vars: Record<string, unknown>): string {
+export function resolveString(ref: unknown, vars: Record<string, unknown>): string {
   const v = resolveValue(ref, vars);
   if (v == null) return "";
   return typeof v === "object" ? JSON.stringify(v) : String(v);
