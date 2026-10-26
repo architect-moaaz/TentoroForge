@@ -1,7 +1,13 @@
 # TentoroForge test stack on its own EC2 box (t3.medium, 30 GB).
 #
 #  - everything lives in ./data (bind mounts), so removing this folder removes everything the stack ever wrote
-#  - one published port, on 127.0.0.1 only (reach it with an SSH tunnel); nothing else is published
+#  - published ports (nothing else is):
+#      127.0.0.1:3100  the website and API, on this machine only: reach it with an SSH tunnel (safe, encrypted)
+#      80              the same website on the PUBLIC address, in CLEARTEXT (no HTTPS): if the security group lets port 80 in, logins
+#                      and chats cross the internet unencrypted
+#      443             HTTPS, but it only answers when PUBLIC_DOMAIN is set in .env (see README: "WARNING: cleartext")
+#      ${TUNNEL_SSH_PORT:-2222}  the Watch live tunnel service (key login, no shell)
+#    Use test data only until HTTPS is on, or close port 80 in the security group and use the SSH tunnel to 127.0.0.1:3100.
 #  - memory caps sized for a 3.8 GB machine with 4 GB of swap
 #
 # Images are built by ./build.sh (an isolated builder whose cache is removed afterwards).
@@ -61,6 +67,7 @@ services:
       SECRET_KEY: ${SECRET_KEY}
       # "staging", not "production": production refuses to start without a model key
       APP_ENV: ${APP_ENV:-staging}
+      # when HTTPS is on, add https://<PUBLIC_DOMAIN> to this list in .env (comma separated)
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS}
       FORGE_INTEGRATIONS_SECRET: ${FORGE_INTEGRATIONS_SECRET}
       # Watch live: reaching the app on a builder's own computer through its reverse SSH tunnel (services/agent_tunnel.py)
@@ -118,9 +125,17 @@ services:
     depends_on:
       - backend
       - frontend
+    environment:
+      # The site address Caddy serves HTTPS for. Unset = no HTTPS: the placeholder is a plain-http address nobody uses, so only
+      # the cleartext :80 site exists. Set PUBLIC_DOMAIN=name.example.com in .env (a name that points at this server) to turn HTTPS on.
+      TTF_SITE: ${PUBLIC_DOMAIN:-http://domain-not-set.invalid}
     ports:
       - "80:80"
+      # HTTPS. Nothing listens on it inside the container until PUBLIC_DOMAIN is set, so by default it only refuses connections.
+      - "443:443"
       - "127.0.0.1:3100:80"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # the certificates and their account: kept so a rebuild does not ask Let's Encrypt for new ones (it limits how often)
+      - ./data/caddy-data:/data
     mem_limit: 64m

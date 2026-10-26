@@ -19,12 +19,45 @@ Amazon Linux 2023. Nothing outside this folder is touched.
    generated app fails to build with "Can't resolve '@tentoroforge/engine'". Build them first (`npm run build` in each package)
    and add `packages/*/dist` to the tarball.
 3. `bash make-env.sh` writes `.env` (fresh random secrets). Put the model key in `keys.env` (`ANTHROPIC_API_KEY=...`, mode 600).
-   Set `PUBLIC_HOST` in `.env` to the address builders reach this server on (public IP or name).
+   Set `PUBLIC_HOST` in `.env` to the address builders reach this server on (public IP or name). To turn HTTPS on, also set
+   `PUBLIC_DOMAIN` (see "WARNING: cleartext logins" below).
 4. `bash build.sh` builds the images (`ttf-frontend`, `ttf-backend`, `ttf-tunnel`) with a throw-away builder and a disk watchdog.
-5. `sudo chown -R 1000:1000 data/tunnel data/output` (the backend runs as uid 1000), then `docker compose up -d`.
+5. `bash install.sh` does the folder setup (`data/output` and `data/tunnel` are given to uid 1000, the backend's user); if you start the
+   stack by hand instead: `sudo chown -R 1000:1000 data/tunnel data/output && sudo chmod 755 data/tunnel`, then `docker compose up -d`.
 
-The only published ports: `127.0.0.1:3100` (the website and API, through the proxy; reach it with an SSH tunnel or put TLS in front)
-and `2222` (the tunnel service). **Open TCP 2222 in the security group** to the computers that will use Watch live.
+## Ports this stack publishes
+
+| Port | What | Safe? |
+|---|---|---|
+| `127.0.0.1:3100` | the website and API, through the proxy, on this machine only | yes: reach it with an SSH tunnel |
+| `80` | the same website on the server's **public** address, plain HTTP | **no: cleartext** (see the warning below) |
+| `443` | HTTPS for `PUBLIC_DOMAIN` | only answers once `PUBLIC_DOMAIN` is set; until then it refuses connections |
+| `2222` | the tunnel service (SSH, key login, no shell) | yes. **Open TCP 2222 in the security group** to the computers that will use Watch live |
+
+Nothing else is published (Postgres, Redis, the backend and the frontend are only reachable inside the stack).
+
+## WARNING: cleartext logins (test data only)
+
+By default the site is also served on port **80 over plain HTTP** (`auto_https` is not used). Anyone on the path between a
+browser and this server can read the logins, session cookies and chats that cross it. So, until HTTPS is on:
+
+* use **test data only** (no real customer data, no real passwords reused from anywhere else), and
+* prefer the encrypted way in: keep the security group closed for port 80 and open the site through an SSH tunnel to
+  `127.0.0.1:3100` (`ssh -L 3100:127.0.0.1:3100 ec2-user@<server>`, then browse `http://localhost:3100`).
+
+### Turning HTTPS on
+
+1. Make a DNS record (`A`) for a name you own, say `ttf-test.example.com`, that points at this server's public IP.
+2. Open TCP **80 and 443** in the security group (80 is needed once, for the certificate check and the redirect).
+3. In `.env` set `PUBLIC_DOMAIN=ttf-test.example.com` (the name only, no `https://`) and append `,https://ttf-test.example.com` to
+   `ALLOWED_ORIGINS`.
+4. `docker compose up -d proxy backend`. Caddy fetches and renews the certificate by itself (kept in `data/caddy-data`) and sends
+   `http://ttf-test.example.com` to `https://`. Check: `curl -I http://ttf-test.example.com` answers a redirect to https, and
+   `curl -I https://ttf-test.example.com` answers 200.
+5. Once it works, close port 80 in the security group again (the SSH tunnel to `127.0.0.1:3100` keeps working; the bare IP address
+   on port 80 is still plain HTTP, so do not use it).
+
+To switch it off again, empty `PUBLIC_DOMAIN` and `docker compose up -d proxy`.
 
 ## Watch live: how a builder's computer connects
 
