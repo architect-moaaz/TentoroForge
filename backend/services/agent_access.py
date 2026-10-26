@@ -15,9 +15,18 @@ with the app's own access list.
 * A tool that writes an entity the app lets a person write is left alone.
 * A tool that writes an entity nobody may write directly is REPLACED by the app's
   own workflow for that entity, when there is one (same tool name, so the prompt and
-  the model still call it the same thing; the workflow's rules now apply).
+  the model still call it the same thing; the workflow's rules now apply). But only
+  by a workflow EVERYONE who can talk to the agent may launch: the app checks who
+  may launch each workflow (``launch-roles.ts``) and a Manager-only "approve
+  expense" must not become the chat's tool for an Employee. The agent is open to
+  anyone signed in (or to visitors, when it does not require a sign-in), so a
+  workflow limited to named roles is not a replacement.
 * With no such workflow it is REMOVED and the agent's prompt is told it cannot do
   that, rather than shipping a tool that can only fail.
+
+The runtime enforces the same rule on every call (the workflow is started through
+the app's own execute route with the person's session, tools.ts), so this step is
+about not shipping a tool that would be refused, not the only lock.
 
 Every change is reported, so Apply shows what happened and why. Deterministic, no
 model involved, and a no-op for an app that has no access list (older apps).
@@ -62,6 +71,38 @@ def read_entity_access(app_root: Path) -> dict[str, dict[str, list[str]]]:
                 "write": [str(r) for r in rules.get("write") or []],
             }
     return out
+
+
+def read_launch_roles(app_root: Path) -> dict[str, list[str] | None]:
+    """``{workflow id: roles that may launch it}`` from the app's generated
+    ``src/lib/workflows/launch-roles.ts`` (``None``: nothing limits it, as the execute
+    route reads a missing entry). ``{}`` when the file is absent: no opinion."""
+    path = app_root / "src" / "lib" / "workflows" / "launch-roles.ts"
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    out: dict[str, list[str] | None] = {}
+    for line in text.splitlines():
+        m = re.match(r'^\s*("(?:[^"\\]|\\.)*")\s*:\s*(null|\[.*\])\s*,?\s*$', line)
+        if not m:
+            continue
+        try:
+            wid, roles = json.loads(m.group(1)), json.loads(m.group(2))
+        except ValueError:
+            continue
+        out[str(wid)] = None if roles is None else [str(r) for r in roles]
+    return out
+
+
+def _launchable_by_everyone(roles: list[str] | None, visitors: bool) -> bool:
+    """Would the app let EVERY person who can talk to the agent launch this workflow? ``roles`` is
+    what ``launch-roles.ts`` says: ``None`` (open), ``"*"`` (anyone, a signed-out visitor too),
+    ``"@signed-in"`` (anyone with a session) or named roles (only those). ``visitors``: the agent
+    answers people who are not signed in."""
+    if roles is None or "*" in roles:
+        return True
+    return "@signed-in" in roles and not visitors
 
 
 def _blueprint_inputs(app_root: Path) -> dict[str, list[dict[str, Any]]]:
@@ -133,12 +174,15 @@ def _input_schema(inputs: list[dict[str, Any]]) -> dict[str, Any]:
     return {"type": "object", "properties": props, "required": [i["name"] for i in inputs]}
 
 
-def _workflow_for(entity: str, op: str, workflows: list[dict[str, Any]]) -> dict[str, Any] | None:
+def _workflow_for(entity: str, op: str, workflows: list[dict[str, Any]],
+                  admitted: Any = None) -> dict[str, Any] | None:
     """The workflow that performs ``op`` on ``entity``: one that really writes it (insert for
     create, update for update, delete for delete); a workflow that handles BOTH insert and
-    update (an upsert, like SubmitRating) is the best match for either."""
+    update (an upsert, like SubmitRating) is the best match for either. ``admitted`` (when
+    given) keeps only the workflows the agent's users may launch."""
     want = _WRITE_OPS[op]
-    candidates = [w for w in workflows if want in w["writes"].get(entity, set())]
+    candidates = [w for w in workflows if want in w["writes"].get(entity, set())
+                  and (admitted is None or admitted(w))]
     if not candidates:
         return None
     candidates.sort(key=lambda w: (-len(w["writes"].get(entity, set())), w["id"]))
@@ -152,6 +196,13 @@ def reconcile_agent(config: dict[str, Any], app_root: Path) -> list[str]:
     if not access:
         return []
     workflows = read_workflows(app_root)
+    launch = read_launch_roles(app_root)
+    visitors = (((config.get("guardrails") or {}).get("input") or {}).get("requireAuth")) is False
+
+    def admitted(wf: dict[str, Any]) -> bool:
+        # No entry means the route leaves it open (``LAUNCH_ROLES[id] ?? null``).
+        return _launchable_by_everyone(launch.get(str(wf["id"])), visitors)
+
     notes: list[str] = []
     kept: list[dict[str, Any]] = []
     cannot: list[str] = []
@@ -163,7 +214,7 @@ def reconcile_agent(config: dict[str, Any], app_root: Path) -> list[str]:
         if not closed:
             kept.append(tool)
             continue
-        wf = _workflow_for(entity, op, workflows)
+        wf = _workflow_for(entity, op, workflows, admitted)
         if wf:
             rewritten = {k: v for k, v in tool.items() if k not in ("entity", "operation")}
             rewritten.update({"kind": "workflow", "workflowId": wf["id"], "inputSchema": _input_schema(wf["inputs"])})
@@ -173,9 +224,19 @@ def reconcile_agent(config: dict[str, Any], app_root: Path) -> list[str]:
                 f"it now runs the app's '{wf['name']}' workflow instead, so the app's own rules apply")
         else:
             cannot.append(f"{op} {entity}")
-            notes.append(
-                f"tool '{tool['name']}' wrote {entity} directly, which this app does not allow anyone to do, "
-                "and no workflow does it either — the tool was removed")
+            limited = _workflow_for(entity, op, workflows)
+            if limited:
+                roles = launch.get(str(limited["id"])) or []
+                who = ", ".join(r for r in roles if not r.startswith("@")) or "some people"
+                notes.append(
+                    f"tool '{tool['name']}' wrote {entity} directly, which this app does not allow anyone to do. "
+                    f"The app's '{limited['name']}' workflow does it, but only {who} may launch it and this assistant "
+                    + ("answers people who are not signed in" if visitors else "is open to everyone who is signed in")
+                    + " — the tool was removed rather than lend the workflow to people the app keeps from it")
+            else:
+                notes.append(
+                    f"tool '{tool['name']}' wrote {entity} directly, which this app does not allow anyone to do, "
+                    "and no workflow does it either — the tool was removed")
     config["tools"] = kept
     if cannot:
         config["systemPrompt"] = (str(config.get("systemPrompt") or "").rstrip()

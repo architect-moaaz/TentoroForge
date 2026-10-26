@@ -2,9 +2,9 @@
  * The real model and the real tool back-ends. Forge runtime — do not remove.
  *
  * Everything the loop was tested against a fake of is here: the Anthropic call,
- * the app's own routes, the workflow engine, the MCP pool, the AI presets and the
- * per-agent tool modules. Imports are dynamic so a part the app doesn't use (no
- * MCP server, no workflows) is never loaded.
+ * the app's own routes (a workflow is one of them: see tools.ts), the MCP pool,
+ * the AI presets and the per-agent tool modules. Imports are dynamic so a part the
+ * app doesn't use (no MCP server) is never loaded.
  */
 import type { FetchInit, ToolIO } from "./tools";
 import { ToolError, createToolRunner, RateLimiter } from "./tools";
@@ -109,15 +109,6 @@ async function fetchInternal(path: string, init: FetchInit, ctx: ToolContext): P
 
 export const toolIO: ToolIO = {
   fetchInternal,
-
-  async triggerWorkflow(id, input, user) {
-    const { initializeRuntime } = await import("@/lib/runtime-loader");
-    const { triggerWorkflow } = await import("@/lib/workflows");
-    await initializeRuntime();
-    const r: any = await triggerWorkflow(id, input, user ?? undefined);
-    if (r?.status === "failed") throw new ToolError(r.error || `${id} failed.`, "failed");
-    return { status: r?.status, output: r?.output ?? {} };
-  },
 
   async callMcp(serverId, tool, args) {
     const { callMcpTool } = await import("@/lib/integrations/mcpClientPool");

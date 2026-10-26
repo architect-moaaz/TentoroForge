@@ -412,7 +412,6 @@ console.log("tool runner");
   const fetched: any[] = [];
   const io: any = {
     fetchInternal: async (path: string, init: any, ctx: any) => { fetched.push({ path, ...init, cookie: ctx.cookie }); return { data: [{ id: 1, secret: "s", name: "n" }] }; },
-    triggerWorkflow: async (id: string, input: any, u: any) => ({ ran: id, input, as: u?.id }),
     callMcp: async (s: string, t: string, a: any) => ({ server: s, tool: t, args: a }),
     runAi: async (action: string, cfg: any, input: any) => ({ action, input }),
     runFunction: async (h: string, input: any) => ({ h, input }),
@@ -441,8 +440,11 @@ console.log("tool runner");
     ok(threw, `${bad} is not a route a tool may call`);
   }
 
-  const wf: any = await run_(spec({ kind: "workflow", workflowId: "refund" }), { amount: 1 }, ctx, {});
-  eqJson(wf, { ran: "refund", input: { amount: 1 }, as: "u1" }, "a workflow runs as the person");
+  await run_(spec({ kind: "workflow", workflowId: "refund" }), { amount: 1 }, ctx, {});
+  eqJson(fetched[5], { path: "/api/workflows/refund/execute", method: "POST", body: { input: { amount: 1 } }, cookie: "sid=9" },
+    "a workflow is started through the app's own execute route with the person's cookie: that route is where its launch roles are checked");
+  await run_(spec({ kind: "workflow", workflowId: "a/b c" }), {}, ctx, {});
+  eqJson(fetched[6].path, "/api/workflows/a%2Fb%20c/execute", "and its id cannot change which route that is");
 
   const mcp: any = await run_(
     spec({ kind: "mcp", mcpServerId: "abc", mcpToolName: "search", argsMapping: { query: "{{identify.brand}} {{identify.model}}", limit: "{{input.n}}" } }),
@@ -464,6 +466,48 @@ console.log("tool runner");
   err = undefined;
   try { await limited(s, {}, ctx, {}); } catch (e) { err = e; }
   ok(err instanceof ToolError && err.code === "rate_limit", "the second call in the window is refused");
+}
+
+console.log("tool runner: a workflow is gated by the app's launch roles, not run around them");
+{
+  // The app's execute route, as generated: LAUNCH_ROLES is checked against the SESSION (the cookie), and a role that
+  // is not admitted gets a 403 before anything runs. The tool must reach it that way, so the engine is never started.
+  const LAUNCH: Record<string, string[] | null> = { "approve-expense": ["Manager"], "submit-expense": ["@signed-in"], "open-thing": null };
+  const ROLE: Record<string, string> = { "sid=emp": "Employee", "sid=mgr": "Manager" };
+  const started: string[] = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: any, init: any) => {
+    const m = String(url).match(/^http:\/\/app\.test\/api\/workflows\/([^/]+)\/execute$/);
+    if (!m) return new Response("{}", { status: 404 });
+    const id = decodeURIComponent(m[1]);
+    const role = ROLE[init.headers.cookie];
+    const allowed = LAUNCH[id] ?? null;
+    if (allowed && !allowed.includes("*") && !(allowed.includes("@signed-in") && role) && !allowed.includes(role)) {
+      return new Response(JSON.stringify({ error: "This action is not available to your role" }), { status: 403 });
+    }
+    started.push(`${role}:${id}`);
+    return new Response(JSON.stringify({ status: "completed", id: "r1" }), { status: 200 });
+  }) as any;
+  try {
+    const { toolIO } = await import("../agents/io.ts");
+    const runner = createToolRunner(toolIO, new RateLimiter(() => 0));
+    const as = (cookie: string, role: string) => ({ user: { id: cookie, role }, cookie, origin: "http://app.test" });
+    const wfSpec = (workflowId: string): any => ({ name: "t", description: "", kind: "workflow", workflowId, inputSchema: { type: "object", properties: {} } });
+
+    let err: any;
+    try { await runner(wfSpec("approve-expense"), { id: 12 }, as("sid=emp", "Employee"), {}); } catch (e) { err = e; }
+    ok(err instanceof ToolError && err.code === "auth", "an Employee asking the chat for a Manager-only workflow is refused");
+    ok(/Do not retry/.test(String(err?.message)), "and the assistant is told plainly not to retry");
+    eqJson(started, [], "the workflow never started");
+
+    const done_: any = await runner(wfSpec("approve-expense"), { id: 12 }, as("sid=mgr", "Manager"), {});
+    eqJson([started, done_?.status], [["Manager:approve-expense"], "completed"], "a Manager's chat runs it, as them");
+    await runner(wfSpec("submit-expense"), {}, as("sid=emp", "Employee"), {});
+    await runner(wfSpec("open-thing"), {}, as("sid=emp", "Employee"), {});
+    eqJson(started.slice(1), ["Employee:submit-expense", "Employee:open-thing"], "workflows open to everyone signed in, or to anyone, still run for an Employee");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 }
 
 console.log("mapping helpers");

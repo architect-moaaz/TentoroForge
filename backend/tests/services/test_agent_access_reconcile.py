@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from services.agent_access import read_entity_access, read_workflows, reconcile_agent
+from services.agent_access import read_entity_access, read_launch_roles, read_workflows, reconcile_agent
 from tests.services.test_agent_runtime_install import (
     by_name, graph, make_app, node, tool,
 )
@@ -133,3 +133,102 @@ def test_install_applies_it_and_reports_it(tmp_path):
     # the builder's own graph is untouched: the project stays the source of truth
     saved = json.loads((project / "agent-definitions" / "support.json").read_text())
     assert saved["nodes"][1]["data"]["config"]["tool_type"] == "data_engine"
+
+
+# --- who may launch the workflow a tool is swapped to ---------------------------------------
+#
+# A workflow is checked at the app's execute route against LAUNCH_ROLES; the engine behind it
+# is not. An "approve expense" workflow only a Manager may launch must not become the chat's
+# approve tool for an Employee, so a closed write is swapped only to a workflow every user of
+# the agent may launch (the runtime holds the same line on each call: tools.ts).
+
+EXPENSE_ACCESS_TS = """export const ENTITY_ACCESS: Record<string, { read: string[]; write: string[] }> = {
+  "expenses": { "read": ["Manager", "Employee"], "write": [] }
+};
+"""
+
+
+def expense_app(tmp_path, launch: dict | None):
+    """An app whose expenses nobody may write directly; ApproveExpense is how they change."""
+    _, app = make_app(tmp_path)
+    (app / "src" / "lib").mkdir(parents=True, exist_ok=True)
+    (app / "src" / "lib" / "entity-access.ts").write_text(EXPENSE_ACCESS_TS, encoding="utf-8")
+    d = app / "src" / "lib" / "workflows" / "definitions"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "approve-expense.json").write_text(json.dumps(workflow(
+        "approve-expense", "ApproveExpense", "expenses", ["db_query", "db_update"], ["expense"],
+        [{"name": "expense", "table": "expenses"}])), encoding="utf-8")
+    if launch is not None:
+        lines = ["export const LAUNCH_ROLES: Record<string, string[] | null> = {"]
+        lines += [f"  {json.dumps(k)}: {json.dumps(v)}," for k, v in launch.items()] + ["};", ""]
+        (app / "src" / "lib" / "workflows" / "launch-roles.ts").write_text("\n".join(lines), encoding="utf-8")
+    return app
+
+
+def approve_tool_cfg(visitors=False):
+    cfg = cfg_with(data_tool("t1", "approve_expense", "expenses", "update"))
+    if visitors:
+        cfg["guardrails"]["input"]["requireAuth"] = False
+    return cfg
+
+
+def test_a_manager_only_workflow_is_not_the_chats_tool_for_everyone(tmp_path):
+    app = expense_app(tmp_path, {"approve-expense": ["Manager"]})
+    cfg = approve_tool_cfg()
+    notes = reconcile_agent(cfg, app)
+    assert cfg["tools"] == [], "an Employee could otherwise run it by asking the chat"
+    assert len(notes) == 1 and "ApproveExpense" in notes[0] and "Manager" in notes[0] and "was removed" in notes[0]
+    assert "cannot do these in this app: update expenses" in cfg["systemPrompt"]
+
+
+def test_a_workflow_open_to_everyone_signed_in_is_swapped_in(tmp_path):
+    for n, open_to in enumerate((["@signed-in"], ["*"], None)):
+        app = expense_app(tmp_path / f"app{n}", {"approve-expense": open_to})
+        cfg = approve_tool_cfg()
+        reconcile_agent(cfg, app)
+        assert by_name(cfg, "approve_expense")["workflowId"] == "approve-expense", open_to
+
+
+def test_an_app_with_no_launch_roles_file_leaves_the_swap_as_it_was(tmp_path):
+    app = expense_app(tmp_path, None)  # older app: the route reads a missing entry as open
+    cfg = approve_tool_cfg()
+    reconcile_agent(cfg, app)
+    assert by_name(cfg, "approve_expense")["workflowId"] == "approve-expense"
+
+
+def test_a_workflow_for_signed_in_people_is_not_for_visitors(tmp_path):
+    app = expense_app(tmp_path, {"approve-expense": ["@signed-in"]})
+    cfg = approve_tool_cfg(visitors=True)  # an agent that answers people who are not signed in
+    reconcile_agent(cfg, app)
+    assert cfg["tools"] == []
+    app = expense_app(tmp_path / "public", {"approve-expense": ["*"]})
+    cfg = approve_tool_cfg(visitors=True)
+    reconcile_agent(cfg, app)
+    assert by_name(cfg, "approve_expense")["kind"] == "workflow"
+
+
+def test_an_open_workflow_is_chosen_over_a_restricted_one(tmp_path):
+    app = expense_app(tmp_path, {"approve-expense": ["Manager"], "bulk-approve": ["@signed-in"]})
+    (app / "src" / "lib" / "workflows" / "definitions" / "bulk-approve.json").write_text(json.dumps(workflow(
+        "bulk-approve", "BulkApprove", "expenses", ["db_update"], ["expense"],
+        [{"name": "expense", "table": "expenses"}])), encoding="utf-8")
+    cfg = approve_tool_cfg()
+    reconcile_agent(cfg, app)
+    assert by_name(cfg, "approve_expense")["workflowId"] == "bulk-approve"
+
+
+def test_launch_roles_are_read_as_the_blueprint_projection_writes_them(tmp_path):
+    from services.blueprint.projection import project_launch_roles
+    _, app = make_app(tmp_path)
+    doc = {"roles": [{"id": "R1", "name": "Manager"}],
+           "pages": [{"id": "P1", "access": "role_restricted", "users": ["R1"]},
+                     {"id": "P2", "access": "authenticated"}, {"id": "P3", "access": "public"}],
+           "workflows": [{"id": "approve", "name": "Approve Expense", "launchedFrom": ["P1"]},
+                         {"id": "submit", "name": "Submit", "launchedFrom": ["P2"]},
+                         {"id": "open", "name": "Open", "launchedFrom": ["P3"]},
+                         {"id": "free", "name": "Free"}]}
+    project_launch_roles(doc, app)
+    roles = read_launch_roles(app)
+    assert roles["approve"] == ["Manager"] and roles["approve-expense"] == ["Manager"]
+    assert roles["submit"] == ["@signed-in"] and roles["open"] == ["*"] and roles["free"] is None
+    assert read_launch_roles(tmp_path / "nowhere") == {}

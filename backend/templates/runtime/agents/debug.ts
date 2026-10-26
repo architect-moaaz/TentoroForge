@@ -96,7 +96,6 @@ export function instrumentIO(io: ToolIO, send: (e: DebugEvent) => void): ToolIO 
         },
         (note) => io.fetchInternal(path, { ...init, onResponse: (status) => { init.onResponse?.(status); note({ status }); } }, ctx),
       ),
-    triggerWorkflow: (id, input, user) => timed({ kind: "workflow", label: id, body: clipBody(input) }, () => io.triggerWorkflow(id, input, user)),
     callMcp: (serverId, tool, args) => timed({ kind: "mcp", label: `${serverId}/${tool}`, body: clipBody(args) }, () => io.callMcp(serverId, tool, args)),
     runAi: (action, config, input, user) => timed({ kind: "ai", label: action }, () => io.runAi(action, config, input, user)),
   };

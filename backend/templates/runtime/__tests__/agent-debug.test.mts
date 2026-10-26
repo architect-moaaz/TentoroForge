@@ -37,7 +37,6 @@ console.log("what the tools did in the app is reported, with the real method, ro
       if (path.includes("missing")) throw new Error("Not found");
       return { data: [] };
     },
-    async triggerWorkflow() { return { status: "completed" }; },
     async callMcp() { return "ok"; },
     async runAi() { return { label: "x" }; },
   };
@@ -58,8 +57,10 @@ console.log("what the tools did in the app is reported, with the real method, ro
   ok(threw, "a failure still fails the tool");
   eqJson([sent.at(-1).ok, sent.at(-1).status, sent.at(-1).error], [false, 404, "Not found"], "and is shown with its status and why");
 
-  await io.triggerWorkflow("assign_ticket", { id: "t1" }, null);
-  eqJson([sent.at(-1).kind, sent.at(-1).label, sent.at(-1).body], ["workflow", "assign_ticket", { id: "t1" }], "a workflow, by name, with its input");
+  // A workflow is the app's own execute route like any other call, so the builder sees it as the request it is.
+  await io.fetchInternal("/api/workflows/assign_ticket/execute", { method: "POST", body: { input: { id: "t1" } } }, {} as any);
+  eqJson([sent.at(-1).kind, sent.at(-1).method, sent.at(-1).label, sent.at(-1).body], ["request", "POST", "/api/workflows/assign_ticket/execute", { input: { id: "t1" } }], "a workflow: the route it went through, with its input");
+  ok(!("triggerWorkflow" in io), "and there is no way to start one around the app's route");
   await io.callMcp("srv", "search", { q: "x" });
   eqJson([sent.at(-1).kind, sent.at(-1).label], ["mcp", "srv/search"], "an MCP tool");
   await io.runAi("classify", {}, { input: "x" }, null);

@@ -201,7 +201,6 @@ export interface FetchInit {
 
 export interface ToolIO {
   fetchInternal(path: string, init: FetchInit, ctx: ToolContext): Promise<unknown>;
-  triggerWorkflow(id: string, input: Record<string, unknown>, user: AgentUser | null): Promise<unknown>;
   callMcp(serverId: string, tool: string, args: Record<string, unknown>): Promise<unknown>;
   runAi(
     action: NonNullable<AgentToolSpec["aiAction"]>,
@@ -306,7 +305,14 @@ export function createToolRunner(io: ToolIO, limiter: RateLimiter = new RateLimi
       }
       case "workflow":
         if (!spec.workflowId) throw new ToolError(`${spec.name} names no workflow.`, "invalid");
-        result = await io.triggerWorkflow(spec.workflowId, input, ctx.user);
+        // Through the app's own execute route, with the person's cookie, like every other tool: that route is where
+        // the workflow's launch roles are checked (the engine itself does not), so an Employee cannot run a
+        // Manager-only workflow by asking the chat. There is deliberately no way to start one around the route.
+        result = await io.fetchInternal(
+          `/api/workflows/${encodeURIComponent(spec.workflowId)}/execute`,
+          { method: "POST", body: { input } },
+          ctx,
+        );
         break;
       case "mcp":
         if (!spec.mcpServerId || !spec.mcpToolName) {
