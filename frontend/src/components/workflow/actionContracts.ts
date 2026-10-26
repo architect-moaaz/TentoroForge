@@ -432,6 +432,38 @@ export const ACTION_CONTRACTS: Record<string, ActionContract> = {
       { name: "rationale", type: "string", label: "Why" },
     ],
   },
+  // An app assistant does one step and hands back a structured answer. The
+  // properties panel has its own editor for this one (AgentStepProps); this
+  // entry is the declared shape: what the step takes and what a later step can
+  // read from it (`<step>.result.<answer>` plus the always-present fields).
+  // "An assistant OR a brief" cannot be said by one `required` flag, so
+  // agentId is not marked required here; lib/agent-step.ts checks the pair.
+  agent_step: {
+    label: "Assistant step",
+    inputs: [
+      { name: "agentId", type: "string", label: "Assistant", help: "The assistant that does this step." },
+      { name: "task", type: "string", required: true, label: "What to do this time" },
+      { name: "input", type: "object", label: "Facts to hand over" },
+      { name: "outputFields", type: "array", required: true, label: "Answers it hands back" },
+      { name: "autonomy", type: "enum", options: ["suggest", "limited", "full"], label: "How much it may do by itself" },
+      { name: "minConfidence", type: "number", label: "How sure it must be (Limited)", advanced: true },
+      { name: "allowedWriteTools", type: "array", label: "Changes it may make", advanced: true },
+      { name: "maxActions", type: "number", label: "Most changes at one time", advanced: true },
+      { name: "maxTurns", type: "number", label: "Most turns", advanced: true },
+      { name: "timeoutSec", type: "number", label: "Time limit (seconds)", advanced: true },
+      { name: "maxTokens", type: "number", label: "Size limit (tokens)", advanced: true },
+      { name: "onFailure", type: "enum", options: ["human", "skip", "fail"], label: "If it cannot finish", advanced: true },
+    ],
+    outputs: [
+      { name: "ok", type: "boolean", label: "Finished properly" },
+      { name: "needsHuman", type: "boolean", label: "A person should look" },
+      { name: "confidence", type: "number", label: "How sure it is" },
+      { name: "summary", type: "string", label: "One sentence about what it did" },
+      { name: "result", type: "object", label: "Its answers" },
+      { name: "proposals", type: "array", label: "Changes it suggested" },
+      { name: "actions", type: "array", label: "Changes it made" },
+    ],
+  },
 };
 
 export const ACTION_CONTRACT_KEYS = Object.keys(ACTION_CONTRACTS);

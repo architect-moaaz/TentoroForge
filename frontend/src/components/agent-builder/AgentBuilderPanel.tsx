@@ -5,7 +5,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Node as RFNode, Edge as RFEdge } from "@xyflow/react";
 import {
   Plus,
-  Trash2,
   Workflow,
   X,
   Play,
@@ -24,6 +23,7 @@ import { api } from "@/lib/api";
 import { checkKeyOf, draftKeyOf } from "@/lib/agent-draft";
 import { useAgentBuilderStore } from "@/stores/agent-builder";
 import { AgentCanvas } from "./AgentCanvas";
+import { AgentListTags, DeleteAgentButton } from "./AgentUsage";
 import { AgentChecksBar } from "./AgentChecksBar";
 import { AgentBlastPanel } from "./AgentBlastPanel";
 import { AgentInsightsPanel } from "./AgentInsightsPanel";
@@ -609,13 +609,14 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
                   onClick={() => openAgent(agent.id)}
                 >
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <span className="text-sm font-medium truncate">
                         {agent.name}
                       </span>
                       <Badge variant="secondary" className="text-[10px]">
                         {agent.node_count} node{agent.node_count !== 1 ? "s" : ""}
                       </Badge>
+                      <AgentListTags projectId={projectId} agentId={agent.id} />
                     </div>
                     {agent.description && (
                       <p className="text-xs text-muted-foreground truncate mt-0.5">
@@ -623,17 +624,13 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
                       </p>
                     )}
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 shrink-0"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      deleteAgent(agent.id);
-                    }}
-                  >
-                    <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
-                  </Button>
+                  {/* Asks first (and names the workflows) when workflows use this assistant. */}
+                  <DeleteAgentButton
+                    projectId={projectId}
+                    agentId={agent.id}
+                    agentName={agent.name}
+                    onDelete={() => deleteAgent(agent.id)}
+                  />
                 </div>
               ))}
             </div>

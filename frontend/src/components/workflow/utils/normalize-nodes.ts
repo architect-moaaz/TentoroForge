@@ -6,7 +6,7 @@ import type { WorkflowNodeSerialized } from "@/types/workflow";
 // shape (`type: "action"`, `config.actionType: "ai_generate"`). Left as-is, the
 // canvas would need a special-case and the properties panel — which switches on
 // `data.nodeType` — would render a generic Action editor instead of the AI one.
-const _AI_TYPES = new Set(["ai_generate", "ai_classify", "ai_extract", "ai_decide"]);
+const _AI_TYPES = new Set(["ai_generate", "ai_classify", "ai_extract", "ai_decide", "agent_step"]);
 
 /**
  * Promote legacy `action:ai_*` nodes to their canonical top-level node type on load,

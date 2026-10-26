@@ -5,6 +5,7 @@ import type {
   WorkflowNodeConfig,
   TriggerConfig,
 } from "@/types/workflow";
+import { AUTONOMY_CHOICES, FAILURE_CHOICES, STANDARD_ENVELOPE, STEP_LIMITS, asFields } from "@/lib/agent-step";
 
 /**
  * Converts a visual workflow definition into a natural-language instruction
@@ -233,12 +234,61 @@ function configDescription(
       lines.push("  Output: {text}");
       break;
 
+    case "agent_step":
+      lines.push(...agentStepLines(config));
+      break;
+
     case "end":
       lines.push("  (End of workflow)");
       break;
   }
 
   return lines.join("\n");
+}
+
+/**
+ * An agent step, as the chat is told about it: which assistant, what it is asked, what it must hand back, how much it
+ * may change by itself and what happens when it cannot finish. The words match what the editor shows the person.
+ */
+function agentStepLines(config: WorkflowNodeConfig): string[] {
+  const lines: string[] = [];
+  if (config.agentId) lines.push(`  Assistant: ${config.agentId}`);
+  else if (config.agentBrief?.purpose) lines.push(`  Assistant: to be created (${config.agentBrief.purpose})`);
+  else lines.push("  Assistant: not chosen yet");
+  if (config.task) lines.push(`  Task: ${config.task}`);
+  const facts = Object.entries(config.input ?? {}).filter(([k]) => k.trim());
+  if (facts.length) {
+    lines.push("  Facts handed over:");
+    for (const [k, v] of facts) lines.push(`    ${k} <- ${v}`);
+  }
+  const fields = asFields(config.outputFields);
+  if (fields.length) {
+    lines.push("  Answers it hands back:");
+    for (const f of fields) {
+      const kind = f.type === "enum" ? `one of ${(f.values ?? []).join("|")}` : f.type;
+      lines.push(`    ${f.name} (${kind}${f.required === false ? ", optional" : ""})${f.description ? `: ${f.description}` : ""}`);
+    }
+  }
+  const autonomy = AUTONOMY_CHOICES.find((c) => c.value === (config.autonomy ?? "suggest")) ?? AUTONOMY_CHOICES[0];
+  lines.push(`  Autonomy: ${autonomy.label} (${autonomy.explain})`);
+  if (autonomy.value !== "suggest") {
+    if (config.allowedWriteTools?.length) lines.push(`  Changes it may make: ${config.allowedWriteTools.join(", ")}`);
+    if (autonomy.value === "limited") {
+      lines.push(`  Only when at least ${config.minConfidence ?? STEP_LIMITS.minConfidence.default} sure`);
+    }
+    lines.push(`  At most ${config.maxActions ?? STEP_LIMITS.maxActions.default} changes at one time`);
+  }
+  lines.push(
+    `  Limits: ${config.maxTurns ?? STEP_LIMITS.maxTurns.default} turns, ` +
+      `${config.timeoutSec ?? STEP_LIMITS.timeoutSec.default} seconds, ` +
+      `${config.maxTokens ?? STEP_LIMITS.maxTokens.default} tokens`,
+  );
+  const failure = FAILURE_CHOICES.find((c) => c.value === (config.onFailure ?? "human")) ?? FAILURE_CHOICES[0];
+  lines.push(`  If it cannot finish: ${failure.label} (${failure.explain})`);
+  lines.push(
+    `  Output: {${["result: {" + fields.map((f) => f.name).join(", ") + "}", ...STANDARD_ENVELOPE.map((s) => s.name)].join(", ")}}`,
+  );
+  return lines;
 }
 
 function requirementsSection(nodes: WorkflowNodeSerialized[]): string {
@@ -307,6 +357,17 @@ function requirementsSection(nodes: WorkflowNodeSerialized[]): string {
     lines.push("12. AI Decide: send context + options + rules to LLM, parse {decision, confidence, reasoning}, route workflow based on decision");
     lines.push("13. AI Generate: send context + prompt to LLM, return generated text");
     lines.push("14. Store AI node results in workflow execution context for use by downstream nodes");
+  }
+
+  if (nodes.some((n) => n.data.nodeType === "agent_step")) {
+    lines.push("");
+    lines.push("### Agent steps:");
+    lines.push("- An agent step runs a named app assistant without a signed-in person, asks it the task and waits for a structured answer");
+    lines.push("- The answer is stored as {ok, needsHuman, confidence, summary, result, proposals, actions}; later steps read result.<answer> and the other fields by the step's id");
+    lines.push("- Autonomy Suggest: every data-changing call the assistant makes is held back as a proposal and nothing is changed by the step");
+    lines.push("- Autonomy Limited or Full: only the listed changes may run, after the assistant has finished, up to the change limit (Limited also needs enough confidence); everything else stays a proposal");
+    lines.push("- When the assistant cannot finish, follow the step's failure choice");
+    lines.push("");
   }
 
   lines.push(`${hasAINodes ? "15" : "9"}. Store workflow definitions in src/workflows/definitions.ts`);

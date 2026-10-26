@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Plus,
@@ -31,6 +31,7 @@ import { WorkflowCanvas } from "./WorkflowCanvas";
 import { WorkflowSimulator } from "./simulator/WorkflowSimulator";
 import { NodePalette } from "./NodePalette";
 import { NodePropertiesPanel } from "./NodePropertiesPanel";
+import { AssistantNamesContext, useAssistants } from "./agentStepData";
 import { ProcessVariablesEditor } from "./ProcessVariablesEditor";
 import type { ProcessVariable } from "@/types/workflow";
 import type { AppModel } from "@/types/app-model";
@@ -92,6 +93,15 @@ export function WorkflowPanel({ projectId, orgId }: WorkflowPanelProps) {
     queryKey: ["project", projectId, "app-model"],
     queryFn: () => api.get<AppModel>(`/api/projects/${projectId}/app-model`),
   });
+
+  // The canvas badge on an agent step shows the assistant's name, not its id.
+  // The list is only fetched once the workflow actually has an agent step.
+  const hasAgentStep = nodes.some((n) => n?.data?.nodeType === "agent_step");
+  const { assistants } = useAssistants(projectId, hasAgentStep);
+  const assistantNames = useMemo(
+    () => Object.fromEntries(assistants.map((a) => [a.id, a.name])),
+    [assistants],
+  );
 
   // Open a workflow for editing
   const openWorkflow = useCallback(
@@ -562,6 +572,7 @@ export function WorkflowPanel({ projectId, orgId }: WorkflowPanelProps) {
           <>
             <NodePalette />
             <div className="flex-1">
+              <AssistantNamesContext.Provider value={assistantNames}>
               <WorkflowCanvas
                 initialNodes={nodes}
                 initialEdges={edges}
@@ -608,6 +619,7 @@ export function WorkflowPanel({ projectId, orgId }: WorkflowPanelProps) {
                 }}
                 layoutVersion={layoutVersion}
               />
+              </AssistantNamesContext.Provider>
             </div>
             {selectedNode ? (
               <NodePropertiesPanel

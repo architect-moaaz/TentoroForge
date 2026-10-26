@@ -103,7 +103,8 @@ export type AIWorkflowNodeType =
   | "ai_classify"
   | "ai_extract"
   | "ai_decide"
-  | "ai_generate";
+  | "ai_generate"
+  | "agent_step";
 
 export interface AIClassifyConfig {
   input?: string;
@@ -131,6 +132,52 @@ export interface AIGenerateConfig {
   tone?: string;
   maxLength?: number;
   maxTokens?: number;
+}
+
+// ---------------------------------------------------------------------------
+// Agent step: an app assistant as one step of a workflow
+// ---------------------------------------------------------------------------
+
+/** How much the assistant may do by itself: only suggest, change a few listed things when sure, or change listed things up to a limit. */
+export type AgentAutonomy = "suggest" | "limited" | "full";
+
+/** What the workflow does when the assistant cannot finish: send to a person, carry on without it, or stop the workflow. */
+export type AgentOnFailure = "human" | "skip" | "fail";
+
+export type AgentOutputType = "string" | "number" | "boolean" | "array" | "object" | "enum";
+
+/** One answer the step must hand back. Later steps read it as {{step.result.<name>}}. */
+export interface AgentOutputField {
+  name: string;
+  type: AgentOutputType;
+  values?: string[];
+  description: string;
+  required?: boolean;
+}
+
+/** What the build helper (or a person) writes to ask for an assistant made for one step. */
+export interface AgentBrief {
+  purpose: string;
+  reads: string[];
+  mayChange?: { tool: string; why: string }[];
+  instructions?: string;
+}
+
+export interface AgentStepConfig {
+  /** The assistant's id. Required once built; a brief may stand in until the build creates it. */
+  agentId?: string;
+  agentBrief?: AgentBrief;
+  task: string;
+  input?: Record<string, string>;
+  outputFields: AgentOutputField[];
+  autonomy?: AgentAutonomy;
+  minConfidence?: number;
+  allowedWriteTools?: string[];
+  maxActions?: number;
+  maxTurns?: number;
+  timeoutSec?: number;
+  maxTokens?: number;
+  onFailure?: AgentOnFailure;
 }
 
 // ---------------------------------------------------------------------------

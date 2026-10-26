@@ -22,7 +22,8 @@ export type WorkflowNodeType =
   | "ai_classify"
   | "ai_extract"
   | "ai_decide"
-  | "ai_generate";
+  | "ai_generate"
+  | "agent_step";
 
 export interface NodeCategoryItem {
   id: string;
@@ -179,6 +180,22 @@ export interface WorkflowNodeConfig {
   aiTone?: string;
   aiMaxLength?: number;
   aiMaxTokens?: number;
+
+  // Agent step: an app assistant does one step of the workflow and hands back
+  // a structured answer (see AgentStepConfig in ai-features.ts for the shape).
+  agentId?: string;
+  agentBrief?: import("@/types/ai-features").AgentBrief;
+  task?: string;
+  input?: Record<string, string>;
+  outputFields?: import("@/types/ai-features").AgentOutputField[];
+  autonomy?: import("@/types/ai-features").AgentAutonomy;
+  minConfidence?: number;
+  allowedWriteTools?: string[];
+  maxActions?: number;
+  maxTurns?: number;
+  timeoutSec?: number;
+  maxTokens?: number;
+  onFailure?: import("@/types/ai-features").AgentOnFailure;
 
   // Linked Page (for assignment, approval, task_pool nodes)
   pageId?: string;

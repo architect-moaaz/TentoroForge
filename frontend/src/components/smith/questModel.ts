@@ -106,7 +106,7 @@ const LANDED = 6;
 export const AREAS: { key: Area["key"]; label: string; steps: string[] }[] = [
   { key: "data", label: "Data", steps: ["data_model", "entity_fields", "content_fields", "database"] },
   { key: "screens", label: "Screens", steps: ["ux_architecture", "page_contracts", "page_details", "auth_pages", "app_flows", "page_layouts", "page_code", "native_code"] },
-  { key: "workflows", label: "Workflows", steps: ["workflows", "workflow_steps", "business_rules", "security", "apis", "integrations", "api_reference", "service_check"] },
+  { key: "workflows", label: "Workflows", steps: ["workflows", "workflow_steps", "workflow_agents", "business_rules", "security", "apis", "integrations", "api_reference", "service_check"] },
   { key: "design", label: "Design", steps: ["design_system", "brand_design_system", "figma_design_system", "imagery", "ui_direction"] },
   { key: "build", label: "Build", steps: ["backend", "frontend", "integration", "assemble", "verification", "testing"] },
 ];

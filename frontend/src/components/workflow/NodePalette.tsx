@@ -27,6 +27,7 @@ import {
   FileText,
   Plug,
   ClipboardCheck,
+  Bot,
 } from "lucide-react";
 import { NODE_CATEGORIES, type WorkflowNodeType } from "@/types/workflow";
 
@@ -57,6 +58,7 @@ const ICONS: Record<string, typeof Zap> = {
   FileText,
   Plug,
   ClipboardCheck,
+  Bot,
 };
 
 export function NodePalette() {

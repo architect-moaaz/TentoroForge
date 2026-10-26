@@ -54,6 +54,7 @@ const nodeTypes = {
   ai_extract: WorkflowNode,
   ai_decide: WorkflowNode,
   ai_generate: WorkflowNode,
+  agent_step: WorkflowNode,
 };
 
 const edgeTypes = {

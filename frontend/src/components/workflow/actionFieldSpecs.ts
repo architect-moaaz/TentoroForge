@@ -262,6 +262,18 @@ export const ACTION_FIELD_SPECS: Record<string, ActionSpec> = {
       { key: "aiPrompt",  label: "Extra prompt", kind: "textarea", placeholder: "(optional)" },
     ],
   },
+  agent_step: {
+    label: "Assistant step",
+    fields: [
+      { key: "agentId", label: "Assistant id", kind: "text", placeholder: "wf_handle_request_triage" },
+      { key: "task", label: "What to do this time", kind: "textarea", placeholder: "Work out how urgent {{trigger.reason}} is" },
+      { key: "input", label: "Facts to hand over", kind: "json", placeholder: '{\n  "petId": "{{pet.id}}"\n}' },
+      { key: "outputFields", label: "Answers it hands back", kind: "json",
+        placeholder: '[\n  { "name": "urgency", "type": "enum", "values": ["routine","soon","emergency"], "description": "How soon" }\n]' },
+      { key: "autonomy", label: "How much it may do by itself", kind: "select", options: ["suggest", "limited", "full"] },
+      { key: "onFailure", label: "If it cannot finish", kind: "select", options: ["human", "skip", "fail"] },
+    ],
+  },
   ocr_document: {
     label: "OCR · Document (PaddleOCR)",
     fields: [

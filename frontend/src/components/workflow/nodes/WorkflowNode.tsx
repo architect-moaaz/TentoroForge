@@ -31,8 +31,11 @@ import {
   FileText,
   Plug,
   ClipboardCheck,
+  Bot,
 } from "lucide-react";
 import { visualFor } from "@/catalog/workflowNodes";
+import { AUTONOMY_LABEL, autonomyOf } from "@/lib/agent-step";
+import { useAssistantName } from "../agentStepData";
 import type { WorkflowNodeData, WorkflowNodeType } from "@/types/workflow";
 
 // ---------------------------------------------------------------------------
@@ -42,7 +45,7 @@ const ICONS: Record<string, typeof Zap> = {
   Zap, Play, GitBranch, Clock, Square, UserPlus, CheckCircle, Users,
   ArrowUpCircle, Brain, ScanText, Sparkles, Table2, Hand, Webhook,
   Calendar, Database, Globe, Mail, Bell, Split, GitMerge, Hash, FileText, Plug,
-  ClipboardCheck,
+  ClipboardCheck, Bot,
 };
 
 // ---------------------------------------------------------------------------
@@ -261,6 +264,10 @@ function getSubtitle(
         : "Decision";
     case "ai_generate":
       return config.aiTone || "Generate";
+    case "agent_step": {
+      const n = Array.isArray(config.outputFields) ? config.outputFields.length : 0;
+      return n ? `${n} answer${n === 1 ? "" : "s"}` : "Assistant step";
+    }
     default:
       return "";
   }
@@ -276,6 +283,42 @@ const SIM_STATUS_RING: Record<string, string> = {
   failed: STATUS_RING.failed,    // red ring
   pending: "",                   // no ring
 };
+
+/** The small badge on an agent step: the assistant's name and its autonomy ("Limited" and "Full" stand out, they can change data). */
+function AgentBadge({
+  config,
+  assistantName,
+}: {
+  config: WorkflowNodeData["config"] | undefined;
+  assistantName?: string;
+}) {
+  const agentId = asText((config as Record<string, unknown> | undefined)?.agentId);
+  const brief = (config as Record<string, unknown> | undefined)?.agentBrief as { purpose?: unknown } | undefined;
+  const autonomy = autonomyOf(config);
+  const who = assistantName || agentId;
+  return (
+    <div
+      className="flex flex-wrap items-center gap-1.5 border-t border-gray-100 px-3 py-2"
+      data-testid="agent-step-badge"
+    >
+      <span
+        className={`inline-flex max-w-[170px] items-center gap-1 rounded-full px-2 py-0.5 text-[11px] ${
+          who ? "bg-purple-50 text-purple-800" : brief ? "bg-gray-100 text-gray-600" : "bg-amber-50 text-amber-800"
+        }`}
+      >
+        <Bot className="h-3 w-3 shrink-0" />
+        <span className="truncate">{who || (brief ? "Assistant planned" : "No assistant yet")}</span>
+      </span>
+      <span
+        className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] ${
+          autonomy === "suggest" ? "bg-gray-100 text-gray-600" : "bg-amber-100 text-amber-800"
+        }`}
+      >
+        {AUTONOMY_LABEL[autonomy]}
+      </span>
+    </div>
+  );
+}
 
 function WorkflowNodeComponent({
   data,
@@ -300,6 +343,8 @@ function WorkflowNodeComponent({
   const subtitle = getSubtitle(nodeType, config);
   const pills = getMetadataPills(nodeType, config);
   const branching = isBranchingNode(nodeType);
+  // The assistant's name comes from the project's list (the panel provides it); the id stands in until it is known.
+  const assistantName = useAssistantName(nodeType === "agent_step" ? (config as { agentId?: string } | undefined)?.agentId : undefined);
 
   return (
     <div
@@ -334,6 +379,11 @@ function WorkflowNodeComponent({
           )}
         </div>
       </div>
+
+      {/* Agent step: who does it, and how much it may do alone */}
+      {nodeType === "agent_step" && (
+        <AgentBadge config={config} assistantName={assistantName} />
+      )}
 
       {/* Metadata pills */}
       {pills.length > 0 && (

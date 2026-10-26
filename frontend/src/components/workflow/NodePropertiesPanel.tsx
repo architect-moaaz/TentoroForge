@@ -54,6 +54,7 @@ import type { NodeParam } from "@/types/workflow";
 import { FormFieldEditor } from "./FormFieldEditor";
 import { TriggerMappingEditor } from "./TriggerMappingEditor";
 import { AssignmentStrategyEditor } from "./AssignmentStrategyEditor";
+import { AgentStepProps } from "./AgentStepProps";
 import { api } from "@/lib/api";
 import type { AppModel } from "@/types/app-model";
 import type { PageDefinition } from "@/types/ui-editor";
@@ -176,6 +177,20 @@ export function NodePropertiesPanel({
             onUpdate={updateConfig}
           />
         )}
+        {nodeType === "agent_step" && (
+          <AgentStepProps
+            nodeId={nodeId}
+            config={config}
+            allNodes={allNodes}
+            allEdges={allEdges}
+            appModel={appModel}
+            projectId={projectId}
+            workflowId={workflowId}
+            processVariables={processVariables}
+            variables={workflowVariables}
+            onUpdate={updateConfig}
+          />
+        )}
         {(nodeType === "condition" || nodeType === "exclusive_gateway") && (
           <ConditionProps config={config} onUpdate={updateConfig} />
         )}
@@ -239,7 +254,9 @@ export function NodePropertiesPanel({
           nodeType !== "exclusive_gateway" &&
           nodeType !== "decision" &&
           nodeType !== "wait" &&
-          nodeType !== "escalation" && (
+          nodeType !== "escalation" &&
+          // The agent step has its own facts-in / answers-out editors above.
+          nodeType !== "agent_step" && (
           <>
             <Separator />
             <NodeIOParamsEditor
@@ -287,7 +304,7 @@ export function NodePropertiesPanel({
           </>
         )}
 
-        {nodeType !== "end" && (
+        {nodeType !== "end" && nodeType !== "agent_step" && (
           <>
             <Separator />
             <VariablePicker
@@ -544,7 +561,8 @@ function ActionProps({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {Object.keys(ACTION_CONTRACTS).map((k) => (
+            {/* The agent step is placed from the palette and edited by its own panel, not chosen as an action type. */}
+            {Object.keys(ACTION_CONTRACTS).filter((k) => k !== "agent_step").map((k) => (
               <SelectItem key={k} value={k} className="text-xs">
                 {ACTION_CONTRACTS[k].label}
               </SelectItem>

@@ -6,6 +6,7 @@ import type {
   WorkflowNodeSerialized,
 } from "@/types/workflow";
 import { getContract, type ParamType } from "./actionContracts";
+import { agentStepVariables } from "@/lib/agent-step";
 
 export type VariableGroup =
   | "process-variable"    // opt-in named var promoted from a node's output
@@ -99,6 +100,19 @@ export function collectWorkflowVariables(args: {
         out.push({
           path: `${n.id}.output.${o.name}`,
           type: o.type,
+          group: "node-output",
+          sourceLabel: `${n?.data?.label || n.id}`,
+        });
+      }
+    }
+    // An agent step hands back what its author listed, plus the standard fields
+    // (needsHuman, confidence, summary, proposals, actions, ok): offer each as
+    // `<step>.result.<name>` / `<step>.<field>` so a later step can pick it.
+    if (n?.data?.nodeType === "agent_step" || n?.type === "agent_step") {
+      for (const v of agentStepVariables(n.id, n?.data?.config)) {
+        out.push({
+          path: v.path,
+          type: v.type as ParamType,
           group: "node-output",
           sourceLabel: `${n?.data?.label || n.id}`,
         });

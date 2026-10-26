@@ -14,6 +14,8 @@ interface VariablePickerProps {
   appModel: AppModel | null;
   nodes: WorkflowNodeSerialized[];
   currentNodeId: string;
+  /** The connections, when the caller has them, so "upstream" follows the graph and not the array order. */
+  edges?: Array<{ source: string; target: string }>;
   processVariables?: ProcessVariable[];
   onInsert: (variable: string) => void;
 }
@@ -34,6 +36,7 @@ export function VariablePicker({
   appModel,
   nodes,
   currentNodeId,
+  edges,
   processVariables,
   onInsert,
 }: VariablePickerProps) {
@@ -45,9 +48,10 @@ export function VariablePicker({
         processVariables,
         appModel,
         nodes,
+        edges,
         currentNodeId,
       }),
-    [processVariables, appModel, nodes, currentNodeId],
+    [processVariables, appModel, nodes, edges, currentNodeId],
   );
 
   const filtered = search
