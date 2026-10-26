@@ -16,7 +16,7 @@
 // `loadingMore`. Rows are keyed by `id` unless `keyExtractor` says otherwise.
 
 import * as React from "react";
-import { ActivityIndicator, FlatList, Pressable, RefreshControl, View } from "react-native";
+import { ActivityIndicator, FlatList, Pressable, RefreshControl, View, type StyleProp, type ViewStyle } from "react-native";
 import { useTheme } from "../theme";
 import { Text } from "./Text";
 import { Divider } from "./Layout";
@@ -44,15 +44,18 @@ export interface ListViewProps<T> {
   separators?: boolean;
   /** Space between rows instead of hairlines - for a list of cards, which touch otherwise. */
   spaced?: boolean;
+  /** Space around the list: margins and padding. */
+  style?: StyleProp<ViewStyle>;
 }
 
-export function ListView<T>({ list, renderItem, keyExtractor, empty, header, separators = true, spaced = false }: ListViewProps<T>) {
+export function ListView<T>({ list, renderItem, keyExtractor, empty, header, separators = true, spaced = false, style }: ListViewProps<T>) {
   const theme = useTheme();
   if (list.loading) return <Loading />;
   if (list.error && !list.data) return <ErrorState message={list.error} onRetry={() => { void list.refetch(); }} />;
   const rows = list.data ?? [];
   return (
     <FlatList
+      style={style}
       data={rows}
       keyExtractor={keyExtractor ?? ((item, i) => String((item as { id?: unknown }).id ?? i))}
       renderItem={({ item, index }) => renderItem(item, index)}
