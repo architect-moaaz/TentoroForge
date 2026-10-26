@@ -5111,6 +5111,41 @@ def _render_icon(dest: Path, size: int, *, maskable: bool, name: str, bg_hex: st
     img.save(dest, format="PNG", optimize=True)
 
 
+#: Where the platform puts the page that installs an app on a phone.
+INSTALL_PAGE = "src/app/install/page.tsx"
+_INSTALL_TEMPLATE = Path(__file__).resolve().parents[2] / "templates" / "app-foundation" / INSTALL_PAGE
+#: What the platform's page says of itself, in this and every earlier copy: a
+#: file without it at that path is the app's own, and is never touched.
+_INSTALL_SIGN = "The page a person opens to put this application on their phone"
+
+
+def app_owns_install(doc: dict) -> bool:
+    """The application has a page of its own at `/install`: a field-service
+    app's installations, say. Its page wins; the platform's stands aside."""
+    return any(str(p.get("route") or "").rstrip("/") == "/install"
+               for p in _live(doc.get("pages")) if isinstance(p, dict))
+
+
+def platform_install_page(doc: dict) -> bool:
+    """Whether the platform's own `/install` page belongs in this app: it is
+    installable and has no page of its own there. Asked by `project_pwa`,
+    which writes or removes the page, and by `platform_routes`, which opens
+    the route to signed-out visitors (PR #28 review: the platform's page
+    replaced an app's own `/install` and made it public)."""
+    return bool(mobile_policy(doc)["installable"]) and not app_owns_install(doc)
+
+
+def _drop_platform_install_page(root: Path) -> None:
+    """Remove the platform's install page, and only that: the scaffold copies
+    it into every app, and an app's own file at the path is left alone."""
+    page = root / INSTALL_PAGE
+    try:
+        if page.is_file() and _INSTALL_SIGN in page.read_text("utf-8"):
+            page.unlink()
+    except OSError:
+        pass
+
+
 def project_pwa(doc: dict, app_root: str | Path, output_dir: str | Path | None = None) -> dict[str, Any]:
     """The installable application: `public/manifest.webmanifest`, its icons,
     the service worker that keeps the shell, and `src/lib/mobile.ts`."""
@@ -5128,8 +5163,10 @@ def project_pwa(doc: dict, app_root: str | Path, output_dir: str | Path | None =
         "  store: { enabled: boolean; bundleId: string | null };\n  startUrl: string;\n  themeColor: string;\n  backgroundColor: string;\n}\n"
         f"export const MOBILE: MobilePolicy = {json.dumps(policy, indent=2)};\n", "utf-8")
     files = [MOBILE_POLICY_FILE]
+    if not platform_install_page(doc):
+        _drop_platform_install_page(root)
     if not policy["installable"]:
-        for stale in ("public/manifest.webmanifest", "public/sw.js", "src/app/install/page.tsx"):
+        for stale in ("public/manifest.webmanifest", "public/sw.js"):
             if (root / stale).exists():
                 (root / stale).unlink()
         return {"files": files, **policy}
@@ -5168,13 +5205,13 @@ def project_pwa(doc: dict, app_root: str | Path, output_dir: str | Path | None =
         (public / "sw.js").write_text(sw_src.read_text("utf-8").replace("__BASE__", "").replace("__VERSION__", version)
                                       .replace("__SHELL__", json.dumps(shell)), "utf-8")
         files.append("public/sw.js")
-    # THE INSTALL PAGE: where a link or a QR code sends someone who wants the app on their phone. Public.
-    install_src = Path(__file__).resolve().parents[2] / "templates" / "app-foundation" / "src" / "app" / "install" / "page.tsx"
-    if install_src.is_file():
-        install_dst = root / "src" / "app" / "install" / "page.tsx"
+    # THE INSTALL PAGE: where a link or a QR code sends someone who wants the app on their phone. Public. Not
+    # when the app has a page of its own at `/install` (`platform_install_page`).
+    if platform_install_page(doc) and _INSTALL_TEMPLATE.is_file():
+        install_dst = root / INSTALL_PAGE
         install_dst.parent.mkdir(parents=True, exist_ok=True)
-        install_dst.write_text(install_src.read_text("utf-8"), "utf-8")
-        files.append("src/app/install/page.tsx")
+        install_dst.write_text(_INSTALL_TEMPLATE.read_text("utf-8"), "utf-8")
+        files.append(INSTALL_PAGE)
     return {"files": files, **policy}
 
 

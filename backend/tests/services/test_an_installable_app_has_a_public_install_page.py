@@ -50,3 +50,40 @@ def test_only_the_exact_route_is_open_never_a_page_that_starts_with_the_word(tmp
 def test_an_app_that_is_not_installable_has_no_open_install_route(tmp_path):
     project_middleware({**DOC, "mobile": {"installable": False}}, tmp_path)
     assert not Gate(tmp_path).is_public("/install"), "an app with no install page does not leave the route open"
+
+
+def _owns_install(access="authenticated"):
+    return {**DOC, "pages": DOC["pages"] + [{"id": "PAGE-002", "name": "Installations", "route": "/install",
+                                              "access": access}]}
+
+
+def test_an_apps_own_install_page_wins_and_stays_behind_sign_in(tmp_path):
+    """PR #28 review: the platform's page replaced an app's own `/install`
+    (a field-service app's installations) and opened it to signed-out
+    visitors. The app's page wins; the platform's stands aside."""
+    project_pwa(DOC, tmp_path)                                   # the platform's page was there
+    project_pwa(_owns_install(), tmp_path)
+    assert not (tmp_path / "src" / "app" / "install" / "page.tsx").exists(), "the catch-all renders the app's page"
+    project_middleware(_owns_install(), tmp_path)
+    assert not Gate(tmp_path).is_public("/install"), "the app's page keeps its own access"
+    project_middleware(_owns_install("public"), tmp_path)
+    assert Gate(tmp_path).is_public("/install"), "…and is open when it says so"
+
+
+def test_an_apps_own_file_at_the_path_is_never_removed(tmp_path):
+    page = tmp_path / "src" / "app" / "install" / "page.tsx"
+    page.parent.mkdir(parents=True)
+    page.write_text("export default function Installations() { return null; }\n")
+    project_pwa(_owns_install(), tmp_path)
+    project_pwa({**DOC, "mobile": {"installable": False}}, tmp_path)
+    assert page.read_text().startswith("export default function Installations"), "only the platform's page is removed"
+
+
+def test_the_scaffolds_copy_is_removed_from_an_app_that_is_not_installable(tmp_path):
+    from pathlib import Path
+    scaffold = Path(__file__).resolve().parents[2] / "templates" / "app-foundation" / "src" / "app" / "install" / "page.tsx"
+    page = tmp_path / "src" / "app" / "install" / "page.tsx"
+    page.parent.mkdir(parents=True)
+    page.write_text(scaffold.read_text())                        # what the scaffold copies into every app
+    project_pwa({**DOC, "mobile": {"installable": False}}, tmp_path)
+    assert not page.exists()
