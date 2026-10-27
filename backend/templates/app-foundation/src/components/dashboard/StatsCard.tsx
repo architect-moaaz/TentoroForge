@@ -13,20 +13,23 @@ interface StatsCardProps {
   className?: string;
 }
 
+// Status variants use the app's own status tokens (success/warning/destructive
+// and their -subtle grounds), not hardcoded Tailwind palette — so they sit in
+// the design's palette and work in both light and dark without per-mode classes.
 const variantStyles = {
   default: "bg-card",
   primary: "bg-primary/5 border-primary/20",
-  success: "bg-emerald-50 border-emerald-200 dark:bg-emerald-900/10 dark:border-emerald-800",
-  warning: "bg-amber-50 border-amber-200 dark:bg-amber-900/10 dark:border-amber-800",
-  error: "bg-red-50 border-red-200 dark:bg-red-900/10 dark:border-red-800",
+  success: "bg-success-subtle border-success/25",
+  warning: "bg-warning-subtle border-warning/25",
+  error: "bg-destructive-subtle border-destructive/25",
 };
 
 const iconStyles = {
   default: "bg-muted text-muted-foreground",
   primary: "bg-primary/10 text-primary",
-  success: "bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400",
-  warning: "bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400",
-  error: "bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400",
+  success: "bg-success/15 text-success",
+  warning: "bg-warning/15 text-warning",
+  error: "bg-destructive/15 text-destructive",
 };
 
 export function StatsCard({ title, value, icon: Icon, description, trend, variant = "default", className }: StatsCardProps) {
@@ -41,7 +44,7 @@ export function StatsCard({ title, value, icon: Icon, description, trend, varian
       <p className="text-2xl font-bold text-foreground">{value}</p>
       {description && <p className="mt-1 text-xs text-muted-foreground">{description}</p>}
       {trend && (
-        <p className={cn("mt-1 text-xs", trend.value >= 0 ? "text-emerald-600" : "text-red-600")}>
+        <p className={cn("mt-1 text-xs", trend.value >= 0 ? "text-success" : "text-destructive")}>
           {trend.value >= 0 ? "↑" : "↓"} {Math.abs(trend.value)}% {trend.label}
         </p>
       )}
