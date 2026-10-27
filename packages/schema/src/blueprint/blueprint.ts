@@ -2663,6 +2663,28 @@ export const DesignSystem = z.object({
   radius: z.record(z.string(), z.string()).default({}),
   borders: z.record(z.string(), z.string()).default({}),
   elevation: z.record(z.string(), z.string()).default({}),
+  /**
+   * How motion is used, as a free record the projector reads into the app's
+   * motion tokens: `level` (`none` | `subtle` | `expressive` — how much the UI
+   * moves at all), and optionally `durationFast`/`durationNormal`/`easing`.
+   * Every generated app shared one fixed, library-default motion regardless of
+   * personality; a playful consumer app and a restrained finance tool moved
+   * identically. Chosen by the design system agent from the register and the
+   * personality, projected to `--motion-*` and the `data-motion-level` the kit
+   * reads.
+   */
+  motion: z.record(z.string(), z.string()).default({}),
+  /**
+   * The design LANGUAGE this application is built in — a coherent register
+   * that bundles how it reads, not a colour. One of the director's known
+   * registers (e.g. `editorial`, `utility`, `warm`, `luxe`, `playful`,
+   * `minimal`) or a short phrase when none fits. It is chosen for the domain
+   * and audience and then expressed through the palette, type pairing,
+   * elevation, motion and density — so a fashion shop and an admin tool reach
+   * for different languages instead of the one dashboard look. Kept here so
+   * the page writer and reviewer hold the app to the register it declared.
+   */
+  register: z.string().default(""),
   navigationApproach: z.string().default(""),
   /**
    * The photographs the application uses, by the job each does: the sign-in

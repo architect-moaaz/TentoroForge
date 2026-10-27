@@ -3440,6 +3440,17 @@
           },
           "default": {}
         },
+        "motion": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        },
+        "register": {
+          "type": "string",
+          "default": ""
+        },
         "navigationApproach": {
           "type": "string",
           "default": ""
