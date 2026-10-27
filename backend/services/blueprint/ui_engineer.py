@@ -39,6 +39,7 @@ from typing import Any, Iterable, Sequence
 from services.blueprint.app_sdk import (
     code_page_files, project_app_sdk, sdk_reference,
 )
+from services.blueprint.repeated_sections import drop_repeated_sections
 from services.build_usage import carrying
 
 logger = logging.getLogger(__name__)
@@ -1559,6 +1560,12 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
             parts = {k[5:]: v for k, v in files.items() if k.startswith("part:")}
         view = _use_client_first(view)
         parts = {k: _use_client_first(v) for k, v in parts.items()}
+        if parts:
+            # A SECTION IS DRAWN BY ONE FILE. The frame and a part wrote the same panel, side by side (FitTrackr's dashboard
+            # showed Quick Actions twice); the copy that is not the owner's is taken out, with no model call.
+            view, parts, repeated = drop_repeated_sections(doc, page, view, parts, app_root=app_root)
+            for line in repeated:
+                logger.info("[ui_engineer] %s: %s", page.get("id"), line)
         whole = "\n".join([view, *parts.values()])            # what the screen does, parts and all
         design = _design_findings(doc, page, whole)
         errors = (_static_findings(load, view) + _simulated_writes(whole) + _unwired_actions(doc, page, whole)
@@ -1914,6 +1921,10 @@ def reshape_screen(doc: dict, page: dict, app_root: Path, client: Any, current: 
 
     # THE WHOLE SCREEN, against the real definition.
     for round_ in range(COMPILE_ROUNDS):
+        # A SECTION IS DRAWN BY ONE FILE: the frame and the parts do not see each other's, so a panel can come out twice.
+        view, written, repeated = drop_repeated_sections(doc, page, view, written, app_root=app_root)
+        for line in repeated:
+            logger.info("[ui_engineer] %s: %s", pid, line)
         whole = "\n".join([view, *written.values()])
         compiled = typecheck(doc, app_root, pid, load, view, parts=written)
         wiring = (_unwired_actions(doc, page, whole) + _unread_handoffs(doc, page, load, whole)

@@ -88,11 +88,19 @@ function StatusIcon({ status }: { status: string }) {
   return <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />;
 }
 
+/** What to tell a person when the list of builds could not be read. */
+export function listProblemFor(status: number): string {
+  if (status === 401) return "Your sign-in has expired, so the builds cannot be shown. Reload the page and sign in again.";
+  if (status === 429) return "Too many requests just now, so the builds cannot be shown. Wait a minute, then open this again.";
+  return `The builds could not be loaded (error ${status}). Try again in a moment.`;
+}
+
 export function MobileBuildsPanel({ projectId, orgId }: Props) {
   const token = useAuthStore((s) => s.token);
   const [builds, setBuilds] = useState<MobileBuild[]>([]);
   const [loading, setLoading] = useState<null | { profile: string; platform: string }>(null);
   const [error, setError] = useState<{ message: string; missing_keys?: string[]; action?: string } | null>(null);
+  const [listProblem, setListProblem] = useState<string | null>(null);
   const mounted = useRef(true);
 
   // Set to true on every mount: in development React mounts, unmounts and mounts again, and the cleanup alone would leave it false.
@@ -112,11 +120,16 @@ export function MobileBuildsPanel({ projectId, orgId }: Props) {
       const res = await authFetch(`/api/projects/${projectId}/mobile-builds`, {
         headers: authHeaders,
       });
-      if (!res.ok) return;
+      if (!res.ok) {
+        // SAID, NOT HIDDEN: a failed read used to leave "No mobile builds yet" on screen, which told a person with a build in
+        // progress that it had vanished (an expired sign-in, 2026-10-23).
+        if (mounted.current) setListProblem(listProblemFor(res.status));
+        return;
+      }
       const data = (await res.json()) as MobileBuild[];
-      if (mounted.current) setBuilds(data);
+      if (mounted.current) { setBuilds(data); setListProblem(null); }
     } catch {
-      // Silent — this runs on a poll cadence, one hiccup shouldn't nag.
+      // A network hiccup on the poll cadence: the list on screen stays as it was.
     }
   }, [projectId, authHeaders]);
 
@@ -259,7 +272,12 @@ export function MobileBuildsPanel({ projectId, orgId }: Props) {
         <div className="text-xs font-medium text-muted-foreground">
           Recent builds
         </div>
-        {builds.length === 0 && (
+        {listProblem && (
+          <div role="alert" data-testid="builds-problem" className="rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
+            {listProblem}
+          </div>
+        )}
+        {builds.length === 0 && !listProblem && (
           <div className="rounded border bg-muted/40 px-3 py-4 text-xs text-muted-foreground text-center">
             No mobile builds yet. Pick a target above to start one.
           </div>

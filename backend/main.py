@@ -383,6 +383,18 @@ async def _tell_whose_turn_was_lost(paths: list[str]) -> None:
 
 
 @app.on_event("startup")
+async def _follow_open_mobile_builds():
+    """A build still going on Expo when this process started is watched again; see `routers.mobile_builds.resume_open_builds`."""
+    import logging
+
+    from routers import mobile_builds
+    try:
+        await mobile_builds.resume_open_builds()
+    except Exception:  # noqa: BLE001 - the platform starts without it; the build's own row is read on the next request
+        logging.getLogger("forge.startup").exception("[mobile_builds] open builds could not be followed again")
+
+
+@app.on_event("startup")
 async def _start_lost_run_watch():
     """A ledger that stops pulsing while the platform is up — a worker died,
     not the container — is closed and its person told; see `services.lost_runs`."""

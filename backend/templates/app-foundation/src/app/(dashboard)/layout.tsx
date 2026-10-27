@@ -25,7 +25,6 @@ import { MobileNav } from "./MobileNav";
 import { NotificationBell } from "./NotificationBell";
 import { OrgSwitcher } from "./OrgSwitcher";
 import { OutsideOrganisation } from "./OutsideOrganisation";
-import { InstallButton } from "@/components/PwaRegister";
 import { LanguageSwitch } from "@/sdk/i18n";
 import { AccountMenu } from "./AccountMenu";
 import { MobileTabBar } from "./MobileTabBar";
@@ -992,15 +991,17 @@ export default async function DashboardLayout({
   // chromes with neither — a row above the page. Floating over the page's
   // header they sat on top of its primary action.
   const chromeName = identity.chrome ?? "standard-rail";
-  // A 64px RAIL HOLDS TWO CONTROLS. The organisation switch, the language and
-  // "Install app" stacked into its foot clipped and truncated (pcn4owv7,
-  // 2026-10-15); in the icon rail they live inside the account menu.
+  // A 64px RAIL HOLDS TWO CONTROLS. The organisation switch and the language
+  // stacked into its foot clipped and truncated (pcn4owv7, 2026-10-15); in the
+  // icon rail they live inside the account menu. THERE IS NO "Install app" HERE:
+  // it sat in every app's menu, installable or not, and the owner did not want
+  // it (2026-10-26). The browser's own install offer, and the /install page of an
+  // app made as a PWA, are how a phone gets the app.
   const compact = chromeName === "icon-rail";
   const extras = (
     <>
       <OrgSwitcher />
       <LanguageSwitch />
-      <InstallButton />
     </>
   );
   const cluster = session?.user ? (

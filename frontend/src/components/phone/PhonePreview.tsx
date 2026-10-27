@@ -12,6 +12,7 @@ import { ChangePanel, usePhoneDrop } from "@/components/react-editor/PhoneTools"
 import { usePhonePick } from "@/components/react-editor/phonePick";
 import { screenOf, type Source } from "@/components/react-editor/phoneParts";
 import { useEditorStore } from "@/components/react-editor/store";
+import { isTabPart, TabRename } from "./TabRename";
 import { useSmithDraftStore } from "@/stores/smithDraft";
 
 const PREFIX = "design2ui:";
@@ -352,7 +353,10 @@ export function PhonePreview({ projectId, onAskSmith, autoRedraw = false, editPa
                 {picked.source && <p className="mt-1 font-mono text-[11px] text-muted-foreground">{picked.source.file}:{picked.source.line}</p>}
               </div>
             )}
-            {editParts && <ChangePanel />}
+            {editParts && picked && isTabPart(picked.source) && picked.textContent && (
+              <TabRename projectId={projectId} label={picked.textContent.trim()} />
+            )}
+            {editParts && !(picked && isTabPart(picked.source)) && <ChangePanel />}
             {dropSaid && <p role="status" className="text-xs text-red-600">{dropSaid}</p>}
             <label className="text-xs text-muted-foreground" htmlFor="phone-change">{editParts && picked ? "Or ask Smith" : "What should change?"}</label>
             <textarea

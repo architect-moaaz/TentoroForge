@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -30,6 +31,18 @@ _BIG = 60
 #: Settings that carry the screen's own logic (a spinner while a workflow runs, a button that is off until a field is filled): a
 #: person does not choose these, the screen's code does.
 LOGIC_PROPS = frozenset({"loading", "disabled", "refreshing", "required"})
+
+
+#: The kit's parts that take a `style`, so a margin can be set on them (the Editor's "Space around").
+STYLE_PARTS = frozenset({"Stack", "Row", "Card", "Divider", "Text", "Button", "GradientBand", "ListView"})
+
+#: A style that is only margins and paddings, each a plain number: nothing in it can break a type, so it is saved without the compiler.
+_MARGINS_ONLY = re.compile(r"^\{\s*(?:(?:margin|padding)(?:Top|Right|Bottom|Left):\s*-?\d{1,3}(?:\.\d+)?\s*(?:,\s*)?)*\}$")
+
+
+def margins_only(value: Any) -> bool:
+    """Is this op value a `style` of margin and padding numbers and nothing else (or an empty one)?"""
+    return (value or {}).get("kind") == "expr" and bool(_MARGINS_ONLY.match(str((value or {}).get("value") or "")))
 
 
 def _kit_dir(root: Path) -> Path:
