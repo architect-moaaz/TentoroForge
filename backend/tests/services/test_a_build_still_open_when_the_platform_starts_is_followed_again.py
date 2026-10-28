@@ -20,12 +20,16 @@ import pytest
 
 from routers import mobile_builds as mb
 
-NOW = datetime.now(timezone.utc)
+def _now() -> datetime:
+    """Read when the row is made: a time taken when the file was loaded aged
+    every row by however long the tests before this one ran (a full run
+    failed it by 22 s)."""
+    return datetime.now(timezone.utc)
 
 
 def row(*, eas="e-1", age=120, status="in_progress"):
     return types.SimpleNamespace(id=uuid.uuid4(), project_id=uuid.uuid4(), eas_build_id=eas, status=status, platform="android",
-                                 created_at=NOW - timedelta(seconds=age))
+                                 created_at=_now() - timedelta(seconds=age))
 
 
 class FakeSession:
@@ -204,7 +208,7 @@ def real(monkeypatch):
 def stored(real, age=0):
     r = real.add(types.SimpleNamespace(
         id=uuid.uuid4(), project_id=uuid.uuid4(), eas_build_id="e-1", status="in_progress", platform="android",
-        created_at=NOW - timedelta(seconds=age), artifact_url=None, logs_url=None, error_message=None, completed_at=None))
+        created_at=_now() - timedelta(seconds=age), artifact_url=None, logs_url=None, error_message=None, completed_at=None))
     real.projects[r.project_id] = types.SimpleNamespace(output_dir=f"/out/{r.project_id}", org_id=uuid.uuid4())
     return r
 
