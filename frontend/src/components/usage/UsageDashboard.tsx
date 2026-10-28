@@ -11,6 +11,7 @@
  * counts × list price when the SDK didn't report a billed amount.
  */
 
+import { agentLabel } from "@/lib/agentPersonas";
 import { useEffect, useState } from "react";
 import { useAuthStore } from "@/stores/auth";
 import { api, ApiError } from "@/lib/api";
@@ -181,7 +182,7 @@ export function UsageDashboard() {
         <div className="rounded border bg-card divide-y">
           {data.by_agent.map((r) => (
             <div key={r.agent} className="flex items-center gap-3 p-2.5 text-xs">
-              <span className="w-36 truncate font-medium">{r.agent}</span>
+              <span className="w-56 truncate font-medium" title={r.agent}>{agentLabel(r.agent)}</span>
               <div className="flex-1 h-1.5 rounded bg-muted overflow-hidden">
                 <div
                   className="h-full bg-primary/60"

@@ -3,6 +3,7 @@
 import { X, FileCode, MessageCircle, Lock, RotateCcw, MoveRight } from "lucide-react";
 import { useOfficeStore } from "../OfficeStateManager";
 import { AGENT_BY_ID, DEPARTMENT_BY_ID } from "../types";
+import { doingNow } from "./AgentTooltip";
 
 export function AgentPanel() {
   const selectedAgent = useOfficeStore((s) => s.selectedAgent);
@@ -74,7 +75,10 @@ export function AgentPanel() {
         className="flex items-center justify-between px-4 py-3 border-b border-gray-700/50"
         style={{ borderBottomColor: agentInfo.color }}
       >
-        <h3 className="text-sm font-semibold text-white">{agentInfo.name}</h3>
+        <h3 className="text-sm font-semibold text-white">
+          {agentInfo.name}
+          <span className="font-normal text-gray-400"> · {agentInfo.role}</span>
+        </h3>
         <button
           onClick={() => selectAgent(null)}
           className="p-1 rounded hover:bg-gray-700/50 transition-colors text-gray-400 hover:text-white"
@@ -85,6 +89,20 @@ export function AgentPanel() {
 
       {/* Body */}
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
+        {/* CLICKED, THEY INTRODUCE THEMSELVES — in their own words, from the
+            persona file every screen shares (`lib/agentPersonas`). */}
+        {agentInfo.intro && (
+          <div className="rounded-lg bg-gray-800/70 px-3 py-2.5" data-testid="agent-intro">
+            <p className="text-[13px] leading-relaxed text-gray-100">{agentInfo.intro}</p>
+            {agentState && (
+              <p className="mt-2 text-xs text-gray-400">
+                <span className="text-gray-500">Right now: </span>
+                {doingNow(agentState)}
+              </p>
+            )}
+          </div>
+        )}
+
         {/* Sprite placeholder + identity */}
         <div className="flex items-start gap-3">
           <div

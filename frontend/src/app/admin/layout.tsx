@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  Activity, AppWindow, BarChart3, Building2, ChevronLeft, Coins, LayoutDashboard, LogOut, ShieldCheck, Users, ToggleLeft, Radio } from "lucide-react";
+  Activity, AppWindow, BarChart3, Building2, ChevronLeft, Coins, LayoutDashboard, LogOut, ShieldCheck, Users, ToggleLeft, Radio, Bot } from "lucide-react";
 import { AuthGuard } from "@/components/auth-guard";
 import { SuperAdminGate } from "@/components/admin/SuperAdminGate";
 import { Badge } from "@/components/ui/badge";
@@ -27,6 +27,7 @@ const NAV: { label?: string; items: NavItem[] }[] = [
       { href: "/admin/credits", label: "Credits", icon: Coins },
       { href: "/admin/features", label: "Features", icon: ToggleLeft },
       { href: "/admin/activity", label: "Activity", icon: Activity },
+      { href: "/admin/agents", label: "Agents", icon: Bot },
     ],
   },
   {

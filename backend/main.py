@@ -102,6 +102,7 @@ from routers.brand_discovery import router as brand_discovery_router
 from routers.usage import router as usage_router
 from routers.drafts_room import router as drafts_room_router
 from routers.admin import router as admin_router
+from routers.admin_agents import router as admin_agents_router
 from routers.admin_credits import router as admin_credits_router
 from routers.admin_live import router as admin_live_router
 from routers.features import router as features_router, admin_router as admin_features_router
@@ -254,6 +255,7 @@ app.include_router(usage_router)
 # agree a draft before any app exists; agreeing creates and builds the app.
 app.include_router(drafts_room_router)
 app.include_router(admin_router)
+app.include_router(admin_agents_router)
 app.include_router(admin_credits_router)
 app.include_router(admin_live_router)
 app.include_router(features_router)

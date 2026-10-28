@@ -319,7 +319,7 @@ function ProjectWorkspace({
     { id: "app-flow" as Tab, label: "App Map", icon: Route },
     { id: "agents" as Tab, label: "Agents", icon: Bot },
     { id: "ai" as Tab, label: "AI", icon: Sparkles },
-    { id: "office" as Tab, label: "Office", icon: Building2 },
+    { id: "office" as Tab, label: "Foundry", icon: Building2 },
     { id: "monitoring" as Tab, label: "Monitor", icon: BarChart3 },
     { id: "versions" as Tab, label: "Versions", icon: GitBranch },
     { id: "app-settings" as Tab, label: "App settings", icon: Settings },
@@ -517,7 +517,7 @@ function ProjectWorkspace({
           <PublishButton projectId={projectId} orgId={orgId} lockedWeb={!feat.allowed("publish")} lockedMobile={!feat.allowed("mobile_builds")} />
           <MoreMenu
             items={[
-              { label: "Agents' office", onClick: () => setActiveTab("office"), locked: !feat.allowed("office") },
+              { label: "The Foundry", onClick: () => setActiveTab("office"), locked: !feat.allowed("office") },
               { label: "Delete project", onClick: () => setShowDelete(true), danger: true },
             ]}
           />

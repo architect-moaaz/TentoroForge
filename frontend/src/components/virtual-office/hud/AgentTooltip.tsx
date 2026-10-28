@@ -3,6 +3,20 @@
 import { useEffect, useState } from "react";
 import { useOfficeStore } from "../OfficeStateManager";
 import { AGENT_REGISTRY } from "../types";
+import { verbFor } from "@/components/smith/stages";
+
+/** What the agent is doing this moment, in words: its own line, else its step. */
+export function doingNow(state: { state: string; speechBubble?: string; node?: string;
+                                  tally?: { done: number; total: number } }): string {
+  if (state.speechBubble) return state.speechBubble;
+  if (state.node && state.state !== "idle") {
+    const tally = state.tally && state.tally.total > 1 ? ` (${state.tally.done} of ${state.tally.total})` : "";
+    return `${verbFor(state.node)}${tally}`;
+  }
+  if (state.state === "error") return "Stopped on a problem";
+  if (state.state === "walking") return "On the way to a desk";
+  return "Not working on anything right now";
+}
 
 export function AgentTooltip() {
   const hoveredAgent = useOfficeStore((s) => s.hoveredAgent);
@@ -41,11 +55,17 @@ export function AgentTooltip() {
         className="bg-gray-900/95 backdrop-blur-sm rounded-lg shadow-xl px-3 py-2 min-w-[180px] border border-gray-700/50"
         style={{ borderLeftColor: agentInfo.color, borderLeftWidth: 3 }}
       >
-        {/* Name */}
-        <p className="text-sm font-semibold text-white">{agentInfo.name}</p>
+        {/* Who */}
+        <p className="text-sm font-semibold text-white">
+          {agentInfo.name}
+          <span className="font-normal text-gray-400"> · {agentInfo.role}</span>
+        </p>
 
-        {/* Role */}
-        <p className="text-xs text-gray-400 mt-0.5">{agentInfo.role}</p>
+        {/* WHAT THEY ARE DOING, the moment you point at them */}
+        <p className="text-xs text-gray-200 mt-1 max-w-[240px]">
+          <span className="text-gray-500">Now: </span>
+          {doingNow(agentState)}
+        </p>
 
         {/* State */}
         <div className="flex items-center gap-1.5 mt-1.5">
@@ -81,17 +101,7 @@ export function AgentTooltip() {
             </div>
           )}
 
-        {/* Speech bubble / current action */}
-        {agentState.speechBubble && (
-          <p className="text-xs text-gray-400 mt-1.5 italic truncate max-w-[200px]">
-            &ldquo;{agentState.speechBubble}&rdquo;
-          </p>
-        )}
-
-        {/* Room */}
-        <p className="text-[10px] text-gray-500 mt-1">
-          Room: {agentInfo.room.replace(/_/g, " ")}
-        </p>
+        <p className="text-[10px] text-gray-500 mt-1.5">Click to meet {agentInfo.name}</p>
       </div>
     </div>
   );

@@ -223,3 +223,46 @@ export interface Incident {
   path?: string;
   cause?: string;
 }
+
+/** One agent's month (or day, week, year) — `GET /api/admin/agents`. */
+export interface AgentStat {
+  agent: string;
+  name: string;
+  title: string;
+  room: string;
+  calls: number;
+  repair_calls: number;
+  cost_usd: number;
+  input_tokens: number;
+  output_tokens: number;
+  busy_hours: number;
+  utilization: number;
+  apps: number;
+  steps: number;
+  done: number;
+  failed: number;
+  retries: number;
+  repairs: number;
+  unrepaired: number;
+  runs_lost: number;
+  reviews: number;
+  found: number;
+  success_rate: number | null;
+  median_s: number | null;
+  p90_s: number | null;
+  cost_per_step_usd: number | null;
+  top_failures: { reason: string; count: number }[];
+}
+
+export interface AgentReport {
+  period: string;
+  from: number;
+  to: number;
+  agents: AgentStat[];
+  totals: {
+    calls: number; steps: number; done: number; failed: number; retries: number; repairs: number;
+    unrepaired: number; runs_lost: number; reviews: number; found: number; cost_usd: number;
+    busy_hours: number; success_rate: number | null; active_agents: number;
+  };
+  daily: { day: string; calls: number; cost_usd: number; failures: number }[];
+}

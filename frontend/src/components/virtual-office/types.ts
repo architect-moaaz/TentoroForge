@@ -1,3 +1,5 @@
+import { PERSONAS } from "@/lib/agentPersonas";
+
 // ── Virtual Office Type Definitions ──────────────────────────────────────────
 
 export type Direction = "down" | "left" | "right" | "up";
@@ -281,11 +283,15 @@ export const DEPARTMENT_BY_ID: Record<string, Department> = Object.fromEntries(
 
 export interface AgentInfo {
   id: string;
+  /** The agent's name ("Bob"), from `lib/agent-personas.json`. */
   name: string;
   spriteKey: string;
   room: string;
+  /** Their title ("Data modeller"). */
   role: string;
   color: string;
+  /** How they introduce themselves when clicked, in their own words. */
+  intro?: string;
 }
 
 // The cast is the Blueprint agent registry
@@ -299,7 +305,7 @@ export interface AgentInfo {
 // wide image, which the renderer squashes into a square. Neither is referenced
 // here. `security` and `inspector` have no idle frame at all, which the
 // renderer's sprite fallback covers from the working and base sheets.
-export const AGENT_REGISTRY: AgentInfo[] = [
+const CAST: AgentInfo[] = [
   // ── Discovery ─────────────────────────────────────────────────────────
   { id: "smith", name: "Smith", spriteKey: "contract_writer", room: "discovery", role: "The architect you talk to", color: "#1E40AF" },
   { id: "requirement", name: "Requirements", spriteKey: "discovery", room: "discovery", role: "Writes down what the app is for", color: "#3B82F6" },
@@ -345,6 +351,15 @@ export const AGENT_REGISTRY: AgentInfo[] = [
   { id: "build", name: "Build", spriteKey: "export_agent", room: "shipping", role: "Builds the preview", color: "#78716C" },
   { id: "deployment", name: "Deployment", spriteKey: "bizlogic_agent", room: "shipping", role: "Ships it", color: "#15803D" },
 ];
+
+// THE AGENTS ARE PEOPLE IN THE FOUNDRY. Their names, titles and introductions
+// come from the one persona file every screen reads (`lib/agentPersonas`), so
+// the Foundry, the cockpit and the spend charts call each agent the same thing.
+// The cast above keeps what only the Foundry needs: a desk, a sprite, a colour.
+export const AGENT_REGISTRY: AgentInfo[] = CAST.map((a) => {
+  const p = PERSONAS[a.id];
+  return p ? { ...a, name: p.name, role: p.title, intro: p.intro } : a;
+});
 
 export const AGENT_BY_ID: Record<string, AgentInfo> = Object.fromEntries(
   AGENT_REGISTRY.map((a) => [a.id, a]),
