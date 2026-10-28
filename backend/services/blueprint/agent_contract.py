@@ -55,7 +55,7 @@ WRITABLE_SECTIONS: frozenset[str] = frozenset(
     | {"data.entities", "data.relationships", "data.constraints",
        "navigation", "designSystem", "security",
        "runtime", "database", "deployment", "product", "codeMap",
-       "pageLayouts", "pageCode", "nativeCode", "composition", "completeness",
+       "pageLayouts", "pageCode", "nativeCode", "composition", "completeness", "drawnViews",
        "domainReference", "mobile"}
 )
 
@@ -310,7 +310,9 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
     # the compiler: a page is type-checked before it is proposed.
     "ui_engineer": _cap(
         "ui_engineer",
-        {"pageCode"},
+        # …and the design's screens as React views (`drawn_views`): the same
+        # engineer, converting a drawing rather than writing a page.
+        {"pageCode", "drawnViews"},
         tools={"blueprint:read", "page_contract:read", "design_system:read",
                "sdk:read", "tsc:check"},
     ),

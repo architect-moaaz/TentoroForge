@@ -222,7 +222,21 @@ def _n(key, agent, depends_on=(), produces=(), note="", kind="agent",
 
 #: §28's graph. Tier names follow the PRD's diagram.
 DAG: dict[str, DagNode] = {n.key: n for n in (
-    _n("requirements", "requirement", (), ("requirements",)),
+    # A DESIGN HELD AS THE SPECIFICATION IS BUILT AS DRAWN (`services/drawn`).
+    # Its frames are converted to React views first — the markup is the
+    # drawing's, the example content props, the buttons handlers — and what
+    # each needs (its contract) is what the data model and the processes are
+    # then generated to back. One subject per frame, the shell and the shared
+    # components; an application with no such design has none, and the node
+    # completes without a call.
+    _n("drawn_views", "ui_engineer", (), ("drawnViews",), fanout="drawn_frames",
+       note="the design's frames as React views with contracts"),
+    # The journey the design draws, as a document the requirements are read
+    # from: screens, what each action does and where it leads, what each
+    # screen states as its rules.
+    _n("drawn_flow", "ui_engineer", ("drawn_views",), (), kind="service",
+       note="the drawn journey, written down for the requirements"),
+    _n("requirements", "requirement", ("drawn_flow",), ("requirements",)),
     # §51 puts Figma Intelligence upstream of domain, page, entity, workflow
     # and requirement inference — it is the evidence those work from, so it
     # runs beside `requirements` rather than after them. §48 bounds what it may
@@ -554,10 +568,28 @@ FANOUT: dict[str, Any] = {
     # belongs to no entity (a dashboard, a sign-in, a drawn screen with no
     # primary record) on its own.
     "page_features": lambda doc: page_features(doc),
+    # Every frame of a design held as the specification, then its shell and
+    # its shared components (`services/drawn/convert`).
+    "drawn_frames": lambda doc: _drawn_subjects(doc),
     # The page set: ``[""]`` (one call) unless the drawn screens are too many
     # for one reply, then a module's screens at a time and the rest.
     "page_set": lambda doc: _page_set_parts(doc),
 }
+
+
+def _drawn_subjects(doc: Mapping[str, Any]) -> list[str]:
+    from services.drawn.convert import COMPONENTS_KEY, SHELL_KEY, frame_subjects
+    frames = frame_subjects(dict(doc))
+    return [*frames, SHELL_KEY, COMPONENTS_KEY] if frames else []
+
+
+def _drawn_present(doc: Mapping[str, Any], subject: str) -> bool:
+    """A frame, the shell or the components are converted once their rows are."""
+    from services.drawn.convert import COMPONENTS_KEY
+    rows = [v for v in doc.get("drawnViews") or [] if isinstance(v, dict)]
+    if subject == COMPONENTS_KEY:
+        return any(v.get("kind") == "component" for v in rows)
+    return any(str(v.get("key")) == subject for v in rows)
 
 
 def _page_set_parts(doc: Mapping[str, Any]) -> list[str]:
@@ -854,6 +886,8 @@ INCREMENTAL_SECTIONS: frozenset[str] = frozenset({
     "requirements", "pages", "components", "widgets", "pageLayouts",
     # A page's code follows its page: adding a page must give it one.
     "pageCode", "nativeCode",
+    # A drawn view is one frame's, converted again when that frame changes.
+    "drawnViews",
     "data.entities", "data.relationships",
     "data.constraints", "apis", "workflows", "businessRules", "tests",
     # The paths between the screens follow the screens and the processes.
@@ -1206,6 +1240,7 @@ _SUBJECT_AUTHORED: dict[str, Callable[[Mapping[str, Any], str], bool]] = {
     "page_features": _contracts_present,
     "entities": _fields_present,
     "page_set": _page_set_present,
+    "drawn_frames": _drawn_present,
 }
 
 
@@ -3440,6 +3475,13 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
         project_native(svc.doc, svc.output_dir)
     except Exception as exc:  # noqa: BLE001 — additive: never the web app's loss
         logger.warning("[frontend] the native project was not written: %s", exc)
+    # A DESIGN BUILT AS DRAWN brings its frame and its pictures (`services.drawn`).
+    # Every app gets the wrapper the layout imports: the drawn frame, or the
+    # pass-through that leaves the application's own.
+    from services.drawn.project import project_drawn
+    out = project_drawn(svc.doc, svc.output_dir, app_root)
+    if out.get("shell") or out.get("assets"):
+        logger.info("[drawn] projected %s", out)
 
 
 def _project_integration(svc: BlueprintService, app_root: str) -> None:
@@ -3753,6 +3795,15 @@ def _add_content_fields(svc: BlueprintService) -> None:
             commit=True)
 
 
+def _write_drawn_flow(svc: BlueprintService) -> None:
+    """The drawn journey, kept as a document for the requirements (`drawn.flow`)."""
+    from services.drawn.flow import write
+
+    out = write(svc)
+    if out:
+        logger.info("[drawn] flow document: %s", out)
+
+
 def _project_design_reference(svc: BlueprintService) -> None:
     """§47 — the connected design's own tokens. No-op without one."""
     from services.figma.projection import apply_design_reference
@@ -3845,6 +3896,7 @@ SERVICE_HANDLERS: dict[str, Any] = {
     "content_fields": _add_content_fields,
     "brand_design_system": _project_company_language,
     "figma_design_system": _project_design_reference,
+    "drawn_flow": _write_drawn_flow,
     "verification": _run_verification,
     "apis": _derive_apis,
     "memory": _record_memory,

@@ -1,0 +1,9 @@
+"use client";
+// The design draws no frame of its own: the application draws its own.
+import * as React from "react";
+
+export const DRAWN_SHELL = false;
+
+export default function DrawnShell(props: { children?: React.ReactNode; controls?: React.ReactNode }) {
+  return <>{props.children}</>;
+}

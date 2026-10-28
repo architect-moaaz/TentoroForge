@@ -79,6 +79,7 @@ UNVERIFIED_HERE = (
 #: and ``backend``); ownership has to be a decision, not a scan.
 SECTION_OWNER: dict[str, str] = {
     "requirements": "requirement",
+    "drawnViews": "ui_engineer",
     "product": "product_analysis",
     "domainReference": "domain_intelligence",
     "modules": "solution_architecture",

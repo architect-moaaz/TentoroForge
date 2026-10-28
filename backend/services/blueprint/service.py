@@ -119,6 +119,8 @@ KEYED_LIST_SECTIONS: dict[str, tuple[str, ...]] = {
     "pageCode": ("page",),
     # …and one native screen per page, the same way.
     "nativeCode": ("page",),
+    # One converted view per drawn frame (or the shell, or a shared component).
+    "drawnViews": ("key",),
     "data.relationships": ("from", "to", "kind"),
     "data.constraints": ("entity", "kind", "expression"),
 }

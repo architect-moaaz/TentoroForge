@@ -54,7 +54,11 @@ def test_dag_is_acyclic_and_layered():
     # entity and page inference — it is evidence those work from.
     # `install` joins it because `npm install` needs nothing an agent writes
     # and used to be the last one to three minutes of every build.
-    assert set(lv[0]) == {"requirements", "figma_intelligence", "install"}
+    # `drawn_views` leads the requirements: a design built as drawn is
+    # converted first and its journey is what the requirements read
+    # (`drawn_flow`); with no such design it has no subjects.
+    assert set(lv[0]) == {"drawn_views", "figma_intelligence", "install"}
+    assert "requirements" in lv[2]
     flat = [k for level in lv for k in level]
     assert sorted(flat) == sorted(DAG)
 

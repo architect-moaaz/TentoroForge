@@ -82,6 +82,7 @@ def scales(documents: list[dict]) -> dict[str, dict[str, str]]:
     spacing: Counter = Counter()
     body: Counter = Counter()
     lines: Counter = Counter()
+    families: Counter = Counter()
     for document in documents:
         for node in _walk(document):
             if node.get("cornerRadius"):
@@ -92,6 +93,8 @@ def scales(documents: list[dict]) -> dict[str, dict[str, str]]:
                         spacing[int(round(float(node[key])))] += 1
             if str(node.get("type") or "") == "TEXT":
                 style = node.get("style") if isinstance(node.get("style"), dict) else {}
+                if style.get("fontFamily"):
+                    families[str(style["fontFamily"])] += len(str(node.get("characters") or "")) or 1
                 if style.get("fontSize"):
                     size = int(round(float(style["fontSize"])))
                     body[size] += len(str(node.get("characters") or "")) or 1
@@ -122,6 +125,10 @@ def scales(documents: list[dict]) -> dict[str, dict[str, str]]:
         line = max((n, h) for (sz, h), n in lines.items() if sz == size)[1] if any(
             sz == size for sz, _h in lines) else 0
         out["typography"] = {"baseSize": f"{size}px", **({"lineHeightBase": f"{line}px"} if line else {})}
+    if families:
+        # THE FACE MOST WORDS ARE SET IN — loaded by the app, or a drawn page
+        # written in `font-['Inter']` renders in the browser's serif.
+        out.setdefault("typography", {})["fontFamilyBase"] = families.most_common(1)[0][0]
     return out
 
 

@@ -45,7 +45,7 @@ def test_generated_contract_is_present_and_is_the_blueprint():
     schema = json.loads(CONTRACT_PATH.read_text("utf-8"))
     assert schema["$schema"].startswith("http://json-schema.org/draft-07")
     assert set(schema["required"]) == {"schemaVersion", "application"}
-    assert len(schema["properties"]) == 41   # + pageCode, frameCode, flows, domainReference, mobile, nativeCode
+    assert len(schema["properties"]) == 42   # + pageCode, frameCode, flows, domainReference, mobile, nativeCode, drawnViews
 
 
 def test_minimal_blueprint_validates(svc):

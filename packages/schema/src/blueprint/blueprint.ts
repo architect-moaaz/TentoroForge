@@ -1379,6 +1379,87 @@ export const PageCode = z.object({
 });
 
 /**
+ * DRAWN VIEWS — A DESIGN CONVERTED TO REACT, BEFORE ANYTHING IS INFERRED FROM IT.
+ *
+ * A design connected as the specification is the page's markup, not a brief
+ * for a writer: one pilot's page writer, shown the frames and held to them,
+ * still re-authored every screen and drifted (D3, 2026-10-28). So each drawn
+ * frame is converted to a React view that only displays — its example
+ * content turned into typed props, its buttons into handlers — and never
+ * rewritten. What the view needs is its CONTRACT: the records it shows, the
+ * forms it collects and the actions it offers. The data model and the
+ * processes are generated to back that contract, and the page is attached to
+ * them by a binder that writes `load.ts` and wiring around the view
+ * (`services/drawn`).
+ */
+export const DrawnField = z.object({
+  /** The prop's key, camelCase: `seatsUsed`. */
+  name: z.string().min(1),
+  /** What the screen calls it: "Seats". */
+  label: z.string().default(""),
+  type: z.enum(["string", "text", "number", "money", "percent", "date", "datetime", "boolean",
+                "enum", "email", "phone", "url", "image", "id"]).default("string"),
+  /** For `enum`: the values the drawing shows (the pills, the chips). */
+  options: z.array(z.string()).optional(),
+  /** A field the form must be given. */
+  required: z.boolean().optional(),
+});
+
+export const DrawnSlot = z.object({
+  /** The prop's key: `tenants`, `selectedTenant`, `promoForm`. */
+  name: z.string().min(1),
+  /** `list`: rows of records; `record`: one record; `form`: what a person
+   *  enters; `value`: one figure or line the screen shows. */
+  kind: z.enum(["list", "record", "form", "value"]),
+  /** What the screen calls it: "Tenants", "Entitlements". */
+  label: z.string().default(""),
+  /** What one row, the record or the form holds. Empty for a `value`. */
+  fields: z.array(DrawnField).default([]),
+  /** For a `value`: its type. */
+  type: DrawnField.shape.type.optional(),
+});
+
+export const DrawnAction = z.object({
+  /** The handler prop: `onNewTenant`, `onAddOverride`. */
+  name: z.string().regex(/^on[A-Z]\w*$/),
+  /** The words on what is pressed: "New tenant". */
+  label: z.string().default(""),
+  /** `navigate`: to another screen; `open`: a dialog, drawer or tab of this
+   *  one; `submit`: sends a form; `run`: does something to a record. */
+  kind: z.enum(["navigate", "open", "submit", "run"]),
+  /** For `navigate` / `open`: the frame it leads to, when the prototype says. */
+  target: z.string().optional(),
+  /** The slot it acts on: the list whose row it is on, the form it submits. */
+  on: z.string().optional(),
+});
+
+export const DrawnContract = z.object({
+  data: z.array(DrawnSlot).default([]),
+  actions: z.array(DrawnAction).default([]),
+});
+
+export const DrawnView = z.object({
+  /** A frame's reference (`1:2`, `FIGMA-002/1:2`), `shell`, or `component:<Name>`. */
+  key: z.string().min(1),
+  kind: z.enum(["screen", "shell", "component"]),
+  /** The React component's name: `TenantsEntitlementsView`. */
+  name: z.string().min(1),
+  /** The frame it was converted from (a screen's own; a shell's or a
+   *  component's first). */
+  frame: z.string().optional(),
+  /** The component file, as written — the markup is the drawing's. */
+  code: z.string().min(1),
+  contract: DrawnContract.default({ data: [], actions: [] }),
+  /** The drawing's own example content, in the contract's shape: what the
+   *  view renders with before there is data, and the app's first sample rows. */
+  sample: z.record(z.string(), z.unknown()).default({}),
+  /** A hash of the deterministic conversion the view was made from, so a
+   *  frame changed in Figma is seen as changed. */
+  source: z.string().optional(),
+  ...artifactBase,
+});
+
+/**
  * A page as the phone shows it: one native screen per page, written as React
  * Native against the app's native SDK and kit (`templates/native`), beside the
  * web page's `PageCode`. One-to-one by design — the same Blueprint page, so the
@@ -3367,6 +3448,8 @@ export const Blueprint = z.object({
   pageCode: z.array(PageCode).default([]),
   /** One native screen per page, when `mobile.native.enabled` (see `NativeCode`). */
   nativeCode: z.array(NativeCode).default([]),
+  /** A design held as the specification, converted to React (see `DrawnView`). */
+  drawnViews: z.array(DrawnView).default([]),
   /** The frame files this application owns (see `FrameCode`). */
   frameCode: z.array(FrameCode).default([]),
 

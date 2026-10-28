@@ -601,6 +601,38 @@ def _nodes_from_markup(text: str) -> dict | None:
 _SCREEN_TYPES = ("FRAME", "COMPONENT", "COMPONENT_SET", "SECTION")
 
 
+def _chapter_labels(kids: list[dict]) -> list[tuple[float, str]]:
+    """The chapter headings a page or section is laid out under: short text
+    layers set beside the frames, not inside them ("1 · Operations & tenants").
+    ``[(top, words)]`` from the top down. A design of a hundred screens is
+    drawn in rows under such headings; without them every frame of one Figma
+    page was one group, and one module held seventy-four pages (D3 pilot)."""
+    out = []
+    for kid in kids:
+        if str(kid.get("type") or "").upper() != "TEXT" or kid.get("visible") is False:
+            continue
+        words = re.sub(r"\s+", " ", str(kid.get("characters") or kid.get("name") or "")).strip()
+        box = kid.get("absoluteBoundingBox") or {}
+        if words and len(words) <= 120 and isinstance(box, dict) and box.get("y") is not None:
+            out.append((float(box["y"]), words))
+    return sorted(out)
+
+
+def _in_chapter(group: str, node: dict, labels: list[tuple[float, str]]) -> str:
+    """``group`` narrowed to the chapter heading nearest above ``node``."""
+    if not labels or str(node.get("type") or "").upper() == "TEXT":
+        return group
+    box = node.get("absoluteBoundingBox") or {}
+    try:
+        top = float(box["y"])
+    except (KeyError, TypeError, ValueError):
+        return group
+    above = [words for y, words in labels if y <= top + 1]
+    if not above:
+        return group
+    return f"{group} / {above[-1]}" if group else above[-1]
+
+
 def _screen_nodes(payload: Any) -> list[tuple[str, str, dict]]:
     """``(Figma page, section, node)`` for every node, in document order.
 
@@ -630,15 +662,16 @@ def _screen_nodes(payload: Any) -> list[tuple[str, str, dict]]:
         kids = [c for c in node.get("children") or [] if isinstance(c, dict)]
         if kind == "CANVAS":
             canvas = name
+        labels = _chapter_labels(kids) if kind in ("CANVAS", "SECTION") else []
         if kind == "SECTION" and any(str(c.get("type") or "").upper() in _SCREEN_TYPES for c in kids):
             inner = f"{section} / {name}" if section and name else (name or section)
             for child in kids:
-                walk(child, canvas, inner)
+                walk(child, canvas, _in_chapter(inner, child, labels))
             return
         if node.get("id"):
             out.append((canvas, section, node))
         for child in kids:
-            walk(child, canvas, section)
+            walk(child, canvas, _in_chapter(section, child, labels))
 
     walk(payload, "", "")
     return out

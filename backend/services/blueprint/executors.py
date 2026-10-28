@@ -2453,7 +2453,35 @@ def reference_hold(doc: dict, node: str) -> str:
     )
 
 
+#: The steps that generate what drawn views need, shown every view's contract
+#: (`services.drawn.contract.digest`).
+DRAWN_READERS = frozenset({"data_model", "entity_fields", "workflows", "workflow_steps", "security",
+                           "page_contracts", "business_rules"})
+
+
 def build_prompt(
+    doc: dict, node: str, *, inline_schema: bool = False, inline_shapes: bool = True,
+    subject: str = "", feedback: str = "", references: Sequence[Path] = (),
+    output_dir: Any = None, brief: str = "", agent: str = "",
+) -> tuple[str, str]:
+    """Build (system, user) for a node — see :func:`_build_prompt`. A node
+    that backs a design built as drawn is shown every drawn view's contract,
+    in the part of the prompt its subjects share (it is the same for all)."""
+    system, user = _build_prompt(doc, node, inline_schema=inline_schema, inline_shapes=inline_shapes,
+                                 subject=subject, feedback=feedback, references=references,
+                                 output_dir=output_dir, brief=brief, agent=agent)
+    if node in DRAWN_READERS and doc.get("drawnViews"):
+        from services.drawn.contract import DIGEST_PREAMBLE, digest
+
+        drawn = digest(doc)
+        if drawn:
+            block = DIGEST_PREAMBLE + drawn
+            head, sep, tail = user.partition(CACHE_BREAK)
+            user = head + block + sep + tail if sep else user + block
+    return system, user
+
+
+def _build_prompt(
     doc: dict, node: str, *, inline_schema: bool = False, inline_shapes: bool = True,
     subject: str = "", feedback: str = "", references: Sequence[Path] = (),
     output_dir: Any = None, brief: str = "", agent: str = "",
@@ -4705,6 +4733,24 @@ def make_executor(
         if not getattr(critic, "accepts_images", False):
             critic = None
         def compose(doc: dict, page: dict) -> tuple[Any, list]:
+            # A DRAWN PAGE IS BOUND, NOT WRITTEN (`services.drawn.binder`): its
+            # views are the design's markup, and only load.ts and the page
+            # around them are written — never on a change Smith briefs, which
+            # edits the page like any other.
+            from services.drawn import binder as drawn_binder
+            if not getattr(spec, "brief", "") and drawn_binder.applies(doc, page):
+                tell(reasoning, f"Attaching {page.get('route')} to its data — the drawing stays as drawn.",
+                     "step", spec.node)
+                body, spent = drawn_binder.bind(doc, page, Path(svc.output_dir) / "app", client,
+                                                feedback=spec.feedback or "")
+                seed = body.pop("seed", None)
+                if seed:
+                    from services.drawn.seed import record
+                    with svc.lock:
+                        for line in record(svc, seed, page_id=str(page.get("id")),
+                                           app_root=str(Path(svc.output_dir) / "app")):
+                            tell(reasoning, f"Sample data from the drawing — {line}.", "step", spec.node)
+                return body, spent
             return ui_engineer.compose_page(
                 doc, page, Path(svc.output_dir) / "app", client,
                 feedback=spec.feedback or "", brief=getattr(spec, "brief", "") or "",
@@ -4712,8 +4758,21 @@ def make_executor(
                 critic=critic, reference=reference,
                 on_look=lambda v: _looked(svc, spec, page, v, reasoning))
 
+        from services.drawn.binder import NeedsFields
+
         try:
-            body, spent = compose(doc, page)
+            try:
+                body, spent = compose(doc, page)
+            except NeedsFields as need:
+                # WHAT THE DRAWING SHOWS, THE RECORDS HOLD. A drawn column no
+                # field backs is added to its record (no screens to surface it
+                # on: the drawing already shows it), then the page is bound again.
+                if not _add_needed_fields(page, need.fields, reasoning):
+                    raise
+                with svc.lock:
+                    doc = _copy.deepcopy(svc.doc)
+                page = next((p for p in doc.get("pages") or [] if str(p.get("id")) == spec.subject), page)
+                body, spent = compose(doc, page)
         except ui_engineer.NeedsWorkflow as need:
             # A SCREEN THAT NEEDS AN ACTION GETS IT, THEN IS WRITTEN. F&B's Edit
             # Category, Edit Menu Item and Incoming Orders, and SnapIt's
@@ -4735,6 +4794,45 @@ def make_executor(
         return AgentResult(task_id=spec.task_id, agent=spec.agent, confidence=0.9,
                            proposals=[ArtifactProposal(section="pageCode",
                                                        natural_key=spec.subject, body=body)])
+
+    def _convert_drawn(spec: TaskSpec) -> AgentResult:
+        """One frame of a design held as the specification as a React view
+        with its contract — or the shell, or every shared component (see
+        `services.drawn`). The frame's markup is converted, not written; the
+        one model call turns its example content into props."""
+        import copy as _copy
+
+        from services.drawn import convert
+        from services.llm_client import tell
+
+        with svc.lock:
+            doc = _copy.deepcopy(svc.doc)
+        prepared = convert.prepare(doc, svc.output_dir)
+        client = model.for_task(spec.node, spec.agent) if isinstance(model, ModelRouter) else model
+        spent: list = []
+        project = str((svc.doc.get("application") or {}).get("id", ""))
+        if spec.subject == convert.COMPONENTS_KEY:
+            rows = convert.component_rows(prepared)
+            report = convert.export_assets(prepared, svc.output_dir)
+            tell(reasoning, f"Kept {len(rows)} shared components and {report.get('saved', 0) + report.get('kept', 0)} "
+                 "icons and pictures from the design" + (f"; {len(report['missing'])} could not be rendered"
+                                                          if report.get("missing") else "") + ".", "step", spec.node)
+        elif spec.subject == convert.SHELL_KEY:
+            row = convert.shell_row(client, prepared, usage=spent)
+            rows = [row] if row else []
+            tell(reasoning, "Converted the frame every screen is drawn in." if rows
+                 else "The design draws no shared frame.", "step", spec.node)
+        else:
+            if spec.subject not in prepared.static:
+                raise ValueError(f"{spec.subject} has no stored drawing to convert")
+            tell(reasoning, f"Converting {prepared.headings.get(spec.subject) or spec.subject} to React.", "step", spec.node)
+            rows = [convert.screen_row(client, prepared, spec.subject, usage=spent)]
+        for u, elapsed in spent:
+            if usage is not None and u is not None:
+                usage.record(node=spec.node, agent=spec.agent, usage=u, elapsed_s=elapsed, project=project)
+        return AgentResult(task_id=spec.task_id, agent=spec.agent, confidence=0.9,
+                           proposals=[ArtifactProposal(section="drawnViews", natural_key=row["key"], body=row)
+                                      for row in rows])
 
     def _compose_native(spec: TaskSpec) -> AgentResult:
         """One page as a React Native screen (see ``native_engineer``): the web
@@ -4805,6 +4903,27 @@ def make_executor(
                 added.append(str(out.get("name") or out.get("workflow") or need))
         return added
 
+    def _add_needed_fields(page: dict, fields: list[dict], reasoning: Any) -> list[str]:
+        """Each field a drawn page showed with nothing behind it, added to its
+        record — the column only, under the document's lock. Returns what landed."""
+        from services.llm_client import tell
+        from services.smith.field_change import add_field
+        from services.smith.section_change import SectionChangeError
+
+        added: list[str] = []
+        with svc.lock:
+            for f in fields:
+                try:
+                    add_field(svc, str(f.get("entity")), {"name": f.get("name"), "type": f.get("type") or "string",
+                                                           "label": f.get("label") or ""}, surface=False)
+                except SectionChangeError as exc:
+                    tell(reasoning, f"Could not add {f.get('entity')}.{f.get('name')}: {exc}", "step", "page_code")
+                    continue
+                added.append(f"{f.get('entity')}.{f.get('name')}")
+                tell(reasoning, f"{page.get('route')} shows {f.get('label') or f.get('name')} — added it to "
+                     f"{f.get('entity')}.", "step", "page_code")
+        return added
+
     def _looked(svc: Any, spec: TaskSpec, page: dict, v: dict, reasoning: Any) -> None:
         """A look's verdict, told to whoever watches: the thoughts and the
         run ledger (from which the panel draws the page's score and picture)."""
@@ -4826,6 +4945,8 @@ def make_executor(
             pass
 
     def executor(spec: TaskSpec) -> AgentResult:
+        if spec.node == "drawn_views":
+            return _convert_drawn(spec)
         if spec.agent in ("ui_director", "ui_engineer"):
             return _compose_ui(spec)
         if spec.agent == "native_engineer":
