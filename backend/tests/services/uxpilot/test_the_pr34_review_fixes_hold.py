@@ -71,6 +71,7 @@ def test_a_designer_named_while_the_key_is_asked_for_is_a_change_of_mind():
     assert ui_designer.answer_in(ui_designer.USE_FORGE_INSTEAD, KEY_ASK) == "forge"
     assert ui_designer.answer_in("just use forge", KEY_ASK) == "forge"
     assert ui_designer.answer_in("figma then", KEY_ASK) == "figma"
+    assert ui_designer.answer_in("UX Pilot", KEY_ASK) == ""            # the one being set up: no choice
 
 
 def test_a_designer_named_out_of_the_blue_is_not_an_answer():

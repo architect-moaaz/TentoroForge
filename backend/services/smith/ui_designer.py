@@ -186,10 +186,13 @@ def answer_in(message: str, history: Iterable[tuple[str, str]]) -> str:
     from services.smith import figma_gate
 
     if is_key_prompt(text) or figma_gate.is_prompt(text) or figma_gate.is_check_pending(text):
-        # A change of mind at the key or design step: "use Forge instead", or another designer named.
+        # A change of mind at the key or design step: "use Forge instead", or ANOTHER designer named.
+        # Naming the one being set up ("UX Pilot" while its key is asked for) is not a choice.
         if _norm(message) == _norm(USE_FORGE_INSTEAD):
             return FORGE
-        return named(message)
+        choice = named(message)
+        current = UXPILOT if is_key_prompt(text) else FIGMA
+        return "" if choice == current else choice
     if not is_question(text):
         return ""
     return named(message)
