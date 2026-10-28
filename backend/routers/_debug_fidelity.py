@@ -164,13 +164,19 @@ async def fidelity_stats(since: str | None = None, _admin: PlatformUser = Depend
     avg_iters = round(iter_total / pages_scored, 2) if pages_scored else 0.0
     pass_rate = round(pass_count / pages_scored, 2) if pages_scored else 0.0
     avg_cost = round(cost_total / projects, 2) if projects else 0.0
+    # Cost per PAGE as well as per project: a project with many pages and one
+    # with a few are not comparable per project, but their page cost is.
+    avg_cost_per_page = round(cost_total / pages_scored, 2) if pages_scored else 0.0
     return {
         "projects": projects,
         "pages_scored": pages_scored,
         "pass_rate": pass_rate,
         "avg_iters": avg_iters,
-        "median_score": avg_score,  # using avg as proxy; median requires extra pass
+        # The mean design score, not the median — the name said median while the
+        # value was always the average, so the label on the dashboard misled.
+        "avg_score": avg_score,
         "avg_cost_usd": avg_cost,
+        "avg_cost_per_page_usd": avg_cost_per_page,
         "cap_exhausted": cap_exhausted,
         "iter_distribution": dict(iter_dist),
     }
