@@ -86,7 +86,11 @@
     "planner": "characters/idle/planner.png",
     "auth_agent": "characters/idle/auth_agent.png",
     "component_builder": "characters/idle/component_builder.png",
-    "indexer": "characters/idle/indexer.png"
+    "indexer": "characters/idle/indexer.png",
+    "nina": "characters/idle/nina.png",
+    "otto": "characters/idle/otto.png",
+    "trey": "characters/idle/trey.png",
+    "remy": "characters/idle/remy.png"
   },
   "characters_walk": {
     "walk_sheet": "characters/walk_sheet.png"
@@ -119,6 +123,10 @@
     "indexer": "characters/working/indexer.png",
     "ui_styler": "characters/working/ui_styler.png",
     "discovery": "characters/working/discovery.png",
-    "appmodel_manager": "characters/working/appmodel_manager.png"
+    "appmodel_manager": "characters/working/appmodel_manager.png",
+    "nina": "characters/working/nina.png",
+    "otto": "characters/working/otto.png",
+    "trey": "characters/working/trey.png",
+    "remy": "characters/working/remy.png"
   }
 }

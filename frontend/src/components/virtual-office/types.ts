@@ -333,6 +333,11 @@ const CAST: AgentInfo[] = [
   { id: "ui_engineer", name: "UI Engineer", spriteKey: "artist", room: "composition", role: "Writes each page in React and compiles it", color: "#E11D48" },
   { id: "page_template", name: "Page Layout", spriteKey: "agent_builder", room: "composition", role: "Lays out each page from its contract", color: "#DB2777" },
   { id: "a2ui_pages", name: "Page Composer", spriteKey: "component_builder", room: "composition", role: "Recomposes a screen Smith is asked to change", color: "#EC4899" },
+  // Drawn for the Foundry (2026-10-28): the four agents who had names but no face.
+  { id: "native_engineer", name: "Mobile Engineer", spriteKey: "nina", room: "composition", role: "Writes the phone screens", color: "#14B8A6" },
+  { id: "observer", name: "Reviewer", spriteKey: "otto", room: "qa", role: "Reads each piece of work as it lands", color: "#7C3AED" },
+  { id: "process_trials", name: "Process Tester", spriteKey: "trey", room: "qa", role: "Runs each process for real", color: "#DC2626" },
+  { id: "researcher", name: "Researcher", spriteKey: "remy", room: "discovery", role: "Studies the references in the Drafts Room", color: "#1E3A8A" },
   { id: "frontend", name: "Frontend Projection", spriteKey: "seed_generator", room: "composition", role: "Projects the page schemas", color: "#16A34A" },
 
   // ── Logic ─────────────────────────────────────────────────────────────
