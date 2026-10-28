@@ -31,6 +31,7 @@ import itertools
 import json
 import logging
 import re
+import time
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -372,6 +373,12 @@ def _sample_values(field: dict | None, nums: list[float], strs: list[str]) -> li
         base = {0.0, -1.0, 1.0, 100000.0}
         for n in nums:
             base |= {n - 1, n, n + 1, n - 0.5, n + 0.5}
+        # A value BETWEEN every two neighbours: n±0.5 lands past a literal
+        # less than 0.5 away, so `amount >= 0.01` and `amount <= 0` had no
+        # sample between them and 0.005 went unseen (PR #29 re-review).
+        # Where they are 1 or more apart, n+0.5 already lies between.
+        lits = sorted(set(nums))
+        base |= {(a + b) / 2 for a, b in zip(lits, lits[1:]) if b - a < 1}
         return sorted(base) + [None]
     if t == "boolean":
         return [True, False, None]
@@ -437,6 +444,12 @@ def _fill(value: Any, vars_: dict) -> Any:
 
 _JUDGED: dict[str, dict] = {}
 _JUDGED_MAX = 2000
+# A question the engine could not answer (it took too long, or there is no
+# node) is not asked again for a while: the Rules tab asks on every open, and
+# a large app paid the whole wait each time (PR #29 re-review). Not asked
+# means not known — never "the same", so nothing is folded on it.
+_UNJUDGED: dict[str, float] = {}
+_RETRY_AFTER = 600.0
 
 
 def unprovable(rule: dict, c: dict) -> str | None:
@@ -519,12 +532,12 @@ def _key(rule: dict, c: dict) -> str:
                       sort_keys=True, default=str)
 
 
-def judge_all(doc: dict, pairs: list[tuple[dict, dict]]) -> list[dict]:
+def judge_all(doc: dict, pairs: list[tuple[dict, dict]], *, timeout: float = 90) -> list[dict]:
     """Each (rule, candidate) judged, with ``same``: does the workflow's step
     say "go on" exactly when the rule lets the save through, on every sample
     save? One run of the app's engine for all of them; ``same`` is None when
     it cannot run. Answers are remembered: the same rule and step are the
-    same question."""
+    same question — and one it could not answer is left for `_RETRY_AFTER`."""
     from services.blueprint import rule_lab
     out: list[dict | None] = [None] * len(pairs)
     todo, conditions, saves = [], [], []
@@ -532,6 +545,9 @@ def judge_all(doc: dict, pairs: list[tuple[dict, dict]]) -> list[dict]:
         k = _key(rule, c)
         if k in _JUDGED:
             out[i] = {**c, **_JUDGED[k], "rule": str(rule.get("id"))}
+            continue
+        if time.monotonic() - _UNJUDGED.get(k, float("-inf")) < _RETRY_AFTER:
+            out[i] = {**c, "same": None, "rule": str(rule.get("id"))}
             continue
         why = unprovable(rule, c)
         if why:
@@ -551,13 +567,16 @@ def judge_all(doc: dict, pairs: list[tuple[dict, dict]]) -> list[dict]:
         saves += ss
     if todo:
         try:
-            ans = rule_lab.run({"op": "batch", "conditions": conditions, "saves": saves}, timeout=90)
+            ans = rule_lab.run({"op": "batch", "conditions": conditions, "saves": saves}, timeout=timeout)
         except rule_lab.LabUnavailable as exc:
             logger.warning("[rule-links] could not compare workflow checks with rules: %s", exc)
             ans = None
         for i, k, cases, at, n in todo:
             rule, c = pairs[i]
             if ans is None:
+                if len(_UNJUDGED) > _JUDGED_MAX:
+                    _UNJUDGED.clear()
+                _UNJUDGED[k] = time.monotonic()
                 out[i] = {**c, "same": None, "rule": str(rule.get("id"))}
                 continue
             cv = (ans.get("conditions") or [])[at:at + n]
@@ -630,12 +649,12 @@ def review(doc: dict, rule: dict) -> list[dict]:
     return judge(doc, rule, candidates(doc, rule))
 
 
-def review_all(doc: dict, rule_ids: set[str] | None = None) -> list[dict]:
+def review_all(doc: dict, rule_ids: set[str] | None = None, *, timeout: float = 90) -> list[dict]:
     """Every rule's candidate copies, judged in one go."""
     pairs = [(r, c) for r in _live(doc.get("businessRules"))
              if rule_ids is None or str(r.get("id")) in rule_ids
              for c in candidates(doc, r)]
-    return judge_all(doc, pairs) if pairs else []
+    return judge_all(doc, pairs, timeout=timeout) if pairs else []
 
 
 def _check_fields(doc: dict, rule: dict, c: dict) -> set[str]:

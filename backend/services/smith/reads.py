@@ -548,7 +548,7 @@ READS: tuple[tuple[str, str, dict[str, str]], ...] = (
      {"artifact_id": "string"}),
     ("rule_links",
      "Where business rules are checked in the workflows — the answer to \"is "
-     "this rule linked to that workflow?\", \"which rules does Log an expense "
+     "this rule linked to that workflow?\", \"which rules does this workflow "
      "check?\". A rule of a record is checked AUTOMATICALLY by every workflow "
      "step that saves that record (nobody connects it); this lists those steps "
      "per rule, the extra check steps someone added, and any workflow check of "

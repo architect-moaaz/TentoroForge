@@ -104,7 +104,7 @@ def test_a_check_the_samples_cannot_judge_is_never_folded_and_the_lab_is_not_ask
     steps = [{"key": "start", "type": "trigger", "next": ["chk"]}, _check("string length(title) >= 3", "ins"),
              _STOP, _INSERT]
     doc = _one(weaker, steps)
-    L._JUDGED.clear()
+    L._JUDGED.clear(); L._UNJUDGED.clear()
     judged = L.review_all(doc)
     assert [(c["same"], bool(c.get("unproven"))) for c in judged] == [(False, True)]
     assert L.fold_copies(copy.deepcopy(doc)) == []
@@ -119,7 +119,7 @@ def test_a_save_that_works_out_its_values_is_not_compared(monkeypatch):
     ins["config"]["values"]["amount"] = "{{amount}} * 2"
     doc = _one(_POSITIVE, [{"key": "start", "type": "trigger", "next": ["chk"]}, _check("amount > 0", "ins"),
                            _STOP, ins])
-    L._JUDGED.clear()
+    L._JUDGED.clear(); L._UNJUDGED.clear()
     assert [c.get("unproven") for c in L.review_all(doc)] == [
         "the save works out its values in a way the comparison can't follow"]
 
@@ -132,7 +132,7 @@ def test_the_samples_are_never_cut_short():
 
 @needs_node
 def test_the_reviewers_two_cases_on_the_real_engine():
-    L._JUDGED.clear()
+    L._JUDGED.clear(); L._UNJUDGED.clear()
     # The plain copy is still proven and folded…
     doc = _one(_POSITIVE, [{"key": "start", "type": "trigger", "next": ["chk"]}, _check("amount > 0", "ins"),
                            _STOP, _INSERT])
@@ -188,7 +188,7 @@ def test_the_builds_fold_is_recorded_with_a_version_to_go_back_to(tmp_path, monk
     v0, h0 = int(svc.doc.get("version") or 1), len(svc.doc.get("changeHistory") or [])
     projected = []
     monkeypatch.setattr(orchestrator, "_project_integration", lambda s, root: projected.append(s.doc))
-    L._JUDGED.clear()
+    L._JUDGED.clear(); L._UNJUDGED.clear()
     orchestrator._project_integration_of_a_build(svc, str(tmp_path / "app"))
     saved = json.loads((tmp_path / ".forge" / "blueprint" / "current.json").read_text())
     assert saved["version"] == v0 + 1 and len(saved["changeHistory"]) == h0 + 1
@@ -216,7 +216,7 @@ def test_smiths_own_turn_may_link_a_rule_but_still_waits_for_a_build(tmp_path, m
     doc = json.loads(path.read_text())   # the workflow's check is stricter than the rule: an old one
     next(w for w in doc["workflows"] if w["id"] == "FLOW-900")["steps"][0]["config"]["expression"] = "openingsCount >= 2"
     path.write_text(json.dumps(doc))
-    L._JUDGED.clear()
+    L._JUDGED.clear(); L._UNJUDGED.clear()
     monkeypatch.setattr(rules, "TAB_LOCK_WAIT", 0)
     monkeypatch.setattr(rules, "busy", lambda out: "smith")
     with pytest.raises(rules.RuleError):
@@ -229,3 +229,47 @@ def test_smiths_own_turn_may_link_a_rule_but_still_waits_for_a_build(tmp_path, m
     monkeypatch.setattr(rules, "busy", lambda out: "building")
     with pytest.raises(rules.RuleError):
         rules.attach(tmp_path, "RULE-900", workflow="FLOW-900", after=None, in_turn=True)
+
+
+def test_two_close_literals_get_a_sample_between_them():
+    """PR #29 re-review: `amount >= 0.01` against the rule `amount <= 0` had
+    no sample between 0 and 0.01, so the stricter check looked the same."""
+    values = [v for v in L._sample_values({"name": "amount", "type": "number"}, [0.01, 0.0], [])
+              if v is not None]
+    assert any(0 < v < 0.01 for v in values)
+    # Far-apart literals already have one between them; none are added there.
+    far = [v for v in L._sample_values({"name": "amount", "type": "number"}, [5.0], []) if v is not None]
+    assert all(b - a >= 0.5 for a, b in zip(far, far[1:]))
+
+
+@needs_node
+def test_a_check_stricter_by_a_hair_is_not_a_copy():
+    L._JUDGED.clear(); L._UNJUDGED.clear()
+    doc = _one(_POSITIVE, [{"key": "start", "type": "trigger", "next": ["chk"]}, _check("amount >= 0.01", "ins"),
+                           _STOP, _INSERT])
+    (judged,) = L.review_all(doc)
+    assert judged["same"] is False and 0 < judged["differs"]["amount"] < 0.01
+    assert L.fold_copies(copy.deepcopy(doc)) == []
+
+
+def test_a_comparison_the_engine_could_not_make_is_not_asked_again_at_once(monkeypatch):
+    """PR #29 re-review: a timed-out answer was not remembered, so a large app
+    waited for the engine on every open of its Rules tab."""
+    from services.blueprint import rule_lab
+    asked = []
+
+    def slow(*a, **k):
+        asked.append(k.get("timeout"))
+        raise rule_lab.LabUnavailable("the rule lab took too long")
+    monkeypatch.setattr(rule_lab, "run", slow)
+    doc = _one(_POSITIVE, [{"key": "start", "type": "trigger", "next": ["chk"]}, _check("amount > 0", "ins"),
+                           _STOP, _INSERT])
+    L._JUDGED.clear(); L._UNJUDGED.clear()
+    assert [c["same"] for c in L.review_all(doc, timeout=20)] == [None]
+    assert [c["same"] for c in L.review_all(doc, timeout=20)] == [None]
+    assert asked == [20], "asked once, with the wait the caller gave"
+    assert L.fold_copies(copy.deepcopy(doc)) == []  # not known is never folded
+    # After a while it is asked again.
+    monkeypatch.setattr(L, "_RETRY_AFTER", 0.0)
+    L.review_all(doc)
+    assert asked == [20, 90]

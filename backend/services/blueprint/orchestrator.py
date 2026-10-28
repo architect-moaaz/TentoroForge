@@ -3457,8 +3457,8 @@ def _project_integration_of_a_build(svc: BlueprintService, app_root: str) -> Non
     (services/rule_links). Only here, in the build that wrote the copies — a
     re-projection (catch-up, repair) writes what the document says and never
     changes the document behind a change record's back; an app built before
-    this has its copies handed over when its Business Rules tab is opened,
-    recorded."""
+    this is offered its copies on its Business Rules tab, and they are handed
+    over, recorded, when someone presses "Use the rules"."""
     before = svc.snapshot()
     try:
         from services.rule_links import fold_copies

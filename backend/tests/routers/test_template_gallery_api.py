@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import io
 import json
+import uuid
 from pathlib import Path
 
 import pytest
@@ -356,6 +357,47 @@ async def test_an_admins_review_copy_is_not_a_use(auth_client, org_id, super_adm
     assert r.status_code == 200
     assert (await super_admin_client.get(f"/api/projects/{review_copy['id']}")).status_code == 404
     assert (await auth_client.get(f"/api/projects/{ours['id']}")).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_an_admins_app_from_a_gallery_template_is_a_real_app(auth_client, org_id, super_admin_client):
+    """PR #29 re-review: an admin starting an app in their own organisation
+    from a template already in the Gallery was marked a test copy, and
+    deleted — database, domains and folder — when a later version was decided."""
+    builder, admin = auth_client, super_admin_client
+    src, v1 = await _ready_template(builder, org_id)
+    await builder.post(f"/api/project-templates/{v1['id']}/submit", json={})
+    await admin.post(f"/api/admin/template-requests/{v1['id']}/decision", json={"decision": "approve"})
+    admin_org = await _org(admin, "tentoro")
+    r = await admin.post(f"/api/orgs/{admin_org}/projects/from-project-template",
+                         json={"template_id": v1["id"], "name": "Our real app"})
+    assert r.status_code == 201, r.text
+    real = r.json()
+    # A real app is a real use.
+    assert (await builder.get(f"/api/project-templates/{v1['id']}")).json()["uses"] == 1
+
+    v2 = (await builder.post(f"/api/projects/{src['id']}/templates",
+                             json={"name": "Hiring desk", "description": GOOD_DESCRIPTION})).json()
+    await builder.post(f"/api/project-templates/{v2['id']}/screenshots",
+                       files={"file": ("s.png", _png(), "image/png")})
+    await builder.post(f"/api/project-templates/{v2['id']}/submit", json={})
+    for decision in ("reject", "approve"):
+        if decision == "approve":
+            await builder.post(f"/api/project-templates/{v2['id']}/submit", json={})
+        r = await admin.post(f"/api/admin/template-requests/{v2['id']}/decision",
+                             json={"decision": decision, "note": "Please add a second screenshot."})
+        assert r.status_code == 200, r.text
+        assert (await admin.get(f"/api/projects/{real['id']}")).status_code == 200
+
+    # Its own decision, run again, leaves it too.
+    from database import async_session
+    from routers.project_templates import _remove_test_copies
+    from models.project import Project
+    async with async_session() as db:
+        project = await db.get(Project, uuid.UUID(real["id"]))
+        assert "review_copy" not in (project.brief or {})["template"]
+        assert await _remove_test_copies(db, v1["id"]) == 0
+    assert (await admin.get(f"/api/projects/{real['id']}")).status_code == 200
 
 
 @pytest.mark.asyncio

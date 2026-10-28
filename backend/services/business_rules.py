@@ -333,7 +333,9 @@ def read(output_dir: str | Path) -> dict:
     doc = svc.doc
     why = busy(output_dir)
     from services import rule_links
-    judged = rule_links.review_all(doc) if rule_links.has_candidates(doc) else []
+    # The tab opens without waiting long for the engine: what it cannot answer
+    # in 20 s is shown as not compared, and not asked again for a while.
+    judged = rule_links.review_all(doc, timeout=20) if rule_links.has_candidates(doc) else []
     copies = rule_links.stale(doc, judged)
     rules = [view(r, doc, copies) for r in _live(doc.get("businessRules"))]
     names = {str(r.get("id")): r.get("name") for r in _live(doc.get("businessRules"))}

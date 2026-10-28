@@ -665,7 +665,8 @@ async def create_from_project_template(org_id: uuid.UUID, req: UseTemplateReques
 
     Any template the person may see can be used: their own organisation's in
     any state, and everyone's in the Gallery. A Tentoro admin's copy of one
-    under review is a test copy — kept, never counted as a use."""
+    waiting for review is a test copy — removed once it is decided, never
+    counted as a use."""
     if not await gallery.membership(db, str(org_id), user):
         raise HTTPException(status_code=403, detail="You are not a member of this organisation.")
     meta = templates.get(req.template_id)
@@ -677,7 +678,16 @@ async def create_from_project_template(org_id: uuid.UUID, req: UseTemplateReques
     # organisation using its template, or a Tentoro admin trying one, is not a
     # use: counted, a builder could lift their template up the "popular" order
     # by using it themselves.
-    is_review = who.in_org or who.is_admin
+    # A Tentoro admin's copy is a TEST COPY only while the template waits for
+    # their review, from outside its organisation. An admin starting an app
+    # from a template already in the Gallery is a real app and a real use
+    # (PR #29 re-review: marked a test copy, it was deleted when a later
+    # version was decided).
+    review_copy = bool(who.is_admin and not who.in_org
+                       and gallery.status_of(row) == gallery.PENDING)
+    # Not a use either: an admin looking at one not in the Gallery.
+    is_review = who.in_org or review_copy or bool(
+        who.is_admin and gallery.status_of(row) != gallery.APPROVED)
     project = await create_project(org_id=org_id, owner_id=user.id, name=req.name.strip(),
                                    description=meta.get("description") or "", db=db)
     from routers.blueprint_generate import _output_dir
@@ -688,11 +698,8 @@ async def create_from_project_template(org_id: uuid.UUID, req: UseTemplateReques
         import shutil
         shutil.rmtree(_output_dir(project), ignore_errors=True)  # no orphan folder
         raise HTTPException(status_code=400, detail=str(exc))
-    # A Tentoro admin's copy of a template they review — from outside its
-    # organisation — is a TEST COPY: marked, so it is removed once the
-    # request is decided (PR #29 review: they were never cleaned up). Never
-    # an organisation's own use, which is a real app.
-    review_copy = bool(who.is_admin and not who.in_org)
+    # The test copy is marked, so it is removed once the request is decided
+    # (PR #29 review: they were never cleaned up).
     project.brief = {**(project.brief or {}),
                      "template": {"id": meta["id"], "name": meta["name"],
                                   "version": int(meta.get("version") or 1),

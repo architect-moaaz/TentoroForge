@@ -240,7 +240,7 @@ _REPLACE_OLD_CHECK = re.compile(r"\b(replace|instead of|take (?:it|that|the old 
 
 
 def link_rule(ctx: Ctx, u: dict) -> Outcome:
-    """\"Connect the manager-note rule to Log an expense\": the rule is often
+    """\"Connect the deposit rule to Book a room\": the rule is often
     linked already — every workflow step that saves its record checks it — and
     that is said, with the step. A workflow's own check that no longer matches
     the rule is handed to the rule. Otherwise the rule becomes an extra check
