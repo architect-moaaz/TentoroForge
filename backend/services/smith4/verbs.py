@@ -678,8 +678,21 @@ def connect_service(ctx: Ctx, u: dict) -> Outcome:
 
 
 def disconnect_design(ctx: Ctx, u: dict) -> Outcome:
-    from services.smith.design_disconnect import disconnect_and_recompose
-    out = disconnect_and_recompose(ctx.out, ctx.message, reasoning=ctx.reasoning)
+    from services.blueprint.service import BlueprintService
+    from services.smith.design_disconnect import disconnect_and_recompose, which
+    # ONE DESIGN OF SEVERAL, BY ITS ID OR ITS LINK. With more than one
+    # connected and neither named, the person is asked which — dropping every
+    # design when they meant one would undo screens they still want drawn.
+    said = " ".join(str(x) for x in (ctx.message, _s(u, "figma_url"), _s(u, "uxpilot_ref")) if x)
+    source, sources = which(BlueprintService.load(output_dir=str(ctx.out)), said)
+    everything = bool(re.search(r"\b(all|every|both)\b", str(ctx.message or ""), re.I))
+    if not source and len(sources) > 1 and not everything:
+        return Outcome(status="asked", options=[
+            f"{s['id']} — {s.get('name') or s.get('url') or s.get('fileKey')}" for s in sources
+        ] + ["All of them"], said="This application holds " + str(len(sources)) + " designs. "
+             "Which should I disconnect?")
+    out = disconnect_and_recompose(ctx.out, ctx.message, reasoning=ctx.reasoning,
+                                   source="" if everything else source)
     if not out.get("applied"):
         return Outcome(status="no_op", said=str(out.get("reason") or "No design is connected."))
     sources = ", ".join(out.get("sources") or []) or "the design"
@@ -736,7 +749,15 @@ def connect_figma(ctx: Ctx, u: dict) -> Outcome:
             "the application is built around them — usually more pages than frames.\n\n"
             "Say “specification” or “reference”."))
     try:
-        out = connect(ctx.out, figma_url=url, token_env=token_env, treat_as=treat_as)
+        # A LARGE FILE TAKES MINUTES; SAY HOW FAR IT HAS GOT.
+        from services.llm_client import tell
+
+        def _progress(read: int, total: int) -> None:
+            if total > 40:
+                tell(ctx.reasoning, f"Read {read} of {total} screens from Figma", "step")
+
+        out = connect(ctx.out, figma_url=url, token_env=token_env, treat_as=treat_as,
+                      progress=_progress)
     except FigmaConnectError as exc:
         return Outcome(status="needs_user", said=str(exc))
     except Exception as exc:  # noqa: BLE001

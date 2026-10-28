@@ -42,14 +42,16 @@ import {
 
 /**
  * Who designs the screens: Forge's own composer (A2UI against the component
- * catalog) or UX Pilot, generating each page from its brief.
+ * catalog), UX Pilot generating each page from its brief, or the person's own
+ * design in Figma (each page that has a frame is written from it; a page with
+ * none is Forge's).
  *
- * A closed pair rather than a free string so the page-layouts node can
+ * A closed set rather than a free string so the page-layouts node can
  * dispatch on it without interpretation, and so a value nobody produces
  * cannot be written. `forge` is what every application built before the
  * choice existed was, and is what an unset value means.
  */
-export const UiDesigner = z.enum(["forge", "uxpilot"]);
+export const UiDesigner = z.enum(["forge", "uxpilot", "figma"]);
 
 /**
  * Where this application's design language comes from: the company's own,
@@ -294,6 +296,12 @@ export const Module = z.object({
    * working application rather than a second application beside it.
    */
   deferred: z.boolean().optional(),
+  /**
+   * The connected design's group this module is (`designSources[].frames[].group`),
+   * by its exact name. Set when the design is drawn in groups; every frame of
+   * the group becomes a page of this module.
+   */
+  designGroup: z.string().optional(),
   ...artifactBase,
 });
 
@@ -2510,6 +2518,15 @@ export const DesignSourceFrame = z.object({
    * routes by (§48, §49).
    */
   shows: z.string().optional(),
+  /**
+   * THE DESIGNER'S OWN GROUPING: the Figma section the frame sits in, else
+   * the Figma page it is on. A file of five hundred screens is organised by
+   * whoever drew it — Billing on one page, Onboarding in a section — and that
+   * is an enumeration made on purpose, not a guess. `ux_architecture` makes
+   * one module per group (`modules[].designGroup`), and the frame's page is
+   * put in that module, so a large design builds module by module.
+   */
+  group: z.string().optional(),
 });
 
 export const DesignSource = z.object({

@@ -97,9 +97,12 @@ const config: Config = {
       spacing: tailwindTokens.spacing,
       // The design's families (tokens.css). `font-heading` is the display face
       // for page and card titles; `font-sans` is the body.
+      // A var() WITH A FALLBACK: an app whose design names no body face has no
+      // `--font-body`, and a bare var() makes the whole font-family invalid at
+      // computed time, so every page fell back to the browser's serif (PR #34 review).
       fontFamily: {
-        sans: ["var(--font-body)", "ui-sans-serif", "system-ui", "sans-serif"],
-        heading: ["var(--font-heading)", "var(--font-body)", "ui-sans-serif", "system-ui", "sans-serif"],
+        sans: ["var(--font-body, ui-sans-serif)", "ui-sans-serif", "system-ui", "sans-serif"],
+        heading: ["var(--font-heading, var(--font-body, ui-sans-serif))", "ui-sans-serif", "system-ui", "sans-serif"],
       },
       fontSize: tailwindTokens.fontSize,
       borderRadius: {

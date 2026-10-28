@@ -54,7 +54,8 @@
           "type": "string",
           "enum": [
             "forge",
-            "uxpilot"
+            "uxpilot",
+            "figma"
           ]
         },
         "designLanguage": {
@@ -598,6 +599,9 @@
           },
           "deferred": {
             "type": "boolean"
+          },
+          "designGroup": {
+            "type": "string"
           },
           "status": {
             "$ref": "#/properties/product/properties/capabilities/items/properties/status"
@@ -3262,6 +3266,9 @@
                   "default": true
                 },
                 "shows": {
+                  "type": "string"
+                },
+                "group": {
                   "type": "string"
                 }
               },

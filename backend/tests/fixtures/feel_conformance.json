@@ -424,5 +424,47 @@
     "expr": "date($today).year > 2000",
     "data": {},
     "expected": true
+  },
+  {
+    "expr": "matches(title, \".*\\S.*\")",
+    "data": {
+      "title": "Dune"
+    },
+    "expected": true
+  },
+  {
+    "expr": "matches(title, \".*\\S.*\")",
+    "data": {
+      "title": "   "
+    },
+    "expected": false
+  },
+  {
+    "expr": "matches(code, \"^\\d{3}$\")",
+    "data": {
+      "code": "042"
+    },
+    "expected": true
+  },
+  {
+    "expr": "matches(code, \"^\\d{3}$\")",
+    "data": {
+      "code": "abc"
+    },
+    "expected": false
+  },
+  {
+    "expr": "name = \"say \\\"hi\\\"\"",
+    "data": {
+      "name": "say \"hi\""
+    },
+    "expected": true
+  },
+  {
+    "expr": "path = \"a\\\\b\"",
+    "data": {
+      "path": "a\\b"
+    },
+    "expected": true
   }
 ]

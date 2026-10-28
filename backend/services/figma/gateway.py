@@ -84,7 +84,15 @@ FigmaErrorKind = Literal[
     "tool_error",   # Figma ran the tool and reported failure
     "protocol",     # response was not the shape the SDK promises
     "unavailable",  # the MCP SDK is not installed
+    "rate_limited", # Figma kept answering 429 after every wait it asked for
 ]
+
+#: How deep the REST listing of a whole file reads: pages, their frames and
+#: sections, the frames inside sections, and one level more for a section
+#: inside a section. A screen's own insides come from its own fetch.
+LISTING_DEPTH_FILE = 4
+#: The same, from a linked page, section or frame rather than the file.
+LISTING_DEPTH_NODE = 3
 
 
 class FigmaGatewayError(RuntimeError):
@@ -135,6 +143,7 @@ class FigmaGateway:
 
     calls: list[CallRecord] = field(default_factory=list)
     _last_call_at: float = field(default=0.0, repr=False)
+    _gap_lock: asyncio.Lock | None = field(default=None, repr=False)
 
     # -- §98 authentication -------------------------------------------------
 
@@ -237,10 +246,13 @@ class FigmaGateway:
 
     async def _via_rest(self, tool: str, file_key: str, node_id: str | None, *,
                         after: FigmaGatewayError | None = None) -> list[dict[str, Any]]:
+        from services.figma_client import FigmaRateLimited
         try:
             blocks = await self._rest_fallback(tool, file_key, node_id)
         except FigmaGatewayError:
             raise
+        except FigmaRateLimited as exc:
+            raise FigmaGatewayError("rate_limited", str(exc)) from exc
         except Exception as rest_exc:  # noqa: BLE001 — mapped, not swallowed
             raise FigmaGatewayError(
                 "unreachable", f"{tool}: MCP {after.kind if after else '-'}; "
@@ -267,7 +279,18 @@ class FigmaGateway:
         if not token:
             raise FigmaGatewayError("auth", f"no Figma token under {self.credential.ref!r}")
         if tool == "get_metadata":
-            document = await fetch_figma_node(file_key, node_id or "0:1", token)
+            # THE WHOLE FILE, NOT ITS FIRST PAGE. A link with no node id asked
+            # for node "0:1" — the first page — so a file whose screens sit on
+            # ten pages read as the screens of one. A listing is a few levels
+            # deep: the frames and sections, not every frame's insides, which
+            # come per screen and would make a large file's listing enormous.
+            if not node_id:
+                from services.figma_client import fetch_figma_file
+                body = await fetch_figma_file(file_key, token, depth=LISTING_DEPTH_FILE)
+                document = (body or {}).get("document") or {}
+            else:
+                document = await fetch_figma_node(file_key, node_id, token,
+                                                  depth=LISTING_DEPTH_NODE)
             if not document:
                 raise FigmaGatewayError("tool_error", f"REST returned no node {node_id!r}")
             return [{"type": "structured", "data": document}]
@@ -306,6 +329,60 @@ class FigmaGateway:
             raise FigmaGatewayError("tool_error", f"REST returned no node {node_id!r}")
         return document
 
+    @property
+    def rest_preferred(self) -> bool:
+        """The REST API has answered for this session: read in batches from it."""
+        return self.rest_fallback and self._rest_preferred
+
+    async def rest_nodes(self, *, file_key: str, node_ids: list[str]) -> dict[str, dict]:
+        """Many frames' REST node documents, several per request.
+
+        `rest_node` once per frame is five hundred requests for a file of five
+        hundred screens, against a token allowed a few dozen a minute. The
+        nodes endpoint takes many ids, so this is twenty-five. A frame the API
+        returns nothing for maps to ``{}``; a rate limit that outlasts every
+        wait raises ``rate_limited`` so the read can stop and carry on later.
+        """
+        from services.figma_client import FigmaRateLimited, fetch_figma_nodes
+
+        token = self.resolver.resolve(self.credential.ref)
+        if not token:
+            raise FigmaGatewayError("auth", f"no Figma token under {self.credential.ref!r}")
+        started = time.monotonic()
+        try:
+            out = await fetch_figma_nodes(file_key, list(node_ids), token)
+        except FigmaRateLimited as exc:
+            self._record("rest_nodes", file_key, None, started, ok=False, error_kind="rate_limited")
+            raise FigmaGatewayError("rate_limited", str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001 — mapped, not swallowed
+            self._record("rest_nodes", file_key, None, started, ok=False, error_kind="unreachable")
+            raise FigmaGatewayError("unreachable", f"{type(exc).__name__}: {exc}") from exc
+        self._record("rest_nodes", file_key, f"{len(node_ids)} frames", started, ok=True)
+        return out
+
+    async def rest_images(self, *, file_key: str, node_ids: list[str]) -> dict[str, bytes]:
+        """``{node id: png}`` for many frames: one render request per sixty
+        frames, then the downloads from Figma's CDN several at a time."""
+        from services.figma_client import (
+            FigmaRateLimited, download_images, fetch_figma_image_urls,
+        )
+
+        token = self.resolver.resolve(self.credential.ref)
+        if not token:
+            raise FigmaGatewayError("auth", f"no Figma token under {self.credential.ref!r}")
+        started = time.monotonic()
+        try:
+            urls = await fetch_figma_image_urls(file_key, list(node_ids), token,
+                                                format="png", scale=1.0)
+        except FigmaRateLimited as exc:
+            self._record("rest_images", file_key, None, started, ok=False, error_kind="rate_limited")
+            raise FigmaGatewayError("rate_limited", str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001
+            self._record("rest_images", file_key, None, started, ok=False, error_kind="tool_error")
+            raise FigmaGatewayError("tool_error", f"{type(exc).__name__}: {exc}") from exc
+        self._record("rest_images", file_key, f"{len(node_ids)} frames", started, ok=True)
+        return await download_images(urls)
+
     async def _invoke(self, tool: str, args: dict[str, Any]) -> list[dict[str, Any]]:
         try:
             from mcp import ClientSession
@@ -340,12 +417,18 @@ class FigmaGateway:
     # -- §98 rate limits and logging ---------------------------------------
 
     async def _respect_rate_limit(self) -> None:
+        """Space calls `min_interval_s` apart — under a lock, because screens
+        are read several at a time and each would otherwise see the same gap
+        and go at once."""
         if self.min_interval_s <= 0:
             return
-        gap = time.monotonic() - self._last_call_at
-        if self._last_call_at and gap < self.min_interval_s:
-            await asyncio.sleep(self.min_interval_s - gap)
-        self._last_call_at = time.monotonic()
+        if self._gap_lock is None:
+            self._gap_lock = asyncio.Lock()
+        async with self._gap_lock:
+            gap = time.monotonic() - self._last_call_at
+            if self._last_call_at and gap < self.min_interval_s:
+                await asyncio.sleep(self.min_interval_s - gap)
+            self._last_call_at = time.monotonic()
 
     def _record(self, tool, file_key, node_id, started, *, ok, error_kind="") -> None:
         record = CallRecord(

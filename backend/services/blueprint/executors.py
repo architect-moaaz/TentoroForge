@@ -2727,8 +2727,29 @@ def build_prompt(
         # instruction was arguing with the question: a free list of pages admits
         # a filtered page as a good answer. Slots remove the room instead.
         from services.blueprint.page_planner import (
+            FEATURES_PART, is_page_set_part, page_set_part_prompt, page_set_parts,
             page_slot_prompt, page_slots,
         )
+
+        if subject and is_page_set_part(subject):
+            # ONE PART OF A PAGE SET TOO LARGE FOR ONE REPLY. What every part
+            # shares — the Blueprint — first, so the parts read it from the
+            # cache; this part's question and slots after the break.
+            user = (
+                "Here is the Blueprint the page set is derived from.\n\n```json\n"
+                + json.dumps(context_for(doc, agent), indent=2, sort_keys=True)
+                + "\n```" + CACHE_BREAK
+                + page_set_part_prompt(doc, subject) + "\n\n```json\n"
+                + json.dumps(page_set_parts(doc).get(subject, []), indent=2) + "\n```"
+            )
+            if subject != FEATURES_PART:
+                user += ("\n\nEVERY page you author carries `figmaFrame`, set to the "
+                         "`figmaFrame` of the slot it answers.")
+            if brief:
+                user += "\n\nSmith's brief for this call — what to change and what to keep:\n\n" + brief
+            if feedback:
+                user += "\n\nYour previous attempt was rejected:\n\n" + feedback
+            return system, user
 
         user = (
             page_slot_prompt(doc) + "\n\n```json\n"
@@ -2756,7 +2777,7 @@ def build_prompt(
             # specification a page without one is a screen nobody drew.
             user += (
                 "\n\nEVERY page you author must carry `figmaFrame`, set to the "
-                "`nodeId` of the slot it answers. A page without one is a screen "
+                "`figmaFrame` of the slot it answers. A page without one is a screen "
                 "nobody drew, and this design is the specification."
             )
         elif doc.get("designSources"):
@@ -2771,7 +2792,7 @@ def build_prompt(
                 "\n\nA DESIGN IS CONNECTED AS A REFERENCE. Its frames are the "
                 "first slots above, each carrying the `figmaFrame` it must be "
                 "built from. Every page answering one of those slots must "
-                "carry that `nodeId` \u2014 it is how the screen is built from "
+                "carry that `figmaFrame` \u2014 it is how the screen is built from "
                 "the drawing rather than composed from components, and it is "
                 "the part of this application somebody actually drew.\n\n"
                 "Pages answering the entity features OMIT `figmaFrame` "
@@ -2895,6 +2916,32 @@ def build_prompt(
                           "to that entry and is never a heading. Say nothing about "
                           "entries you leave out; do not invent any.")
             return _describe_chrome(side)
+
+        # THE DESIGN IS DRAWN IN GROUPS, AND EACH GROUP IS A MODULE. A file of
+        # hundreds of screens is organised by whoever drew it — a Figma page
+        # or section per part of the product. That is an enumeration made on
+        # purpose, so it is given as the module set rather than left to be
+        # rediscovered: one module per group, saying which group it is, and
+        # the planner puts every frame of the group in it.
+        from services.blueprint.page_planner import design_groups
+
+        groups = design_groups(doc)
+        if groups:
+            counts: dict[str, int] = {}
+            for src in doc.get("designSources") or []:
+                for frame in src.get("frames") or []:
+                    g = str(frame.get("group") or "").strip()
+                    if g and frame.get("looksLikeScreen", True):
+                        counts[g] = counts.get(g, 0) + 1
+            user += (
+                "\n\nTHE CONNECTED DESIGN IS DRAWN IN GROUPS — the designer's own "
+                "Figma pages and sections. Each is a module: give every group "
+                "below exactly one module, with `designGroup` set to the group's "
+                "name exactly as written, and name the module for what the group "
+                "is. Modules the design does not draw (settings, administration) "
+                "may still be added, without a `designGroup`.\n\n"
+                + "".join(f"  - {g} ({counts.get(g, 0)} screens)\n" for g in groups)
+            )
 
         if drawn:
             user += (
@@ -3429,7 +3476,7 @@ _PINNED_PAGE_FIELDS: tuple[str, ...] = ("id", "route", "figmaFrame", "module", "
                                         "menuEntry")
 
 
-def pin_page_set(result: AgentResult) -> None:
+def pin_page_set(result: AgentResult, doc: dict | None = None) -> None:
     """Keep the declaration to what it declares.
 
     The page-set call is asked for routes and patterns and told to write
@@ -3444,11 +3491,25 @@ def pin_page_set(result: AgentResult) -> None:
     violation is a fact about the model that must surface, not be tidied.
     """
     result.proposals = [p for p in result.proposals if p.section != "widgets"]
+    # A DRAWN FRAME'S MODULE IS THE DESIGNER'S GROUP. The slot says which
+    # module that is (`page_planner.frame_slots`); like `figmaFrame` itself it
+    # is the design's decision, not this call's.
+    frame_modules: dict[str, str] = {}
+    if doc:
+        from services.blueprint.page_planner import page_slots
+        try:
+            frame_modules = {str(slot["figmaFrame"]): str(slot["module"]) for slot in page_slots(doc)
+                             if slot.get("figmaFrame") and slot.get("module")}
+        except Exception:  # noqa: BLE001 — the pin is a convenience, never the answer
+            frame_modules = {}
     for proposal in result.proposals:
         if proposal.section != "pages":
             continue
         proposal.body = {k: v for k, v in (proposal.body or {}).items()
                          if k in _DECLARED_PAGE_FIELDS}
+        frame = str(proposal.body.get("figmaFrame") or "")
+        if frame in frame_modules:
+            proposal.body["module"] = frame_modules[frame]
         # A SCREEN'S RECORD IS ITS MAIN SECTION'S, as the declaration is told.
         # Left unsaid, the screen had no record at all: its contract's facts
         # could not resolve (`related` needs one) and seven of ToroCommerce's
@@ -4613,6 +4674,28 @@ def make_executor(
         current = next((row for row in doc.get("pageCode") or []
                         if str(row.get("page")) == spec.subject), None)
         tell(reasoning, f"Writing {page.get('route')} in React.", "step", spec.node)
+        # THE DESIGNER THE PERSON CHOSE (`application.uiDesigner`, or this page's
+        # `designedBy`). When it is UX Pilot, the page's design is fetched here —
+        # outside the document's lock, since it is minutes of network, and from
+        # the ledger when its brief has not changed, so a rebuild spends nothing —
+        # and the writer adapts it. A change to an existing page is made with
+        # edits, not redrawn, so it never asks.
+        reference = None
+        if not getattr(spec, "brief", ""):
+            from services.figma import react_reference as figma_pages
+            from services.uxpilot import generate as uxpilot_pages
+
+            # A FRAME A PERSON DREW WINS, as it does for the schema pages: the page that has a
+            # `figmaFrame` stored in a connected design is adapted from that frame, whoever else
+            # was asked. Every other page — no frame, or its frame unreadable — goes on to the
+            # chosen designer exactly as before.
+            reference, said = figma_pages.reference_for(doc, page, svc.output_dir)
+            if said:
+                tell(reasoning, said, "step", spec.node)
+            if reference is None:
+                reference, said = uxpilot_pages.reference_for(doc, page, svc.output_dir)
+                if said:
+                    tell(reasoning, said, "step", spec.node)
         # THE PAGE IS LOOKED AT AS IT IS WRITTEN (`page_look`): the reviewer
         # is the page reviewer's tier, and only a client that can see an
         # image can review one.
@@ -4624,7 +4707,7 @@ def make_executor(
                 doc, page, Path(svc.output_dir) / "app", client,
                 feedback=spec.feedback or "", brief=getattr(spec, "brief", "") or "",
                 current=current if (spec.feedback or getattr(spec, "brief", "")) else None,
-                critic=critic,
+                critic=critic, reference=reference,
                 on_look=lambda v: _looked(svc, spec, page, v, reasoning))
 
         try:
@@ -4868,7 +4951,7 @@ def make_executor(
                 with svc.lock:
                     pin_workflow_identity(svc, spec.subject, parsed)
             elif spec.node == "page_contracts":
-                pin_page_set(parsed)
+                pin_page_set(parsed, svc.doc)
             elif spec.node == "page_details":
                 with svc.lock:
                     pin_page_identity(svc, spec.subject, parsed)

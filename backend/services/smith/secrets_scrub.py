@@ -27,6 +27,9 @@ MASK = "[secret removed — give me the NAME of the variable instead]"
 #: (pattern, what it is) — the second half is documentation, not behaviour.
 _PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\bfigd_[A-Za-z0-9_-]{8,}"), "Figma personal access token"),
+    # The shape `uxpilot/credentials.py` recognises. Asked for a key, a person
+    # pastes it into the chat box as often as into the key field.
+    (re.compile(r"\bep_[A-Za-z0-9_-]{12,}"), "UX Pilot API key"),
     (re.compile(r"\bgh[pousr]_[A-Za-z0-9]{16,}"), "GitHub token"),
     (re.compile(r"\bgithub_pat_[A-Za-z0-9_]{16,}"), "GitHub fine-grained token"),
     (re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{10,}"), "Slack token"),

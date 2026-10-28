@@ -329,6 +329,14 @@ FRAME_FILES: tuple[str, ...] = (
     "src/app/(dashboard)/OrgSwitcher.tsx", "src/app/(dashboard)/OutsideOrganisation.tsx",
     "src/components/PublicPageFrame.tsx", "src/components/PublicNavLinks.tsx",
     "src/components/AppNavigator.tsx",
+    # Every coded page's `loading.tsx` imports it (`app_sdk.loading_module`). It
+    # came only with a build's scaffold or an import completion, and a page
+    # Smith writes later (`project_code_pages`, straight from a page edit)
+    # completes no imports: an app that had no coded page when its catch-up ran
+    # got one whose loading file imported a component it did not have, and that
+    # route was "Module not found" (PR #34 review). Written with the frame, it
+    # is always there.
+    "src/components/PageSkeleton.tsx",
 )
 
 

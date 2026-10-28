@@ -94,9 +94,11 @@ import {
   type RunEvent as RunEventT,
   type RunThought,
   type BlueprintRun,
+  type SecretField,
 } from "@/hooks/useBlueprintRun";
 import { authFetch } from "@/lib/api";
 import { useSmithDraftStore } from "@/stores/smithDraft";
+import { SecretCard } from "./SecretCard";
 
 /** §107 step 1 — what Smith says before the user says anything. */
 type Greeting = {
@@ -202,6 +204,8 @@ interface Message {
   id?: string;
   /** A self-heal of an error the running app hit — drawn as its own card. */
   selfHeal?: SelfHealMetadata;
+  /** A field to fill in the chat (an API key): shown as a masked box, never sent as a message. */
+  secret?: SecretField;
 }
 
 /** A transcript row as the panel shows it. */
@@ -220,6 +224,8 @@ function messageOf(r: Record<string, unknown>): Message {
     status: heal ? undefined : (meta.status as string) || undefined,
     at: r.created_at ? Date.parse(String(r.created_at)) : Date.now(),
     selfHeal: heal,
+    // A field to fill in the chat (an API key): never part of the text, only its description.
+    secret: (meta.secret as SecretField) ?? undefined,
   };
 }
 
@@ -800,6 +806,7 @@ export function SmithPanel({
         role: "smith" as const,
         text: x.text,
         options: x.options,
+        secret: x.secret,
         diffSummary: x.diffSummary,
         status: x.status,
         at: Date.now(),
@@ -1211,6 +1218,12 @@ export function SmithPanel({
               <UpdateCard text={m.text} files={m.diffSummary || filesNamed(m.text).join(", ")} />
             ) : (
               <SmithProse text={m.text} />
+            )}
+
+            {m.secret && i === messages.length - 1 && (
+              // A key typed here goes to the organisation's integrations, not into the transcript;
+              // only the last message offers it, so a reloaded history never shows a stale box.
+              <SecretCard field={m.secret} disabled={busy} onSaved={sendText} />
             )}
 
             {m.options && m.options.length > 0 && (

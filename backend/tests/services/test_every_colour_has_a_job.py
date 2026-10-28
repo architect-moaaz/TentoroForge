@@ -129,7 +129,7 @@ def test_both_faces_are_loaded_and_applied(tmp_path):
 def test_tailwind_exposes_the_jobs_and_the_faces():
     src = (_TEMPLATE / "tailwind.config.ts").read_text()
     for needle in ("var(--accent-subtle", "var(--accent-subtle-foreground", "var(--inverse",
-                   "var(--inverse-foreground", "heading: [\"var(--font-heading)\"", "sans: [\"var(--font-body)\""):
+                   "var(--inverse-foreground", "heading: [\"var(--font-heading, var(--font-body, ui-sans-serif))\"", "sans: [\"var(--font-body, ui-sans-serif)\""):
         assert needle in src, needle
 
 

@@ -172,6 +172,37 @@ export function AppNavigator({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
+  // PLAIN ANCHORS NAVIGATE SOFTLY TOO. The shell's rail, top bar and tab bar are
+  // server-rendered `<a href>`, and nothing turned their clicks into router
+  // navigations (the comments above said AppNavigator did; it only handled the
+  // engine's own navigations). Every click was a full document load: the signed-in
+  // layout had to resolve again before anything showed, and the root `loading.tsx`
+  // covered the whole window until it did. `next/link` handles its own clicks and
+  // calls preventDefault first, so only the plain anchors reach this.
+  React.useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const a = (e.target as Element | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
+      if (!a || (a.target && a.target !== "_self") || a.hasAttribute("download") || a.hasAttribute("data-hard-nav")) return;
+      let href = a.getAttribute("href") || "";
+      // AN ANCHOR THAT ALREADY CARRIES THE BASE PATH (`${NEXT_PUBLIC_BASE_PATH}/connect-ai`) is
+      // given to the router without it: `router.push` adds the base path itself, and twice is a
+      // 404 under the Preview tab's prefix (PR #34 review).
+      const base = (process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/+$/, "");
+      if (base && (href === base || href.startsWith(`${base}/`) || href.startsWith(`${base}?`))) {
+        href = href.slice(base.length) || "/";
+        if (!href.startsWith("/")) href = `/${href}`;
+      }
+      // Same-site paths only: not external, a hash, mailto:, an API route or an asset.
+      if (!href.startsWith("/") || href.startsWith("//") || /^\/(api|_next)(\/|$)/.test(href)) return;
+      e.preventDefault();
+      setOverlay(null);
+      router.push(href);
+    };
+    document.addEventListener("click", onClick);
+    return () => document.removeEventListener("click", onClick);
+  }, [router]);
+
   const value = React.useMemo(
     () => ({
       push: (url: string) => open(url),

@@ -118,8 +118,8 @@ def test_the_whole_process_tree_is_ended_not_just_npm():
     from services.blueprint.assembly import verify_boot
 
     src = inspect.getsource(verify_boot)
-    assert "start_new_session=True" in src
-    assert "killpg" in src
+    assert "start_new_session=True" in src or "group_kwargs()" in src      # its own session / group
+    assert "killpg" in src or "kill_group" in src                          # ended as a group
     # NO UNBOUNDED READ ANYWHERE. Every `communicate` carries a timeout, and
     # the bare `proc.stdout.read()` that could wait for an EOF a surviving
     # grandchild would never send is gone.
