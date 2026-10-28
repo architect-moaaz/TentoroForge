@@ -27,6 +27,11 @@ from it, with plain rules and no model, so the same app always gives the same ag
   a short guide the assistant reads: when someone asks this, use these tools);
 * a welcome message and suggested questions drawn from the app's own subjects, and a steady temperature.
 
+What it does NOT do is guess from the words in a name. Whether the app holds personal data, which roles take a
+hand-over and how much one person may use the assistant come from what the Blueprint declares (a field's `sensitive` flag,
+`security.tenancy`, the approval steps of its workflows and `security.audit`, an entity's `commerce` flag): see
+`_holds_personal_data`, `_handlers` and `_weight`.
+
 One agent per app. It acts as the signed-in person, so an action only an Admin may do is
 refused for a Reviewer by the app itself, and the prompt tells it to say so.
 """
@@ -131,16 +136,22 @@ def _params(workflow: dict[str, Any], by_id: dict[str, dict[str, Any]]) -> list[
 # what the app says about itself, read the way a careful designer would
 # ---------------------------------------------------------------------------
 
-_PII_FIELD_RX = re.compile(r"e-?mail|phone|mobile|address|street|postcode|postal|zip|ssn|social_?sec|birth|dob|passport|"
-                           r"iban|card_?(number|no)|account_?(number|no)|salary|tax_?id", re.I)
-_PII_ENTITY_RX = re.compile(r"^(user|customer|client|patient|employee|member|person|people|contact|applicant|student|guest|passenger)s?$", re.I)
-_REFERENCE_ENTITY_RX = re.compile(r"order|ticket|booking|reservation|case|request|invoice|appointment|claim|shipment|delivery", re.I)
-_SENSITIVE_WORDS = ("refund", "cancel", "dispute", "complaint")
+#: WHAT THE SUGGESTION DECIDES FROM, AND WHAT IT NEVER GUESSES. Which fields are personal data, which roles take a hand-over,
+#: how much one person may use the assistant: each is read from what the Blueprint DECLARES about the app (a field's `sensitive`
+#: flag, the roles `security` names as accountable, `security.audit.level`). It is never worked out from the words in a name:
+#: that fails in any other language and on any name nobody foresaw, and a wrong guess here is a privacy or access problem.
 
-#: How much one person may use the assistant, per the app's weight: an app whose assistant can change things is held
-#: to less (a loop that changes things is worse than a loop that reads).
-_LIMITS_READ_ONLY = {"max_messages_per_minute": 20, "max_messages_per_hour": 200, "max_tokens_per_day": 500_000}
-_LIMITS_CAN_CHANGE = {"max_messages_per_minute": 10, "max_messages_per_hour": 100, "max_tokens_per_day": 400_000}
+#: How much one person may use the assistant, by how much damage a loop could do. The tier is picked from declared facts
+#: (see `_weight`): an assistant that only reads, one that can change things, and one that can change things in an app the
+#: Blueprint says is regulated or handles money. A loop that changes things is worse than a loop that reads.
+_LIMITS = {
+    "read": {"max_messages_per_minute": 20, "max_messages_per_hour": 200, "max_tokens_per_day": 500_000},
+    "change": {"max_messages_per_minute": 10, "max_messages_per_hour": 100, "max_tokens_per_day": 400_000},
+    "regulated": {"max_messages_per_minute": 5, "max_messages_per_hour": 60, "max_tokens_per_day": 300_000},
+}
+
+#: Ways of asking for a person. These are about the conversation, not about any app, so they are the same everywhere.
+_ASK_FOR_A_PERSON = ("human", "real person", "speak to someone", "manager", "complaint")
 
 
 def _humanize(name: Any) -> str:
@@ -176,13 +187,64 @@ def _with_article(phrase: str) -> str:
 
 
 def _holds_personal_data(entities: list[dict[str, Any]]) -> bool:
-    """Does this app keep information about people? Then what the assistant says is held to a stricter filter."""
+    """Does this app keep information about people? Then what the assistant says is held to a stricter filter.
+
+    The Blueprint says so: a field it marks `sensitive` (the data layer masks it by role), or an entity that is the account
+    people sign in with. Nothing is inferred from what a field or an entity is called."""
     for e in entities:
-        if _PII_ENTITY_RX.match(str(e.get("name") or "")):
+        if e.get("account") is True:
             return True
-        if any(_PII_FIELD_RX.search(str(f.get("name") or "")) for f in e.get("fields") or []):
+        if any(f.get("sensitive") is True for f in e.get("fields") or [] if isinstance(f, dict)):
             return True
     return False
+
+
+def _weight(doc: dict[str, Any], entities: list[dict[str, Any]], can_change: bool) -> str:
+    """Which usage tier the assistant is held to: "read", "change" or "regulated" (it can change things in an app whose
+    Blueprint says its audit is `regulated`, or that has entities carrying money)."""
+    if not can_change:
+        return "read"
+    audit = ((doc.get("security") or {}).get("audit") or {})
+    if str(audit.get("level") or "").lower() == "regulated" or any(e.get("commerce") is True for e in entities):
+        return "regulated"
+    return "change"
+
+
+def _handlers(doc: dict[str, Any], roles: list[dict[str, Any]]) -> list[str]:
+    """The roles that take a hand-over, from what the Blueprint declares, in this order of trust (the first that names anyone):
+
+    1. the organisation's admin role (`security.tenancy.organisationAdminRole`);
+    2. the roles the app's own workflows send people's requests to: the assignee of each approval step. These are the people the
+       app already relies on to decide what a customer asks for, most-used first;
+    3. the people who review its audit trail (`security.audit.reviewers`).
+    Each may be written as a role's id or its name. When the Blueprint names none, every role except the sign-up role: that is
+    the role anyone can join as, and a hand-over holds a customer's words and contact details, so it must never be readable by
+    whoever signs up. If nothing is left no one is named, and the builder's check asks for a choice before the agent can be
+    applied, rather than the suggestion guessing."""
+    by_key: dict[str, str] = {}
+    for r in roles:
+        by_key[str(r["name"]).strip().lower()] = str(r["name"])
+        if r.get("id"):
+            by_key[str(r["id"]).strip().lower()] = str(r["name"])
+
+    def resolve(names: list[Any]) -> list[str]:
+        return list(dict.fromkeys(by_key[str(n).strip().lower()] for n in names if n and str(n).strip().lower() in by_key))
+
+    security = doc.get("security") or {}
+    approvers: dict[str, int] = {}
+    for w in _live(doc.get("workflows")):
+        for step in w.get("steps") or []:
+            cfg = (step or {}).get("config") or {}
+            if (step or {}).get("type") == "approval" and cfg.get("assignType") == "role" and cfg.get("assignTarget"):
+                approvers[str(cfg["assignTarget"])] = approvers.get(str(cfg["assignTarget"]), 0) + 1
+    for named in ([(security.get("tenancy") or {}).get("organisationAdminRole")],
+                  [k for k, _ in sorted(approvers.items(), key=lambda kv: -kv[1])],
+                  list((security.get("audit") or {}).get("reviewers") or [])):
+        found = resolve(named)
+        if found:
+            return found
+    signup = by_key.get(str(security.get("signupRole") or "").strip().lower())
+    return [str(r["name"]) for r in roles if str(r["name"]) != signup]
 
 
 def _visible_keys(entity: dict[str, Any], rels: list[dict[str, Any]]) -> list[str]:
@@ -375,7 +437,7 @@ def suggest_agent(doc: dict[str, Any]) -> dict[str, Any]:
 
     # SAFETY, in two boxes so the drawing says which is which. What comes in: attacks, and the asks no tool can safely do.
     # What goes out: personal data (when the app keeps any) and the assistant's own insides.
-    limits = _LIMITS_CAN_CHANGE if can_change else _LIMITS_READ_ONLY
+    limits = _LIMITS[_weight(doc, entities, can_change)]
     guard_in = _node("guard_in", "guardrail", "Input safety", 800, 0, {
         "guardrail_type": "input_filter", **limits,
         "rules": [{"id": "r1", "name": "No prompt attacks", "type": "block_topics",
@@ -399,19 +461,12 @@ def suggest_agent(doc: dict[str, Any]) -> dict[str, Any]:
     memory = _node("mem_1", "memory", f"Remembers the last {capacity} messages", 800, 340,
                    {"memory_type": "conversation", "capacity": capacity})
 
-    # WHO TAKES A HANDOFF: the app's admin-like roles, or every role when none looks like one. A named person is a
-    # choice for the builder; a role is something the Blueprint already says exists.
-    names = [str(r["name"]) for r in roles]
-    admins = [n for n in names if re.search(r"admin|manag|owner|supervis|lead", n, re.I)]
-    reference = next((e for e in entities if _REFERENCE_ENTITY_RX.search(str(e.get("name") or ""))), None)
+    # WHO TAKES A HANDOFF: roles the Blueprint already says exist and are relied on (see `_handlers`). A named person is a
+    # choice for the builder.
     questions = list(DEFAULT_HANDOFF_QUESTIONS)
-    if reference:
-        questions.insert(0, f"Which {str(reference['name']).lower()} is this about (its number or name)?")
-    haystack = " ".join(_humanize(x.get("name")) for x in [*workflows, *entities]).lower()
-    keywords = ["human", "real person", "speak to someone", "manager", "complaint",
-                *[w for w in _SENSITIVE_WORDS if w in haystack and w != "complaint"]]
+    keywords = list(_ASK_FOR_A_PERSON)
     handoff = _node("handoff_1", "human_handoff", "Hand over to a person", 800, 510, {
-        "handlers": {"roles": admins or names, "people": []},
+        "handlers": {"roles": _handlers(doc, roles), "people": []},
         "assignment": "queue",
         "questions": questions[:5],
         "notify": {"in_app": True, "email": False, "email_urgent_only": True},

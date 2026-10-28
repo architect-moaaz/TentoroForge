@@ -31,7 +31,7 @@ def blueprint() -> dict:
         "data": {
             "entities": [
                 {"id": "ENTITY-001", "name": "User", "table": "users",
-                 "fields": [{"name": "id", "type": "uuid"}, {"name": "email", "type": "string"},
+                 "fields": [{"name": "id", "type": "uuid"}, {"name": "email", "type": "string", "sensitive": True, "mask": "email"},
                             {"name": "passwordHash", "type": "string"}]},
                 {"id": "ENTITY-002", "name": "Movie", "table": "movies",
                  "fields": [{"name": "id", "type": "uuid"}, {"name": "title", "type": "string"},
@@ -48,6 +48,8 @@ def blueprint() -> dict:
             "relationships": [{"from": "ENTITY-003", "fromField": "movieId", "to": "ENTITY-002", "toField": "id"},
                               {"from": "ENTITY-002", "fromField": "addedById", "to": "ENTITY-001", "toField": "id"}],
         },
+        # what a Blueprint says about accountability: who reviews the audit trail, and which role anyone may sign up as
+        "security": {"audit": {"level": "writes", "reviewers": ["Admin"]}, "signupRole": "ROLE-002"},
         "pages": [
             {"id": "PAGE-1", "name": "Movies", "users": ["ROLE-001", "ROLE-002"], "access": "authenticated",
              "data": {"primaryEntity": "ENTITY-002", "supportingEntities": ["ENTITY-003", "ENTITY-004"]}},
@@ -263,17 +265,46 @@ def test_an_id_pointer_reads_correctly_for_a_word_that_starts_with_a_vowel():
     assert "is the id of a user" in t["list_movies"]["description"], "'a user', not 'an user'"
 
 
-def test_a_handoff_box_is_drawn_for_the_apps_admin_like_roles():
+def handlers_of(doc: dict) -> list[str]:
+    return next(n for n in suggest_agent(doc)["nodes"] if n["type"] == "human_handoff")["data"]["config"]["handlers"]["roles"]
+
+
+def test_a_handoff_box_is_drawn_for_the_roles_the_blueprint_names_as_accountable():
     handoff = next(n for n in suggest_agent(blueprint())["nodes"] if n["type"] == "human_handoff")["data"]["config"]
-    assert handoff["handlers"] == {"roles": ["Admin"], "people": []}
+    assert handoff["handlers"] == {"roles": ["Admin"], "people": []}, "the audit reviewers the Blueprint declares"
     assert handoff["assignment"] == "queue" and handoff["notify"] == {"in_app": True, "email": False, "email_urgent_only": True}
 
 
-def test_with_no_admin_like_role_every_role_may_handle_handoffs():
+def test_who_takes_a_handoff_is_decided_in_a_fixed_order_from_what_the_blueprint_declares():
     doc = blueprint()
-    doc["roles"] = [{"id": "ROLE-001", "name": "Agent"}, {"id": "ROLE-002", "name": "Clerk"}]
-    handoff = next(n for n in suggest_agent(doc)["nodes"] if n["type"] == "human_handoff")["data"]["config"]
-    assert handoff["handlers"]["roles"] == ["Agent", "Clerk"]
+    doc["roles"] += [{"id": "ROLE-003", "name": "Front Desk"}, {"id": "ROLE-004", "name": "Owner"}]
+    assert handlers_of(doc) == ["Admin"], "audit reviewers, when nothing ranks above them"
+    # the roles the app's own workflows send requests to (an approval step's assignee, by id or by name), most-used first
+    doc["workflows"].append({"id": "FLOW-010", "name": "Review", "trigger": {"kind": "manual"}, "inputs": [], "steps": [
+        {"key": "a", "type": "approval", "config": {"assignType": "role", "assignTarget": "ROLE-003"}},
+        {"key": "b", "type": "approval", "config": {"assignType": "role", "assignTarget": "Front Desk"}},
+        {"key": "c", "type": "approval", "config": {"assignType": "role", "assignTarget": "ROLE-004"}}]})
+    assert handlers_of(doc) == ["Front Desk", "Owner"], "approval assignees beat audit reviewers"
+    # the organisation's admin role beats both
+    doc["security"]["tenancy"] = {"kind": "organisation", "organisationAdminRole": "ROLE-001"}
+    assert handlers_of(doc) == ["Admin"]
+    # a user assigned to an approval (not a role), and a name that is no role, name no one
+    doc["security"] = {"audit": {"reviewers": ["Nobody"]}}
+    doc["workflows"][-1]["steps"] = [{"key": "a", "type": "approval", "config": {"assignType": "user", "assignTarget": "ROLE-003"}}]
+    assert handlers_of(doc) == ["Admin", "Reviewer", "Front Desk", "Owner"], "nothing usable declared: every role (no sign-up role named)"
+
+
+def test_a_role_is_never_taken_for_a_handler_because_of_what_it_is_called():
+    doc = blueprint()
+    doc["security"] = {}
+    doc["roles"] = [{"id": "ROLE-001", "name": "Administrator"}, {"id": "ROLE-002", "name": "Customer"},
+                    {"id": "ROLE-003", "name": "Team Lead"}]
+    assert handlers_of(doc) == ["Administrator", "Customer", "Team Lead"], "the old guess would have picked only the admin-sounding ones"
+    # ... but the role anyone can sign up as never takes a handoff by default: it holds other people's words and contact details
+    doc["security"] = {"signupRole": "ROLE-002"}
+    assert handlers_of(doc) == ["Administrator", "Team Lead"]
+    doc["roles"] = [{"id": "ROLE-002", "name": "Customer"}]
+    assert handlers_of(doc) == [], "nothing left: no one is named, and the builder's check asks for a choice"
 
 
 def test_the_suggestion_compiles_into_a_working_handoff():
@@ -304,6 +335,33 @@ def test_safety_is_two_boxes_one_for_what_comes_in_and_one_for_what_goes_out():
     outbound = guards["output_filter"]["rules"]
     assert any(r["type"] == "pii_redaction" for r in outbound), "this app keeps people's email: it is filtered on the way out"
     assert any("api key" in r.get("expression", "") for r in outbound), "the assistant's own insides stay in"
+
+
+def output_rule_types(doc: dict) -> list[str]:
+    out = next(cfg_of(g) for g in boxes(suggest_agent(doc), "guardrail") if cfg_of(g)["guardrail_type"] == "output_filter")
+    return [r["type"] for r in out["rules"]]
+
+
+def test_personal_data_is_what_the_blueprint_marks_sensitive_or_an_account_never_what_a_field_is_called():
+    plain = {"id": "ENTITY-001", "name": "Note", "table": "notes", "fields": [{"name": "id", "type": "uuid"}, {"name": "text", "type": "text"}]}
+
+    def doc_with(entity: dict) -> dict:
+        d = blueprint()
+        d["data"]["entities"] = [entity]
+        d["data"]["relationships"] = []
+        return d
+
+    assert output_rule_types(doc_with(plain))[0] == "content_policy"
+    # names that SOUND personal, with nothing declared: not personal data (the Blueprint is the authority, in any language)
+    sounds = {**plain, "name": "Customer", "table": "customers",
+              "fields": [{"name": "email", "type": "string"}, {"name": "phone", "type": "string"}, {"name": "address", "type": "string"}]}
+    assert output_rule_types(doc_with(sounds))[0] == "content_policy"
+    # a field it marks sensitive, however it is called
+    declared = {**plain, "fields": [{"name": "id", "type": "uuid"}, {"name": "dateOfBirth", "type": "date", "sensitive": True, "mask": "full"}]}
+    assert output_rule_types(doc_with(declared))[0] == "pii_redaction"
+    assert output_rule_types(doc_with({**plain, "fields": [{"name": "kontakt", "type": "string", "sensitive": True}]}))[0] == "pii_redaction"
+    # the entity people sign in with
+    assert output_rule_types(doc_with({**plain, "name": "Member", "account": True}))[0] == "pii_redaction"
 
 
 def test_an_app_with_no_personal_data_gets_a_content_filter_instead_of_pii_redaction():
@@ -349,6 +407,27 @@ def test_a_tool_that_changes_something_asks_first_and_is_held_to_fewer_calls_tha
     assert t["submit_rating"]["confirm"] is True and t["add_movie"]["confirm"] is True and t["post_comment"]["confirm"] is True
     assert t["list_movies"].get("confirm") is None and t["get_movie"].get("confirm") is None
     assert t["submit_rating"]["rate_limit"] == "6/min" and t["list_movies"]["rate_limit"] == "30/min"
+
+
+def limits_of(doc: dict) -> tuple[int, int, int]:
+    g = cfg_of(next(g for g in boxes(suggest_agent(doc), "guardrail") if cfg_of(g)["guardrail_type"] == "input_filter"))
+    return g["max_messages_per_minute"], g["max_messages_per_hour"], g["max_tokens_per_day"]
+
+
+def test_an_assistant_in_a_regulated_app_or_one_with_money_is_held_to_less_again():
+    ordinary = limits_of(blueprint())
+    regulated = blueprint()
+    regulated["security"]["audit"]["level"] = "regulated"
+    money = blueprint()
+    money["data"]["entities"][1]["commerce"] = True
+    for doc in (regulated, money):
+        stricter = limits_of(doc)
+        assert all(a < b for a, b in zip(stricter, ordinary)), (stricter, ordinary)
+    assert limits_of(regulated) == limits_of(money), "one tier, picked from declared facts"
+    # nothing in a name or a rule's words moves the tier
+    named = blueprint()
+    named["workflows"][0]["name"] = "PayInvoiceAndRefund"
+    assert limits_of(named) == ordinary
 
 
 def test_memory_is_longer_for_an_app_with_many_tools_or_multi_step_jobs():
@@ -407,17 +486,20 @@ def test_the_first_screen_says_what_the_assistant_does_and_offers_questions_wort
     assert compile_agent(suggest_agent(blueprint())).config["ui"]["suggestedQuestions"] == ui["suggested_questions"]
 
 
-def test_the_hand_over_asks_which_record_it_is_about_when_the_app_has_one():
+def test_the_hand_over_asks_the_same_questions_and_listens_for_the_same_words_whatever_the_app_calls_things():
+    # a ticket, a refund workflow and a "cancel" job: the words in names do not become questions or trigger words (they used to)
     doc = blueprint()
     doc["data"]["entities"].append({"id": "ENTITY-009", "name": "Ticket", "table": "tickets", "fields": [{"name": "id", "type": "uuid"}]})
     doc["workflows"].append({"id": "FLOW-009", "name": "RefundTicket", "purpose": "Let an admin refund a ticket.", "trigger": {"kind": "manual"},
+                             "inputs": [{"kind": "record", "entity": "ENTITY-009", "name": "ticket", "required": True}],
+                             "steps": [{"key": "u", "type": "action", "config": {"actionType": "db_update", "table": "tickets"}}]})
+    doc["workflows"].append({"id": "FLOW-010", "name": "CancelBooking", "purpose": "Let a user cancel.", "trigger": {"kind": "manual"},
                              "inputs": [], "steps": [{"key": "u", "type": "action", "config": {"actionType": "db_update", "table": "tickets"}}]})
     handoff = cfg_of(boxes(suggest_agent(doc), "human_handoff")[0])
-    assert handoff["questions"][0] == "Which ticket is this about (its number or name)?"
-    assert len(handoff["questions"]) <= 5
-    assert "refund" in handoff["conditions"]["keyword_triggers"], "a word this app's own jobs use"
+    assert handoff["questions"] == ["Why do you need a person?", "How urgent is it?", "How can we reach you?"]
+    assert handoff["conditions"]["keyword_triggers"] == ["human", "real person", "speak to someone", "manager", "complaint"]
     plain = cfg_of(boxes(suggest_agent(blueprint()), "human_handoff")[0])
-    assert plain["questions"] == ["Why do you need a person?", "How urgent is it?", "How can we reach you?"]
+    assert plain["questions"] == handoff["questions"] and plain["conditions"] == handoff["conditions"]
 
 
 def test_the_whole_suggestion_is_a_sound_drawing_the_checks_find_no_error_in():
