@@ -15,13 +15,20 @@
 # Installed on the host as ~/v3-cutover.sh from deploy/v3-cutover.sh in the
 # repository; change it there.
 set -u
+#: Where the stack lives and what its containers are called. Overridable only
+#: so the gate can be tested (`backend/tests/deploy/test_cutover_gate.py`).
+V3_ROOT="${V3_ROOT:-/opt/tentoro-forge-v3}"
+V3_STAGE_LOG="${V3_STAGE_LOG:-/tmp/v3-stage-build.log}"
+PG_CONTAINER="${PG_CONTAINER:-tentoro-forge-v3-postgres-1}"
+APPS_DB_CONTAINER="${APPS_DB_CONTAINER:-tentoro-forge-v3-apps-db-1}"
+BACKEND_CONTAINER="${BACKEND_CONTAINER:-tentoro-forge-v3-backend-1}"
 EX="--exclude=/data --exclude=/.env --exclude=/a2ui --exclude=/logs --exclude=/node_modules --exclude=/frontend/node_modules --exclude=/frontend/.next --exclude=/packages/*/node_modules --exclude=/apps/*/node_modules --exclude=/apps/*/.next"
 #: A ledger that wrote within this many seconds is alive. Turns heartbeat
 #: every 20 s, builds on every event; three minutes covers a long model call.
 BUSY_S=180
 
 busy() {
-  ( cd /opt/tentoro-forge-v3/data/output || exit 0
+  ( cd "$V3_ROOT/data/output" || exit 0
   now=$(date +%s)
   for d in */; do
     for f in "$d.forge/runs/"*.jsonl; do
@@ -33,31 +40,44 @@ busy() {
     done
   done
   # Review copies of an app's database in use are a check mid-flight.
-  n=$(docker exec tentoro-forge-v3-apps-db-1 psql -U postgres -At -c "select count(*) from pg_stat_activity where datname like '%_review_%' or datname like '%_trial%'" 2>/dev/null || echo 0)
+  n=$(docker exec "$APPS_DB_CONTAINER" psql -U postgres -At -c "select count(*) from pg_stat_activity where datname like '%_review_%' or datname like '%_trial%'" 2>/dev/null || echo 0)
   if [ "${n:-0}" != "0" ]; then echo "[$(date -u +%T)] busy: $n review/trial database(s) in use"; exit 1; fi
   # A PUBLISH UNDER WAY. Personal Finance's publish started in the minute a
   # cutover restarted the backend and was cut off at "snapshot"
   # (u8w3uw4j, 2026-10-21): publishes keep no ledger, so the gate never saw it.
-  since=$(docker inspect -f '{{.State.StartedAt}}' tentoro-forge-v3-backend-1 2>/dev/null || echo 1970-01-01)
-  p=$(docker exec tentoro-forge-v3-postgres-1 sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -At -c "select count(*) from deployments where status not in ('"'"'succeeded'"'"', '"'"'succeeded_with_warnings'"'"', '"'"'failed'"'"') and created_at > now() - interval '"'"'45 minutes'"'"' and created_at > '"'"'$since'"'"'"' 2>/dev/null || echo 0)
+  # THE QUERY IS WRITTEN HERE, NOT IN THE CONTAINER. It used to sit inside a
+  # single-quoted `sh -c`, so `$since` reached the container unexpanded, the
+  # SQL failed on an empty timestamp, and `|| echo 0` read the failure as "no
+  # publish under way": the gate never saw a publish (2026-10-26). A question
+  # it cannot answer is now an answer of busy.
+  since=$(docker inspect -f '{{.State.StartedAt}}' "$BACKEND_CONTAINER" 2>/dev/null || echo 1970-01-01T00:00:00Z)
+  sql="select count(*) from deployments where status not in ('succeeded', 'succeeded_with_warnings', 'failed') and created_at > now() - interval '45 minutes' and created_at > '$since'"
+  if ! p=$(printf '%s\n' "$sql" | docker exec -i "$PG_CONTAINER" sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -At -v ON_ERROR_STOP=1' 2>/dev/null); then
+    echo "[$(date -u +%T)] busy: could not ask the platform database whether a publish is under way"; exit 1
+  fi
   if [ "${p:-0}" != "0" ]; then echo "[$(date -u +%T)] busy: $p publish(es) under way"; exit 1; fi
   exit 0 )
 }
 
-if ! grep -q STAGE-BUILD-DONE /tmp/v3-stage-build.log 2>/dev/null; then echo "staged image build not finished"; exit 2; fi
-if grep -q STAGE-BUILD-FAILED /tmp/v3-stage-build.log; then echo "staged image build FAILED; nothing touched"; exit 2; fi
-busy || { echo "v3 is busy; nothing touched"; exit 3; }
+main() {
+  if ! grep -q STAGE-BUILD-DONE "$V3_STAGE_LOG" 2>/dev/null; then echo "staged image build not finished"; exit 2; fi
+  if grep -q STAGE-BUILD-FAILED "$V3_STAGE_LOG"; then echo "staged image build FAILED; nothing touched"; exit 2; fi
+  busy || { echo "v3 is busy; nothing touched"; exit 3; }
 
-echo "[$(date -u +%T)] syncing the tree"
-rsync -a --delete $EX /opt/tentoro-forge-v3-new/ /opt/tentoro-forge-v3/ || { echo "rsync failed"; exit 4; }
-cd /opt/tentoro-forge-v3
-echo "[$(date -u +%T)] tree at $(cat .forge-version); re-tagging images under the live project name"
-docker compose -f docker-compose.prod.yml build > /tmp/v3-live-build.log 2>&1 || { echo "live build failed (see /tmp/v3-live-build.log)"; exit 5; }
-# The gate again, right before the restart: a turn can start during the re-tag.
-busy || { echo "v3 became busy during the re-tag; tree is synced, images built, stack NOT restarted — rerun to finish"; exit 3; }
-echo "[$(date -u +%T)] bringing the stack up"
-# NOT THE COMPOSE FILE'S CADDY: the old stack's Caddy owns :80/:443 and routes this stack.
-docker compose -f docker-compose.prod.yml up -d backend frontend render-scaffold forge-verify postgres redis apps-db || { echo "up failed"; exit 6; }
-sleep 25
-docker compose -f docker-compose.prod.yml ps --format "{{.Name}}\t{{.Status}}"
-echo "[$(date -u +%T)] CUTOVER-DONE"
+  echo "[$(date -u +%T)] syncing the tree"
+  rsync -a --delete $EX "${V3_ROOT}-new/" "$V3_ROOT/" || { echo "rsync failed"; exit 4; }
+  cd "$V3_ROOT"
+  echo "[$(date -u +%T)] tree at $(cat .forge-version); re-tagging images under the live project name"
+  docker compose -f docker-compose.prod.yml build > /tmp/v3-live-build.log 2>&1 || { echo "live build failed (see /tmp/v3-live-build.log)"; exit 5; }
+  # The gate again, right before the restart: a turn can start during the re-tag.
+  busy || { echo "v3 became busy during the re-tag; tree is synced, images built, stack NOT restarted — rerun to finish"; exit 3; }
+  echo "[$(date -u +%T)] bringing the stack up"
+  # NOT THE COMPOSE FILE'S CADDY: the old stack's Caddy owns :80/:443 and routes this stack.
+  docker compose -f docker-compose.prod.yml up -d backend frontend render-scaffold forge-verify postgres redis apps-db || { echo "up failed"; exit 6; }
+  sleep 25
+  docker compose -f docker-compose.prod.yml ps --format "{{.Name}}\t{{.Status}}"
+  echo "[$(date -u +%T)] CUTOVER-DONE"
+}
+
+# Sourced by the tests for `busy`; run as a script, it cuts over.
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then main "$@"; fi

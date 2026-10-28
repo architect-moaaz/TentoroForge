@@ -613,6 +613,10 @@ def page_findings(doc: dict) -> list[dict]:
     # A screen in a module the person chose to build later is not missing.
     from services.blueprint.scope import deferred_page_ids
     held = deferred_page_ids(doc)
+    # A phone-only app has no web trees to look at: its pages are phone screens, held to their own rules by the native
+    # engineer's compiler. A web tree it does not have is not a route that 404s.
+    from services.blueprint import app_target
+    web = app_target.web_pages_enabled(doc)
 
     for page in _live(doc.get("pages")):
         pid = str(page.get("id") or "")
@@ -620,6 +624,8 @@ def page_findings(doc: dict) -> list[dict]:
             continue
         route = page.get("route") or pid
         layout = layouts.get(pid)
+        if not layout and not web:
+            continue
 
         # A page nothing composed has no schema, so its route 404s. The run
         # reports the composition failure; without this the Blueprint still

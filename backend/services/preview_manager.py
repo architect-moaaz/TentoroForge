@@ -9,6 +9,8 @@ from pathlib import Path
 
 import httpx
 
+from services import process_groups  # noqa: E402
+
 logger = logging.getLogger(__name__)
 
 
@@ -178,7 +180,7 @@ async def start_project_environment(
         env=_capped_env(env),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
-        preexec_fn=os.setsid,
+        **process_groups.own_group(),
     )
 
     from services import dev_servers
@@ -255,7 +257,7 @@ async def stop_project_environment(project_short_id: str) -> bool:
         dev_servers.forget(proc.pid)
     if proc and proc.returncode is None:
         try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            process_groups.stop_group(proc)
         except (ProcessLookupError, OSError):
             pass
 
@@ -384,7 +386,7 @@ async def _restart_preview_server(project_short_id: str) -> bool:
     proc = entry.get("proc")
     if proc and proc.returncode is None:
         try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            process_groups.stop_group(proc)
         except (ProcessLookupError, OSError):
             pass
 
@@ -399,7 +401,7 @@ async def _restart_preview_server(project_short_id: str) -> bool:
         env=_capped_env(env),
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.DEVNULL,
-        preexec_fn=os.setsid,
+        **process_groups.own_group(),
     )
 
     from services import dev_servers

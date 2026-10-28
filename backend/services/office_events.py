@@ -307,6 +307,10 @@ def build_success_event(total_files: int = 0, total_lines: int = 0) -> dict:
 # The Blueprint DAG narrator
 # ---------------------------------------------------------------------------
 
+#: The agent who reviews each piece of work as it lands (Otto).
+REVIEWER = "observer"
+
+
 class OfficeNarrator:
     """Turn a run ledger's lines into office events.
 
@@ -358,6 +362,11 @@ class OfficeNarrator:
         "node:skipped": "node_skipped",
         "run:end": "run_end",
         "run:crashed": "run_crashed",
+        "observer:verdict": "observer_verdict",
+        "observer:repair": "observer_repair",
+        "observer:unrepaired": "observer_unrepaired",
+        "node:stalled": "node_stalled",
+        "run:paused": "run_paused",
     }
 
     def translate(self, line: dict) -> list[dict]:
@@ -369,8 +378,17 @@ class OfficeNarrator:
         return getattr(self, f"_on_{name}")(line)
 
     def _agent(self, line: dict) -> str:
-        """The agent that owns the node this line is about."""
-        return self._agent_of.get(str(line.get("node") or ""), "")
+        """The agent that owns the node this line is about — from the run's
+        plan, or, only for a run that has none (a check, a process trial),
+        from whoever the node's name places (`agent_personas.agent_of`)."""
+        node = str(line.get("node") or "")
+        found = self._agent_of.get(node, "")
+        if found or not node or self._plan:
+            # A run with a plan names its agents there; a node outside it moves
+            # no one — better silent than the wrong character.
+            return found
+        from services.agent_personas import agent_of
+        return agent_of(node.split(":", 1)[0]) or ""
 
     def _on_plan(self, line: dict) -> list[dict]:
         from services.blueprint.orchestrator import DAG
@@ -450,6 +468,44 @@ class OfficeNarrator:
         unmet = str(line.get("unmet") or "") or "an upstream step"
         job = NODE_LABEL.get(str(line.get("node") or ""), "that step")
         return [agent_skipped_event(agent, f"{job} — still waiting on {unmet}")]
+
+    # -- Otto, the reviewer, reads each piece of work as it lands -----------
+
+    def _on_observer_verdict(self, line: dict) -> list[dict]:
+        node, agent = str(line.get("node") or ""), self._agent(line)
+        if not agent:
+            return []
+        label = NODE_LABEL.get(node, node)
+        what = f"{label} · {line['subject']}" if line.get("subject") else label
+        n = int(line.get("findings") or 0)
+        said = f"{what}: passes" if line.get("ok") else f"{what}: {n} finding{'' if n == 1 else 's'}"
+        return [agent_start_event(REVIEWER, room=room_for(REVIEWER, "qa"), node=node),
+                agent_status_event(REVIEWER, said, node=node)]
+
+    def _on_observer_repair(self, line: dict) -> list[dict]:
+        agent = self._agent(line)
+        if not agent:
+            return []
+        return [agent_retry_event(agent, int(line.get("round") or 1), int(line.get("of") or 2),
+                                  f"Sent back: {_short(line.get('reason'), 72)}")]
+
+    def _on_observer_unrepaired(self, line: dict) -> list[dict]:
+        node, agent = str(line.get("node") or ""), self._agent(line)
+        if not agent:
+            return []
+        return [agent_status_event(REVIEWER, f"{NODE_LABEL.get(node, node)}: left a note", node=node),
+                agent_status_event(agent, "Moving on — noted for later", node=node)]
+
+    def _on_node_stalled(self, line: dict) -> list[dict]:
+        agent = self._agent(line)
+        return [agent_status_event(agent, "The API is busy — waiting to try again",
+                                   node=str(line.get("node") or ""))] if agent else []
+
+    def _on_run_paused(self, line: dict) -> list[dict]:
+        reason = str(line.get("reason") or "")
+        if "credit" in reason.lower() or "balance" in reason.lower() or "billing" in reason.lower():
+            return [{"type": "credits_exhausted", "message": _short(reason)}]
+        return [{"type": "run_complete", "completed": 0, "failed": 0, "blocked": 1, "skipped": 0}]
 
     def _on_run_end(self, line: dict) -> list[dict]:
         if line.get("failed") or line.get("blocked"):

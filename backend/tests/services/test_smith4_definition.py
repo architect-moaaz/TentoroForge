@@ -15,6 +15,17 @@ from services.smith4.verbs import Ctx
 from tests.services._loop_fixtures import _Chooser, _repo
 
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def platform_settled(tmp_path):
+    """Where people will use the app is asked first (`test_smith_asks_where_people_will_use_the_app`); these tests are
+    about the definition that follows, so the app they define has a platform already."""
+    from services.blueprint import app_target
+    app_target.write(tmp_path, "web")
+
+
 def _ctx(tmp_path, message="", history=(), evidence=()):
     return Ctx(output_dir=str(tmp_path), project_id="p1", message=message, ask=message,
                history=list(history), evidence=list(evidence), app_name="Roster")

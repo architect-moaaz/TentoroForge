@@ -51,7 +51,7 @@ import { VisualEditor } from "@/components/visual-editor/VisualEditor";
 import { IREditor } from "@/components/ir-editor/IREditor";
 import { DesignEditor } from "@/components/design-editor/DesignEditor";
 import { VisualEditorWorkspace } from "@/components/visual-editor/VisualEditorWorkspace";
-import { ReactEditor } from "@/components/react-editor/ReactEditor";
+import { EditorSurfaces } from "@/components/react-editor/EditorSurfaces";
 import { AppFlowPanel } from "@/components/app-flow/AppFlowPanel";
 import { AppSettingsPanel } from "@/components/app-settings/AppSettingsPanel";
 import { useAppSettingsStore } from "@/stores/appSettings";
@@ -61,7 +61,8 @@ import { CostTrackingPanel } from "@/components/monitoring/CostTrackingPanel";
 import { DRDEditorPanel } from "@/components/decision/DRDEditorPanel";
 import { BusinessRulesPanel } from "@/components/business-rules/BusinessRulesPanel";
 import { ExportDialog } from "@/components/projects/ExportDialog";
-import { MORE_TABS, PRIMARY_TABS, TabRow, type Tab } from "@/components/projects/ProjectTabs";
+import { moreTabs, PRIMARY_TABS, TabRow, type Tab } from "@/components/projects/ProjectTabs";
+import { PhonePreview, phoneStatusKey } from "@/components/phone/PhonePreview";
 import { PublishButton } from "@/components/deploy/PublishButton";
 import { ASK_SMITH_EVENT, OPEN_WORKFLOW_EVENT, type AskSmithDetail, type OpenWorkflowDetail } from "@/lib/ask-smith";
 import { SaveAsTemplateButton } from "@/components/templates/SaveAsTemplateButton";
@@ -279,6 +280,14 @@ function ProjectWorkspace({
     queryFn: () => api.get<Project>(`/api/projects/${projectId}`),
   });
 
+  // The Phone tab exists for an app that has native screens; its own panel reads the same status and keeps it fresh.
+  const { data: phone } = useQuery({
+    queryKey: phoneStatusKey(projectId),
+    queryFn: () => api.get<{ state: string }>(`/api/projects/${projectId}/phone-preview/status`),
+    retry: false,
+  });
+  const hasPhone = !!phone && phone.state !== "unavailable";
+
   // §25/§109 — what Smith understood, so the approval gate can show it.
   //
   // SmithPanel renders the Application Definition from this prop and nothing
@@ -328,7 +337,7 @@ function ProjectWorkspace({
     { id: "app-flow" as Tab, label: "App Map", icon: Route },
     { id: "agents" as Tab, label: "Agents", icon: Bot },
     { id: "ai" as Tab, label: "AI", icon: Sparkles },
-    { id: "office" as Tab, label: "Office", icon: Building2 },
+    { id: "office" as Tab, label: "Foundry", icon: Building2 },
     { id: "monitoring" as Tab, label: "Monitor", icon: BarChart3 },
     { id: "versions" as Tab, label: "Versions", icon: GitBranch },
     { id: "app-settings" as Tab, label: "App settings", icon: Settings },
@@ -526,7 +535,7 @@ function ProjectWorkspace({
           <PublishButton projectId={projectId} orgId={orgId} lockedWeb={!feat.allowed("publish")} lockedMobile={!feat.allowed("mobile_builds")} />
           <MoreMenu
             items={[
-              { label: "Agents' office", onClick: () => setActiveTab("office"), locked: !feat.allowed("office") },
+              { label: "The Foundry", onClick: () => setActiveTab("office"), locked: !feat.allowed("office") },
               { label: "Delete project", onClick: () => setShowDelete(true), danger: true },
             ]}
           />
@@ -543,7 +552,7 @@ function ProjectWorkspace({
             the left needed a tooltip to read. */}
         <TabRow
           tabs={PRIMARY_TABS}
-          more={MORE_TABS}
+          more={moreTabs(hasPhone)}
           active={activeTab}
           onPick={setActiveTab}
           allowed={(f) => !f || feat.allowed(f)}
@@ -575,6 +584,9 @@ function ProjectWorkspace({
           <PreviewFrame projectId={projectId} project={project || null} />
         )}
         {lockedName && <LockedPanel name={lockedName} />}
+        {activeTab === "phone" && hasPhone && (
+          <PhonePreview projectId={projectId} onAskSmith={() => setActiveTab("chat")} />
+        )}
         {activeTab === "code" && !lockedName && <CodePanel projectId={projectId} />}
         {activeTab === "data" && (
           <DataModelPanel
@@ -601,7 +613,7 @@ function ProjectWorkspace({
         {/* The Editor tab is the visual React editor over the Blueprint's coded
             pages. The schema-JSON editor stays reachable as "schema-editor"
             for apps built before pages were written as React. */}
-        {activeTab === "editor" && <ReactEditor projectId={projectId} />}
+        {activeTab === "editor" && <EditorSurfaces projectId={projectId} onAskSmith={() => setActiveTab("chat")} />}
         {activeTab === "schema-editor" && !lockedName && project?.short_id && (
           <VisualEditorWorkspace projectId={project.short_id} />
         )}
@@ -639,6 +651,7 @@ function ProjectWorkspace({
         {activeTab === "office" && !lockedName && (
           <VirtualOffice
             className="h-full"
+            projectId={projectId}
             isGenerating={useChatStore.getState().isGenerating}
           />
         )}

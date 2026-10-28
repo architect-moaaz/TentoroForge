@@ -355,7 +355,7 @@ function ExpandedOfficeModal({
       <div className="flex items-center justify-between px-4 py-2 border-b bg-muted/40">
         <div className="flex items-center gap-2">
           <Building2 className={`h-4 w-4 ${isProtest ? "text-red-500" : "text-primary"}`} />
-          <span className="text-sm font-semibold">Virtual Office</span>
+          <span className="text-sm font-semibold">The Foundry</span>
           {isProtest ? (
             <div className="flex items-center gap-1.5 text-xs text-red-600">
               <AlertTriangle className="h-3 w-3" />

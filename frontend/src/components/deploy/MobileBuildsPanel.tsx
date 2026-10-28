@@ -37,6 +37,7 @@ import { Button } from "@/components/ui/button";
 import { useAuthStore } from "@/stores/auth";
 import { toast } from "sonner";
 import { authFetch } from "@/lib/api";
+import { QRCode } from "@tentoroforge/library";
 
 interface MobileBuild {
   id: string;
@@ -87,11 +88,19 @@ function StatusIcon({ status }: { status: string }) {
   return <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />;
 }
 
+/** What to tell a person when the list of builds could not be read. */
+export function listProblemFor(status: number): string {
+  if (status === 401) return "Your sign-in has expired, so the builds cannot be shown. Reload the page and sign in again.";
+  if (status === 429) return "Too many requests just now, so the builds cannot be shown. Wait a minute, then open this again.";
+  return `The builds could not be loaded (error ${status}). Try again in a moment.`;
+}
+
 export function MobileBuildsPanel({ projectId, orgId }: Props) {
   const token = useAuthStore((s) => s.token);
   const [builds, setBuilds] = useState<MobileBuild[]>([]);
   const [loading, setLoading] = useState<null | { profile: string; platform: string }>(null);
   const [error, setError] = useState<{ message: string; missing_keys?: string[]; action?: string } | null>(null);
+  const [listProblem, setListProblem] = useState<string | null>(null);
   const mounted = useRef(true);
 
   // Set to true on every mount: in development React mounts, unmounts and mounts again, and the cleanup alone would leave it false.
@@ -100,20 +109,27 @@ export function MobileBuildsPanel({ projectId, orgId }: Props) {
     return () => { mounted.current = false; };
   }, []);
 
-  const authHeaders = useMemo<Record<string, string>>(() => (
-    token ? { Authorization: `Bearer ${token}` } : {}
-  ), [token]);
+  const authHeaders = useMemo<Record<string, string>>(() => {
+    const headers: Record<string, string> = {};
+    if (token) headers.Authorization = `Bearer ${token}`;
+    return headers;
+  }, [token]);
 
   const fetchList = useCallback(async () => {
     try {
       const res = await authFetch(`/api/projects/${projectId}/mobile-builds`, {
         headers: authHeaders,
       });
-      if (!res.ok) return;
+      if (!res.ok) {
+        // SAID, NOT HIDDEN: a failed read used to leave "No mobile builds yet" on screen, which told a person with a build in
+        // progress that it had vanished (an expired sign-in, 2026-10-23).
+        if (mounted.current) setListProblem(listProblemFor(res.status));
+        return;
+      }
       const data = (await res.json()) as MobileBuild[];
-      if (mounted.current) setBuilds(data);
+      if (mounted.current) { setBuilds(data); setListProblem(null); }
     } catch {
-      // Silent — this runs on a poll cadence, one hiccup shouldn't nag.
+      // A network hiccup on the poll cadence: the list on screen stays as it was.
     }
   }, [projectId, authHeaders]);
 
@@ -199,6 +215,8 @@ export function MobileBuildsPanel({ projectId, orgId }: Props) {
   );
 
   const settingsHref = `/org/${orgId}/settings/integrations`;
+  // The newest finished Android build that has a file to install.
+  const installable = builds.find((b) => b.platform === "android" && b.status === "completed" && !!b.artifact_url);
 
   return (
     <div className="space-y-4">
@@ -246,12 +264,20 @@ export function MobileBuildsPanel({ projectId, orgId }: Props) {
         </div>
       )}
 
+      {/* The way to put a finished Android app on a phone: a code to scan, a link to open, the steps. */}
+      {installable && <InstallCard url={installable.artifact_url ?? ""} />}
+
       {/* History */}
       <div className="space-y-1.5">
         <div className="text-xs font-medium text-muted-foreground">
           Recent builds
         </div>
-        {builds.length === 0 && (
+        {listProblem && (
+          <div role="alert" data-testid="builds-problem" className="rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
+            {listProblem}
+          </div>
+        )}
+        {builds.length === 0 && !listProblem && (
           <div className="rounded border bg-muted/40 px-3 py-4 text-xs text-muted-foreground text-center">
             No mobile builds yet. Pick a target above to start one.
           </div>
@@ -404,6 +430,56 @@ function BuildRow({ build, onSubmit }: { build: MobileBuild; onSubmit: () => voi
           {build.error_message}
         </span>
       )}
+    </div>
+  );
+}
+
+// --------------------------------------------------------------------------- //
+// Install card — how a person puts the finished Android app on their phone     //
+// --------------------------------------------------------------------------- //
+
+function InstallCard({ url }: { url: string }) {
+  if (!url) return null;
+  return (
+    <div className="rounded border bg-background p-3 space-y-3" data-testid="install-card">
+      <div className="flex items-start gap-3">
+        <div className="shrink-0 rounded bg-white p-2">
+          <QRCode value={url} size={104} />
+        </div>
+        <div className="space-y-2 text-xs leading-snug">
+          <div className="text-sm font-medium">Install on Android</div>
+          <p className="text-muted-foreground">
+            Scan the code with your phone, or open the link on it. When Android asks, allow installs from your
+            browser, then tap Install.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <a
+              href={url}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex h-7 items-center gap-1 rounded bg-primary px-3 text-xs font-medium text-primary-foreground hover:opacity-90"
+            >
+              <Download className="h-3 w-3" />
+              Download app (.apk)
+            </a>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs"
+              onClick={() => {
+                void navigator.clipboard.writeText(url);
+                toast.success("Link copied");
+              }}
+            >
+              Copy link
+            </Button>
+          </div>
+        </div>
+      </div>
+      <p className="text-[11px] text-muted-foreground leading-snug">
+        iPhone: open the web address in Safari, tap Share, then Add to Home Screen. Every installable app also has an
+        /install page with these steps.
+      </p>
     </div>
   );
 }

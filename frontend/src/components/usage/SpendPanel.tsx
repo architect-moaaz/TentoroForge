@@ -13,6 +13,7 @@
  * cockpit's Credits page — so this panel only reads.
  */
 
+import { agentLabel } from "@/lib/agentPersonas";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuthStore } from "@/stores/auth";
 import { api } from "@/lib/api";
@@ -177,7 +178,7 @@ export function SpendPanel({ scope, heading = "Spend" }: { scope?: SpendScope; h
 
       <div className="grid md:grid-cols-2 gap-4 my-4">
         <Card title="By agent" hint={drill.some((d) => d.kind === "agent") ? "" : "click to drill in"}>
-          <HBars rows={(report?.by_agent ?? []).slice(0, 14).map((r) => ({ key: r.agent, label: r.agent, value: r.cost_usd, sub: `${r.calls} calls` }))}
+          <HBars rows={(report?.by_agent ?? []).slice(0, 14).map((r) => ({ key: r.agent, label: agentLabel(r.agent), value: r.cost_usd, sub: `${r.calls} calls` }))}
                  onPick={drill.some((d) => d.kind === "agent") ? undefined : (k) => into({ kind: "agent", id: k, label: k })} />
         </Card>
         <Card title="By application" hint={drill.some((d) => d.kind === "project") || scope?.project ? "" : "click to drill in"}>

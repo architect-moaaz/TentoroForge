@@ -46,13 +46,13 @@ def test_the_projection_writes_manifest_icons_worker_and_policy(tmp_path):
     assert not (tmp_path / "public/manifest.webmanifest").exists() and not (tmp_path / "public/sw.js").exists()
 
 
-def test_the_frame_registers_the_worker_offers_install_and_push():
+def test_the_frame_registers_the_worker_and_offers_push_but_not_an_install_button():
     layout = (ROOT / "templates/app-foundation/src/app/layout.tsx").read_text()
     assert "manifest: `${BASE}/manifest.webmanifest`" in layout and 'themeColor: "__THEME_COLOR__"' in layout and "appleWebApp" in layout
     providers = (ROOT / "templates/app-foundation/src/app/providers.tsx").read_text()
     assert "<PwaRegister />" in providers
     frame = (ROOT / "templates/app-foundation/src/app/(dashboard)/layout.tsx").read_text()
-    assert "<InstallButton />" in frame
+    assert "InstallButton" not in frame, "the menu has no Install app: the owner did not want it in every app (2026-10-26)"
     bell = (ROOT / "templates/app-foundation/src/app/(dashboard)/NotificationBell.tsx").read_text()
     assert "Turn on notifications on this device" in bell and "subscribeToPush()" in bell
     reg = (ROOT / "templates/app-foundation/src/components/PwaRegister.tsx").read_text()

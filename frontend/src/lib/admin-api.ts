@@ -1,6 +1,7 @@
 /** The cockpit's reads and writes, and the query keys the pages share. */
 import { api } from "@/lib/api";
 import type {
+  AgentReport,
   AdminApp,
   AdminFeature,
   AdminMember,
@@ -33,6 +34,7 @@ function qs(params: Record<string, string | number | undefined | null>): string 
 export const adminKeys = {
   overview: ["admin", "overview"] as const,
   incidents: ["admin", "incidents"] as const,
+  agents: (period: string) => ["admin", "agents", period] as const,
   people: (q: string, page: number) => ["admin", "people", q, page] as const,
   orgs: (q: string, status: string, page: number) => ["admin", "orgs", q, status, page] as const,
   org: (id: string) => ["admin", "org", id] as const,
@@ -49,6 +51,8 @@ export const adminKeys = {
 export const adminApi = {
   overview: () => api.get<AdminOverview>("/api/admin/overview"),
   incidents: (limit = 50) => api.get<{ incidents: Incident[] }>(`/api/admin/incidents?limit=${limit}`),
+  /** Every agent's work, cost, success and failures over a period. */
+  agents: (period: string) => api.get<AgentReport>(`/api/admin/agents${qs({ period })}`),
 
   people: (q: string, page = 1) => api.get<Paged<AdminPerson>>(`/api/admin/people${qs({ q, page })}`),
   disable: (id: string, reason: string) => api.post<AdminPerson>(`/api/admin/people/${id}/disable`, { reason }),

@@ -8,13 +8,13 @@
  */
 import { useState } from "react";
 import {
-  Bot, ChevronDown, Code, Database, Eye, GitBranch, Layout, MessageSquare, Route, Scale, Settings, Shield, Workflow,
+  Bot, ChevronDown, Code, Database, Eye, GitBranch, Layout, MessageSquare, Route, Scale, Settings, Shield, Smartphone, Workflow,
 } from "lucide-react";
 
 import { LockBadge } from "@/components/features/Locked";
 import type { FeatureKey } from "@/lib/features";
 
-export type Tab = "chat" | "preview" | "code" | "data" | "rules" | "business-rules" | "decisions" | "workflows" | "editor" | "schema-editor" | "design" | "design-editor" | "ir-editor" | "navigation" | "app-flow" | "agents" | "ai" | "monitoring" | "versions" | "office" | "app-settings";
+export type Tab = "chat" | "preview" | "phone" | "code" | "data" | "rules" | "business-rules" | "decisions" | "workflows" | "editor" | "schema-editor" | "design" | "design-editor" | "ir-editor" | "navigation" | "app-flow" | "agents" | "ai" | "monitoring" | "versions" | "office" | "app-settings";
 
 export type TabSpec = {
   id: Tab; label: string; icon: React.ComponentType<{ className?: string }>; shortcut?: string; feature?: FeatureKey;
@@ -45,6 +45,18 @@ export const MORE_TABS: TabSpec[] = [
   { id: "code", label: "Files", icon: Code, shortcut: "⌘3", feature: "code_view", group: "Project", hint: "The app's source files" },
   { id: "app-settings", label: "Settings", icon: Settings, group: "Project", hint: "Name, addresses, sign-in and more" },
 ];
+
+/** The phone preview: only for an app that has native screens, so the page adds it to More when it does. */
+export const PHONE_TAB: TabSpec = {
+  id: "phone", label: "Phone", icon: Smartphone, group: "Try and ship", hint: "See the phone app's screens, and ask for changes",
+};
+
+/** More, with Phone just after Preview when the app has phone screens. */
+export function moreTabs(hasPhone: boolean): TabSpec[] {
+  if (!hasPhone) return MORE_TABS;
+  const at = MORE_TABS.findIndex((t) => t.id === "preview");
+  return [...MORE_TABS.slice(0, at + 1), PHONE_TAB, ...MORE_TABS.slice(at + 1)];
+}
 
 /** The More items under their headings, in the headings' order; anything
  *  without a heading comes last, under none. */

@@ -11,10 +11,23 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
  * want a member now, so every request carries the token the person has
  * (a header the caller already set is kept).
  */
-export function authFetch(input: string, init: RequestInit = {}): Promise<Response> {
+export async function authFetch(input: string, init: RequestInit = {}): Promise<Response> {
   const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
   const headers = new Headers(init.headers || {});
-  if (token && !headers.has("Authorization")) headers.set("Authorization", `Bearer ${token}`);
+  const sent = headers.get("Authorization");
+  if (token && !sent) headers.set("Authorization", `Bearer ${token}`);
+  const res = await fetch(input, { ...init, headers });
+  // AN EXPIRED SIGN-IN IS RENEWED, AS `api` DOES. Only `api.*` did: a panel that read through here (the mobile builds) got a 401
+  // for ever and showed an empty list while a build was running (2026-10-23). The request is sent again once, with the
+  // renewed token, unless it carries a token that is not a bearer one (it is not ours to replace) or a body that was a stream.
+  // THE SAME `init` IS SENT AGAIN, which is right for a string, `FormData`, `Blob`, `URLSearchParams` and `ArrayBuffer`: they can be read
+  // twice. A body that can be read ONCE (a `ReadableStream`, today) cannot be sent again, so it is skipped below; a new kind of one-shot
+  // body, if it is ever passed here, must be added to that test or its retry would send an empty body.
+  if (res.status !== 401 || !token || (sent && !sent.startsWith("Bearer ")) || init.body instanceof ReadableStream) return res;
+  const current = localStorage.getItem("token");
+  const renewed = current && current !== token ? true : await attemptTokenRefresh();
+  if (!renewed) return res;
+  headers.set("Authorization", `Bearer ${localStorage.getItem("token")}`);
   return fetch(input, { ...init, headers });
 }
 

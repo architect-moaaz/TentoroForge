@@ -1,0 +1,203 @@
+{
+  "_about": "Every agent as people meet them. Display only: no prompt carries these names. Copied to frontend/src/lib/agent-personas.json (a test keeps the two the same).",
+  "personas": {
+    "smith": {
+      "name": "Smith",
+      "title": "The architect you talk to",
+      "room": "discovery",
+      "intro": "I'm Smith. You tell me what you want and I turn it into a plan the team builds, then I change the app whenever you ask — and I check that it works before I say it's done."
+    },
+    "requirement": {
+      "name": "Rita",
+      "title": "Requirements analyst",
+      "room": "discovery",
+      "intro": "I'm Rita. I write down what the app is for: who uses it, what each of them needs to do, and the rules it has to follow. Everyone else builds from my list."
+    },
+    "domain_intelligence": {
+      "name": "Dana",
+      "title": "Domain researcher",
+      "room": "discovery",
+      "intro": "I'm Dana. I know how businesses like yours usually work — the records they keep, the steps they follow — so the app doesn't miss what people in your line of work expect."
+    },
+    "product_analysis": {
+      "name": "Priya",
+      "title": "Product analyst",
+      "room": "discovery",
+      "intro": "I'm Priya. I turn the requirements into the shape of the product: its modules, who each one is for, and what has to be built first."
+    },
+    "solution_architecture": {
+      "name": "Arjun",
+      "title": "Solution architect",
+      "room": "architecture",
+      "intro": "I'm Arjun. I map the app's screens and how people move between them, so every role has a way in and nothing is left unreachable."
+    },
+    "integration": {
+      "name": "Ivan",
+      "title": "Integrations engineer",
+      "room": "architecture",
+      "intro": "I'm Ivan. I connect the app to the outside world — email, payments, other systems' APIs and webhooks — and check each connection actually answers."
+    },
+    "accessibility": {
+      "name": "Iris",
+      "title": "Design system lead",
+      "room": "design_studio",
+      "intro": "I'm Iris. I own the app's look: its colours, type, spacing and imagery, and I keep it readable for everyone."
+    },
+    "page_design": {
+      "name": "Paige",
+      "title": "Page designer",
+      "room": "design_studio",
+      "intro": "I'm Paige. For every page I decide what it shows, who it's for and what people can do there — the contract the builders work to."
+    },
+    "figma_intelligence": {
+      "name": "Felix",
+      "title": "Design reader",
+      "room": "design_studio",
+      "intro": "I'm Felix. When you bring a Figma file or a UX Pilot design, I read it and hand the team the screens, components and tokens it holds."
+    },
+    "ui_director": {
+      "name": "Uma",
+      "title": "Design director",
+      "room": "design_studio",
+      "intro": "I'm Uma. I set the conventions the whole app shares — how pages open, where actions go, how dense things are — so it feels like one product."
+    },
+    "data_model": {
+      "name": "Bob",
+      "title": "Data modeller",
+      "room": "data",
+      "intro": "I'm Bob. I design the records the app keeps and how they connect, and I write the sample data you see before your own arrives."
+    },
+    "api": {
+      "name": "Ada",
+      "title": "API designer",
+      "room": "data",
+      "intro": "I'm Ada. I derive the app's endpoints from the data model, so every screen and process has a way to read and save what it needs."
+    },
+    "backend": {
+      "name": "Kai",
+      "title": "Backend engineer",
+      "room": "data",
+      "intro": "I'm Kai. I project the data model into the database and the server code that keeps it."
+    },
+    "analytics": {
+      "name": "Ana",
+      "title": "Analytics designer",
+      "room": "data",
+      "intro": "I'm Ana. I design the numbers and charts each page carries — what is counted, summed and compared — and make sure they come from real records."
+    },
+    "page_template": {
+      "name": "Theo",
+      "title": "Layout engineer",
+      "room": "composition",
+      "intro": "I'm Theo. I lay out each page from its contract, so it opens the way the design director set and shows what the page designer asked for."
+    },
+    "ui_engineer": {
+      "name": "Leo",
+      "title": "UI engineer",
+      "room": "composition",
+      "intro": "I'm Leo. I write pages in React when a layout isn't enough, and I don't hand one over until it compiles."
+    },
+    "frontend": {
+      "name": "Fern",
+      "title": "Frontend engineer",
+      "room": "composition",
+      "intro": "I'm Fern. I turn the page designs into the schemas and files the running app renders."
+    },
+    "native_engineer": {
+      "name": "Nina",
+      "title": "Mobile engineer",
+      "room": "composition",
+      "intro": "I'm Nina. When the app goes on a phone, I write its screens for Expo and keep them in step with the web pages."
+    },
+    "workflow": {
+      "name": "Todd",
+      "title": "Workflow engineer",
+      "room": "logic",
+      "intro": "I'm Todd. I wire up the app's processes step by step — what happens when someone submits, approves or cancels — and the formulas inside them."
+    },
+    "business_rules": {
+      "name": "Ruth",
+      "title": "Business rules analyst",
+      "room": "logic",
+      "intro": "I'm Ruth. I write the app's rules — limits, required fields, who may do what when — and keep each one in a single place the whole app follows."
+    },
+    "security": {
+      "name": "Sam",
+      "title": "Security officer",
+      "room": "security",
+      "intro": "I'm Sam. I set the roles and permissions: who can see and change which records, and who reviews what is audited."
+    },
+    "verification": {
+      "name": "Vera",
+      "title": "Verifier",
+      "room": "qa",
+      "intro": "I'm Vera. I check the blueprint against itself — every reference resolves, every control does what it says — before anything is built."
+    },
+    "memory": {
+      "name": "Mo",
+      "title": "Record keeper",
+      "room": "qa",
+      "intro": "I'm Mo. I keep the record of every decision and what each requirement is covered by, so a change later knows why things are the way they are."
+    },
+    "observer": {
+      "name": "Otto",
+      "title": "Reviewer",
+      "room": "qa",
+      "intro": "I'm Otto. I read each piece of work the moment it lands and send it back to whoever made it when it isn't right."
+    },
+    "page_reviewer": {
+      "name": "Penny",
+      "title": "Page reviewer",
+      "room": "qa",
+      "intro": "I'm Penny. I open each page as the people it's for, look at it the way they would, and send weak ones back to be redone."
+    },
+    "testing": {
+      "name": "Tess",
+      "title": "App tester",
+      "room": "qa",
+      "intro": "I'm Tess. When the app is built I use every page as every role — pressing the buttons, following the flows — and report what doesn't work."
+    },
+    "process_trials": {
+      "name": "Trey",
+      "title": "Process tester",
+      "room": "qa",
+      "intro": "I'm Trey. I run each of the app's processes for real on a copy of its data and check that what it saved shows up where people look for it."
+    },
+    "build": {
+      "name": "Bruno",
+      "title": "Build engineer",
+      "room": "shipping",
+      "intro": "I'm Bruno. I assemble the app, install what it needs and start it, so there's a running preview to try."
+    },
+    "deployment": {
+      "name": "Dex",
+      "title": "Release engineer",
+      "room": "shipping",
+      "intro": "I'm Dex. I publish the app — its database, its address and its settings — and only say it's live once it answers."
+    },
+    "a2ui_pages": {
+      "name": "Abe",
+      "title": "Page composer",
+      "room": "composition",
+      "intro": "I'm Abe. I compose pages from the component library when Smith changes a screen that is built from parts rather than code."
+    },
+    "researcher": {
+      "name": "Remy",
+      "title": "Researcher",
+      "room": "discovery",
+      "intro": "I'm Remy. In the Drafts Room I study the references you point me at — sites, screenshots, documents — and bring back what they do well."
+    }
+  },
+  "aliases": {
+    "app_check": "testing",
+    "checks": "testing",
+    "change_check": "testing",
+    "page_review": "page_reviewer",
+    "page_repair": "smith",
+    "drafts_room": "researcher",
+    "statements": "testing",
+    "expectations": "testing",
+    "engineer": "solution_architecture",
+    "indexer": "memory"
+  }
+}

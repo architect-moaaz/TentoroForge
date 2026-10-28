@@ -142,6 +142,40 @@ class SlotUnavailable(RuntimeError):
     """Every slot for trying an app stayed taken for the whole wait."""
 
 
+def _try_lock(fh: Any) -> bool:
+    """Take the slot's lock file without waiting: `flock` where there is one, `msvcrt.locking` on Windows (which has no fcntl:
+    `import fcntl` there was a ModuleNotFoundError that stopped every page trial)."""
+    try:
+        import fcntl
+    except ImportError:
+        import msvcrt
+
+        try:
+            fh.seek(0)
+            msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+            return True
+        except OSError:
+            return False
+    try:
+        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except OSError:
+        return False
+
+
+def _unlock(fh: Any) -> None:
+    try:
+        import fcntl
+    except ImportError:
+        import msvcrt
+
+        fh.seek(0)
+        msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+        return
+    fcntl.flock(fh, fcntl.LOCK_UN)
+
+
+
 class TrialSlot:
     """One of `MAX_TRIALS` places to run an app's dev server for a trial.
 
@@ -155,16 +189,12 @@ class TrialSlot:
         self._fh: Any = None
 
     def acquire(self) -> int:
-        import fcntl
-
         DIR.mkdir(parents=True, exist_ok=True)
         deadline = time.monotonic() + self.wait_s
         while True:
             for i in range(self.slots):
                 fh = open(DIR / f"trial-slot-{i}.lock", "a+")  # noqa: SIM115 — held until release
-                try:
-                    fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                except OSError:
+                if not _try_lock(fh):
                     fh.close()
                     continue
                 self._fh = fh
@@ -175,11 +205,9 @@ class TrialSlot:
             time.sleep(2)
 
     def release(self) -> None:
-        import fcntl
-
         if self._fh is not None:
             try:
-                fcntl.flock(self._fh, fcntl.LOCK_UN)
+                _unlock(self._fh)
             finally:
                 self._fh.close()
                 self._fh = None

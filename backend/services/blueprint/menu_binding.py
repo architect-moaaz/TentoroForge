@@ -80,4 +80,73 @@ def bind_menu(doc: dict) -> list[str]:
             if child.get("view") and str(child.get("page") or "") not in live:
                 child["page"] = page
                 linked.append(path + SEP + label)
+    linked += _restore_named_entries(doc, tree, live)
+    _drop_sign_in_entries(doc, tree)
     return linked
+
+
+#: What a screen that nobody can reach from the menu is given: an entry for itself.
+_ICON_FOR_PATTERN = {"settings": "settings"}
+
+
+def _restore_named_entries(doc: dict, tree: list, live: set[str]) -> list[str]:
+    """A screen names the menu entry it answers; when the menu has NO such entry (a later edit took it out and left the screen),
+    the entry is put back at the end of the menu.
+
+    PlantPal (2026-10-22): the menu listed "Account Settings" from the first draft; a repair step judged the screen out of the
+    brief's scope, wrote Login over its entry, and left the screen in the plan. The screen was then in the plan and in the website,
+    and in no menu: the phone's bar had no way to reach it. A path with a parent ("Admin > Coupons") is never made up here: only a
+    top-level entry, for a screen that is a destination (no parameter in its route, not a sign-in page)."""
+    have = {_key(path) for path, _ in _walk(tree)}
+    linked_pages = {str(node.get("page")) for _, node in _walk(tree) if node.get("page")}
+    added: list[str] = []
+    for page in doc.get("pages") or []:
+        if not isinstance(page, dict) or str(page.get("id")) not in live:
+            continue
+        entry = str(page.get("menuEntry") or "").strip()
+        if (not entry or SEP.strip() in entry or _key(entry) in have or str(page["id"]) in linked_pages
+                or "[" in str(page.get("route") or "") or str(page.get("pattern") or "") == "auth"):
+            continue
+        node: dict[str, Any] = {"label": entry, "page": str(page["id"]), "tab": True}
+        icon = _ICON_FOR_PATTERN.get(str(page.get("pattern") or ""))
+        if icon:
+            node["icon"] = icon
+        roles = _roles_of_neighbours(doc, tree)
+        if roles:
+            node["roles"] = roles
+        tree.append(node)
+        have.add(_key(entry))
+        added.append(entry)
+    return added
+
+
+def _auth_page_ids(doc: dict) -> set[str]:
+    return {str(p.get("id")) for p in doc.get("pages") or []
+            if isinstance(p, dict) and p.get("status") != "DEPRECATED" and str(p.get("pattern") or "") == "auth"}
+
+
+def _roles_of_neighbours(doc: dict, tree: list) -> list[str]:
+    """The roles of the first entry that leads to a screen needing a sign-in: the new entry is for the same people."""
+    auth = _auth_page_ids(doc)
+    for _, node in _walk(tree):
+        if node.get("roles") and str(node.get("page") or "") not in auth:
+            return list(node["roles"])
+    return []
+
+
+def _drop_sign_in_entries(doc: dict, tree: list) -> list[str]:
+    """Sign in and Sign up are not menu entries of an application that is signed in to: the gate sends a signed-out person to them
+    and a signed-in one never needs them. PlantPal's menu (2026-10-22) listed Login and Sign Up beside My Plants and Today.
+
+    Only when every other screen needs a person (an application with public screens may well show a sign-in link there), and
+    only a top-level entry that leads to a sign-in page."""
+    auth = _auth_page_ids(doc)
+    if not auth:
+        return []
+    others = [p for p in doc.get("pages") or []
+              if isinstance(p, dict) and p.get("status") != "DEPRECATED" and str(p.get("id")) not in auth]
+    if not others or any(str(p.get("access") or "authenticated") == "public" for p in others):
+        return []
+    dropped = [str(n.get("label")) for n in tree if isinstance(n, dict) and str(n.get("page") or "") in auth]
+    tree[:] = [n for n in tree if not (isinstance(n, dict) and str(n.get("page") or "") in auth)]
+    return dropped

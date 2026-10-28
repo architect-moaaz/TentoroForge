@@ -106,6 +106,9 @@ function jsxChildrenOf(node) {
 // Descend a non-JSX expression looking for JSX, remembering the container it
 // sat in and the context (repeat / conditional) it came through.
 let SRC = "";
+/** A phone screen hands whole parts to the kit as settings (`footer={<Stack>…</Stack>}`, `renderItem={(row) => <ListItem/>}`).
+ *  When this is on, such a part is a node too: kept apart from its owner's `children`, and marked `slot` with the setting's name. */
+let SLOTS = false;
 function collectFrom(node, container, context, out, repeat = null) {
   if (node.type === "JSXElement" || node.type === "JSXFragment") {
     out.push({ node, container, context, repeat });
@@ -237,6 +240,22 @@ function buildNode(source, entry, id, parentId, nodes, index) {
     rec.children.push(cid);
     buildNode(source, k, cid, id, nodes, i);
   });
+  if (SLOTS && !isFragment) {
+    for (const a of opening.attributes) {
+      if (a.type !== "JSXAttribute" || !a.value || a.value.type !== "JSXExpressionContainer") continue;
+      const held = [];
+      collectFrom(a.value.expression, null, null, held);
+      // `renderItem={(item) => <ListItem/>}`: what the row is called inside it, for a part that acts on the row's record.
+      const fn = a.value.expression;
+      const rowVar = fn.type === "ArrowFunctionExpression" && fn.params[0] && fn.params[0].type === "Identifier" ? fn.params[0].name : null;
+      held.forEach((k, i) => {
+        const sid = `${id}@${attrName(a)}.${i}`;
+        buildNode(source, k, sid, id, nodes, i);
+        nodes[sid].slot = attrName(a);
+        if (rowVar) nodes[sid].rowVar = rowVar;
+      });
+    }
+  }
   return rec;
 }
 
@@ -271,6 +290,9 @@ function importsOf(source, ast) {
         : sp.type === "ImportNamespaceSpecifier" ? `*:${sp.local.name}` : sp.local.name),
       span: [s.start, s.end],
       typeOnly: s.importKind === "type",
+      // `import { Screen as ScreenView }`: the name the file uses, and the one the module exports.
+      exported: Object.fromEntries(s.specifiers.filter((sp) => sp.type === "ImportSpecifier")
+        .map((sp) => [sp.local.name, sp.imported.name ?? sp.imported.value])),
     });
   }
   return out;
@@ -754,8 +776,14 @@ function cutWithLine(source, start, end) {
   return lineEmpty ? splice(source, s, e, "") : splice(source, start, end, "");
 }
 
+function notSlotRoot(m, id, what) {
+  const n = need(m, id);
+  if (n.slot) throw new PatchError("held-by-parent", `This ${describe(n.type)} is held by its parent as a setting (${n.slot}), so it cannot be ${what} from here — ask Smith.`);
+}
+
 function opRemove(source, m, op) {
   const ids = op.ids ?? [op.id];
+  for (const id of ids) notSlotRoot(m, id, "taken away");
   const spans = ids.map((id) => removeSpan(need(m, id))).sort((a, b) => b[0] - a[0]);
   for (const [s, e] of spans) source = cutWithLine(source, s, e);
   return source;
@@ -829,9 +857,34 @@ function opMove(source, m, op) {
 }
 
 function opDuplicate(source, m, op) {
+  notSlotRoot(m, op.id, "copied");
   const n = need(m, op.id);
   if (n.parent == null) throw new PatchError("no-parent", "The page itself cannot be duplicated.");
   return insertInto(source, m, n.parent, n.index + 1, sourceOf(source, n));
+}
+
+/** A statement as the first line of the screen's own function: a hook (`const rows = useList("Job")`) the parts below read.
+ *  First, because a hook must run on every draw, whatever the screen returns early. Only the phone editor's guided parts ask. */
+function opAddStatement(source, m, op) {
+  if (typeof op.code !== "string" || !op.code.trim()) throw new PatchError("bad-value", "Nothing to add.");
+  const root = m.nodes[m.roots[0]?.id];
+  if (!root) throw new PatchError("no-screen", "The screen draws nothing, so there is nowhere to add it.");
+  const ast = parseTsx(source);
+  let body = null;
+  const visit = (node, fnBody) => {
+    if (body || !isNode(node)) return;
+    const own = (node.type === "FunctionDeclaration" || node.type === "ArrowFunctionExpression" || node.type === "FunctionExpression")
+      && node.body && node.body.type === "BlockStatement" ? node.body : fnBody;
+    if (node.type === "ReturnStatement" && node.argument && fnBody
+        && node.argument.start <= root.span[0] && root.span[1] <= node.argument.end) { body = fnBody; return; }
+    for (const c of children(node)) visit(c, own);
+  };
+  visit(ast.program, null);
+  const first = body && body.body[0];
+  if (!first) throw new PatchError("no-screen", "The screen's own function could not be found.");
+  const indent = lineIndent(source, first.start);
+  const lead = source.lastIndexOf("\n", first.start - 1) + 1;
+  return splice(source, lead, lead, `${indent}${op.code.trim()}\n`);
 }
 
 function opReplaceNode(source, m, op) {
@@ -1073,6 +1126,7 @@ function opUnwrapCondition(source, m, op) {
 }
 
 const OPS = {
+  addStatement: opAddStatement,
   wrap: opWrap,
   unwrap: opUnwrap,
   wrapRepeat: opWrapRepeat,
@@ -1245,6 +1299,7 @@ function annotate(view) {
 
 /** One command answered — never thrown. */
 function handle(cmd, input) {
+  SLOTS = !!input.slots;
   try {
     if (cmd === "model") return model(input.view ?? "", input.load ?? null);
     if (cmd === "patch") return patch(input.view ?? "", input.ops ?? []);

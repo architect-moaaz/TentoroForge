@@ -15,6 +15,9 @@
   window.__design2ui_bridge = true;
 
   var PREFIX = "design2ui:";
+  // "select": a click selects an element (the editor's default). "use": the page behaves as it would for a person, so a
+  // phone preview can be tapped through; the parent switches it with `set-mode`.
+  var mode = "select";
   var MAX_TREE_DEPTH = 12;
   var OVERLAY_Z = 2147483640;
   var IGNORED_TAGS = { SCRIPT: 1, STYLE: 1, LINK: 1, META: 1, NOSCRIPT: 1, SVG: 1 };
@@ -83,10 +86,29 @@
     return "/body/" + parts.join("/");
   }
 
+  // A phone preview's screens are React Native: a custom component (a Button) does not hand a marker down to the page,
+  // but React still holds it on the component's props. Walk up from the element to the nearest one that carries it.
+  function fiberSource(el) {
+    var key = null;
+    for (var k in el) {
+      if (k.indexOf("__reactFiber$") === 0) { key = k; break; }
+    }
+    var fiber = key ? el[key] : null;
+    var guard = 0;
+    while (fiber && guard++ < 200) {
+      var ds = fiber.memoizedProps && fiber.memoizedProps.dataSet;
+      if (ds && ds.sourceFile) {
+        return { file: ds.sourceFile, line: parseInt(ds.sourceLine || "0", 10), component: ds.sourceComponent || null };
+      }
+      fiber = fiber.return;
+    }
+    return null;
+  }
+
   function getElementInfo(el) {
     var rect = el.getBoundingClientRect();
-    var source = null;
-    var srcFile = el.getAttribute("data-source-file");
+    var source = fiberSource(el);
+    var srcFile = source ? null : el.getAttribute("data-source-file");
     if (srcFile) {
       source = {
         file: srcFile,
@@ -199,6 +221,22 @@
     }
   }
 
+  // The page is going away: a reload, which a change that a hot update cannot swap in causes. The editor draws "Updating…" over the phone
+  // until the page says it is ready again, instead of showing a blank phone for a second or two.
+  window.addEventListener("pagehide", function () { send("unloading", {}); });
+  // ... and when the app on the new page has drawn its first text ("ready" only says this script started, a second or two earlier).
+  (function () {
+    var tries = 0;
+    var timer = setInterval(function () {
+      tries += 1;
+      var text = document.body && document.body.innerText ? document.body.innerText.trim() : "";
+      if (text.length > 0 || tries > 300) {
+        clearInterval(timer);
+        if (text.length > 0) send("painted", {});
+      }
+    }, 100);
+  })();
+
   // --- Element lookup by xpath ---
   function findByXPath(xpath) {
     try {
@@ -217,6 +255,7 @@
 
   // --- Event handlers ---
   document.addEventListener("mousemove", function (e) {
+    if (mode !== "select") return;
     var el = document.elementFromPoint(e.clientX, e.clientY);
     if (!el || isBridgeElement(el) || el === document.documentElement) return;
 
@@ -229,6 +268,7 @@
   }, true);
 
   document.addEventListener("click", function (e) {
+    if (mode !== "select") return;
     var el = document.elementFromPoint(e.clientX, e.clientY);
     if (!el || isBridgeElement(el)) return;
 
@@ -248,6 +288,61 @@
       send("deselect", {});
     }
   });
+
+  // --- A ready part dragged in from the editor's Add list ---
+  //
+  // The editor starts the drag (its own document) and this page receives it. It only answers to that one kind of drag. While it is
+  // over a part the part is outlined: a line at the top or the bottom (before / after it) or the whole box (inside it). On drop the
+  // parent is told which part, and how far down it, and decides what that means for the screen's code.
+  var PART_TYPE = "application/x-forge-part";
+  var dropOverlay = createOverlay("rgba(37,99,235,0.18)", "2px solid #2563eb");
+  document.body.appendChild(dropOverlay);
+
+  function isPartDrag(e) {
+    var types = e.dataTransfer && e.dataTransfer.types;
+    return !!types && Array.prototype.indexOf.call(types, PART_TYPE) >= 0;
+  }
+
+  function dropTarget(e) {
+    var el = document.elementFromPoint(e.clientX, e.clientY);
+    if (!el || isBridgeElement(el) || el === document.documentElement || el === document.body) return null;
+    var rect = el.getBoundingClientRect();
+    var rel = rect.height > 0 ? (e.clientY - rect.top) / rect.height : 0.5;
+    return { el: el, rect: rect, rel: Math.max(0, Math.min(1, rel)) };
+  }
+
+  function showDrop(t) {
+    var r = t.rect;
+    var line = 3;
+    if (t.rel < 0.25) positionOverlay(dropOverlay, { top: r.top - 1, left: r.left, width: r.width, height: line });
+    else if (t.rel > 0.75) positionOverlay(dropOverlay, { top: r.bottom - 2, left: r.left, width: r.width, height: line });
+    else positionOverlay(dropOverlay, r);
+  }
+
+  document.addEventListener("dragover", function (e) {
+    if (!isPartDrag(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    var t = dropTarget(e);
+    if (t) showDrop(t); else hideOverlay(dropOverlay);
+  }, true);
+
+  document.addEventListener("dragleave", function (e) {
+    if (isPartDrag(e) && !e.relatedTarget) hideOverlay(dropOverlay);
+  }, true);
+
+  document.addEventListener("drop", function (e) {
+    if (!isPartDrag(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    hideOverlay(dropOverlay);
+    // The drag carries which part it is: the editor's own record of it is cleared when the drag ends, which a browser does
+    // before this page's message arrives.
+    var part = e.dataTransfer.getData(PART_TYPE);
+    var t = dropTarget(e);
+    if (!t) { send("drop", { source: null, rel: 0.5, part: part }); return; }
+    send("drop", { source: getElementInfo(t.el).source, rel: t.rel, part: part });
+  }, true);
 
   // Reposition overlays on scroll/resize
   function repositionOverlays() {
@@ -294,6 +389,16 @@
         break;
       case "ping":
         send("pong", {});
+        break;
+
+      case "set-mode":
+        mode = payload.mode === "use" ? "use" : "select";
+        if (mode === "use") {
+          selectedElement = null;
+          hoveredElement = null;
+          hideOverlay(selectOverlay);
+          hideOverlay(hoverOverlay);
+        }
         break;
 
       case "edit-complete":
@@ -453,7 +558,22 @@
     subtree: true,
   });
 
+  // --- Where the page is: a single-page app (a phone preview) changes screen without loading a page ---
+  function sendRoute() {
+    send("route", { path: location.pathname + location.search });
+  }
+  ["pushState", "replaceState"].forEach(function (name) {
+    var original = history[name];
+    history[name] = function () {
+      var result = original.apply(this, arguments);
+      setTimeout(sendRoute, 0);
+      return result;
+    };
+  });
+  window.addEventListener("popstate", sendRoute);
+
   // --- Ready ---
   send("ready", {});
+  sendRoute();
   sendTree();
 })();

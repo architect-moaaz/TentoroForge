@@ -27,7 +27,7 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 #: project_id -> live snapshot. Written from the stream's `emit`, read by the
 #: run endpoint. Single-process, single event loop: no lock needed, and one
@@ -266,9 +266,13 @@ def ledger_snapshot(output_dir: str | Path, *, turns: bool = True) -> dict[str, 
     import glob
     import os
 
+    from services.blueprint.run_ledger import ledger_kind
+
     runs = sorted(glob.glob(os.path.join(str(output_dir), ".forge", "runs", "*.jsonl")))
-    if not turns:
-        runs = [p for p in runs if not _is_turn(p)]
+    # A publish, a self-heal or a Drafts Room run keeps a ledger too (so the
+    # cutover gate waits for it); none of them is the run this panel follows.
+    wanted = ("build", "check", "turn", "fix") if turns else ("build", "check")
+    runs = [p for p in runs if ledger_kind(p) in wanted]
     if not runs:
         return None
     newest = _fold(runs[-1])
@@ -323,12 +327,9 @@ def live_state(output_dir: str | Path) -> str:
             going = (path, folded)
             break
     def kind_of(path: str) -> str:
-        stem = os.path.basename(path)
-        if stem.endswith("-smith-turn.jsonl"):
-            return "turn"
-        if stem.endswith("-checks.jsonl") or stem.endswith("-app-check.jsonl"):
-            return "check of the application"
-        return "build"
+        from services.blueprint.run_ledger import ledger_kind
+        return {"check": "check of the application", "fix": "fix", "heal": "fix", "publish": "publish",
+                "drafts": "Drafts Room run"}.get(ledger_kind(path), ledger_kind(path))
     def clock(epoch: float | None) -> str:
         return time.strftime("%H:%M UTC", time.gmtime(epoch)) if epoch else "?"
     if going is not None:
@@ -358,8 +359,8 @@ def last_build(output_dir: str | Path) -> dict[str, Any] | None:
     import os
     runs = sorted(glob.glob(os.path.join(str(output_dir), ".forge", "runs", "*.jsonl")))
     for path in reversed(runs):
-        stem = os.path.basename(path)
-        if stem.endswith("-smith-turn.jsonl") or stem.endswith("-checks.jsonl") or stem.endswith("-app-check.jsonl"):
+        from services.blueprint.run_ledger import ledger_kind
+        if ledger_kind(path) != "build":                 # a turn, a check, a publish, a fix: not a build to resume
             continue
         return _fold(path)
     return None
@@ -430,6 +431,52 @@ def _writer_alive(path: Path) -> bool:
     return began <= run_started + 1
 
 
+def _tail_event(fh: Any) -> str | None:
+    fh.seek(0, os.SEEK_END)
+    size = fh.tell()
+    fh.seek(max(0, size - 4096))
+    tail = fh.read().decode("utf-8", "replace").strip().splitlines()
+    try:
+        return str(json.loads(tail[-1]).get("event") or "") if tail else None
+    except ValueError:
+        return None
+
+
+def close_once(path: str | Path, record: dict, *, still_open: Callable[[Path], bool] = lambda p: True) -> bool:
+    """Append `record` to a ledger that has not ended — once, whoever asks.
+
+    BOTH WORKERS CLOSE WHAT A RESTART KILLED, at the same moment, and each
+    appended its own `run:crashed`: forge-v3's crashed ledgers carry the line
+    twice, and the person was told twice (2026-10-26). The ledger is locked,
+    its last line read again under the lock, and `still_open(path)` asked
+    there (the writer is gone; the pulse has stopped) before anything is
+    written. True only for the caller that wrote."""
+    path = Path(path)
+    try:
+        fh = path.open("a+b")
+    except OSError:
+        return False
+    try:
+        try:
+            import fcntl
+            fcntl.flock(fh, fcntl.LOCK_EX)
+        except (ImportError, OSError):
+            pass                                          # no flock here: the check below still narrows it
+        last = _tail_event(fh)
+        if last is None or last in ("run:end", "run:crashed"):
+            return False
+        if not still_open(path):
+            return False
+        fh.seek(0, os.SEEK_END)
+        fh.write((json.dumps(record) + "\n").encode("utf-8"))
+        fh.flush()
+        return True
+    except OSError:
+        return False
+    finally:
+        fh.close()                                        # closing releases the lock
+
+
 def close_orphaned_ledgers(root: str | Path) -> list[str]:
     """A RESTART CLOSES WHAT IT KILLED. Every ledger is written by this
     process; one still open when the process starts belonged to the one
@@ -444,32 +491,16 @@ def close_orphaned_ledgers(root: str | Path) -> list[str]:
         return closed
     for runs in root.glob("*/.forge/runs"):
         for path in runs.glob("*.jsonl"):
-            try:
-                with path.open("rb") as fh:
-                    fh.seek(0, os.SEEK_END)
-                    size = fh.tell()
-                    fh.seek(max(0, size - 4096))
-                    tail = fh.read().decode("utf-8", "replace").strip().splitlines()
-                last = json.loads(tail[-1]) if tail else None
-            except (OSError, ValueError):
-                continue
-            if not last or str(last.get("event") or "") in ("run:end", "run:crashed"):
-                continue
-            if _writer_alive(path):
-                # A WORKER RESTARTING IS NOT THE PLATFORM RESTARTING. The
-                # backend runs two workers; when one is replaced, the other's
-                # runs — and the checks a separate process runs — go on. Closed
-                # here, Personal Finance's checks, alive and heartbeating, were
-                # told to its owner as lost (u8w3uw4j, 2026-10-22).
-                continue
-            try:
-                with path.open("a", encoding="utf-8") as fh:
-                    fh.write(json.dumps({"event": "run:crashed", "error": "the platform restarted while it ran",
-                                         "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}) + "\n")
+            # A WORKER RESTARTING IS NOT THE PLATFORM RESTARTING. The backend
+            # runs two workers; when one is replaced, the other's runs — and
+            # the checks a separate process runs — go on. Closed here, Personal
+            # Finance's checks, alive and heartbeating, were told to its owner
+            # as lost (u8w3uw4j, 2026-10-22): `_writer_alive` keeps them open.
+            if close_once(path, {"event": "run:crashed", "error": "the platform restarted while it ran",
+                                 "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())},
+                          still_open=lambda p: not _writer_alive(p)):
                 closed.append(path.stem)
                 CLOSED_PATHS.append(str(path))
-            except OSError:
-                continue
     return closed
 
 

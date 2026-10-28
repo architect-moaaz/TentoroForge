@@ -32,9 +32,14 @@ import logging
 import uuid
 from typing import Any, AsyncIterator
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import StreamingResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
+from auth import get_current_user
+from database import get_db
+from models.auth import PlatformUser
 from services.project_event_bus import subscribe
 
 log = logging.getLogger(__name__)
@@ -83,3 +88,39 @@ async def project_events(project_id: uuid.UUID) -> EventSourceResponse:
                 yield {"event": name, "data": json.dumps(payload, default=str)}
 
     return EventSourceResponse(_stream())
+
+
+#: How often the Foundry's feed looks for new ledger lines.
+_OFFICE_POLL_S = 1.0
+
+
+@router.get("/api/projects/{project_id}/office")
+async def office_feed(project_id: str, request: Request, user: PlatformUser = Depends(get_current_user),
+                      db: AsyncSession = Depends(get_db)) -> StreamingResponse:
+    """THE FOUNDRY'S FEED: every job this project runs, as its agents doing it
+    (`services.office_feed`) — builds, Smith's turns and fixes, the checks,
+    the process trials, a publish, a self-heal. Signed in and a member, unlike
+    `/events`: what Smith is doing says something about the app. Read with
+    `fetch` (an EventSource cannot send the sign-in); one `office` frame per
+    event, a `ping` every 20 s."""
+    from services.office_feed import ProjectFeed
+    from services.project_service import project_for
+
+    project = await project_for(project_id, user, db)
+    feed = ProjectFeed(project.output_dir or "")
+
+    async def _stream() -> AsyncIterator[bytes]:
+        yield b"event: ready\ndata: {}\n\n"
+        quiet = 0.0
+        while not await request.is_disconnected():
+            events = await asyncio.to_thread(feed.poll)
+            for evt in events:
+                yield f"event: office\ndata: {json.dumps(evt, default=str)}\n\n".encode()
+            quiet = 0.0 if events else quiet + _OFFICE_POLL_S
+            if quiet >= 20:
+                quiet = 0.0
+                yield b"event: ping\ndata: {}\n\n"
+            await asyncio.sleep(_OFFICE_POLL_S)
+
+    return StreamingResponse(_stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"})

@@ -7803,8 +7803,9 @@ async def _handle_fix_proposal_agent(
         # it through the build's seams. No proposal card — the fix lands, and
         # the reply says what changed; a question comes back as a question.
         from services.smith4.platform import smith_result as _smith_turn
+        from services.blueprint.run_ledger import with_ledger
         result = await asyncio.to_thread(
-            _smith_turn, str(project.id), output_dir, symptom,
+            with_ledger, output_dir, "fix", _smith_turn, str(project.id), output_dir, symptom,
             commit=True, commit_message=f"smith(fix): {symptom[:60]}",
         )
     except Exception as e:  # noqa: BLE001
@@ -8402,8 +8403,9 @@ async def _handle_smith_turn(project: Project, message: str, deferred: dict | No
             except Exception as _e:  # noqa: BLE001 — never lose the turn
                 logger.warning("attached documents could not be read: %s", _e)
         from services.smith4.platform import smith_result as _smith_turn
+        from services.blueprint.run_ledger import with_ledger
         _smith_worker = asyncio.create_task(asyncio.to_thread(
-            _smith_turn, str(project.id), output_dir, message + _doc_note,
+            with_ledger, output_dir, "turn", _smith_turn, str(project.id), output_dir, message + _doc_note,
             history=prior_messages, attachments=_attach_files,
             reasoning=_reasoning_cb, commit=True,
             commit_message=f"smith: {message.strip()[:60]}",

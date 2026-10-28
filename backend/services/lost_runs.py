@@ -29,12 +29,8 @@ WATCH_EVERY_S = 60
 
 
 def kind_of(path: str | Path) -> str:
-    stem = Path(path).stem
-    if stem.endswith("-smith-turn"):
-        return "turn"
-    if stem.endswith("-checks") or stem.endswith("-app-check"):
-        return "check"
-    return "build"
+    from services.blueprint.run_ledger import ledger_kind
+    return ledger_kind(path)
 
 
 def _last_event(path: Path) -> str | None:
@@ -64,16 +60,18 @@ def scan(root: str | Path, lost_s: int | None = None) -> list[str]:
             if last is None or last in ("run:end", "run:crashed"):
                 continue
             try:
-                if now - os.path.getmtime(path) < lost_s:
-                    continue
-                with path.open("a", encoding="utf-8") as fh:
-                    fh.write(json.dumps({"event": "run:crashed",
-                                         "error": "the process working on it went away — no pulse for "
-                                                  f"{int(now - os.path.getmtime(path))} s",
-                                         "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}) + "\n")
-                closed.append(str(path))
+                quiet = now - os.path.getmtime(path)
             except OSError:
                 continue
+            if quiet < lost_s:
+                continue
+            from services.run_registry import close_once
+            # Once, whichever worker's watch gets there first (`close_once`).
+            if close_once(path, {"event": "run:crashed",
+                                 "error": f"the process working on it went away — no pulse for {int(quiet)} s",
+                                 "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())},
+                          still_open=lambda p: time.time() - os.path.getmtime(p) >= lost_s):
+                closed.append(str(path))
     return closed
 
 
@@ -88,6 +86,15 @@ def message_for(path: str | Path, why: str, when: str) -> str:
     if kind == "check":
         return (f"{cause} at {when} while I was checking the application, and that check stopped before it "
                 "finished. Say “check the app again” and I will run it through.")
+    if kind == "publish":
+        return (f"{cause} at {when} while your app was being published, and the publish stopped before it "
+                "finished. Press Publish to send it again.")
+    if kind in ("fix", "heal"):
+        return (f"{cause} at {when} while I was fixing a fault in your app, and that fix stopped before it "
+                "finished. Say “carry on” and I will look at it again.")
+    if kind == "drafts":
+        return (f"{cause} at {when} while the Drafts Room was working, and that run stopped before it "
+                "finished. Open the Drafts Room and run it again.")
     return (f"{cause} at {when} during the build, and the build stopped before it finished. "
             "Press Build to carry on; what was already built is kept.")
 

@@ -57,7 +57,7 @@ CATALOGUE: tuple[Feature, ...] = (
     Feature("code_view", "Code tab", "Read the app's source files inside Forge.", "workspace", False, source_out=True),
     Feature("legacy_editors", "Legacy editors", "The schema, AHTML and IR editors.", "workspace", True, enforced="ui"),
     Feature("agents", "Agents and AI", "An app's agent definitions and AI features.", "workspace", True),
-    Feature("office", "Virtual office", "Watch the agents at work on an app.", "workspace", True, enforced="ui"),
+    Feature("office", "The Foundry", "Watch the agents at work on an app, by name.", "workspace", True, enforced="ui"),
     Feature("monitoring", "Monitoring", "An app's incidents and runtime exceptions.", "workspace", True, enforced="ui"),
     # Ship
     Feature("publish", "Publish to the web", "Deploy the built app on the platform's hosting.", "ship", False, source_out=True),

@@ -16,7 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 
-import { editorApi, failureOf, type NavItemSpec } from "./api";
+import { editorApi, failureOf, PHONE_GO, type NavItemSpec } from "./api";
 import { useEditorStore } from "./store";
 import type { NavItem, PageListItem } from "./types";
 
@@ -25,15 +25,19 @@ export function routeFromName(name: string): string {
   return "/" + (s || "page");
 }
 
-export function PagesPanel() {
+export function PagesPanel({ surface = "web" }: { surface?: "web" | "phone" }) {
   const projectId = useEditorStore((s) => s.projectId)!;
-  const pages = useEditorStore((s) => s.pages);
+  const allPages = useEditorStore((s) => s.pages);
+  // The phone side lists the phone's screens; the sign-in pair is the kit's own and is not a page to arrange.
+  const pages = surface === "phone" ? allPages.filter((p) => p.phone) : allPages;
   const navigation = useEditorStore((s) => s.navigation);
   const entryPage = useEditorStore((s) => s.entryPage);
   const pageId = useEditorStore((s) => s.pageId);
   const openPage = useEditorStore((s) => s.openPage);
   const loadPages = useEditorStore((s) => s.loadPages);
   const [q, setQ] = useState("");
+  // On the phone side a click shows that screen in the phone, so the page that is on show is this panel's own to know.
+  const [phoneActive, setPhoneActive] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [renaming, setRenaming] = useState<PageListItem | null>(null);
   const [removing, setRemoving] = useState<PageListItem | null>(null);
@@ -46,12 +50,12 @@ export function PagesPanel() {
           <Search className="pointer-events-none absolute left-2 top-2 h-3.5 w-3.5 text-muted-foreground" />
           <Input className="h-8 pl-7 text-xs" placeholder="Find a page" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Find a page" />
         </div>
-        <Button size="sm" className="h-8 text-xs" onClick={() => setCreating(true)}><Plus className="h-3.5 w-3.5" /> New page</Button>
+        {surface === "web" && <Button size="sm" className="h-8 text-xs" onClick={() => setCreating(true)}><Plus className="h-3.5 w-3.5" /> New page</Button>}
       </div>
-      {!pages.length && <p className="p-2 text-xs text-muted-foreground">No pages yet — make one with “New page”.</p>}
+      {!pages.length && <p className="p-2 text-xs text-muted-foreground">{surface === "phone" ? "No phone screens yet — they are written when the app is built." : "No pages yet — make one with “New page”."}</p>}
       {shown.map((p) => (
-        <div key={p.id} className={cn("group flex items-start gap-2 rounded-md px-2 py-1.5 hover:bg-muted", pageId === p.id && "bg-primary/10")}>
-          <button type="button" onClick={() => void openPage(p.id)} title={p.purpose} className="flex min-w-0 flex-1 items-start gap-2 text-left">
+        <div key={p.id} className={cn("group flex items-start gap-2 rounded-md px-2 py-1.5 hover:bg-muted", (surface === "phone" ? phoneActive === p.id : pageId === p.id) && "bg-primary/10")}>
+          <button type="button" onClick={() => { if (surface === "phone") { setPhoneActive(p.id); window.dispatchEvent(new CustomEvent(PHONE_GO, { detail: p.route })); } else void openPage(p.id); }} title={p.purpose} className="flex min-w-0 flex-1 items-start gap-2 text-left">
             <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
             <span className="min-w-0 flex-1">
               <span className="flex items-center gap-1 text-xs font-medium">
@@ -61,7 +65,7 @@ export function PagesPanel() {
               <span className="block truncate text-[11px] text-muted-foreground">{p.route}{p.access === "public" ? " · everyone" : ""}</span>
             </span>
           </button>
-          {!p.coded && <span className="rounded bg-muted px-1 text-[10px] text-muted-foreground" title="Laid out automatically; ask Smith to design it">auto</span>}
+          {surface === "web" && !p.coded && <span className="rounded bg-muted px-1 text-[10px] text-muted-foreground" title="Laid out automatically; ask Smith to design it">auto</span>}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button type="button" className="rounded p-1 text-muted-foreground opacity-0 hover:bg-background group-hover:opacity-100 focus:opacity-100" aria-label={`More for ${p.name}`}><MoreHorizontal className="h-3.5 w-3.5" /></button>
@@ -70,8 +74,8 @@ export function PagesPanel() {
               <DropdownMenuItem onClick={() => setRenaming(p)}>Rename or change address…</DropdownMenuItem>
               <DropdownMenuItem disabled={entryPage === p.id || p.route.includes("[")} onClick={() => void editorApi.setNavigation(projectId, { initialRoute: p.route }).then(() => loadPages()).catch((err) => toast.error("Couldn't change the first page.", { description: failureOf(err).message }))}>Make it the first page</DropdownMenuItem>
               <DropdownMenuItem disabled={!!navigation?.tree.some((n) => n.page === p.id) || p.route.includes("[")} onClick={() => void editorApi.setNavigation(projectId, { tree: [...(navigation?.tree ?? []).map(toSpec), { label: p.name, page: p.id }] }).then(() => loadPages()).catch((err) => toast.error("Couldn't add it to the menu.", { description: failureOf(err).message }))}>Add to the menu</DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem className="text-destructive" onClick={() => setRemoving(p)}>Remove this page…</DropdownMenuItem>
+              {surface === "web" && <DropdownMenuSeparator />}
+              {surface === "web" && <DropdownMenuItem className="text-destructive" onClick={() => setRemoving(p)}>Remove this page…</DropdownMenuItem>}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -84,7 +88,7 @@ export function PagesPanel() {
   );
 }
 
-function toSpec(n: NavItem): NavItemSpec {
+export function toSpec(n: NavItem): NavItemSpec {
   return { label: n.label, page: n.page ?? null, icon: n.icon ?? null, children: (n.children ?? []).map(toSpec) };
 }
 

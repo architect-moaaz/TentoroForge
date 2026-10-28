@@ -236,6 +236,28 @@ def _prior_eas_id(app_json: Path) -> str:
         return ""
 
 
+def _kept_link(app_json: Path, written: str) -> str:
+    """`app.json` as it was just written, with what `eas init` and the build gave it put back: the Expo account that owns the
+    project (a robot access token is refused without `expo.owner`, so the build's status could never be read) and the unique
+    slug a build writes in (`<name>-<project id>`). Projecting again, as every Editor change does, wrote neither back."""
+    try:
+        before = (json.loads(app_json.read_text("utf-8")).get("expo") or {}) if app_json.is_file() else {}
+        data = json.loads(written)
+    except (OSError, ValueError):
+        return written
+    expo = data.get("expo")
+    if not isinstance(expo, dict):
+        return written
+    owner = str(before.get("owner") or "").strip()
+    if owner:
+        expo["owner"] = owner
+    kept_slug = str(before.get("slug") or "").strip()
+    base_slug = str(expo.get("slug") or "")
+    if base_slug and kept_slug.startswith(base_slug + "-"):
+        expo["slug"] = kept_slug
+    return json.dumps(data, indent=2) + "\n"
+
+
 # ---------------------------------------------------------------------------
 # The fixed half
 # ---------------------------------------------------------------------------
@@ -273,6 +295,8 @@ def project_fixed_half(doc: dict, output_dir: str | Path) -> list[str]:
                 text = text.replace(placeholder, value)
             if rel.name == "package.json":
                 text = _with_font_packages(text, doc)
+            if rel.name == "app.json":
+                text = _kept_link(dst, text)
             changed = _write(dst, text)
         else:
             changed = _copy(src, dst)
@@ -382,9 +406,13 @@ def theme_module(doc: dict) -> str:
 def can_sign_up(doc: dict) -> bool:
     """Whether the phone can create an account: the application has a sign-up page and people hold passwords
     (the phone signs in with email and password; single sign-on and email links need a browser)."""
-    from services.blueprint.account_model import is_auth_page, passwords_on
-    if not passwords_on(doc):
+    from services.blueprint.account_model import auth_page_bodies, has_sign_in, is_auth_page, passwords_on
+    if not passwords_on(doc) or not has_sign_in(doc):
         return False
+    # The sign-up page a plan with a sign-in is given (`auth_page_bodies`) counts even before it is written into the plan's pages:
+    # FocusFlow had a sign-in and no create-account link because the page was not yet in its list (2026-10-22).
+    if any(b.get("auth") == "signup" for b in auth_page_bodies(doc)):
+        return True
     return any(is_auth_page(p) and re.search(r"sign.?up|regist|join|create.?account", f"{p.get('route')} {p.get('name')}", re.I)
                for p in _live(doc.get("pages")))
 
