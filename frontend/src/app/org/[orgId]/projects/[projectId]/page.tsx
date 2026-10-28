@@ -631,6 +631,7 @@ function ProjectWorkspace({
         {activeTab === "office" && !lockedName && (
           <VirtualOffice
             className="h-full"
+            projectId={projectId}
             isGenerating={useChatStore.getState().isGenerating}
           />
         )}

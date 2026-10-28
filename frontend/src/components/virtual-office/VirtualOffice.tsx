@@ -1,5 +1,6 @@
 "use client";
 
+import { watchFoundry } from "./feed";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { OfficeEvent } from "./types";
 import { useOfficeStore } from "./OfficeStateManager";
@@ -17,6 +18,9 @@ export interface VirtualOfficeProps {
   onAgentClick?: (agentId: string) => void;
   events?: OfficeEvent[];
   isGenerating?: boolean;
+  /** The project whose work the Foundry shows: every job it runs, as it runs
+   *  (`feed.ts`). Without it the Foundry shows only the `events` it is given. */
+  projectId?: string;
 }
 
 export function VirtualOffice({
@@ -24,6 +28,7 @@ export function VirtualOffice({
   onAgentClick,
   events,
   isGenerating,
+  projectId,
 }: VirtualOfficeProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -38,6 +43,9 @@ export function VirtualOffice({
   const selectAgent = useOfficeStore((s) => s.selectAgent);
   const setHoveredAgent = useOfficeStore((s) => s.setHoveredAgent);
   const selectedAgent = useOfficeStore((s) => s.selectedAgent);
+
+  // ── The project's work, while the Foundry is on screen ─────────────────
+  useEffect(() => (projectId ? watchFoundry(projectId) : undefined), [projectId]);
 
   // ── Setup / teardown ────────────────────────────────────────────────────
   useEffect(() => {
