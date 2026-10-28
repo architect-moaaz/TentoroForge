@@ -1248,10 +1248,15 @@ def _commit(svc: Any, before: dict, request: str, said: str, affected: list[str]
     return int(record["version"])
 
 
-def _guard_writable(output_dir: str | Path) -> None:
+def _guard_writable(output_dir: str | Path, *, in_turn: bool = False) -> None:
+    """`in_turn`: the caller IS the Smith turn that makes the app busy (its
+    link and unlink verbs) — its own turn is not someone else's work to wait
+    for. A build or the checks after one still are."""
     if not has_definition(output_dir):
         raise RuleError("This app has no definition yet — describe it to Smith first.", status=404)
     why = busy(output_dir)
+    if in_turn and why == "smith":
+        why = None
     if why == "smith":
         # A turn is often short: waited for, as the rules lock is.
         deadline = time.monotonic() + TAB_LOCK_WAIT
@@ -1319,13 +1324,14 @@ def link_copies(output_dir: str | Path) -> list[dict]:
         return done
 
 
-def follow_rule(output_dir: str | Path, rule_id: str, *, workflow: str, step: str, actor: str = "") -> dict:
+def follow_rule(output_dir: str | Path, rule_id: str, *, workflow: str, step: str, actor: str = "",
+                in_turn: bool = False) -> dict:
     """The person's choice: a workflow's own check on the rule's fields is
     taken out, and the rule — checked when the workflow saves — decides."""
     from services import rule_links
     from services.blueprint.projection import project_workflows
     from services.blueprint.service import BlueprintService
-    _guard_writable(output_dir)
+    _guard_writable(output_dir, in_turn=in_turn)
     with write_lock(output_dir, timeout=TAB_LOCK_WAIT):
         _refuse_if_building(output_dir)
         svc = BlueprintService.load(output_dir=str(output_dir))
@@ -1816,7 +1822,7 @@ def _refusal_message(rule: dict) -> str:
 
 
 def attach(output_dir: str | Path, rule_id: str, *, workflow: str, after: str | None,
-           on_refusal: str = "stop", actor: str = "", path: str = "then") -> dict:
+           on_refusal: str = "stop", actor: str = "", path: str = "then", in_turn: bool = False) -> dict:
     """Run a rule as a step of a workflow, after the step `after` (None: at
     the start). A rule that can refuse becomes a gate: with ``on_refusal ==
     "stop"`` its else-path ends the workflow, refused, with the rule's own
@@ -1829,7 +1835,7 @@ def attach(output_dir: str | Path, rule_id: str, *, workflow: str, after: str | 
         raise RuleError("Say whether a refusal stops the workflow or it carries on.")
     if path not in ("then", "else"):
         raise RuleError("After a yes/no step, say whether the check goes on its yes or its no path.")
-    _guard_writable(output_dir)
+    _guard_writable(output_dir, in_turn=in_turn)
     with write_lock(output_dir, timeout=TAB_LOCK_WAIT):
         _refuse_if_building(output_dir)
         svc = BlueprintService.load(output_dir=str(output_dir))
@@ -1938,11 +1944,12 @@ def _detach_in(flow: dict, key: str) -> bool:
     return True
 
 
-def detach(output_dir: str | Path, rule_id: str, *, workflow: str, actor: str = "") -> dict:
+def detach(output_dir: str | Path, rule_id: str, *, workflow: str, actor: str = "",
+           in_turn: bool = False) -> dict:
     """Stop running a rule as a step of a workflow."""
     from services.blueprint.projection import project_workflows
     from services.blueprint.service import BlueprintService
-    _guard_writable(output_dir)
+    _guard_writable(output_dir, in_turn=in_turn)
     with write_lock(output_dir, timeout=TAB_LOCK_WAIT):
         _refuse_if_building(output_dir)
         svc = BlueprintService.load(output_dir=str(output_dir))

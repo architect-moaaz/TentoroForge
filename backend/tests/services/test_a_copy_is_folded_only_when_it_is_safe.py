@@ -197,3 +197,35 @@ def test_the_builds_fold_is_recorded_with_a_version_to_go_back_to(tmp_path, monk
     assert svc.versions() and projected and projected[0] is svc.doc
     flow = next(w for w in saved["workflows"] if w["id"] == "FLOW-900")
     assert [s["key"] for s in flow["steps"]] == ["add_role"]
+
+
+def test_smiths_own_turn_may_link_a_rule_but_still_waits_for_a_build(tmp_path, monkeypatch):
+    """Found in the browser (2026-10-28): Smith's link_rule called the rules
+    service from inside its own turn, which made the app "busy", and was
+    refused with "Smith is working on this app right now"."""
+    import json
+    from pathlib import Path
+
+    from services import business_rules as rules
+    from tests.routers.test_business_rules_api import FIXTURE, _with_a_copy
+
+    (tmp_path / ".forge" / "blueprint").mkdir(parents=True)
+    (tmp_path / ".forge" / "blueprint" / "current.json").write_text(Path(FIXTURE).read_text())
+    _with_a_copy(tmp_path)
+    path = tmp_path / ".forge" / "blueprint" / "current.json"
+    doc = json.loads(path.read_text())   # the workflow's check is stricter than the rule: an old one
+    next(w for w in doc["workflows"] if w["id"] == "FLOW-900")["steps"][0]["config"]["expression"] = "openingsCount >= 2"
+    path.write_text(json.dumps(doc))
+    L._JUDGED.clear()
+    monkeypatch.setattr(rules, "TAB_LOCK_WAIT", 0)
+    monkeypatch.setattr(rules, "busy", lambda out: "smith")
+    with pytest.raises(rules.RuleError):
+        rules.follow_rule(tmp_path, "RULE-900", workflow="FLOW-900", step="check_openings")
+    rules.follow_rule(tmp_path, "RULE-900", workflow="FLOW-900", step="check_openings", actor="Smith",
+                      in_turn=True)
+    doc = json.loads((tmp_path / ".forge" / "blueprint" / "current.json").read_text())
+    flow = next(w for w in doc["workflows"] if w["id"] == "FLOW-900")
+    assert [s["key"] for s in flow["steps"]] == ["add_role"]
+    monkeypatch.setattr(rules, "busy", lambda out: "building")
+    with pytest.raises(rules.RuleError):
+        rules.attach(tmp_path, "RULE-900", workflow="FLOW-900", after=None, in_turn=True)

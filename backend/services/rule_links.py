@@ -571,9 +571,13 @@ def judge_all(doc: dict, pairs: list[tuple[dict, dict]]) -> list[dict]:
                 if goes_on == bool(b["refused"]):
                     same, differs = False, case
                     break
+            # The example names only what the check or the rule reads — not
+            # every field the save happens to write.
+            said = _check_fields(doc, rule, c) | _rule_fields(rule)
             verdict = {"same": same, "cases": n,
                        **({"differs": {kk.split(":", 1)[1] + (" (before)" if kk.startswith("was:") else ""): v
-                                       for kk, v in differs.items()}} if differs else {})}
+                                       for kk, v in differs.items()
+                                       if kk.split(":", 1)[1] in said or not said}} if differs else {})}
             if len(_JUDGED) > _JUDGED_MAX:
                 _JUDGED.clear()
             _JUDGED[k] = verdict

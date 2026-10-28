@@ -281,7 +281,7 @@ def link_rule(ctx: Ctx, u: dict) -> Outcome:
         if copies:
             c = copies[0]
             rules_svc.follow_rule(ctx.out, str(rule["id"]), workflow=str(flow["id"]), step=str(c["step"]),
-                                  actor="Smith")
+                                  actor="Smith", in_turn=True)
             return Outcome(status="resolved", said=(
                 f"Done. {wname} had its own older check, “{c['stepName']}” ({c['expression']}), that did not match "
                 f"“{name}”. I took it out, so {wname} now follows the rule itself"
@@ -302,7 +302,7 @@ def link_rule(ctx: Ctx, u: dict) -> Outcome:
                                              "a record is changed" if L.rule_events(rule) == ("update",) else "a record is saved")
                    + f", and {wname} never does that, so there is nothing for it to do there.")))
         out = rules_svc.attach(ctx.out, str(rule["id"]), workflow=str(flow["id"]), after=None,
-                               on_refusal="stop", actor="Smith")
+                               on_refusal="stop", actor="Smith", in_turn=True)
     except rules_svc.RuleError as exc:
         return Outcome(status="needs_user", said=str(exc))
     return Outcome(status="resolved", said=(
@@ -334,7 +334,7 @@ def unlink_rule(ctx: Ctx, u: dict) -> Outcome:
                 "on new records or only on changes, change when the rule applies."))
         return Outcome(status="resolved", said=f"{flow.get('name')} does not use “{rule.get('name')}” — nothing to remove.")
     try:
-        out = rules_svc.detach(ctx.out, str(rule["id"]), workflow=str(flow["id"]), actor="Smith")
+        out = rules_svc.detach(ctx.out, str(rule["id"]), workflow=str(flow["id"]), actor="Smith", in_turn=True)
     except rules_svc.RuleError as exc:
         return Outcome(status="needs_user", said=str(exc))
     return Outcome(status="resolved", said=(
