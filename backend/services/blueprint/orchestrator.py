@@ -3736,12 +3736,16 @@ def _compose_page_layouts(svc: BlueprintService) -> None:
 
     have = {str(l.get("page")) for l in svc.doc.get("pageLayouts") or [] if isinstance(l, dict)}
     held = _deferred_pages(svc.doc)
+    from services.drawn import binder as drawn_binder
+
     for page in list(svc.doc.get("pages") or []):
         pid = str(page.get("id") or "")
         if not pid or page.get("status") == "DEPRECATED" or pid in have or pid in held:
             continue
         if page.get("pattern") == "auth":
             continue            # its floor is the template's sign-in page, not a tree
+        if drawn_binder.applies(svc.doc, page):
+            continue            # its views are the drawing's own (`services.drawn`); nothing to lay out
         body = None
         try:
             drawn = figma_layout.compose(svc, page, app_root=Path(svc.output_dir) / "app")

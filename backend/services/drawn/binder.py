@@ -101,7 +101,18 @@ def parts_of(doc: dict, page: dict) -> dict[str, str]:
     for name, code in components.items():
         if any(f'from "./{name}"' in code_ for code_ in parts.values()):
             parts[name] = code
-    return parts
+    return {name: _unchecked(code) for name, code in parts.items()}
+
+
+#: A drawn file is the drawing's markup: its insides are not type-checked
+#: (TenantsEntitlementsView read an optional `props.summary` unguarded, and the
+#: binder — who may not edit it — could never compile the page). Its props
+#: type is still checked everywhere it is USED, which is where binding happens.
+NOCHECK = "// @ts-nocheck — the drawing's markup; its props type is checked where the view is used.\n"
+
+
+def _unchecked(code: str) -> str:
+    return code if code.startswith("// @ts-nocheck") else NOCHECK + code
 
 
 def _targets(doc: dict) -> dict[str, dict]:
@@ -204,8 +215,11 @@ def bind(doc: dict, page: dict, app_root: Path, client: Any, *, feedback: str = 
         except json.JSONDecodeError:
             seed = {}
         load, view = str(body.get("load") or ""), ui_engineer._use_client_first(str(body.get("view") or ""))
+        # Not `_unwired_actions`: on a drawn page the drawing decides which
+        # processes start there (a process listed as launched from the Create
+        # page that has no button for it is the process's mistake, not the
+        # page's); `check` holds every drawn action to doing something instead.
         errors = check(view, page, doc) + ui_engineer._static_findings(load, view, exact=True) \
-            + ui_engineer._unwired_actions(doc, page, view) \
             + ui_engineer.typecheck(doc, app_root, pid, load, view, parts=parts)
         if not errors:
             return {"page": pid, "rationale": str(body.get("rationale") or ""), "load": load, "view": view,
@@ -223,9 +237,20 @@ def check(view: str, page: dict, doc: dict) -> list[str]:
         if f'"./parts/{row["name"]}"' not in view:
             problems.append(f"view.tsx: never shows the drawn view {row['name']} (its {as_}) — import it from "
                             f"\"./parts/{row['name']}\" and show it")
-    markup = re.findall(r"<([a-z][a-z0-9]*)\b", view)
-    drawn = [t for t in markup if t not in ("fragment",)]
+    # A JSX TAG, NOT A TYPE: `Awaited<typeof load>` is TypeScript. A wrapper
+    # with no classes (a provider's div) draws nothing; a styled one draws.
+    styled = re.findall(r"(?<![\w.$])<([a-z][a-z0-9]*)(?=[\s/>])([^>]*)>", view)
+    drawn = sorted({tag for tag, attrs in styled if tag not in ("typeof", "keyof")
+                    and re.search(r"\b(className|style)=", attrs)})
     if drawn:
-        problems.append("view.tsx: draws markup of its own (<" + ">, <".join(sorted(set(drawn))[:5]) + ">) — the "
-                        "page is the drawn views; only choose which one shows and feed it")
+        problems.append("view.tsx: draws markup of its own (<" + ">, <".join(drawn[:5]) + ">) — the page is the "
+                        "drawn views; only choose which one shows and feed it")
+    # EVERY DRAWN ACTION DOES SOMETHING. On a drawn page the drawing decides
+    # what can be done there; a handler that does nothing is a button that lies.
+    for _as, _label, row in views_of(doc, page):
+        for action in (row.get("contract") or {}).get("actions") or []:
+            name = str(action.get("name") or "")
+            if name and re.search(re.escape(name) + r"=\{\s*\(\s*[^)]*\)\s*=>\s*(\{\s*\}|undefined|null)\s*\}", view):
+                problems.append(f"view.tsx: `{name}` (\u201c{action.get('label')}\u201d) does nothing — wire it: "
+                                f"{action.get('kind')} {'to its page' if action.get('kind') == 'navigate' else 'with its process or view'}")
     return problems

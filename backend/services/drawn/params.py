@@ -28,6 +28,11 @@ ROUNDS = 3
 #: collapsed to one row and a `.map` keeps every row's classes; what may go is
 #: a drawn example the contract makes conditional (an empty state not shown).
 KEEP = 0.95
+#: …and a shell. Its menu is one list drawn in two looks (the page you are on,
+#: the rest), and its brief takes the drawn bell and avatar out for the app's
+#: own controls, so their classes go by design: D6's shell kept 28, then 24, of
+#: its 31 class strings (d6drawn, 2026-10-28). The render shows the rest.
+SHELL_KEEP = 0.7
 
 _FIELD_TYPES = ["string", "text", "number", "money", "percent", "date", "datetime", "boolean", "enum",
                 "email", "phone", "url", "image", "id"]
@@ -117,7 +122,7 @@ def _class_set(code: str) -> set[str]:
     return set(re.findall(r'className="([^"]*)"', code))
 
 
-def check(static: str, code: str, contract: dict, name: str) -> list[str]:
+def check(static: str, code: str, contract: dict, name: str, *, keep: float = KEEP) -> list[str]:
     """What is wrong with a reply, in words the writer can act on."""
     problems: list[str] = []
     drawn = _class_set(static)
@@ -128,7 +133,7 @@ def check(static: str, code: str, contract: dict, name: str) -> list[str]:
     quoted = set(re.findall(r'"([^"\n]*)"', code)) | set(re.findall(r"'([^'\n]*)'", code))
     if drawn:
         lost = sorted(drawn - kept - quoted, key=len)
-        if len(drawn & (kept | quoted)) / len(drawn) < KEEP:
+        if len(drawn & (kept | quoted)) / len(drawn) < keep:
             problems.append(f"the drawing's markup was changed: {len(lost)} of its {len(drawn)} distinct classNames "
                             f"are gone (e.g. {lost[:4]}) — keep every element and class exactly")
         added = sorted(kept - drawn)
@@ -192,7 +197,7 @@ def parameterise(client: Any, name: str, static: str, *, heading: str, image: st
             feedback = f"- the reply was not valid JSON ({exc})"
             continue
         code, contract = str(body.get("code") or ""), body.get("contract") or {"data": [], "actions": []}
-        problems = check(static, code, contract, name)
+        problems = check(static, code, contract, name, keep=SHELL_KEEP if children else KEEP)
         if not problems:
             return {"code": finish(name, code, contract, children=children), "contract": contract,
                     "sample": sample if isinstance(sample, dict) else {}, "rounds": round_}

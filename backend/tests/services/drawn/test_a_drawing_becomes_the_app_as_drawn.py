@@ -268,8 +268,9 @@ def test_the_page_around_the_drawing_draws_nothing(monkeypatch):
     monkeypatch.setattr(ui_engineer, "system_prompt", lambda doc: "s")
     good_view = ('"use client";\nimport TenantsView from "./parts/TenantsView";\nimport AddOverrideView from '
                  '"./parts/AddOverrideView";\nexport default function View(p: any) { return p.open ? '
-                 '<AddOverrideView /> : <TenantsView tenants={p.tenants} onNewTenant={() => {}} onPause={() => {}} />; }')
-    drawing_view = good_view.replace("<TenantsView", "<div><TenantsView").replace("/> : ", "/></div> : ", 1)
+                 '<AddOverrideView /> : <TenantsView tenants={p.tenants} onNewTenant={() => go("/tenants/new")} '
+                 'onPause={(row) => pause(row)} />; }')
+    drawing_view = good_view.replace("<TenantsView", '<div className="p-4"><TenantsView').replace(" />; }", " /></div>; }", 1)
     replies = iter([{"view": drawing_view}, {"view": good_view, "seed": json.dumps({"Tenant": [{"name": "MedStaff"}]})}])
 
     def client(*, system, user, schema):
@@ -279,6 +280,7 @@ def test_the_page_around_the_drawing_draws_nothing(monkeypatch):
 
     body, _ = binder.bind(doc, page, Path("/tmp"), client)
     assert body["parts"] == binder.parts_of(doc, page), "the views are the drawing, as converted"
+    assert all(code.startswith("// @ts-nocheck") for code in body["parts"].values())
     assert body["seed"] == {"Tenant": [{"name": "MedStaff"}]}
 
 
@@ -387,3 +389,18 @@ def test_a_heading_every_frame_shares_does_not_name_the_screens():
     slots = frame_slots(frames)
     assert [s["name"] for s in slots] == ["A-05 · Tenants", "A-11 · Promo codes", "A-12 · Create a promo code"]
     assert all("shows" not in s for s in slots)
+
+
+def test_a_type_is_not_markup_and_a_drawn_action_must_do_something():
+    from services.drawn import binder
+
+    doc = _bound_doc()
+    page = doc["pages"][0]
+    view = ('"use client";\nimport TenantsView from "./parts/TenantsView";\nimport AddOverrideView from "./parts/AddOverrideView";\n'
+            'type P = Awaited<typeof load>;\nexport default function V(p: P) { return <div><TenantsView '
+            'onNewTenant={() => router.push("/x")} onPause={(row) => run(row)} /></div>; }')
+    assert binder.check(view, page, doc) == []
+    lazy = view.replace("onPause={(row) => run(row)}", "onPause={() => {}}")
+    assert any("`onPause`" in p and "does nothing" in p for p in binder.check(lazy, page, doc))
+    styled = view.replace("<div>", '<div className="p-4">')
+    assert any("draws markup of its own (<div>)" in p for p in binder.check(styled, page, doc))
