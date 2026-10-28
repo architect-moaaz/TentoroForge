@@ -13,14 +13,12 @@ The gates here need no node: they decide before the rule lab is asked."""
 from __future__ import annotations
 
 import copy
-import shutil
 
 import pytest
 
 from services import rule_links as L
+from tests.rule_lab_needed import needs_lab as needs_node  # node and esbuild
 from tests.services.test_rules_are_linked_to_the_workflows_that_save_them import _doc
-
-needs_node = pytest.mark.skipif(not shutil.which("node"), reason="the rule lab needs node")
 
 _STOP = {"key": "stop", "type": "end", "config": {"refused": True, "message": "No."}, "next": []}
 _INSERT = {"key": "ins", "type": "action", "entity": "ENTITY-001",

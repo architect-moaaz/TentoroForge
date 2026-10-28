@@ -14,6 +14,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from main import app
+from tests.rule_lab_needed import needs_lab
 
 FIXTURE = Path(__file__).resolve().parents[2] / "fleet" / "blueprints" / "ats-live.json"
 ROLE = "ENTITY-002"
@@ -149,7 +150,7 @@ def _with_a_copy(out: Path) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(not __import__("shutil").which("node"), reason="the rule lab needs node")
+@needs_lab
 async def test_opening_the_tab_changes_nothing_and_use_the_rules_is_recorded(auth_client, org_id):
     """PR #29 review: the tab's GET folded copies into the definition. Now a
     read only offers it ("repeats"); the person's POST does it, with history."""

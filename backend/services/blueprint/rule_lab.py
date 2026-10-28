@@ -40,19 +40,40 @@ def _newest_source() -> float:
     return max(stamps)
 
 
+def _esbuild() -> str | None:
+    """The installed esbuild only: never `npx`, which may download a package
+    on a host (PR #29 review). A checkout has it in the repository's
+    node_modules; the backend image has no repository root (it is /app), so
+    there it is the one the Dockerfile installs on the PATH (PR #29: the lab
+    was unavailable on forge-v3)."""
+    for p in (_BACKEND.parent / "node_modules" / ".bin" / "esbuild",
+              _BACKEND.parent / "frontend" / "node_modules" / ".bin" / "esbuild"):
+        if p.exists():
+            return str(p)
+    return shutil.which("esbuild")
+
+
+def _fresh() -> bool:
+    return _BUNDLE.exists() and _BUNDLE.stat().st_mtime >= _newest_source()
+
+
+def available() -> bool:
+    """Can the lab answer here? Node, and a bundle that is current or an
+    esbuild to make one. Nothing is built or run."""
+    return bool(shutil.which("node")) and (_fresh() or _esbuild() is not None)
+
+
 def _bundle() -> Path:
     with _BUILD_LOCK:
-        if _BUNDLE.exists() and _BUNDLE.stat().st_mtime >= _newest_source():
+        if _fresh():
             return _BUNDLE
-        # The installed esbuild only: never `npx`, which may download a
-        # package on a host (PR #29 review). None: the lab is unavailable, and
-        # every caller already treats that as "not judged".
-        esbuild = next((p for p in (_BACKEND.parent / "node_modules" / ".bin" / "esbuild",
-                                    _BACKEND.parent / "frontend" / "node_modules" / ".bin" / "esbuild")
-                        if p.exists()), None)
+        # None: the lab is unavailable, and every caller already treats that
+        # as "not judged".
+        esbuild = _esbuild()
         if esbuild is None:
-            raise LabUnavailable("esbuild is not installed (run npm install at the repository root)")
-        cmd = [str(esbuild)]
+            raise LabUnavailable("esbuild is not installed (npm install at the repository root, "
+                                 "or esbuild on the PATH)")
+        cmd = [esbuild]
         tmp = _BUNDLE.with_suffix(".tmp.cjs")
         try:
             subprocess.run(cmd + [str(_ENTRY), "--bundle", "--platform=node", "--format=cjs",

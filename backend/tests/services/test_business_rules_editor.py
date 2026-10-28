@@ -16,6 +16,7 @@ import pytest
 
 from services import business_rules as br
 from services.blueprint.service import BlueprintService
+from tests.rule_lab_needed import needs_lab
 
 FIXTURE = Path(__file__).resolve().parents[2] / "fleet" / "blueprints" / "ats-live.json"
 ROLE = "ENTITY-002"
@@ -71,6 +72,7 @@ def test_a_decision_table_with_ranges_and_alternatives_is_saved_and_projected(ap
     assert any(r["rule_type"] == "decision_table" and r["id"] == rule["id"] for r in rows)
 
 
+@needs_lab
 def test_a_table_the_engine_cannot_run_is_refused_with_the_row_and_column(app):
     bad = json.loads(json.dumps(TABLE))
     bad["table"]["rules"][0]["inputEntries"][0] = "[9..1]"
@@ -85,6 +87,7 @@ def test_a_table_the_engine_cannot_run_is_refused_with_the_row_and_column(app):
     assert "“permenant” is not one of permanent" in str(e.value)
 
 
+@needs_lab
 def test_a_unique_table_with_overlapping_rows_is_refused_and_first_is_offered(app):
     overlap = json.loads(json.dumps(TABLE))
     overlap["table"]["rules"].append({"inputEntries": [">= 2", "permanent"], "outputEntries": ["office"]})
@@ -95,6 +98,7 @@ def test_a_unique_table_with_overlapping_rows_is_refused_and_first_is_offered(ap
     assert br.create(app, overlap)["rule"]["rule"]["table"]["hitPolicy"] == "F"
 
 
+@needs_lab
 def test_an_unreachable_row_is_said_not_refused(app):
     tbl = json.loads(json.dumps(TABLE))
     tbl["table"]["hitPolicy"] = "F"
@@ -163,6 +167,7 @@ def test_a_rule_made_again_after_removal_keeps_nothing_of_the_removed_one(app):
 
 # ---- test it -------------------------------------------------------------- #
 
+@needs_lab
 def test_test_it_runs_the_draft_among_the_records_rules(app):
     r = br.test_rule(app, GATE, record={"status": "closed", "openingsCount": 3})
     assert r["refused"] and r["errors"] == ["A closed role cannot have openings."]
@@ -177,6 +182,7 @@ def test_test_it_runs_the_draft_among_the_records_rules(app):
     assert r["errors"] == ["A closed role stays closed."]
 
 
+@needs_lab
 def test_test_it_shows_which_rows_matched_and_what_was_set(app):
     r = br.test_rule(app, TABLE, record={"openingsCount": 2, "employmentType": "contract"})
     assert r["patches"]["location"] == "hybrid"
@@ -185,6 +191,7 @@ def test_test_it_shows_which_rows_matched_and_what_was_set(app):
     assert r["focus"]["matched"] == [] and "location" not in r["patches"]
 
 
+@needs_lab
 def test_test_it_on_a_saved_rule_replaces_it_not_doubles_it(app):
     saved = br.create(app, GATE)["rule"]["rule"]
     softer = {**GATE, "then": [{"type": "set_field", "field": "openingsCount", "valueMode": "literal", "value": "0"}]}
@@ -299,6 +306,7 @@ def test_a_second_rule_setting_the_same_field_is_warned_about(app):
     assert not any(first["id"] in a for a in br.try_rule(app, TABLE, rule_id=first["id"])["advice"])
 
 
+@needs_lab
 def test_every_fault_is_said_at_once(app):
     said = br.try_rule(app, {**GATE, "when": "openingsCount >", "then": []})["problems"]
     assert any("Add what the rule does" in p for p in said) and any("cannot be read" in p for p in said)
@@ -451,7 +459,8 @@ def test_round_two_fine_conditions_stay_fine(app, when):
     ({"type": "set_field", "field": "openingsCount", "valueMode": "formula", "value": '"lots"'}, "is a number"),
     ({"type": "set_field", "field": "openingsCount", "valueMode": "field", "value": "title"}, "different kinds"),
     ({"type": "set_field", "field": "openingsCount", "valueMode": "field", "value": "nope"}, "not a field"),
-    ({"type": "set_field", "field": "openingsCount", "valueMode": "formula", "value": "((("}, "cannot be read"),
+    pytest.param({"type": "set_field", "field": "openingsCount", "valueMode": "formula", "value": "((("},
+                 "cannot be read", marks=needs_lab),  # the engine reads the formula
     ({"type": "set_field", "field": "status", "valueMode": "formula", "value": '"deleted"'}, "not one of"),
 ])
 def test_a_copied_or_worked_out_value_fits_its_field_too(app, act, word):
@@ -516,6 +525,7 @@ def test_inline_options_are_said_as_options():
     assert "options" in said and "named" not in said
 
 
+@needs_lab
 def test_collect_totals_fill_numbers_and_any_rows_agree(app):
     t = json.loads(json.dumps(TABLE))
     t["table"].update(hitPolicy="C", aggregation="COUNT")       # location is text

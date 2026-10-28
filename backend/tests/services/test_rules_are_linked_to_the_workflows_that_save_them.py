@@ -8,13 +8,11 @@ workflow, while every workflow checked a copy of it (`check_amount: amount >
 from __future__ import annotations
 
 import copy
-import shutil
 
 import pytest
 
 from services import rule_links as L
-
-needs_node = pytest.mark.skipif(not shutil.which("node"), reason="the rule lab needs node")
+from tests.rule_lab_needed import needs_lab as needs_node  # node and esbuild
 
 
 def _doc() -> dict:
@@ -183,6 +181,7 @@ def test_smith_reads_where_each_rule_is_checked():
     assert "No business rule called" in reads.run("rule_links", {"rule": "nope"}, output_dir="", doc=_doc())
 
 
+@needs_node
 def test_smith_links_a_rule_says_already_linked_or_adds_an_extra_check(tmp_path, monkeypatch):
     from services import business_rules as rules
     from services.blueprint.service import BlueprintService
