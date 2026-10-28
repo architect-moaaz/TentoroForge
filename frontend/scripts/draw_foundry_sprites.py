@@ -1,8 +1,13 @@
-"""Draw the Foundry characters that had names but no face (Nina, Otto, Trey,
-Remy) as pixel art in the cast's proportions: standing (idle) and seated at
-the desk (working).
+"""Draw the whole Foundry cast as pixel art: every agent in `agent_personas.json`
+gets a face that fits who they are, standing (idle) and seated at the desk
+(working), each holding what says their job (Bob a database, Todd gears, Sam a
+shield…). The sprite key is the persona's first name.
 
     python3 frontend/scripts/draw_foundry_sprites.py frontend/public/sprites/characters
+
+Add a person to `CAST` (hair, skin, top, extras, what they hold) and to the
+manifest; `frontend/src/__tests__/the-foundry-names-its-agents.test.tsx`
+checks every desk has its own face in both poses.
 """
 import sys
 from pathlib import Path
@@ -92,12 +97,13 @@ class Canvas:
 # --------------------------------------------------------------------------- #
 
 def head(cv, hx, hy, p, facing="front"):
+    skin, skin_sh = p.get("skin", (SKIN, SKIN_SH))
     # face
-    cv.rect(hx + 1, hy + 5, hx + 14, hy + 14, SKIN, sh=SKIN_SH)
-    cv.rect(hx + 2, hy + 15, hx + 13, hy + 15, SKIN_SH)
+    cv.rect(hx + 1, hy + 5, hx + 14, hy + 14, skin, sh=skin_sh)
+    cv.rect(hx + 2, hy + 15, hx + 13, hy + 15, skin_sh)
     # ears
-    cv.rect(hx, hy + 8, hx, hy + 10, SKIN)
-    cv.rect(hx + 15, hy + 8, hx + 15, hy + 10, SKIN_SH)
+    cv.rect(hx, hy + 8, hx, hy + 10, skin)
+    cv.rect(hx + 15, hy + 8, hx + 15, hy + 10, skin_sh)
     # eyes and mouth
     ex = (hx + 4, hx + 10) if facing == "front" else (hx + 3, hx + 8)
     for x in ex:
@@ -114,6 +120,21 @@ def head(cv, hx, hy, p, facing="front"):
     cv.set(ex[0] - 1, hy + 12, (240, 160, 150, 255))
     cv.set(ex[1] + 2, hy + 12, (240, 160, 150, 255))
     p["hair"](cv, hx, hy, facing)
+    if p.get("beard"):
+        b, bsh = p["beard"], shade(p["beard"], 0.78)
+        cv.rect(hx + 1, hy + 12, hx + 1, hy + 14, b)
+        cv.rect(hx + 14, hy + 12, hx + 14, hy + 14, bsh)
+        cv.rect(hx + 2, hy + 14, hx + 13, hy + 15, b, sh=bsh)
+        mx = hx + 7 if facing == "front" else hx + 5
+        cv.rect(mx - 1, hy + 13, mx + 2, hy + 13, b)                # moustache, mouth beneath
+        cv.rect(mx, hy + 14, mx + 1, hy + 14, MOUTH)
+    if p.get("headphones"):
+        band = p["headphones"]
+        cv.rect(hx + 1, hy - 1, hx + 14, hy - 1, band)
+        cv.rect(hx - 1, hy, hx - 1, hy + 6, band)
+        cv.rect(hx + 16, hy, hx + 16, hy + 6, band)
+        cv.rect(hx - 2, hy + 7, hx, hy + 11, shade(band, 0.7))
+        cv.rect(hx + 15, hy + 7, hx + 17, hy + 11, shade(band, 0.7))
     if p.get("glasses"):
         frame = (70, 60, 80, 255)
         for x in ex:
@@ -220,11 +241,30 @@ def idle(p):
     if p.get("scarf"):
         cv.rect(8, 18, 18, 20, p["scarf"], sh=shade(p["scarf"], 0.75))
         cv.rect(15, 21, 16, 25, p["scarf"], sh=shade(p["scarf"], 0.75))
+    if p.get("overalls"):
+        o = p["overalls"]
+        cv.rect(9, 23, 17, 32, o, sh=shade(o, 0.78))
+        cv.rect(9, 19, 10, 22, o); cv.rect(16, 19, 17, 22, shade(o, 0.78))     # straps
+        cv.set(10, 24, (250, 204, 21, 255)); cv.set(16, 24, (250, 204, 21, 255))
+    if p.get("apron"):
+        a = p["apron"]
+        cv.rect(9, 21, 17, 34, a, sh=shade(a, 0.78), hi=shade(a, 1.15))
+        cv.rect(11, 26, 15, 26, shade(a, 0.7))                                   # pocket seam
+    if p.get("tie"):
+        cv.rect(12, 19, 14, 19, (240, 240, 245, 255))
+        cv.rect(13, 20, 13, 27, p["tie"]); cv.rect(12, 21, 14, 23, p["tie"])
+    if p.get("hoodie"):
+        h = p["hoodie"]
+        cv.rect(8, 18, 18, 19, shade(h, 0.8))                                    # hood at the neck
+        cv.rect(10, 26, 16, 29, shade(h, 0.85))                                  # pouch
+        cv.set(11, 20, (240, 240, 245, 255)); cv.set(15, 20, (240, 240, 245, 255))
+    if p.get("badge"):
+        cv.rect(15, 21, 17, 23, p["badge"], sh=shade(p["badge"], 0.7))
     # arms and hands
     cv.rect(4, 20, 6, 28, body, sh=body_sh)
     cv.rect(20, 20, 22, 27, body_sh)
-    cv.rect(4, 29, 6, 30, SKIN)
-    cv.rect(20, 28, 22, 29, SKIN)
+    cv.rect(4, 29, 6, 30, p.get("skin", (SKIN, SKIN_SH))[0])
+    cv.rect(20, 28, 22, 29, p.get("skin", (SKIN, SKIN_SH))[0])
     p["holds"](cv, "idle")
     head(cv, 5, 3, p)
     cv.outline()
@@ -251,8 +291,16 @@ def working(p):
         cv.rect(20, 16, 26, 24, p["vest"], sh=shade(p["vest"], 0.75))
     if p.get("scarf"):
         cv.rect(19, 15, 27, 16, p["scarf"], sh=shade(p["scarf"], 0.75))
+    if p.get("overalls"):
+        cv.rect(21, 18, 26, 24, p["overalls"], sh=shade(p["overalls"], 0.78))
+    if p.get("apron"):
+        cv.rect(20, 17, 27, 24, p["apron"], sh=shade(p["apron"], 0.78))
+    if p.get("tie"):
+        cv.rect(23, 16, 23, 22, p["tie"])
+    if p.get("badge"):
+        cv.rect(25, 17, 26, 18, p["badge"])
     cv.rect(14, 19, 19, 21, body, sh=body_sh)
-    cv.rect(12, 20, 14, 21, SKIN)
+    cv.rect(12, 20, 14, 21, p.get("skin", (SKIN, SKIN_SH))[0])
     head(cv, 16, 1, p, facing="side")
     # the desk: top, front edge, legs
     cv.rect(1, 22, 30, 24, WOOD, hi=shade(WOOD, 1.12))
@@ -322,6 +370,194 @@ def book(cv, pose):
         cv.rect(22, 20, 25, 20, (250, 250, 245, 255))
 
 
+def hair_long(color, band=None):
+    hi, sh = shade(color, 1.3), shade(color, 0.72)
+
+    def draw(cv, hx, hy, facing):
+        cv.rect(hx + 1, hy + 1, hx + 14, hy + 6, color, sh=sh, hi=hi)
+        cv.rect(hx + 3, hy, hx + 12, hy, color)
+        cv.rect(hx - 1, hy + 3, hx, hy + 17, color)            # falls past the shoulders
+        cv.rect(hx + 15, hy + 3, hx + 16, hy + 17, sh)
+        cv.rect(hx + 1, hy + 7, hx + 5, hy + 7, color)           # fringe
+        cv.rect(hx + 10, hy + 7, hx + 14, hy + 7, color)
+        if band:
+            cv.rect(hx + 1, hy + 3, hx + 14, hy + 3, band)
+    return draw
+
+
+def hair_bun(color):
+    hi, sh = shade(color, 1.3), shade(color, 0.72)
+
+    def draw(cv, hx, hy, facing):
+        hair_neat(color)(cv, hx, hy, facing)
+        bx = hx + 6 if facing == "front" else hx + 9
+        cv.rect(bx, hy - 3, bx + 3, hy - 1, color, sh=sh, hi=hi)
+    return draw
+
+
+def hair_curly(color):
+    hi, sh = shade(color, 1.3), shade(color, 0.72)
+
+    def draw(cv, hx, hy, facing):
+        cv.rect(hx - 1, hy + 1, hx + 16, hy + 6, color, sh=sh, hi=hi)
+        cv.rect(hx - 1, hy + 7, hx, hy + 11, color)
+        cv.rect(hx + 15, hy + 7, hx + 16, hy + 11, sh)
+        for x in range(hx, hx + 16, 3):                          # curls along the top
+            cv.rect(x, hy - 1, x + 1, hy, color)
+        cv.rect(hx + 2, hy + 7, hx + 4, hy + 7, color); cv.rect(hx + 11, hy + 7, hx + 13, hy + 7, color)
+    return draw
+
+
+def hair_spiky(color):
+    hi, sh = shade(color, 1.3), shade(color, 0.72)
+
+    def draw(cv, hx, hy, facing):
+        cv.rect(hx + 1, hy + 2, hx + 14, hy + 6, color, sh=sh, hi=hi)
+        cv.rect(hx, hy + 4, hx, hy + 8, color); cv.rect(hx + 15, hy + 4, hx + 15, hy + 8, sh)
+        for i, x in enumerate(range(hx + 1, hx + 15, 3)):        # spikes
+            cv.rect(x, hy - 1 + (i % 2), x + 1, hy + 1, color)
+        cv.rect(hx + 3, hy + 7, hx + 5, hy + 7, color); cv.rect(hx + 9, hy + 7, hx + 10, hy + 7, color)
+    return draw
+
+
+def hair_buzz(color):
+    def draw(cv, hx, hy, facing):
+        cv.rect(hx + 2, hy + 2, hx + 13, hy + 5, color, sh=shade(color, 0.78))
+        cv.rect(hx + 1, hy + 4, hx + 1, hy + 7, color); cv.rect(hx + 14, hy + 4, hx + 14, hy + 7, shade(color, 0.78))
+    return draw
+
+
+def beanie(color, hair_color):
+    hi, sh = shade(color, 1.25), shade(color, 0.72)
+
+    def draw(cv, hx, hy, facing):
+        cv.rect(hx, hy + 5, hx + 1, hy + 9, hair_color); cv.rect(hx + 14, hy + 5, hx + 15, hy + 9, shade(hair_color, 0.75))
+        cv.rect(hx + 1, hy, hx + 14, hy + 4, color, sh=sh, hi=hi)
+        cv.rect(hx, hy + 5, hx + 15, hy + 6, shade(color, 1.15))     # the turned-up band
+        cv.rect(hx + 3, hy - 1, hx + 12, hy - 1, color)
+        cv.rect(hx + 7, hy - 3, hx + 8, hy - 2, (245, 245, 245, 255))  # the bobble
+    return draw
+
+
+def hard_hat(color, hair_color):
+    hi, sh = shade(color, 1.25), shade(color, 0.72)
+
+    def draw(cv, hx, hy, facing):
+        cv.rect(hx + 1, hy + 6, hx + 2, hy + 8, hair_color); cv.rect(hx + 13, hy + 6, hx + 14, hy + 8, hair_color)
+        cv.rect(hx + 1, hy, hx + 14, hy + 4, color, sh=sh, hi=hi)
+        cv.rect(hx + 3, hy - 1, hx + 12, hy - 1, color)
+        cv.rect(hx - 1, hy + 5, hx + 16, hy + 5, sh)                   # the rim
+        cv.rect(hx + 7, hy - 1, hx + 8, hy + 4, hi)                     # the ridge
+    return draw
+
+
+def headscarf(color):
+    hi, sh = shade(color, 1.25), shade(color, 0.72)
+
+    def draw(cv, hx, hy, facing):
+        cv.rect(hx, hy, hx + 15, hy + 6, color, sh=sh, hi=hi)
+        cv.rect(hx - 1, hy + 4, hx, hy + 17, color)
+        cv.rect(hx + 15, hy + 4, hx + 16, hy + 17, sh)
+        cv.rect(hx + 2, hy - 1, hx + 13, hy - 1, color)
+        cv.rect(hx + 1, hy + 15, hx + 14, hy + 16, color, sh=sh)       # wrapped under the chin
+    return draw
+
+
+def item(pattern: list[str], colors: dict[str, tuple], *, at=(19, 21), desk: list[str] | None = None,
+         desk_at=(19, 20)):
+    """Something to hold, drawn from a small pattern of letters (a space is
+    nothing): in the hand when standing, and — when `desk` is given — a small
+    version of it on the desk when working."""
+    def stamp(cv, rows, ox, oy):
+        for dy, row in enumerate(rows):
+            for dx, ch in enumerate(row):
+                if ch != " ":
+                    cv.set(ox + dx, oy + dy, colors[ch])
+
+    def holds(cv, pose):
+        if pose == "idle":
+            stamp(cv, pattern, *at)
+        elif desk:
+            stamp(cv, desk, *desk_at)
+    return holds
+
+
+W_ = (250, 250, 245, 255)
+K_ = (40, 40, 52, 255)
+G_ = (150, 150, 162, 255)
+
+# What each one carries.
+BLUEPRINT = item(["  bbbbb", " bBBBBBb", "bBwBwBBb", "bBBBBBBb", " bbbbbb"],
+                 {"b": (30, 64, 175, 255), "B": (59, 130, 246, 255), "w": W_}, at=(18, 24),
+                 desk=["bBBBBb"], desk_at=(19, 21))
+NOTEPAD = item(["yyyyyy", "ywwwwy", "yGGGGy", "ywwwwy", "yGGGGy", "ywwwwy", "yyyyyy"],
+               {"y": (250, 204, 21, 255), "w": W_, "G": G_}, at=(20, 22), desk=["ywwy"])
+GLOBE = item([" bbbb ", "bgbbgb", "bbggbb", "bgbbbb", " bbbb ", "  kk  ", " kkkk "],
+             {"b": (59, 130, 246, 255), "g": (34, 197, 94, 255), "k": (120, 80, 42, 255)}, at=(20, 21))
+STICKIES = item(["yy pp", "yy pp", "  gg ", "  gg "],
+                {"y": (250, 204, 21, 255), "p": (244, 114, 182, 255), "g": (74, 222, 128, 255)},
+                at=(20, 23), desk=["yypp"])
+MAP = item(["wwwwwww", "wBwwwRw", "wkkkkkw", "wwwGwww", "wwkkwww", "wwwwwww"],
+           {"w": W_, "B": (59, 130, 246, 255), "R": (239, 68, 68, 255), "G": (34, 197, 94, 255), "k": G_},
+           at=(19, 22), desk=["wBkkRw"])
+PLUG = item(["  k  ", " kkk ", "kGGGk", "kGGGk", " kkk ", "  o  ", "  o  ", " oo  "],
+            {"k": K_, "G": (148, 163, 184, 255), "o": (234, 88, 12, 255)}, at=(20, 21))
+PALETTE = item([" wwww ", "wRwYww", "wwBwGw", "wwwwww", " ww  "],
+               {"w": (232, 196, 140, 255), "R": (239, 68, 68, 255), "Y": (250, 204, 21, 255),
+                "B": (59, 130, 246, 255), "G": (34, 197, 94, 255)}, at=(19, 23), desk=["RYBG"])
+PENCIL_SHEET = item(["wwwww y", "wGGGw y", "wwwww y", "wGGGw y", "wwwww k"],
+                    {"w": W_, "G": G_, "y": (250, 204, 21, 255), "k": K_}, at=(19, 22), desk=["wGGw"])
+SHAPES = item(["RR pp", "RR pp", "oo ", "oo bb", "   bb", "gg   ", "gg   "],
+              {"R": (242, 78, 30, 255), "p": (162, 89, 255, 255), "o": (255, 114, 98, 255),
+               "b": (26, 188, 254, 255), "g": (10, 207, 131, 255)}, at=(20, 21), desk=["Rpbg"])
+FRAME = item(["kk  kk", "k    k", "      ", "k    k", "kk  kk"], {"k": (250, 204, 21, 255)}, at=(20, 22))
+DATABASE = item([" bbbb ", "bBBBBb", "bbbbbb", "bBBBBb", "bbbbbb", "bBBBBb", " bbbb "],
+                {"b": (37, 99, 235, 255), "B": (96, 165, 250, 255)}, at=(20, 22), desk=["bBBb"])
+TABLET_BRACES = item(["kkkkkk", "kwwwwk", "kbwwbk", "bwwwwb", "kbwwbk", "kwwwwk", "kkkkkk"],
+                     {"k": K_, "w": (219, 234, 254, 255), "b": (79, 70, 229, 255)}, at=(20, 22))
+SERVER = item(["kkkkkk", "kGgGGk", "kkkkkk", "kGGgGk", "kkkkkk", "kGgGGk", "kkkkkk"],
+              {"k": (71, 85, 105, 255), "G": (148, 163, 184, 255), "g": (34, 197, 94, 255)}, at=(20, 22))
+CHART = item(["wwwwww", "wwwwRw", "wwBwRw", "wGBwRw", "wGBwRw", "wwwwww"],
+             {"w": W_, "R": (239, 68, 68, 255), "B": (59, 130, 246, 255), "G": (34, 197, 94, 255)},
+             at=(20, 22), desk=["wGBRw"])
+RULER = item(["yyyyyyy", "ykykyky", "yyyyyyy"], {"y": (250, 204, 21, 255), "k": K_}, at=(19, 26),
+             desk=["ykyky"])
+LAPTOP = item([" kkkkk", " kbbbk", " kbcbk", " kbbbk", "GGGGGGG"],
+              {"k": K_, "b": (30, 41, 59, 255), "c": (97, 218, 251, 255), "G": G_}, at=(19, 23))
+CODE_CARD = item(["wwwwwww", "w k  kw", "wk  k w", "w k k w", "wwwwwww"],
+                 {"w": (217, 249, 157, 255), "k": (21, 128, 61, 255)}, at=(19, 22), desk=["wkkw"])
+GEARS = item([" g g  ", "ggggg ", " gGg  ", "ggggg ", " g g s", "   sss", "    s "],
+             {"g": (148, 163, 184, 255), "G": (71, 85, 105, 255), "s": (251, 146, 60, 255)}, at=(20, 22))
+SCALES = item(["   y   ", "yyyyyyy", "y  y  y", "yy y yy", "   y   ", "  yyy  "],
+              {"y": (217, 119, 6, 255)}, at=(19, 22))
+SHIELD = item(["yyyyy", "yBBBy", "yBwBy", "yBBBy", " yBy ", "  y  "],
+              {"y": (250, 204, 21, 255), "B": (30, 64, 175, 255), "w": W_}, at=(20, 22))
+STAMP = item([" kk ", " kk ", "RRRR", "RRRR"], {"k": (120, 80, 42, 255), "R": (220, 38, 38, 255)}, at=(21, 24),
+             desk=["RR"])
+FILE_BOX = item(["bbbbbb", "bwwwwb", "bbbbbb", "bbkkbb", "bbbbbb"],
+                {"b": (180, 132, 76, 255), "w": W_, "k": (120, 80, 42, 255)}, at=(20, 23))
+CAMERA = item(["  kk  ", "kkkkkk", "kGbbGk", "kGbbGk", "kkkkkk"],
+              {"k": K_, "G": G_, "b": (96, 165, 250, 255)}, at=(20, 23))
+BUG_NET = item([" wwww", "w    w", "w    w", " wwww ", "  k   ", "  k   ", "  k   "],
+               {"w": W_, "k": (120, 80, 42, 255)}, at=(20, 18))
+WRENCH = item(["g g", "ggg", " g ", " g ", " g ", " g "], {"g": (148, 163, 184, 255)}, at=(21, 22))
+ROCKET = item(["  w  ", " wRw ", " www ", " wbw ", "wwwww", "R o R", "  o  "],
+              {"w": W_, "R": (220, 38, 38, 255), "b": (59, 130, 246, 255), "o": (251, 146, 60, 255)},
+              at=(20, 20))
+PUZZLE = item([" gg  ", "gggg ", "ggggp", " pppp", "  pp "],
+              {"g": (34, 197, 94, 255), "p": (168, 85, 247, 255)}, at=(20, 24), desk=["ggpp"])
+
+SKINS = {
+    "light": ((246, 214, 182, 255), (222, 182, 146, 255)),
+    "fair": ((246, 196, 152, 255), (222, 160, 118, 255)),
+    "medium": ((222, 168, 124, 255), (194, 136, 96, 255)),
+    "tan": ((196, 138, 94, 255), (166, 108, 70, 255)),
+    "deep": ((140, 92, 64, 255), (112, 70, 46, 255)),
+}
+
+BLACK, DARK_BROWN, BROWN, AUBURN = (36, 32, 44, 255), (70, 44, 30, 255), (120, 72, 40, 255), (150, 62, 34, 255)
+BLOND, GINGER, GREY, PLATINUM = (226, 190, 102, 255), (204, 102, 44, 255), (168, 168, 176, 255), (226, 226, 232, 255)
+
 CAST = {
     "nina": {"hair": hair_ponytail((44, 38, 62, 255)), "top": (20, 184, 166, 255), "holds": phone,
              "screen": (94, 234, 212, 255)},
@@ -331,6 +567,51 @@ CAST = {
              "coat": (244, 244, 248, 255), "holds": checklist, "screen": (134, 239, 172, 255)},
     "remy": {"hair": beret((30, 58, 138, 255), (120, 72, 40, 255)), "top": (234, 179, 8, 255),
              "scarf": (190, 24, 93, 255), "holds": book, "screen": (253, 230, 138, 255)},
+    # The rest of the team, each dressed for what they do.
+    "smith": {"hair": hair_neat(DARK_BROWN), "beard": DARK_BROWN, "skin": SKINS["tan"], "top": (71, 85, 105, 255),
+              "apron": (146, 92, 52, 255), "holds": BLUEPRINT},
+    "rita": {"hair": hair_long(AUBURN), "skin": SKINS["light"], "top": (251, 113, 133, 255), "holds": NOTEPAD},
+    "dana": {"hair": hair_curly(BLACK), "skin": SKINS["deep"], "top": (101, 163, 13, 255), "holds": GLOBE},
+    "priya": {"hair": hair_bun(BLACK), "skin": SKINS["tan"], "top": (249, 115, 22, 255), "holds": STICKIES},
+    "arjun": {"hair": hair_neat(BLACK), "skin": SKINS["tan"], "glasses": True, "top": (29, 78, 216, 255),
+              "tie": (220, 38, 38, 255), "holds": MAP},
+    "ivan": {"hair": hair_spiky(BLOND), "skin": SKINS["light"], "headphones": (51, 65, 85, 255),
+             "top": (14, 116, 144, 255), "holds": PLUG},
+    "iris": {"hair": hair_long(BROWN, band=(236, 72, 153, 255)), "skin": SKINS["medium"], "top": (236, 72, 153, 255),
+             "holds": PALETTE},
+    "paige": {"hair": hair_bun(GINGER), "skin": SKINS["light"], "top": (56, 189, 248, 255), "holds": PENCIL_SHEET},
+    "felix": {"hair": beanie((234, 88, 12, 255), BROWN), "skin": SKINS["fair"], "top": (31, 41, 55, 255),
+              "holds": SHAPES},
+    "uma": {"hair": hair_long(BLACK), "skin": SKINS["deep"], "glasses": True, "top": (5, 150, 105, 255),
+            "holds": FRAME},
+    "bob": {"hair": hair_buzz(BROWN), "beard": BROWN, "skin": SKINS["fair"], "top": (22, 163, 74, 255),
+            "overalls": (30, 64, 120, 255), "holds": DATABASE},
+    "ada": {"hair": hair_long(AUBURN), "skin": SKINS["light"], "glasses": True, "top": (67, 56, 202, 255),
+            "holds": TABLET_BRACES},
+    "kai": {"hair": hair_spiky(BLACK), "skin": SKINS["tan"], "headphones": (220, 38, 38, 255),
+            "top": (22, 101, 52, 255), "hoodie": (22, 101, 52, 255), "holds": SERVER},
+    "ana": {"hair": hair_curly(DARK_BROWN), "skin": SKINS["medium"], "top": (217, 119, 6, 255), "holds": CHART},
+    "theo": {"hair": hair_neat(BROWN), "skin": SKINS["light"], "top": (8, 145, 178, 255), "holds": RULER},
+    "leo": {"hair": hair_spiky(GINGER), "skin": SKINS["fair"], "top": (37, 99, 235, 255),
+            "hoodie": (37, 99, 235, 255), "holds": LAPTOP},
+    "fern": {"hair": headscarf((22, 163, 74, 255)), "skin": SKINS["medium"], "top": (132, 204, 22, 255),
+             "holds": CODE_CARD},
+    "todd": {"hair": cap((37, 99, 235, 255), (250, 204, 21, 255)), "skin": SKINS["fair"], "top": (226, 232, 240, 255),
+             "overalls": (71, 85, 105, 255), "holds": GEARS},
+    "ruth": {"hair": hair_bun(GREY), "skin": SKINS["light"], "glasses": True, "top": (159, 18, 57, 255),
+             "holds": SCALES},
+    "sam": {"hair": hair_buzz(BLACK), "skin": SKINS["deep"], "top": (17, 24, 39, 255), "badge": (250, 204, 21, 255),
+            "holds": SHIELD},
+    "vera": {"hair": hair_long(BLOND), "skin": SKINS["light"], "top": (16, 185, 129, 255), "holds": STAMP},
+    "mo": {"hair": hair_neat(GREY), "beard": GREY, "skin": SKINS["medium"], "top": (146, 64, 14, 255),
+           "holds": FILE_BOX},
+    "penny": {"hair": hair_curly(GINGER), "skin": SKINS["light"], "top": (225, 29, 72, 255), "holds": CAMERA},
+    "tess": {"hair": hair_ponytail(BLOND), "skin": SKINS["medium"], "top": (250, 204, 21, 255), "holds": BUG_NET},
+    "bruno": {"hair": hard_hat((250, 204, 21, 255), DARK_BROWN), "skin": SKINS["tan"], "top": (234, 88, 12, 255),
+              "holds": WRENCH},
+    "dex": {"hair": hair_spiky(PLATINUM), "skin": SKINS["deep"], "top": (2, 132, 199, 255), "holds": ROCKET},
+    "abe": {"hair": beanie((100, 116, 139, 255), DARK_BROWN), "beard": DARK_BROWN, "skin": SKINS["fair"],
+            "top": (120, 53, 15, 255), "holds": PUZZLE},
 }
 
 for key, p in CAST.items():

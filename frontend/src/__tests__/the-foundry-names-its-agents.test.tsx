@@ -30,6 +30,18 @@ describe("the Foundry's cast", () => {
     expect(AGENT_BY_ID.smith.name).toBe("Smith");
   });
 
+  it("every agent wears a face drawn for them, standing and at the desk", async () => {
+    const { existsSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    for (const a of AGENT_REGISTRY) {
+      const key = PERSONAS[a.id].name.toLowerCase();
+      expect(a.spriteKey, a.id).toBe(key);
+      for (const pose of ["idle", "working"]) {
+        expect(existsSync(join(process.cwd(), "public/sprites/characters", pose, `${key}.png`)), `${pose}/${key}`).toBe(true);
+      }
+    }
+  });
+
   it("no two agents share a name", () => {
     const names = Object.values(PERSONAS).map((p) => p.name);
     expect(new Set(names).size).toBe(names.length);

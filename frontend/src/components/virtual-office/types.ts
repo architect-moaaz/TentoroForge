@@ -294,6 +294,9 @@ export interface AgentInfo {
   intro?: string;
 }
 
+// Every face was drawn for its person (`frontend/scripts/draw_foundry_sprites.py`,
+// 2026-10-28): the sprite key is the persona's first name.
+//
 // The cast is the Blueprint agent registry
 // (`backend/services/blueprint/agent_contract.py`), seated in the department
 // that owns its §30 capability. `spriteKey` still points at the older sprite
@@ -307,54 +310,54 @@ export interface AgentInfo {
 // renderer's sprite fallback covers from the working and base sheets.
 const CAST: AgentInfo[] = [
   // ── Discovery ─────────────────────────────────────────────────────────
-  { id: "smith", name: "Smith", spriteKey: "contract_writer", room: "discovery", role: "The architect you talk to", color: "#1E40AF" },
-  { id: "requirement", name: "Requirements", spriteKey: "discovery", room: "discovery", role: "Writes down what the app is for", color: "#3B82F6" },
-  { id: "product_analysis", name: "Product Analyst", spriteKey: "planner", room: "discovery", role: "Works out the product shape", color: "#6366F1" },
-  { id: "domain_intelligence", name: "Domain Intel", spriteKey: "chat_refiner", room: "discovery", role: "Knows how this industry works", color: "#E11D48" },
+  { id: "smith", name: "Smith", spriteKey: "smith", room: "discovery", role: "The architect you talk to", color: "#1E40AF" },
+  { id: "requirement", name: "Requirements", spriteKey: "rita", room: "discovery", role: "Writes down what the app is for", color: "#3B82F6" },
+  { id: "product_analysis", name: "Product Analyst", spriteKey: "priya", room: "discovery", role: "Works out the product shape", color: "#6366F1" },
+  { id: "domain_intelligence", name: "Domain Intel", spriteKey: "dana", room: "discovery", role: "Knows how this industry works", color: "#E11D48" },
 
   // ── Architecture ──────────────────────────────────────────────────────
-  { id: "solution_architecture", name: "Solution Architect", spriteKey: "navigator", room: "architecture", role: "Maps modules and navigation", color: "#0369A1" },
-  { id: "integration", name: "Integrations", spriteKey: "portal_builder", room: "architecture", role: "Connects the outside services", color: "#0E7490" },
+  { id: "solution_architecture", name: "Solution Architect", spriteKey: "arjun", room: "architecture", role: "Maps modules and navigation", color: "#0369A1" },
+  { id: "integration", name: "Integrations", spriteKey: "ivan", room: "architecture", role: "Connects the outside services", color: "#0E7490" },
 
   // ── Design Studio ─────────────────────────────────────────────────────
-  { id: "accessibility", name: "Design System", spriteKey: "ui_styler", room: "design_studio", role: "Owns the design language", color: "#DB2777" },
-  { id: "page_design", name: "Page Designer", spriteKey: "page_assembler", room: "design_studio", role: "Drafts page contracts", color: "#F59E0B" },
-  { id: "figma_intelligence", name: "Figma Intel", spriteKey: "figma_importer", room: "design_studio", role: "Reads evidence out of Figma and UX Pilot", color: "#A21CAF" },
+  { id: "accessibility", name: "Design System", spriteKey: "iris", room: "design_studio", role: "Owns the design language", color: "#DB2777" },
+  { id: "page_design", name: "Page Designer", spriteKey: "paige", room: "design_studio", role: "Drafts page contracts", color: "#F59E0B" },
+  { id: "figma_intelligence", name: "Figma Intel", spriteKey: "felix", room: "design_studio", role: "Reads evidence out of Figma and UX Pilot", color: "#A21CAF" },
 
   // ── Data ──────────────────────────────────────────────────────────────
-  { id: "data_model", name: "Data Modeler", spriteKey: "schema_designer", room: "data", role: "Designs entities and the schema", color: "#059669" },
-  { id: "api", name: "API Derivation", spriteKey: "api_generator", room: "data", role: "Derives endpoints from the model", color: "#EA580C" },
-  { id: "backend", name: "Backend Projection", spriteKey: "data_modeler", room: "data", role: "Projects the data layer", color: "#B45309" },
+  { id: "data_model", name: "Data Modeler", spriteKey: "bob", room: "data", role: "Designs entities and the schema", color: "#059669" },
+  { id: "api", name: "API Derivation", spriteKey: "ada", room: "data", role: "Derives endpoints from the model", color: "#EA580C" },
+  { id: "backend", name: "Backend Projection", spriteKey: "kai", room: "data", role: "Projects the data layer", color: "#B45309" },
 
   // ── Composition ───────────────────────────────────────────────────────
-  { id: "ui_director", name: "Design Director", spriteKey: "detective", room: "design_studio", role: "Sets the whole app's look and conventions", color: "#BE185D" },
-  { id: "testing", name: "Testing", spriteKey: "qa_tester", room: "qa", role: "Generates the tests", color: "#0891B2" },
-  { id: "page_reviewer", name: "Page Reviewer", spriteKey: "scientist", room: "qa", role: "Looks at each page as it renders and sends weak ones back", color: "#0D9488" },
-  { id: "ui_engineer", name: "UI Engineer", spriteKey: "artist", room: "composition", role: "Writes each page in React and compiles it", color: "#E11D48" },
-  { id: "page_template", name: "Page Layout", spriteKey: "agent_builder", room: "composition", role: "Lays out each page from its contract", color: "#DB2777" },
-  { id: "a2ui_pages", name: "Page Composer", spriteKey: "component_builder", room: "composition", role: "Recomposes a screen Smith is asked to change", color: "#EC4899" },
+  { id: "ui_director", name: "Design Director", spriteKey: "uma", room: "design_studio", role: "Sets the whole app's look and conventions", color: "#BE185D" },
+  { id: "testing", name: "Testing", spriteKey: "tess", room: "qa", role: "Generates the tests", color: "#0891B2" },
+  { id: "page_reviewer", name: "Page Reviewer", spriteKey: "penny", room: "qa", role: "Looks at each page as it renders and sends weak ones back", color: "#0D9488" },
+  { id: "ui_engineer", name: "UI Engineer", spriteKey: "leo", room: "composition", role: "Writes each page in React and compiles it", color: "#E11D48" },
+  { id: "page_template", name: "Page Layout", spriteKey: "theo", room: "composition", role: "Lays out each page from its contract", color: "#DB2777" },
+  { id: "a2ui_pages", name: "Page Composer", spriteKey: "abe", room: "composition", role: "Recomposes a screen Smith is asked to change", color: "#EC4899" },
   // Drawn for the Foundry (2026-10-28): the four agents who had names but no face.
   { id: "native_engineer", name: "Mobile Engineer", spriteKey: "nina", room: "composition", role: "Writes the phone screens", color: "#14B8A6" },
   { id: "observer", name: "Reviewer", spriteKey: "otto", room: "qa", role: "Reads each piece of work as it lands", color: "#7C3AED" },
   { id: "process_trials", name: "Process Tester", spriteKey: "trey", room: "qa", role: "Runs each process for real", color: "#DC2626" },
   { id: "researcher", name: "Researcher", spriteKey: "remy", room: "discovery", role: "Studies the references in the Drafts Room", color: "#1E3A8A" },
-  { id: "frontend", name: "Frontend Projection", spriteKey: "seed_generator", room: "composition", role: "Projects the page schemas", color: "#16A34A" },
+  { id: "frontend", name: "Frontend Projection", spriteKey: "fern", room: "composition", role: "Projects the page schemas", color: "#16A34A" },
 
   // ── Logic ─────────────────────────────────────────────────────────────
-  { id: "workflow", name: "Workflow", spriteKey: "workflow_agent", room: "logic", role: "Wires up the workflows", color: "#4F46E5" },
-  { id: "analytics", name: "Analytics", spriteKey: "mechanic", room: "data", role: "Designs the numbers and charts each page carries", color: "#B45309" },
-  { id: "business_rules", name: "Business Rules", spriteKey: "rules_writer", room: "logic", role: "Writes the business rules", color: "#6D28D9" },
+  { id: "workflow", name: "Workflow", spriteKey: "todd", room: "logic", role: "Wires up the workflows", color: "#4F46E5" },
+  { id: "analytics", name: "Analytics", spriteKey: "ana", room: "data", role: "Designs the numbers and charts each page carries", color: "#B45309" },
+  { id: "business_rules", name: "Business Rules", spriteKey: "ruth", room: "logic", role: "Writes the business rules", color: "#6D28D9" },
 
   // ── Security ──────────────────────────────────────────────────────────
-  { id: "security", name: "Security", spriteKey: "security", room: "security", role: "Sets roles and permissions", color: "#DC2626" },
+  { id: "security", name: "Security", spriteKey: "sam", room: "security", role: "Sets roles and permissions", color: "#DC2626" },
 
   // ── Verification ──────────────────────────────────────────────────────
-  { id: "verification", name: "Verification", spriteKey: "validator", room: "qa", role: "Checks the blueprint against itself", color: "#7C3AED" },
-  { id: "memory", name: "Memory", spriteKey: "inspector", room: "qa", role: "Records decisions and coverage", color: "#92400E" },
+  { id: "verification", name: "Verification", spriteKey: "vera", room: "qa", role: "Checks the blueprint against itself", color: "#7C3AED" },
+  { id: "memory", name: "Memory", spriteKey: "mo", room: "qa", role: "Records decisions and coverage", color: "#92400E" },
 
   // ── Shipping ──────────────────────────────────────────────────────────
-  { id: "build", name: "Build", spriteKey: "export_agent", room: "shipping", role: "Builds the preview", color: "#78716C" },
-  { id: "deployment", name: "Deployment", spriteKey: "bizlogic_agent", room: "shipping", role: "Ships it", color: "#15803D" },
+  { id: "build", name: "Build", spriteKey: "bruno", room: "shipping", role: "Builds the preview", color: "#78716C" },
+  { id: "deployment", name: "Deployment", spriteKey: "dex", room: "shipping", role: "Ships it", color: "#15803D" },
 ];
 
 // THE AGENTS ARE PEOPLE IN THE FOUNDRY. Their names, titles and introductions
