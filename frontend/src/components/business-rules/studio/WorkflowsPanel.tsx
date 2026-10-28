@@ -17,6 +17,7 @@ import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { problemsOf } from "@/lib/blueprint-rules";
+import { differsSaid } from "@/lib/rules-studio";
 import type { RuleLink, StudioCatalogue, StudioView } from "@/lib/rules-studio";
 
 const an = (noun: string) => `${/^[aeiou]/i.test(noun) ? "an" : "a"} ${noun}`;
@@ -136,16 +137,26 @@ export function WorkflowsPanel({ projectId, view, catalogue, onChanged, unsaved,
             <div key={`${c.workflow}:${c.step}`} className="space-y-1.5">
               <p className="flex items-start gap-1.5">
                 <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                <span>
-                  <b>{c.name}</b> has its own older check, “{c.stepName}”, that doesn’t match this rule
-                  (<code className="rounded bg-amber-100 px-1 dark:bg-amber-900/50">{c.expression}</code>).
-                  So that workflow can stop things this rule allows, or let through things it should stop.
-                </span>
+                {c.unproven ? (
+                  <span data-testid="rule-copy-unproven">
+                    <b>{c.name}</b> has its own check, “{c.stepName}”
+                    (<code className="rounded bg-amber-100 px-1 dark:bg-amber-900/50">{c.expression}</code>), that Forge
+                    can’t compare with this rule, because {c.unproven}. It stays as it is, and both are checked. Remove it only
+                    if this rule says everything it should.
+                  </span>
+                ) : (
+                  <span>
+                    <b>{c.name}</b> has its own older check, “{c.stepName}”, that doesn’t match this rule
+                    (<code className="rounded bg-amber-100 px-1 dark:bg-amber-900/50">{c.expression}</code>).
+                    {c.differs ? <> For example, with {differsSaid(c.differs)} they don’t agree.</> : null}
+                    {" "}So that workflow can stop things this rule allows, or let through things it should stop.
+                  </span>
+                )}
               </p>
               <Button size="sm" variant="outline" className="h-7 w-full bg-background text-xs" disabled={follow.isPending}
                       onClick={() => follow.mutate({ workflow: c.workflow, step: c.step })}>
                 {follow.isPending ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : <CheckCircle2 className="mr-1.5 h-3 w-3" />}
-                Use this rule in {c.name} instead
+                {c.unproven ? `Remove that check and use only this rule in ${c.name}` : `Use this rule in ${c.name} instead`}
               </Button>
             </div>
           ))}

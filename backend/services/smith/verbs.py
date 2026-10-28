@@ -125,8 +125,8 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     "add_rule": {"rule"},
     "edit_rule": {"rule", "change"},
     "remove_rule": {"rule"},
-    # A RULE AND A WORKFLOW, TOGETHER. "connect the note rule to Log an
-    # expense": often already linked (every step that saves the record checks
+    # A RULE AND A WORKFLOW, TOGETHER. "connect the <rule> to the <workflow>":
+    # often already linked (every step that saves the record checks
     # it), which is said with the step; otherwise an extra check step.
     "link_rule": {"rule", "workflow"},
     "unlink_rule": {"rule", "workflow"},
@@ -495,16 +495,17 @@ VERB_HELP: dict[str, str] = {
     "remove_rule": ("Retire a business rule. Needs which rule."),
     "link_rule": (
         "Connect a business rule to a workflow, or make a workflow follow a rule: \"link the "
-        "manager-note rule to Log an expense\", \"make Approve check the rejected rule\", \"use the "
-        "positive-amount rule in Save changes\". A rule is checked AUTOMATICALLY by every workflow step "
+        "<rule> to the <workflow> workflow\", \"make <workflow> check the <rule>\", \"use the "
+        "<rule> in <workflow>\". A rule is checked AUTOMATICALLY by every workflow step "
         "that saves its record, so it is often linked already — that is said, with the step; a workflow's "
-        "own older check that does not match is handed to the rule; otherwise the rule becomes an extra "
+        "own older check that does not match is shown to the person and kept, and it is replaced by the "
+        "rule only when they say so (put \"replace the old check\" in `change`); otherwise the rule becomes an extra "
         "check step at the start of the workflow. NOT a question about where a rule is used (read "
         "`rule_links` and answer). Needs the rule and the workflow."
     ),
     "unlink_rule": (
-        "Take a rule's extra check step out of a workflow: \"stop checking the note rule in Approve\", "
-        "\"remove the rule step from Reject\". The automatic check when the workflow saves the record "
+        "Take a rule's extra check step out of a workflow: \"stop checking the <rule> in <workflow>\", "
+        "\"remove the rule step from <workflow>\". The automatic check when the workflow saves the record "
         "stays while the rule is on (that is said). Needs the rule and the workflow."
     ),
     "add_entity": (
@@ -966,11 +967,11 @@ VERB_EXAMPLES: dict[str, tuple[str, ...]] = {
         'it says it is public but it still asks me to sign in',
     ),
     'link_rule': (
-        'link the manager note rule to the Log an expense workflow',
-        'make Approve check the rejected expense rule',
+        'link the deposit rule to the Book a room workflow',
+        'make Approve leave check the days left rule',
     ),
     'unlink_rule': (
-        'stop checking the positive amount rule in Approve',
+        'stop checking the late fee rule in Return a book',
     ),
     'save_as_template': (
         'save this app as a template',

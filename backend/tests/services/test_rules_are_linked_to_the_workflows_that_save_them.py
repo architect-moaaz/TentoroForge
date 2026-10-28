@@ -94,8 +94,12 @@ def test_a_rule_is_linked_to_every_workflow_that_saves_its_record_on_the_saves_i
     assert links["RULE-001"] == [("Log an expense", "create", True), ("Approve", "update", False)]
     # A rule about the value before a change is checked only on a change.
     assert links["RULE-003"] == [("Approve", "update", True)]
-    # A rule that only fills in an empty value acts on new records.
-    assert links["RULE-004"] == [("Log an expense", "create", True)]
+    # A rule that only fills in an empty value acts on every save, as the
+    # app's engine runs it: a change with the value still empty is filled too.
+    assert links["RULE-004"] == [("Log an expense", "create", True), ("Approve", "update", True)]
+    # Unless it says which saves it is for.
+    _rule(doc, "RULE-004")["on"] = ["create"]
+    assert [x["name"] for x in L.links(doc, _rule(doc, "RULE-004"))] == ["Log an expense"]
 
 
 def test_a_switched_off_rule_is_linked_nowhere():
@@ -107,7 +111,7 @@ def test_a_switched_off_rule_is_linked_nowhere():
 def test_the_workflow_screen_gets_the_rules_each_save_step_checks():
     by_flow = L.workflow_links(_doc())
     assert [c["rule"] for c in by_flow["FLOW-001"]["insert_expense"]] == ["RULE-001", "RULE-002", "RULE-004"]
-    assert [c["rule"] for c in by_flow["FLOW-002"]["update_status"]] == ["RULE-001", "RULE-002", "RULE-003"]
+    assert [c["rule"] for c in by_flow["FLOW-002"]["update_status"]] == ["RULE-001", "RULE-002", "RULE-003", "RULE-004"]
     assert "FLOW-003" not in by_flow
 
 
@@ -196,7 +200,10 @@ def test_smith_links_a_rule_says_already_linked_or_adds_an_extra_check(tmp_path,
     out = perform(ctx, "link_rule", {"verb": "link_rule", "rule": "positive amount", "workflow": "approve"})
     assert out.status == "resolved" and attached == [("RULE-001", "FLOW-002")]
     out = perform(ctx, "link_rule", {"verb": "link_rule", "rule": "starts as submitted", "workflow": "approve"})
-    assert out.status == "needs_user" and "only fills in values" in out.said
+    assert out.status == "resolved" and "already linked" in out.said
+    _rule(svc.doc, "RULE-004")["on"] = ["create"]
+    out = perform(ctx, "link_rule", {"verb": "link_rule", "rule": "starts as submitted", "workflow": "approve"})
+    assert out.status == "needs_user" and "only fills in values" in out.said and len(attached) == 1
     out = perform(ctx, "unlink_rule", {"verb": "unlink_rule", "rule": "positive amount", "workflow": "log an expense"})
     assert out.status == "needs_user" and "automatically" in out.said
 

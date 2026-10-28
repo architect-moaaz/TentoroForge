@@ -86,6 +86,8 @@ export interface RulesResponse {
   catalogue: Catalogue | null;
   /** Workflow checks that repeated a rule, handed to the rule as the list was read. */
   linked?: { rule: string; ruleName?: string; workflow: string; name: string; step: string }[];
+  /** Workflow checks that say exactly what a rule says, offered to hand to the rule ("Use the rules"). */
+  repeats?: { rule: string; ruleName?: string; workflow: string; name: string; step: string; stepName?: string }[];
 }
 
 export const ORIGIN_LABEL: Record<RuleOrigin, string> = {

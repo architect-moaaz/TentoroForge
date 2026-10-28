@@ -4,7 +4,7 @@ Checks a decision table at save (the cells it cannot read, the rows that
 overlap under Unique, the rows a First table never reaches) and answers the
 editor's "Test it" — run a save of a sample record through the app's real
 engine with the rules as drafted. Bundled from `templates/runtime` with
-esbuild on demand, like `feel_check`, so the platform never carries a second
+the installed esbuild on demand, so the platform never carries a second
 evaluator that could disagree with the app.
 
 No node, no esbuild: the lab says it is unavailable (`LabUnavailable`) rather
@@ -44,8 +44,15 @@ def _bundle() -> Path:
     with _BUILD_LOCK:
         if _BUNDLE.exists() and _BUNDLE.stat().st_mtime >= _newest_source():
             return _BUNDLE
-        esbuild = _BACKEND.parent / "node_modules" / ".bin" / "esbuild"
-        cmd = [str(esbuild)] if esbuild.exists() else ["npx", "esbuild"]
+        # The installed esbuild only: never `npx`, which may download a
+        # package on a host (PR #29 review). None: the lab is unavailable, and
+        # every caller already treats that as "not judged".
+        esbuild = next((p for p in (_BACKEND.parent / "node_modules" / ".bin" / "esbuild",
+                                    _BACKEND.parent / "frontend" / "node_modules" / ".bin" / "esbuild")
+                        if p.exists()), None)
+        if esbuild is None:
+            raise LabUnavailable("esbuild is not installed (run npm install at the repository root)")
+        cmd = [str(esbuild)]
         tmp = _BUNDLE.with_suffix(".tmp.cjs")
         try:
             subprocess.run(cmd + [str(_ENTRY), "--bundle", "--platform=node", "--format=cjs",

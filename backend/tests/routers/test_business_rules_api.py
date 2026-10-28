@@ -122,3 +122,65 @@ async def test_another_organisation_reaches_nothing(auth_client, org_id):
         assert (await outsider.delete(f"{base}/RULE-001")).status_code in (403, 404)
     doc = json.loads((p["out"] / ".forge" / "blueprint" / "current.json").read_text())
     assert all(r["name"] != "x" for r in doc["businessRules"])
+
+
+def _with_a_copy(out: Path) -> None:
+    """A rule and a workflow that repeats it word for word before it saves."""
+    path = out / ".forge" / "blueprint" / "current.json"
+    doc = json.loads(path.read_text())
+    doc["businessRules"].append({
+        "id": "RULE-900", "name": "Openings are positive", "kind": "condition_action", "entity": ROLE,
+        "status": "PROPOSED", "statement": "A role has at least one opening.",
+        "when": "openingsCount = null or openingsCount < 1",
+        "then": [{"type": "show_error", "message": "A role needs at least one opening."}], "otherwise": []})
+    doc["workflows"].append({
+        "id": "FLOW-900", "name": "Quick role", "status": "PROPOSED", "purpose": "Adds a role in one go.",
+        "trigger": dict(doc["workflows"][0]["trigger"]),
+        "steps": [
+            {"key": "check_openings", "name": "Has openings", "type": "condition",
+             "config": {"expression": "openingsCount >= 1"}, "next": ["add_role", "no_openings"]},
+            {"key": "no_openings", "name": "Stop", "type": "end",
+             "config": {"refused": True, "message": "Enter the openings."}, "next": []},
+            {"key": "add_role", "name": "Add the role", "type": "action", "entity": ROLE,
+             "config": {"actionType": "db_insert", "table": "roles",
+                        "values": {"title": "{{title}}", "openingsCount": "{{openingsCount}}"}},
+             "next": []}]})
+    path.write_text(json.dumps(doc))
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not __import__("shutil").which("node"), reason="the rule lab needs node")
+async def test_opening_the_tab_changes_nothing_and_use_the_rules_is_recorded(auth_client, org_id):
+    """PR #29 review: the tab's GET folded copies into the definition. Now a
+    read only offers it ("repeats"); the person's POST does it, with history."""
+    p = await _project(auth_client, org_id)
+    _with_a_copy(p["out"])
+    current = p["out"] / ".forge" / "blueprint" / "current.json"
+    before = current.read_text()
+    base = f"/api/projects/{p['id']}/business-rules"
+
+    listed = (await auth_client.get(base)).json()
+    assert [(r["workflow"], r["step"], r["rule"]) for r in listed["repeats"]] == [
+        ("FLOW-900", "check_openings", "RULE-900")]
+    assert "linked" not in listed and current.read_text() == before, "a read wrote the definition"
+
+    res = await auth_client.post(f"{base}/use-rules-in-workflows")
+    assert res.status_code == 200, res.text
+    assert [(d["workflow"], d["step"]) for d in res.json()["linked"]] == [("FLOW-900", "check_openings")]
+    doc = json.loads(current.read_text())
+    flow = next(w for w in doc["workflows"] if w["id"] == "FLOW-900")
+    assert [s["key"] for s in flow["steps"]] == ["add_role"]
+    assert "repeated a business rule" in doc["changeHistory"][-1]["userRequest"] or \
+        "now follow the rule" in doc["changeHistory"][-1]["userRequest"]
+    assert (await auth_client.get(base)).json()["repeats"] == []
+    again = await auth_client.post(f"{base}/use-rules-in-workflows")
+    assert again.status_code == 200 and again.json()["linked"] == []
+
+
+@pytest.mark.asyncio
+async def test_use_the_rules_waits_for_a_build(auth_client, org_id, monkeypatch):
+    from services import business_rules as rules
+    p = await _project(auth_client, org_id)
+    monkeypatch.setattr(rules, "busy", lambda out: "building")
+    res = await auth_client.post(f"/api/projects/{p['id']}/business-rules/use-rules-in-workflows")
+    assert res.status_code == 423

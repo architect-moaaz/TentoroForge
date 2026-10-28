@@ -38,6 +38,16 @@ export interface RuleCopy {
   stepName: string;
   expression: string;
   differs?: Record<string, unknown>;
+  /** Set when Forge cannot compare the check with the rule (it uses a function, say): why. */
+  unproven?: string;
+}
+
+/** "amount 5000.5, category meals": the sample save on which a check and its rule disagree. */
+export function differsSaid(d?: Record<string, unknown>): string {
+  if (!d) return "";
+  return Object.entries(d)
+    .map(([k, v]) => `${k.replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase()} ${v === null || v === "" ? "empty" : String(v)}`)
+    .join(", ");
 }
 
 export interface Usages {

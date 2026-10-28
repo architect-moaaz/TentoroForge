@@ -24,6 +24,7 @@ Nothing here is a GATE in front of the loop.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -231,6 +232,11 @@ def _rule_and_flow(ctx: Ctx, u: dict):
     return doc, pick(rules, rref), pick(flows, wref), rules, flows
 
 
+#: The person's go-ahead to take a workflow's own, different check out.
+_REPLACE_OLD_CHECK = re.compile(r"\b(replace|instead of|take (?:it|that|the old check) out|remove the old check|"
+                                r"drop the old check|use (?:only )?the rule instead)\b", re.I)
+
+
 def link_rule(ctx: Ctx, u: dict) -> Outcome:
     """\"Connect the manager-note rule to Log an expense\": the rule is often
     linked already — every workflow step that saves its record checks it — and
@@ -258,6 +264,18 @@ def link_rule(ctx: Ctx, u: dict) -> Outcome:
     copies = [c for c in L.stale(doc, L.review_all(doc))
               if c["rule"] == str(rule["id"]) and c["workflow"] == str(flow.get("id"))]
     try:
+        if copies and not _REPLACE_OLD_CHECK.search(_s(u, "change")):
+            # Never taken out unasked: the old check may be the stricter one
+            # (PR #29 review: an "amount < 10000" limit went, said only after).
+            c = copies[0]
+            from services.rule_links import differs_said
+            why = (f" I can't compare the two, because {c['unproven']}." if c.get("unproven") else
+                   f" For example, with {differs_said(c['differs'])} they don't agree." if c.get("differs") else "")
+            return Outcome(status="needs_user", said=(
+                f"{wname} has its own older check, “{c['stepName']}” ({c['expression']}), that is not the same as "
+                f"“{name}” ({rule.get('when')}).{why} Both are checked now. If the rule says everything that check "
+                f"should, say “replace the old check in {wname} with the rule”, or press “Use this rule in {wname} "
+                "instead” in the Business Rules tab. Otherwise I leave it as it is."))
         if copies:
             c = copies[0]
             rules_svc.follow_rule(ctx.out, str(rule["id"]), workflow=str(flow["id"]), step=str(c["step"]),

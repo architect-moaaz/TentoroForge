@@ -3459,14 +3459,21 @@ def _project_integration_of_a_build(svc: BlueprintService, app_root: str) -> Non
     changes the document behind a change record's back; an app built before
     this has its copies handed over when its Business Rules tab is opened,
     recorded."""
+    before = svc.snapshot()
     try:
         from services.rule_links import fold_copies
         folded = fold_copies(svc.doc)
         if folded:
-            logger.info("[blueprint] %d workflow check(s) now follow their business rule: %s", len(folded),
-                        ", ".join(f"{f['name']}/{f['step']}→{f['rule']}" for f in folded))
+            said = "; ".join(f"{f['name']}: “{f['step']}” is now the rule {f['rule']}" for f in folded)
+            # Recorded like any change: a version to go back to, and the diff
+            # (PR #29 review: the build's fold was saved with no history).
+            svc.commit(user_request="Build: workflow checks that repeated a business rule now follow the rule",
+                       smith_interpretation=said, before=before,
+                       affected=sorted({f["rule"] for f in folded} | {f["workflow"] for f in folded}))
+            logger.info("[blueprint] %d workflow check(s) now follow their business rule: %s", len(folded), said)
     except Exception:  # noqa: BLE001 — the workflows as written still run
-        logger.exception("[blueprint] linking workflow checks to their rules failed")
+        logger.exception("[blueprint] linking workflow checks to their rules failed; the workflows stay as written")
+        svc.doc = before
     _project_integration(svc, app_root)
 
 

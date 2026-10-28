@@ -149,16 +149,20 @@ async def list_business_rules(project_id: uuid.UUID, user: PlatformUser = Depend
         await _adopt_old_rows(project, out, db)
     except Exception:  # noqa: BLE001 — the list is still read
         logger.exception("[business-rules] adopting old rows failed for %s", project_id)
-    linked: list[dict] = []
     try:
-        linked = await asyncio.to_thread(rules.link_copies, out)
-    except Exception:  # noqa: BLE001 — the list is still read
-        logger.exception("[business-rules] linking workflow checks to rules failed for %s", project_id)
+        return await asyncio.to_thread(rules.read, out)
+    except Exception as exc:  # noqa: BLE001
+        raise _fail(exc) from exc
+
+
+@router.post("/api/projects/{project_id}/business-rules/use-rules-in-workflows")
+async def use_rules_in_workflows(project_id: uuid.UUID, user: PlatformUser = Depends(get_current_user),
+                                 db: AsyncSession = Depends(get_db)):
+    """The person's "Use the rules": workflow checks that say exactly what a
+    rule says are handed to the rule, with a change record. Never on a read."""
+    project = await get_project_with_auth(project_id, user, db)
     try:
-        listed = await asyncio.to_thread(rules.read, out)
-        if linked:
-            listed["linked"] = linked
-        return listed
+        return {"linked": await asyncio.to_thread(rules.link_copies, _dir(project))}
     except Exception as exc:  # noqa: BLE001
         raise _fail(exc) from exc
 

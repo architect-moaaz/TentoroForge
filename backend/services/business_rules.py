@@ -333,8 +333,14 @@ def read(output_dir: str | Path) -> dict:
     doc = svc.doc
     why = busy(output_dir)
     from services import rule_links
-    copies = rule_links.stale(doc, rule_links.review_all(doc)) if rule_links.has_candidates(doc) else []
+    judged = rule_links.review_all(doc) if rule_links.has_candidates(doc) else []
+    copies = rule_links.stale(doc, judged)
     rules = [view(r, doc, copies) for r in _live(doc.get("businessRules"))]
+    names = {str(r.get("id")): r.get("name") for r in _live(doc.get("businessRules"))}
+    # Workflow checks that say exactly what a rule says: offered, never done on
+    # a read — the person presses "Use the rules" (PR #29 review).
+    repeats = [{"rule": c["rule"], "ruleName": names.get(c["rule"]), "workflow": c["workflow"], "name": c["name"],
+                "step": c["step"], "stepName": c.get("stepName")} for c in judged if c.get("same") is True]
     # STRAIGHT FROM THE REQUEST. A rule the person stated is a requirement
     # (`owner: businessRules`) from the moment the requirements are written;
     # the rule that enforces it is written by the build. Until then it is
@@ -351,6 +357,7 @@ def read(output_dir: str | Path) -> dict:
         "busy": why,
         "rules": rules,
         "planned": planned,
+        "repeats": repeats,
         "catalogue": catalogue(doc),
     }
 
@@ -1279,22 +1286,22 @@ def _fold_own_copies(svc: Any, rule_id: str) -> list[str]:
 
 def link_copies(output_dir: str | Path) -> list[dict]:
     """Every workflow step proven to say exactly what a rule says is handed
-    to the rule (see `services/rule_links`). Run when the tab opens, so an
-    app built before this keeps one rule, not a rule and its copy. Nothing to
-    do (the usual case) costs no engine run and no write."""
+    to the rule (see `services/rule_links`), when the person asks ("Use the
+    rules" on the tab, or Smith) — an app built before the build did this
+    keeps one rule, not a rule and its copy. Never on a read: opening the tab
+    changes nothing (PR #29 review). Raises when Smith or a build is working
+    on the app; nothing to do costs no write."""
     from services import rule_links
     from services.blueprint.projection import project_workflows
     from services.blueprint.service import BlueprintService
-    if not has_definition(output_dir) or busy(output_dir):
-        return []
+    _guard_writable(output_dir)
     svc = BlueprintService.load(output_dir=str(output_dir))
     if not rule_links.has_candidates(svc.doc):
         return []
     if not any(c.get("same") is True for c in rule_links.review_all(svc.doc)):
         return []
     with write_lock(output_dir, timeout=TAB_LOCK_WAIT):
-        if busy(output_dir):
-            return []
+        _refuse_if_building(output_dir)
         svc = BlueprintService.load(output_dir=str(output_dir))
         before = svc.snapshot()
         done = rule_links.fold_copies(svc.doc)
@@ -1774,7 +1781,8 @@ def usages(doc: dict, rule: dict, copies: list[dict] | None = None) -> dict:
     by_flow: dict[str, dict] = {}
     for ln in linked:
         by_flow.setdefault(ln["workflow"], {"workflow": ln["workflow"], "name": ln["name"]})
-    own = [{k: c.get(k) for k in ("workflow", "name", "step", "stepName", "expression", "differs", "same")}
+    own = [{k: c.get(k) for k in ("workflow", "name", "step", "stepName", "expression", "differs", "same",
+                                         "unproven")}
            for c in copies or [] if c.get("rule") == str(rule.get("id")) and c.get("same") is not True]
     return {"steps": steps, "starts": started, "links": linked, "copies": own,
             "saves": list(by_flow.values()) if linked or not saves else saves}

@@ -63,14 +63,15 @@ function humanError(result: Json, status: number): string {
 /**
  * WHAT THE BUSINESS RULES SAY ABOUT WHAT IS BEING TYPED — asked of the app's
  * own rules (`/api/form-rules`), never written into the page. A screen that
- * hard-coded "a note above 5000" kept asking for a note at 6000 after the rule
- * was changed to 7000; a screen that asks the rules follows every change.
+ * hard-coded a rule's limit kept asking by the old limit after the rule was
+ * changed; a screen that asks the rules follows every change.
  *
- *   const rules = useRuleHints("Expense", { amount: Number(amountText) });
- *   rules.required("managerNote")   // true when a rule makes it required now
- *   rules.hidden("discount")        // true when a rule hides it now
- *   rules.message("managerNote")    // the rule's own sentence, when it has one
- *   rules.errors                    // what a save of these values would be stopped for
+ *   const rules = useRuleHints("<Model>", { <field>: value });           // a new record
+ *   const rules = useRuleHints("<Model>", values, { id, previous });     // editing one
+ *   rules.required("<field>")   // true when a rule makes it required now
+ *   rules.hidden("<field>")     // true when a rule hides it now
+ *   rules.message("<field>")    // the rule's own sentence, when it has one
+ *   rules.errors                // what a save of these values would be stopped for
  *
  * Asked a moment after the values stop changing; until the first answer every
  * question says "no" (the save still checks every rule).
@@ -85,7 +86,16 @@ export interface RuleHints {
   pending: boolean;
 }
 
-export function useRuleHints(model: string, values: Json, delayMs = 250): RuleHints {
+/** What the form is: an edit form passes the record's `id` and, best, the
+ *  record as it was loaded (`previous`) — so rules about a change are asked as
+ *  a change, not as a new record. A number is the old `delayMs`. */
+export type RuleHintsOptions = { id?: string | number | null; previous?: Json | null; delayMs?: number };
+
+export function useRuleHints(model: string, values: Json, options: RuleHintsOptions | number = {}): RuleHints {
+  const opts: RuleHintsOptions = typeof options === "number" ? { delayMs: options } : options ?? {};
+  const delayMs = opts.delayMs ?? 250;
+  const id = opts.id ?? undefined;
+  const prevKey = opts.previous ? JSON.stringify(opts.previous) : "";
   const [answer, setAnswer] = React.useState<{ hints: Array<Record<string, unknown>>; errors: string[]; patches: Json }>(
     { hints: [], errors: [], patches: {} });
   const [pending, setPending] = React.useState(false);
@@ -97,7 +107,11 @@ export function useRuleHints(model: string, values: Json, delayMs = 250): RuleHi
       try {
         const res = await fetch(apiPath("/api/form-rules"), {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ model, values: JSON.parse(key) }),
+          body: JSON.stringify({
+            model, values: JSON.parse(key),
+            ...(id !== undefined && id !== null && id !== "" ? { id } : {}),
+            ...(prevKey ? { previous: JSON.parse(prevKey) } : {}),
+          }),
         });
         const body = (await res.json().catch(() => ({}))) as Json;
         if (live) setAnswer({
@@ -109,7 +123,7 @@ export function useRuleHints(model: string, values: Json, delayMs = 250): RuleHi
       finally { if (live) setPending(false); }
     }, delayMs);
     return () => { live = false; clearTimeout(t); };
-  }, [model, key, delayMs]);
+  }, [model, key, delayMs, id, prevKey]);
   // ANY rule that requires, hides or locks a field does: a "not required" from
   // one rule's Otherwise never cancels another rule's "required" — the save
   // checks every rule, so the form must show what the save will ask for.

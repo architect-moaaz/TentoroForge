@@ -1380,19 +1380,19 @@ sentences:
     reaches: {verb: back_up, states: []}
 
   - id: rule-link-1
-    say: "link the manager note rule to the Log an expense workflow"
+    say: "link the deposit rule to the Book a room workflow"
     checked: {colour: acts, via: handler}
     source: routing
     reaches: {verb: link_rule, states: [rule, workflow]}
 
   - id: rule-link-2
-    say: "make Approve check the rejected expense rule"
+    say: "make Approve leave check the days left rule"
     checked: {colour: acts, via: handler}
     source: routing
     reaches: {verb: link_rule, states: [rule, workflow]}
 
   - id: rule-unlink-1
-    say: "stop checking the positive amount rule in Approve"
+    say: "stop checking the late fee rule in Return a book"
     checked: {colour: acts, via: handler}
     source: routing
     reaches: {verb: unlink_rule, states: [rule, workflow]}

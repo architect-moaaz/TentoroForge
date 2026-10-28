@@ -91,15 +91,21 @@ export function RulesStudio({ projectId, initial }: { projectId: string; initial
     try { localStorage.setItem("forge.rules.layout", l); } catch { /* storage off */ }
   };
   const refresh = () => queryClient.invalidateQueries({ queryKey: key(projectId) });
-  // Said once: workflow checks that repeated a rule were handed to the rule as the list was read.
+  // Workflow checks that repeat a rule word for word: handed to the rule only
+  // when the person presses "Use the rules", then said once.
   const [linkedNote, setLinkedNote] = useState<RulesResponse["linked"] | null>(null);
-  useEffect(() => {
-    if (data.linked?.length) {
-      setLinkedNote(data.linked);
+  const useRules = useMutation({
+    mutationFn: () => api.post<{ linked: NonNullable<RulesResponse["linked"]> }>(
+      `/api/projects/${projectId}/business-rules/use-rules-in-workflows`, {}),
+    onSuccess: (r) => {
+      if (r.linked?.length) setLinkedNote(r.linked);
       queryClient.invalidateQueries({ queryKey: ["project", projectId, "workflows"] });
       queryClient.invalidateQueries({ queryKey: ["project", projectId, "business-rules-links"] });
-    }
-  }, [data.linked, projectId, queryClient]);
+      refresh();
+    },
+    onError: (e) => { toast.error(problemsOf(e)[0]); refresh(); },
+  });
+  const repeats = data.repeats ?? [];
 
   const toggle = useMutation({
     mutationFn: (v: StudioView) =>
@@ -194,6 +200,22 @@ export function RulesStudio({ projectId, initial }: { projectId: string; initial
           </div>
         </div>
       </div>
+
+      {!linkedNote && repeats.length > 0 && (
+        <div className="flex items-start gap-2 border-b border-sky-200 bg-sky-50 px-6 py-2.5 text-xs text-sky-950 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-100" data-testid="rules-repeats-note">
+          <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span className="flex-1">
+            {repeats.length} check{repeats.length === 1 ? "" : "s"} in your workflows
+            {" "}({Array.from(new Set(repeats.map((r) => r.name))).join(", ")}) {repeats.length === 1 ? "says" : "say"} exactly what a rule says.
+            {" "}Let {repeats.length === 1 ? "it" : "them"} use the rule itself, so that when you change a rule, your workflows change with it.
+          </span>
+          <Button size="sm" className="h-7 text-xs" disabled={building || useRules.isPending} onClick={() => useRules.mutate()}
+                  data-testid="use-rules-in-workflows">
+            {useRules.isPending ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : null}
+            Use the rules
+          </Button>
+        </div>
+      )}
 
       {linkedNote && (
         <div className="flex items-start gap-2 border-b border-emerald-200 bg-emerald-50 px-6 py-2.5 text-xs text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200" data-testid="rules-linked-note">
@@ -354,7 +376,7 @@ function RuleCard({ view, catalogue, onOpen, onToggle, busy }: {
             ))}
             {view.enabled && (u?.copies?.length ?? 0) > 0 && (
               <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-400" data-testid="rule-has-copy">
-                <AlertTriangle className="h-3 w-3" /> {u!.copies![0].name} has an older check that doesn’t match — open to fix
+                <AlertTriangle className="h-3 w-3" /> {u!.copies![0].name} has its own older check — open to see it
               </span>
             )}
           </span>

@@ -387,13 +387,15 @@ useWorkflow(workflows.x, { successMessage?, redirectTo?, silent? })
    When the workflow's own rules refuse the input, `ok` is false and `error` is the workflow's
    sentence, shown as an error toast — `successMessage` is only ever shown for a real success.
 
-useRuleHints(model, values) → { required(field), hidden(field), readonly(field), message(field), errors, pending }
+useRuleHints(model, values, { id?, previous? }?) → { required(field), hidden(field), readonly(field), message(field), errors, pending }
    What the app's BUSINESS RULES say about the values being typed, asked of the rules themselves. A
-   form that shows, hides or requires a field because of a rule ("a manager note above 5000") asks
-   here — `const rules = useRuleHints("Expense", { amount: Number(amount) })`, then
-   `rules.required("managerNote")` and `rules.message("managerNote")` — and NEVER writes the rule's
+   form that shows, hides or requires a field because of a rule asks here —
+   `const rules = useRuleHints("<Model>", { <field>: <value as typed> })`, then
+   `rules.required("<field>")` and `rules.message("<field>")` — and NEVER writes the rule's
    number or values into the page: the person changes rules in the Business Rules tab and the
-   screen must follow at once. The save checks every rule anyway; this is only what the form shows.
+   screen must follow at once. A form that EDITS an existing record passes its `id` (and the record
+   as loaded as `previous`), so rules about a change are asked as a change, not as a new record.
+   The save checks every rule anyway; this is only what the form shows.
 
 <SignInForm submitLabel? className? />          // an `auth` login page: email, password, signs in, goes home
 <SignUpForm submitLabel? className? columns?={1 | 2} />   // an `auth` signup page: the person's details + login,

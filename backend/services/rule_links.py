@@ -40,8 +40,9 @@ _RETIRED = {"DEPRECATED", "REMOVED", "SUPERSEDED", "RETIRED"}
 _WRITES = {"db_insert": ("create",), "db_update": ("update",), "db_upsert": ("create", "update")}
 #: An action that makes a save fail when it applies.
 _STOPPING = {"show_error", "set_required"}
-#: The most sample saves one copy is judged on.
-_MAX_CASES = 600
+#: The most sample saves one copy is judged on. Every combination is tried;
+#: a check with more than this is not judged at all (never a cut-short list).
+_MAX_CASES = 4000
 
 
 def _live(rows: Any) -> list[dict]:
@@ -76,10 +77,12 @@ def can_stop(rule: dict) -> bool:
 
 
 def rule_events(rule: dict) -> tuple[str, ...]:
-    """The saves a rule acts on: its `on` when it says; otherwise what it can
-    act on — a rule about the record as it was ("a rejected expense cannot
-    become approved") only on a change, a rule that only fills in a value
-    left empty only on a new record (an existing record already has it)."""
+    """The saves a rule acts on: its `on` when it says; otherwise every save,
+    as the app's engine runs it (`firesOn`) — except a rule about the record
+    as it was ("once rejected, never approved"), which can only hold on a
+    change: on a new record there is nothing before. A rule that only fills
+    in an empty value acts on a change too, when the value is still empty
+    (PR #29 review: it was said to act only on a new record)."""
     on = rule.get("on")
     if isinstance(on, str):
         on = [on]
@@ -90,9 +93,6 @@ def rule_events(rule: dict) -> tuple[str, ...]:
     if rule.get("kind") == "condition_action":
         if any(r.startswith("previous.") for r in _refs(_when(rule))):
             return ("update",)
-        acts = _actions(rule)
-        if acts and all(a.get("type") == "set_default" for a in acts):
-            return ("create",)
     return ("create", "update")
 
 
@@ -229,9 +229,22 @@ def _end_refused(step: dict | None) -> bool:
     return bool(step) and step.get("type") in ("end", "end_event") and (step.get("config") or {}).get("refused") is True
 
 
+def _is_gate(step: dict | None, by_key: dict) -> bool:
+    """A yes/no check whose one side stops the workflow with a message and
+    whose other side goes on: it only reads, so a save may move past it."""
+    if not step or step.get("type") not in ("condition", "exclusive_gateway"):
+        return False
+    nxt = [n for n in (step.get("next") or []) if n]
+    return len(nxt) == 2 and sum(1 for n in nxt if _end_refused(by_key.get(n))) == 1
+
+
 def _first_save_after(flow: dict, start: str, ent: dict, ents: dict) -> dict | None:
-    """The first step that saves the record on the way on from `start`,
-    through other yes/no checks (their way on is the side that does not stop)."""
+    """The save of the record that comes right after `start`, with nothing
+    on the way but other yes/no checks (each passed on its side that goes on).
+
+    Anything else on the way — a payment, a message, a value set, a branch —
+    and there is no such save: taking the check out would let that step run
+    before the save is stopped (PR #29 review: a charge went out first)."""
     by_key = {s.get("key"): s for s in flow.get("steps") or [] if isinstance(s, dict)}
     saves = {s["step"]: s for s in save_steps(flow, ent, ents)}
     seen, key = set(), start
@@ -240,12 +253,60 @@ def _first_save_after(flow: dict, start: str, ent: dict, ents: dict) -> dict | N
         if key in saves:
             return {**saves[key], "config": (by_key[key].get("config") or {})}
         st = by_key.get(key)
-        if not st:
+        if not _is_gate(st, by_key):
             return None
-        nxt = [n for n in (st.get("next") or []) if n]
-        on = [n for n in nxt if not _end_refused(by_key.get(n))]
+        on = [n for n in st.get("next") or [] if n and not _end_refused(by_key.get(n))]
         key = on[0] if on else None
     return None
+
+
+# What the sample saves can tell apart: fields, numbers, texts, yes/no and
+# empty, compared with = != < <= > >=, joined with and / or / not( ) and
+# in [ ]. Anything else — a function (string length, contains, a date),
+# arithmetic, a range — the samples cannot judge, so such a check is never
+# taken for a copy (PR #29 review: "length >= 3" passed for "not blank").
+_SIMPLE_TOKEN = re.compile(r'\s*(?:(<=|>=|!=|=|<|>|\(|\)|\[|\]|,)|("")|(-?\d+(?:\.\d+)?)|([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*))')
+_SIMPLE_WORDS = {"and", "or", "not", "in", "null", "true", "false"}
+
+
+def simple(expr: str) -> bool:
+    """Is this condition one the sample saves judge fully?"""
+    text = _strip_strings(str(expr or "")).strip()
+    if not text:
+        return False
+    pos, prev = 0, None
+    while pos < len(text):
+        m = _SIMPLE_TOKEN.match(text, pos)
+        if not m or m.end() == pos:
+            return False
+        op, string, _num, word = m.groups()
+        if word is not None:
+            nxt = text[m.end():].lstrip()[:1]
+            if nxt == "(" and word not in ("not", "and", "or"):
+                return False                      # a function call
+            if word.split(".")[0] in _KEYWORDS and word not in _SIMPLE_WORDS:
+                return False                      # between, some, if, date…
+        if op in ("<", "<=", ">", ">=") and (string is not None or prev == '""'):
+            return False
+        if string is not None and prev in ("<", "<=", ">", ">="):
+            return False                          # texts put in order
+        prev = '""' if string is not None else (op or word or _num)
+        pos = m.end()
+    return True
+
+
+_PLAIN_VALUE = re.compile(r"^\s*\{\{\s*[\w.]+(?:\s*\?\?\s*(?:[\w.]+|\"[^\"]*\"|'[^']*'|-?\d+(?:\.\d+)?))*\s*\}\}\s*$")
+
+
+def _plain_values(values: dict) -> bool:
+    """A save whose values are each fixed or one `{{path}}` (with `??`
+    fall-backs): what `_fill` reads exactly as the app does."""
+    for v in values.values():
+        if isinstance(v, str) and "{{" in v and not _PLAIN_VALUE.match(v):
+            return False
+        if isinstance(v, (dict, list)):
+            return False
+    return True
 
 
 def candidates(doc: dict, rule: dict) -> list[dict]:
@@ -317,27 +378,16 @@ def _sample_values(field: dict | None, nums: list[float], strs: list[str]) -> li
     return list(dict.fromkeys(strs + ["", "some text", None]))
 
 
-def _cases(dims: list[tuple[str, list[Any]]]) -> list[dict]:
-    sizes = [len(v) for _, v in dims]
+def _cases(dims: list[tuple[str, list[Any]]]) -> list[dict] | None:
+    """Every combination of the sample values — or None when there are more
+    than `_MAX_CASES`: such a check is not judged, rather than judged on a
+    part of them (PR #29 review)."""
     total = 1
-    for s in sizes:
-        total *= s
-    if total <= _MAX_CASES:
-        combos = itertools.product(*[v for _, v in dims])
-    else:
-        # Every value of every field, each beside every value of each other
-        # field (pairs), plus a fixed sweep: enough to tell two simple
-        # conditions apart, small enough to run in one go.
-        combos_set = []
-        for i, (_, vi) in enumerate(dims):
-            for j in range(i + 1, len(dims)):
-                for a in vi:
-                    for b in dims[j][1]:
-                        row = [d[1][0] for d in dims]
-                        row[i], row[j] = a, b
-                        combos_set.append(tuple(row))
-        combos = combos_set[:_MAX_CASES]
-    return [dict(zip([k for k, _ in dims], c)) for c in combos]
+    for _, v in dims:
+        total *= len(v)
+    if total > _MAX_CASES:
+        return None
+    return [dict(zip([k for k, _ in dims], c)) for c in itertools.product(*[v for _, v in dims])]
 
 
 _LITERAL = re.compile(r"""^(?:"([^"]*)"|'([^']*)'|(-?\d+(?:\.\d+)?)|(true|false|null))$""")
@@ -389,8 +439,23 @@ _JUDGED: dict[str, dict] = {}
 _JUDGED_MAX = 2000
 
 
-def _plan(doc: dict, rule: dict, c: dict) -> tuple[list[dict], list[dict], list[dict]] | None:
-    """The sample saves one candidate is judged on: ``(cases, conditions, saves)``."""
+def unprovable(rule: dict, c: dict) -> str | None:
+    """Why the sample saves cannot settle whether this step is the rule — or
+    None when they can. Such a step is never taken out by itself."""
+    if not simple(c["expression"]):
+        return "the workflow's check uses something the comparison can't judge"
+    if not simple(_when(rule)):
+        return "the rule uses something the comparison can't judge"
+    values = (c["save"].get("config") or {}).get("values") or {}
+    if not isinstance(values, dict) or not _plain_values(values):
+        return "the save works out its values in a way the comparison can't follow"
+    return None
+
+
+def _plan(doc: dict, rule: dict, c: dict) -> tuple[list[dict], list[dict], list[dict]] | str | None:
+    """The sample saves one candidate is judged on: ``(cases, conditions,
+    saves)``; "too many" when there are more than `_MAX_CASES`; None when the
+    rule cannot be put to the engine."""
     from services.blueprint.projection import business_rule_rows
     ents = _entities(doc)
     ent = ents.get(str(rule.get("entity") or "")) or {}
@@ -430,6 +495,8 @@ def _plan(doc: dict, rule: dict, c: dict) -> tuple[list[dict], list[dict], list[
     dims = [(f"in:{f}", _values_for(fields.get(f), nums, strs)) for f in sorted(flat)]
     dims += [(f"was:{f}", _values_for(fields.get(f), nums, strs)) for f in sorted(prev)]
     cases = _cases(dims)
+    if cases is None:
+        return "too many"
     conditions, saves = [], []
     for case in cases:
         inputs = {k[3:]: v for k, v in case.items() if k.startswith("in:")}
@@ -466,9 +533,17 @@ def judge_all(doc: dict, pairs: list[tuple[dict, dict]]) -> list[dict]:
         if k in _JUDGED:
             out[i] = {**c, **_JUDGED[k], "rule": str(rule.get("id"))}
             continue
+        why = unprovable(rule, c)
+        if why:
+            out[i] = {**c, "same": False, "unproven": why, "rule": str(rule.get("id"))}
+            continue
         plan = _plan(doc, rule, c)
         if plan is None:
             out[i] = {**c, "same": None, "rule": str(rule.get("id"))}
+            continue
+        if plan == "too many":
+            out[i] = {**c, "same": False, "unproven": "there are too many combinations to compare them all",
+                      "rule": str(rule.get("id"))}
             continue
         cases, cs, ss = plan
         todo.append((i, k, cases, len(conditions), len(cs)))
@@ -560,9 +635,13 @@ def review_all(doc: dict, rule_ids: set[str] | None = None) -> list[dict]:
 
 
 def _check_fields(doc: dict, rule: dict, c: dict) -> set[str]:
+    """The record's fields a check reads — a function's name
+    (`string length(title)`) is not a field."""
     ent = _entities(doc).get(str(rule.get("entity") or "")) or {}
     camel, snake = _camel(str(ent.get("name") or "")), _snake(str(ent.get("name") or ""))
-    return {r.split(".", 1)[1] if r.split(".")[0] in (camel, snake) else r.split(".")[0] for r in _refs(c["expression"])}
+    names = {r.split(".", 1)[1] if r.split(".")[0] in (camel, snake) else r.split(".")[0] for r in _refs(c["expression"])}
+    known = {str(f.get("name")) for f in ent.get("fields") or [] if isinstance(f, dict)}
+    return (names & known) if known else names
 
 
 def stale(doc: dict, judged: list[dict]) -> list[dict]:
@@ -590,6 +669,16 @@ def stale(doc: dict, judged: list[dict]) -> list[dict]:
     return [c for _n, c in best.values()]
 
 
+def differs_said(d: dict | None) -> str:
+    """'amount 5000.5, category meals': the sample save on which a check and
+    its rule disagree, in words."""
+    def v(x: Any) -> str:
+        if x is None or x == "":
+            return "empty"
+        return str(int(x)) if isinstance(x, float) and x.is_integer() else str(x)
+    return ", ".join(f"{re.sub(r'(?<=[a-z0-9])(?=[A-Z])', ' ', k).lower()} {v(x)}" for k, x in (d or {}).items())
+
+
 def has_candidates(doc: dict) -> bool:
     """Cheap: is there anything that might be a copy? (No engine run.)"""
     return any(candidates(doc, r) for r in _live(doc.get("businessRules")))
@@ -613,5 +702,5 @@ def fold_copies(doc: dict, *, rule_ids: set[str] | None = None, only_same: bool 
     return done
 
 
-__all__ = ["can_stop", "candidates", "fold", "fold_copies", "has_candidates", "judge", "judge_all", "links",
+__all__ = ["can_stop", "candidates", "differs_said", "simple", "unprovable", "fold", "fold_copies", "has_candidates", "judge", "judge_all", "links",
            "reads", "review", "review_all", "rule_events", "save_steps", "stale", "workflow_links"]
