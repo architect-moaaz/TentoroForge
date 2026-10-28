@@ -51,7 +51,8 @@ BIND_SCHEMA: dict[str, Any] = {
         "seed": {
             "type": "string",
             "description": "JSON: {EntityName: [rows]} — the drawing's own example content as records, field "
-                           "names as the entities have them, so the app first opens looking as drawn."},
+                           "names as the entities have them, so the app first opens looking as drawn. Each "
+                           "row has an `id` of your own; a reference field holds the id or name of its row."},
     },
 }
 
@@ -170,7 +171,8 @@ def user_prompt(doc: dict, page: dict, *, feedback: str = "") -> str:
         "action no process does: say what it should do in `needs_workflows`. Then leave load.ts and view.tsx "
         "empty — they are written again once those exist. Never feed a prop a made-up constant.\n"
         "- `seed`: the drawing's example content (the samples above) as records of the entities, as JSON — "
-        "the rows the app first opens with.")
+        "the rows the app first opens with. Give every row an `id` of your own (\"tenant-2\"); a reference "
+        "field holds the `id` — or the name — of the row it points at, and that row is in the seed too.")
     if feedback:
         out.append("Your previous version was refused. Fix every one of these:\n" + feedback)
     return "\n\n".join(out)

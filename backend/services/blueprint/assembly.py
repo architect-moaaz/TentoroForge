@@ -149,6 +149,10 @@ SCAFFOLD_DEFAULTS: tuple[str, ...] = (
     # `null` body when no logo was given; this stands in when that projection
     # did not run at all.
     "src/contracts/brand.ts",
+    # The drawn shell's wrapper (`services.drawn.project`): the layout imports
+    # it, and the template's says `DRAWN_SHELL = false`. Overwritten at
+    # assembly, a design's own sidebar and top bar never showed (d6drawn).
+    "src/components/DrawnShell.tsx",
     # THE KIT PARTS A SCREEN IS BUILT FROM (2026-10-07): a page that imports
     # one must find it, in an application built before it existed. Their
     # packages arrive when a page first imports them (`ui_engineer.SDK_PACKAGES`).

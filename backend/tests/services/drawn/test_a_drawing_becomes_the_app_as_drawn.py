@@ -360,7 +360,104 @@ def test_the_drawings_examples_become_the_first_records(tmp_path):
     files = list((tmp_path / "app/src/db/imports").glob("*.json"))
     assert len(files) == 1
     payload = json.loads(files[0].read_text())
-    assert payload["table"] == "tenants" and payload["rows"] == [{"name": "MedStaff", "seats": 7}]
+    (row,) = payload["rows"]
+    assert payload["table"] == "tenants" and {k: v for k, v in row.items() if k != "id"} == {"name": "MedStaff", "seats": 7}
+    assert len(row["id"]) == 36                      # a uuid of its own, made from its name
+
+
+def _linked_svc(tmp_path):
+    from services.blueprint.service import BlueprintService
+
+    svc = BlueprintService.create(output_dir=str(tmp_path), app_id="s", name="S", domain="unknown")
+    svc.doc["data"] = {
+        "entities": [
+            {"id": "ENTITY-001", "name": "Tenant", "table": "tenants", "status": "PROPOSED",
+             "fields": [{"name": "id", "type": "uuid"}, {"name": "code", "type": "string", "unique": True},
+                        {"name": "planId", "type": "uuid", "required": True}]},
+            {"id": "ENTITY-002", "name": "Plan", "table": "plans", "status": "PROPOSED",
+             "fields": [{"name": "id", "type": "uuid"}, {"name": "name", "type": "string", "unique": True}]},
+            {"id": "ENTITY-003", "name": "Override", "table": "overrides", "status": "PROPOSED",
+             "fields": [{"name": "id", "type": "uuid"}, {"name": "key", "type": "string"},
+                        {"name": "tenantId", "type": "uuid", "required": True}]}],
+        "relationships": [
+            {"from": "ENTITY-002", "fromField": "id", "kind": "one_to_many", "to": "ENTITY-001", "toField": "planId"},
+            {"from": "ENTITY-001", "fromField": "id", "kind": "one_to_many", "to": "ENTITY-003", "toField": "tenantId"}]}
+    svc.save()
+    (tmp_path / "app").mkdir()
+    return svc
+
+
+def test_drawn_rows_point_at_the_rows_they_name_and_parents_load_first(tmp_path):
+    from services.drawn.seed import record
+
+    svc = _linked_svc(tmp_path)
+    app = str(tmp_path / "app")
+    said = record(svc, {
+        "Override": [{"id": "o1", "key": "jobs", "tenantId": "tenant-2"},
+                     {"id": "o2", "key": "seats", "tenantId": "tenant-9"}],          # names no tenant: left out
+        "Tenant": [{"id": "tenant-2", "code": "TN-0011", "planId": "plan-premium"}],  # the plan by a prefixed name
+        "Plan": [{"name": "Premium"}, {"name": "Starter"}]}, page_id="PAGE-001", app_root=app)
+    assert said == ["Plan: 2 drawn row(s)", "Tenant: 1 drawn row(s)", "Override: 1 drawn row(s), 1 left out"]
+    files = sorted((tmp_path / "app/src/db/imports").glob("*.json"))
+    tables = [json.loads(f.read_text())["table"] for f in files]
+    assert tables == ["plans", "tenants", "overrides"]               # the seeder's name order is the load order
+    plans, tenants, overrides = (json.loads(f.read_text())["rows"] for f in files)
+    premium = next(p["id"] for p in plans if p["name"] == "Premium")
+    assert tenants[0]["planId"] == premium
+    assert overrides == [{"id": overrides[0]["id"], "key": "jobs", "tenantId": tenants[0]["id"]}]
+
+
+def test_a_row_two_pages_draw_is_loaded_once_and_named_from_the_other_page(tmp_path):
+    from services.drawn.seed import record
+
+    svc = _linked_svc(tmp_path)
+    app = str(tmp_path / "app")
+    record(svc, {"Plan": [{"name": "Premium"}, {"name": "Starter"}]}, page_id="PAGE-001", app_root=app)
+    said = record(svc, {"Plan": [{"name": "Premium"}],
+                        "Tenant": [{"code": "TN-7", "planId": "Premium"}]}, page_id="PAGE-002", app_root=app)
+    assert said == ["Tenant: 1 drawn row(s)"]                         # no second Premium
+    rows = [json.loads(f.read_text()) for f in sorted((tmp_path / "app/src/db/imports").glob("*.json"))]
+    plan = next(r for p in rows if p["table"] == "plans" for r in p["rows"] if r["name"] == "Premium")
+    assert next(p for p in rows if p["table"] == "tenants")["rows"][0]["planId"] == plan["id"]
+
+
+def test_the_finished_app_compiles_a_page_with_its_parts_and_a_drawn_page_goes_back_to_its_binder(monkeypatch, tmp_path):
+    from services.blueprint import ui_engineer
+    from services.drawn import binder
+
+    seen = {}
+
+    class Svc:
+        import threading
+        lock = threading.RLock()
+        doc = {"pages": [{"id": "PAGE-001"}],
+               "pageCode": [{"page": "PAGE-001", "load": "l", "view": "v", "parts": {"TenantsView": "x"}}]}
+
+    def typecheck(doc, root, pid, load, view, parts=None):
+        seen["parts"] = parts
+        return ["view.tsx(1,1): error TS2307: Cannot find module './parts/TenantsView'"]
+
+    def bind(doc, page, root, client, *, feedback=""):
+        seen["bound"] = feedback
+        return {"page": "PAGE-001", "load": "l", "view": "v2", "parts": {"TenantsView": "x"}, "seed": {"T": []}}, []
+
+    applied = []
+    monkeypatch.setattr(ui_engineer, "typecheck", typecheck)
+    monkeypatch.setattr(binder, "applies", lambda doc, page: True)
+    monkeypatch.setattr(binder, "bind", bind)
+    monkeypatch.setattr(ui_engineer, "compose_page", lambda *a, **k: pytest.fail("a drawn page is never redrawn"))
+    monkeypatch.setattr("services.blueprint.agent_contract.apply_agent_result",
+                        lambda svc, result, commit: applied.append(result.proposals[0].body))
+    monkeypatch.setattr("services.blueprint.app_sdk.project_code_pages", lambda doc, root: None)
+    assert ui_engineer.settle_code_pages(Svc(), tmp_path, client=object()) == {"PAGE-001": "rewritten"}
+    assert seen["parts"] == {"TenantsView": "x"} and "TS2307" in seen["bound"]
+    assert applied and "seed" not in applied[0]
+
+
+def test_assembly_keeps_the_drawn_frames_wrapper():
+    from services.blueprint.assembly import SCAFFOLD_DEFAULTS
+
+    assert "src/components/DrawnShell.tsx" in SCAFFOLD_DEFAULTS
 
 
 def test_the_shell_is_drawn_with_its_sidebar_and_top_bar(tmp_path, monkeypatch):
