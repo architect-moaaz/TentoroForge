@@ -1567,12 +1567,14 @@ def _dropped_controls(before: str, after: str, brief: str) -> list[str]:
     return out
 
 
-def _static_findings(load: str, view: str) -> list[str]:
-    """What the compiler cannot see and the rules forbid."""
+def _static_findings(load: str, view: str, *, exact: bool = False) -> list[str]:
+    """What the compiler cannot see and the rules forbid. A page reproducing a
+    drawing (``exact``) is written in the drawing's own colours, so it may use
+    hex values; `_drawn_findings` holds it to the drawn ones instead."""
     out = []
     if not view.lstrip().startswith(('"use client"', "'use client'")):
         out.append('view.tsx: the first line must be "use client".')
-    if re.search(r"#[0-9a-fA-F]{6}\b|#[0-9a-fA-F]{3}\b", view):
+    if not exact and re.search(r"#[0-9a-fA-F]{6}\b|#[0-9a-fA-F]{3}\b", view):
         out.append("view.tsx: uses a hex colour — use the semantic token classes.")
     if re.search(r"\bfetch\(", load + view):
         out.append("load.ts/view.tsx: calls fetch — read through @/sdk/server, write through workflows.")
@@ -1847,7 +1849,8 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
         # push the rewrite back toward the look the design was chosen to replace.
         design = (_drawn_findings(whole, reference) if seeded or (reference or {}).get("exact")
                   else _design_findings(doc, page, whole))
-        errors = (_static_findings(load, view) + _simulated_writes(whole) + _unwired_actions(doc, page, whole)
+        errors = (_static_findings(load, view, exact=bool((reference or {}).get("exact")))
+                  + _simulated_writes(whole) + _unwired_actions(doc, page, whole)
                   + _unfollowed_flows(doc, page, whole)
                   + _unread_handoffs(doc, page, load, whole)
                   + typecheck(doc, app_root, str(page.get("id")), load, view, parts=parts))
@@ -2111,7 +2114,8 @@ def _write_part(doc: dict, page: dict, part: dict, app_root: Path, call: Any, wr
             continue
         code = _use_client_first(str(body.get("code") or ""))
         own = [e.replace("view.tsx", f"parts/{part['key']}.tsx")
-               for e in _static_findings("", code) + _drawn_findings(code, reference)
+               for e in _static_findings("", code, exact=bool((reference or {}).get("exact")))
+               + _drawn_findings(code, reference)
                if not e.startswith("load.ts:")] + _simulated_writes(code)
         compiled = typecheck(doc, app_root, pid, load, view, parts={**siblings, part["key"]: code})
         errors = own + [e for e in compiled if e.startswith(f"parts/{part['key']}.tsx")]
@@ -2315,7 +2319,7 @@ def compose_screen(doc: dict, page: dict, app_root: Path, client: Any, parts: li
             continue
         load, view = str(body.get("load") or ""), _use_client_first(str(body.get("view") or ""))
         missing = [p for p in parts if f"./parts/{p['key']}" not in view]
-        errors = (_static_findings(load, view) + _drawn_findings(view, shown)
+        errors = (_static_findings(load, view, exact=bool((shown or {}).get("exact"))) + _drawn_findings(view, shown)
                   + [f"view.tsx: the frame never places parts/{p['key']}.tsx — import {p['component']} "
                      f"from \"./parts/{p['key']}\" and render <{p['component']} data={{props}} />." for p in missing]
                   + typecheck(doc, app_root, pid, load, view, parts=stubs))

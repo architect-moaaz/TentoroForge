@@ -123,7 +123,8 @@ def design_system_from(ref: DesignReference) -> dict[str, Any]:
                     colors["accent"] = colors.get("primary") or primary
                 colors["primary"] = primary
                 out["colors"] = colors
-                out.setdefault("paletteEvidence", {})["primary"] = f"the fill of {actions[primary]} pressable elements"
+                # Evidence is a count (the contract's type): pressable elements filled with it.
+                out.setdefault("paletteEvidence", {})["primary"] = actions[primary]
     drawn = _styles.drawn_system(ref.screens)
     for key in ("radius", "spacing"):
         if drawn.get(key) and key not in out:

@@ -402,3 +402,33 @@ def test_the_page_is_the_frame_less_the_shell_it_draws():
             {"absoluteBoundingBox": {"x": 248, "y": 0, "width": 1192, "height": 72}}]}]}
     assert content_box(frame) == {"x": 0.1722, "y": 0.0703, "w": 0.8278, "h": 0.9297}
     assert content_box({"absoluteBoundingBox": {"x": 0, "y": 0, "width": 800, "height": 600}, "children": []}) is None
+
+
+def test_a_reproduced_page_may_write_hex_colours_and_others_still_may_not():
+    from services.blueprint.ui_engineer import _static_findings
+
+    view = '"use client";\nexport default function V() { return <div className="bg-[#0443fa]" />; }'
+    assert not any("hex colour" in f for f in _static_findings("", view, exact=True))
+    assert any("hex colour" in f for f in _static_findings("", view))
+
+
+def test_the_drawn_primary_keeps_the_design_system_valid(tmp_path):
+    """Its evidence is a count, as the contract declares; a sentence there made
+    every later write to the Blueprint fail (D3 pilot, 2026-10-28)."""
+    from services.blueprint.service import BlueprintService
+    from services.figma.projection import design_system_from
+
+    blue = {"r": 0.016, "g": 0.263, "b": 0.98}
+    doc = {"id": "1:1", "type": "FRAME", "absoluteBoundingBox": {"x": 0, "y": 0, "width": 800, "height": 600},
+           "children": [{"type": "INSTANCE", "name": "Button", "fills": [{"type": "SOLID", "color": blue}],
+                         "absoluteBoundingBox": {"x": 0, "y": 0, "width": 120, "height": 40}} for _ in range(4)]
+           + [{"type": "FRAME", "name": f"card {i}", "absoluteBoundingBox": {"x": 0, "y": 0, "width": 300, "height": 200},
+               "fills": [{"type": "SOLID", "color": {"r": 1, "g": 0.45, "b": 0.42}}]} for i in range(14)]}
+    ref = DesignReference(target=FigmaTarget(file_key="zYxW9876VuTs", node_id=""),
+                          screens=[ScreenRef(node_id="1:1", name="s", width=800, height=600,
+                                             structure={"source": "rest_node_document", "document": doc})])
+    ds = design_system_from(ref)
+    assert ds["colors"]["primary"] == "#0443fa" and ds["paletteEvidence"]["primary"] == 4
+    svc = BlueprintService.create(output_dir=str(tmp_path), app_id="v", name="V", domain="unknown")
+    svc.doc["designSystem"] = {**(svc.doc.get("designSystem") or {}), **ds}
+    svc.save()
