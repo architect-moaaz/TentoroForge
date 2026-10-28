@@ -104,3 +104,7 @@ backend/scripts/rules/lab.tmp.cjs
 # The native-app toolchain (the compiler and packages the phone screens are type-checked against) and the engineer's
 # working files live here by default: machine state, installed on first use, never part of the source.
 backend/.forge/
+
+# Local app registry: machine state, never committed (PR #29 review)
+backend/data/apps.json
+backend/data/apps.lock
