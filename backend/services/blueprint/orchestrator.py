@@ -2678,6 +2678,11 @@ OBSERVER_ROUNDS_BY_NODE: dict[str, int] = {
     # Judged by the compiler and the looks, like `page_code`.
     "native_code": 0,
     "ux_architecture": 0,
+    # A converted drawing is held to the drawing (`drawn.params.check`), not
+    # to requirements that are written after it, from it: judged against them
+    # the Promo codes view was sent back over a link to a screen left out of
+    # the run (d6drawn, 2026-10-28), eight minutes for nothing.
+    "drawn_views": 0,
 }
 
 

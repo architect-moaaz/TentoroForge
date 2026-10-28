@@ -69,7 +69,8 @@ def document(doc: dict, output_dir: str | Path) -> str:
     for ref in views:
         group = str((frames.get(ref) or {}).get("group") or "The design")
         chapters.setdefault(group, []).append(ref)
-    name_of = {ref: str(f.get("shows") or f.get("name") or ref) for ref, f in frames.items()}
+    # The designer's layer name: a heading read off the frame can be its chrome's.
+    name_of = {ref: str(f.get("name") or f.get("shows") or ref) for ref, f in frames.items()}
     lines = [TITLE, "",
              "The design is held as the specification and its screens are built as drawn. This is what each "
              "screen shows, what a person does on it and where that leads, and what it says in its own "

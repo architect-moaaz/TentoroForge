@@ -377,3 +377,13 @@ def test_the_shell_is_drawn_with_its_sidebar_and_top_bar(tmp_path, monkeypatch):
     assert "{props.children}" in prepared.shell_markup
     page = prepared.static["1:1"]
     assert "Operations" not in page and "Search tenants" not in page
+
+
+def test_a_heading_every_frame_shares_does_not_name_the_screens():
+    from services.blueprint.page_planner import frame_slots
+
+    frames = [{"nodeId": f"{i}:1", "name": n, "shows": "Ditans Health"} for i, n in
+              enumerate(["A-05 · Tenants", "A-11 · Promo codes", "A-12 · Create a promo code"], 1)]
+    slots = frame_slots(frames)
+    assert [s["name"] for s in slots] == ["A-05 · Tenants", "A-11 · Promo codes", "A-12 · Create a promo code"]
+    assert all("shows" not in s for s in slots)

@@ -2184,6 +2184,12 @@ def frame_slots(frames: list[dict], *, sole: bool = True, doc: dict | None = Non
                 entry.pop("kind")
                 if entry not in reached.setdefault(to, []):
                     reached[to].append(entry)
+    # A HEADING EVERY FRAME SHARES IS THE CHROME'S, NOT THE SCREEN'S. The
+    # heading read off each D6 frame was its sidebar's logo, "Ditans Health",
+    # on all of them, and three screens would have been routed as one name.
+    from collections import Counter
+    shared = Counter(str(f.get("shows") or "").strip() for f in frames)
+    chrome = {h for h, n in shared.items() if h and n >= 2 and n >= len(frames) * 0.5}
     slots: list[dict] = []
     for frame in frames:
         # A SECOND DESIGN'S FRAME NAMES ITS DESIGN. Node ids repeat across
@@ -2196,6 +2202,8 @@ def frame_slots(frames: list[dict], *, sole: bool = True, doc: dict | None = Non
         # /users/new: 14 of 15 wrong. The heading read off the frame is its
         # identity, and the slot says so ahead of the layer name.
         shows = str(frame.get("shows") or "").strip()
+        if shows in chrome:
+            shows = ""
         identity = shows or name
         slot = {
             "feature": node_id,
