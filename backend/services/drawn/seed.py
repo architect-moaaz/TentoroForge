@@ -48,12 +48,20 @@ def _norm(value: Any) -> str:
 
 
 def parents(doc: dict, entity_id: str) -> dict[str, str]:
-    """``{field: parent entity id}`` — the entity's references, as the
-    relationships declare them."""
+    """``{field: parent entity id}`` — the entity's references, read the way
+    the sample data reads them (`projection._link_target`): the declared
+    relationship, else the entity the field is named for (`tenantId` → Tenant,
+    which TrustSignal's relationship left undeclared)."""
+    from services.blueprint.projection import _link_target
+
+    entity = next((e for e in (doc.get("data") or {}).get("entities") or []
+                   if isinstance(e, dict) and str(e.get("id")) == entity_id), None)
     out = {}
-    for r in (doc.get("data") or {}).get("relationships") or []:
-        if isinstance(r, dict) and str(r.get("to")) == entity_id and r.get("toField") and r.get("from"):
-            out[str(r["toField"])] = str(r["from"])
+    for field in (entity or {}).get("fields") or []:
+        if isinstance(field, dict) and field.get("name"):
+            target = _link_target(doc, entity, field)
+            if target:
+                out[str(field["name"])] = target
     return out
 
 

@@ -136,7 +136,7 @@ CONTRACT = {"data": [
 def test_the_props_type_is_generated_from_the_contract():
     t = C.props_type("TenantsView", CONTRACT)
     assert 'tenants: Array<{ id: string; name: string; status: "Live" | "Paused" }>;' in t
-    assert "selected?: { id: string; plan: string };" in t
+    assert "selected: { id: string; plan: string };" in t          # a record the drawing shows is always given
     assert "promo: { code: string };" in t and "onPromoChange(field: string, value: string | boolean): void;" in t
     assert "onPause(row: { id: string; name: string; status: \"Live\" | \"Paused\" }): void;" in t
     assert "onNewTenant(): void;" in t

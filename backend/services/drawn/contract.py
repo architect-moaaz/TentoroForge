@@ -55,7 +55,12 @@ def props_type(name: str, contract: dict, *, children: bool = False) -> str:
         if kind == "list":
             lines.append(f"  {slot['name']}: Array<{_row(slot)}>;")
         elif kind == "record":
-            lines.append(f"  {slot['name']}?: {_row(slot)};")
+            # A RECORD THE DRAWING SHOWS IS ALWAYS THERE. The drawing shows a
+            # tenant selected, and its view reads `props.selectedTenant.code`
+            # as drawn; typed optional, the page fed `undefined` until one was
+            # chosen and the drawn page crashed the moment it had rows
+            # (d6drawn, 2026-10-28). Required, the page must give it one.
+            lines.append(f"  {slot['name']}: {_row(slot)};")
         elif kind == "form":
             lines.append(f"  {slot['name']}: {_ts_object(slot.get('fields') or [], with_id=False)};")
             lines.append(f"  {change_handler(slot['name'])}(field: string, value: string | boolean): void;")
