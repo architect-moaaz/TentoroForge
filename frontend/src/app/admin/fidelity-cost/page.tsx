@@ -25,14 +25,15 @@ export default function FidelityCostPage() {
     <main className="bg-background min-h-screen p-8">
       <h1 className="text-2xl font-semibold mb-1">Fidelity Cost Dashboard</h1>
       <p className="text-sm text-muted-foreground mb-6">
-        Per-project + per-page costs from `/api/_debug/fidelity-stats`.
+        Per-project and per-page design-fidelity costs from `/api/_debug/fidelity-stats`.
       </p>
 
-      <div className="grid grid-cols-4 gap-3 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
         <Stat label="Projects" value={stats.projects} />
         <Stat label="Pages scored" value={stats.pages_scored} />
         <Stat label="Pass rate" value={`${(stats.pass_rate * 100).toFixed(0)}%`} />
-        <Stat label="Avg cost" value={`$${stats.avg_cost_usd?.toFixed(2) ?? "0.00"}`} />
+        <Stat label="Avg cost / project" value={`$${stats.avg_cost_usd?.toFixed(2) ?? "0.00"}`} />
+        <Stat label="Avg cost / page" value={`$${stats.avg_cost_per_page_usd?.toFixed(2) ?? "0.00"}`} />
       </div>
 
       <h2 className="text-sm font-semibold mb-3">Iteration Distribution</h2>
@@ -44,7 +45,7 @@ export default function FidelityCostPage() {
 
       <h2 className="text-sm font-semibold mb-3">Health Signals</h2>
       <ul className="space-y-1 text-xs text-muted-foreground">
-        <li>Median score: {stats.median_score}</li>
+        <li>Average score: {stats.avg_score}</li>
         <li>Avg iters: {stats.avg_iters}</li>
         <li>Cap exhausted: {stats.cap_exhausted}</li>
       </ul>
