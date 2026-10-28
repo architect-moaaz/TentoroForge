@@ -862,6 +862,7 @@ def _attach_structure(ref: DesignReference, screen: ScreenRef, blocks) -> None:
         or (screen.structure or {}).get("boxes") or []
     ref.screens[index] = _replace(
         screen, structure={"source": "rest_node_document", "document": payload,
+                           "labels": labels_from_document(payload),
                            "boxes": boxes})
     _harvest(ref, payload)
 
@@ -916,6 +917,38 @@ def _structure_from_code(code: str) -> dict[str, Any]:
         "labels": labels,
         "assets": sorted(set(_ASSET_URL.findall(code))),
     }
+
+
+def labels_from_document(document: Any, limit: int = 200) -> list[str]:
+    """The visible words of a Figma node tree, in reading order (top to bottom, then left to right).
+
+    A screen's vocabulary is what says what it is — "Return item", "Verified Resident" — and the
+    hosted MCP's generated code yields it (`_structure_from_code`). The REST node tree carries the
+    same words as TEXT nodes' `characters`, and without them a design read over REST is a frame with
+    a name and a size: the coverage check has nothing to judge it by. Hidden layers are skipped."""
+    found: list[tuple[int, float, str]] = []
+
+    def walk(node: Any) -> None:
+        if not isinstance(node, dict) or node.get("visible") is False:
+            return
+        if str(node.get("type") or "").upper() == "TEXT":
+            text = re.sub(r"\s+", " ", str(node.get("characters") or "")).strip()
+            if text:
+                box = node.get("absoluteBoundingBox") if isinstance(node.get("absoluteBoundingBox"), dict) else {}
+                try:
+                    y, x = float(box.get("y") or 0), float(box.get("x") or 0)
+                except (TypeError, ValueError):
+                    y = x = 0.0
+                found.append((int(y // 24), x, text))
+        for child in node.get("children") or []:
+            walk(child)
+
+    walk(document)
+    labels: list[str] = []
+    for _row, _x, text in sorted(found, key=lambda t: (t[0], t[1])):
+        if text not in labels:
+            labels.append(text)
+    return labels[:limit]
 
 
 def _interactions_of(node: dict) -> list[InteractionRef]:

@@ -56,6 +56,7 @@ def test_the_stop_is_a_file_any_worker_reads_and_the_next_build_clears_it(tmp_pa
 def test_a_stopped_build_that_booted_is_handed_over(tmp_path, monkeypatch):
     """`_run_dag` after a paused-by-the-person run: what is built is handed
     over as it stands; no checks are started."""
+    monkeypatch.setenv("FORGE_UI_DESIGNER", "forge")            # who designs the screens is settled
     from types import SimpleNamespace
     from routers import blueprint_generate as router
 

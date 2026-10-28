@@ -15,6 +15,7 @@ when published, and a removal keeps its data in `forge_retired.rows`.
 """
 from __future__ import annotations
 
+from services.proc_compat import tool
 import logging
 import os
 import socket
@@ -97,6 +98,7 @@ def run_chain(app_root: str | Path, url: str, *, extra_env: dict[str, str] | Non
     for cmd in map(list, PUBLISH_CHAIN):
         if cmd[1] == "tsx" and not (root / cmd[2]).is_file():
             continue
+        cmd[0] = tool(cmd[0])
         try:
             proc = subprocess.run(cmd, cwd=str(root), env=env, stdin=subprocess.DEVNULL,
                                   capture_output=True, text=True, timeout=TIMEOUT_S)

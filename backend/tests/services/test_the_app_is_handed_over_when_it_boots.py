@@ -33,6 +33,7 @@ def _report():
 
 
 def test_the_build_turn_hands_over_at_boot_and_leaves_the_checks_pending(tmp_path, monkeypatch):
+    monkeypatch.setenv("FORGE_UI_DESIGNER", "forge")            # who designs the screens is settled
     _built(tmp_path)
     monkeypatch.setattr("services.blueprint.orchestrator.run", lambda *a, **k: _report())
     monkeypatch.setattr("services.smith.smith.settle_state_after_build", lambda svc, report: "IMPLEMENTATION")

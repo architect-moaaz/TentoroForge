@@ -122,8 +122,16 @@ export function tokenize(input: string): Token[] {
       let str = "";
       while (pos < input.length && input[pos] !== quote) {
         if (input[pos] === "\\") {
+        // A BACKSLASH IS KEPT UNLESS IT ESCAPES THE QUOTE OR ANOTHER BACKSLASH. This
+        // dropped it for every escape, so `matches(title, ".*\\S.*")` became the regex
+        // `.*S.*` — true only for a title containing a capital S — while the Python
+        // engine kept the text as written. Regex shortcuts (\\S, \\d, \\w) are the reason
+        // a string literal is ever written with a backslash in it.
           advance();
-          if (pos < input.length) str += advance();
+          if (pos < input.length) {
+            const next = input[pos];
+            str += next === quote || next === "\\" ? advance() : "\\" + advance();
+          }
         } else {
           str += advance();
         }

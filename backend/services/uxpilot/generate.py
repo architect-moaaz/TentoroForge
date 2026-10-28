@@ -58,7 +58,7 @@ import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 logger = logging.getLogger(__name__)
 
@@ -78,14 +78,28 @@ _ledger_lock = threading.Lock()
 # ---------------------------------------------------------------------------
 
 def designer_for(doc: dict, page: dict) -> str:
-    """``forge`` or ``uxpilot``: the page's own override, else the application's,
-    else Forge — which is what every application built before the choice
-    existed was."""
+    """``forge``, ``uxpilot`` or (for a page) ``forge`` when Figma leads: the page's own override, else
+    the application's, else the platform default, else Forge — which is what every application built
+    before the choice existed was. The choice is asked once at the build gate
+    (`services.smith.ui_designer`) and recorded as `application.uiDesigner`."""
     own = str((page or {}).get("designedBy") or "").strip()
     if own in ("forge", "uxpilot"):
         return own
     app = str(((doc or {}).get("application") or {}).get("uiDesigner") or "").strip()
-    return app if app in ("forge", "uxpilot") else "forge"
+    if app in ("forge", "uxpilot"):
+        return app
+    # FIGMA IS CHOSEN: the frames lead (`figma_pages.reference_for` adapts each page that has one,
+    # before this is asked), and a page with no frame is the Forge designer's. Without this it would
+    # fall through to a platform default meant for applications nobody has chosen for.
+    if app == "figma":
+        return "forge"
+    # NOBODY HAS CHOSEN FOR THIS APPLICATION: the platform's default, if one is
+    # set. Smith asks the question at the build gate (`ui_designer.gate`, which
+    # also honours this default by not asking), so this is what an operator sets
+    # to decide for every application on a platform. A choice recorded on the
+    # application or the page always outranks it, `forge` included.
+    default = os.environ.get("FORGE_UI_DESIGNER", "").strip().lower()
+    return default if default in ("forge", "uxpilot") else "forge"
 
 
 # ---------------------------------------------------------------------------
@@ -173,6 +187,26 @@ def _launched_here(doc: dict, page_id: str) -> list[dict]:
             if page_id in (w.get("launchedFrom") or []) and w.get("name")]
 
 
+#: Pages that are not a list of records: a table of them there is clutter.
+_NO_TABLE_PATTERNS = ("form", "wizard", "dashboard", "record_workspace", "master_detail", "auth", "settings")
+_BOOKKEEPING = ("id", "createdat", "updatedat", "created_at", "updated_at")
+
+
+def _hidden_fields(doc: dict, entity_name: str) -> set[str]:
+    """Columns of an entity a person is never shown: its id, its bookkeeping
+    timestamps, and the column that says whose it is (a design with a "User Id"
+    column or field is a design of the database, not of the application)."""
+    hidden = set(_BOOKKEEPING)
+    for rule in (doc.get("security") or {}).get("ownershipRules") or []:
+        if isinstance(rule, dict) and str(rule.get("entity") or "").lower() == entity_name.lower() and rule.get("column"):
+            hidden.add(str(rule["column"]).lower())
+    return hidden
+
+
+def _visible(items: list[dict], hidden: set[str], key: str) -> list[dict]:
+    return [i for i in items if str(i.get(key) or "").replace("_", "").lower() not in {h.replace("_", "") for h in hidden}]
+
+
 def _column_defs(brief: dict) -> list[dict]:
     derived = brief.get("derived") or {}
     cols = [c for c in (derived.get("columns") or []) if isinstance(c, dict) and c.get("key")]
@@ -197,7 +231,14 @@ def _metric_widgets(brief: dict) -> list[dict]:
     out = []
     for w in brief.get("widgets") or []:
         src = w.get("dataSource") or {}
-        if src.get("op") == "aggregate" and w.get("label"):
+        # BOTH SHAPES A WIDGET'S SOURCE HAS HAD: the original `aggregate`, and
+        # the `query` the analytics agent writes now (one measure, nothing to
+        # group by). Reading only the first dropped every metric of every
+        # current application from the brief, so the design was drawn without
+        # its numbers.
+        one_number = src.get("op") == "aggregate" or (
+            src.get("op") == "query" and len(src.get("measures") or []) == 1 and not src.get("dimensions"))
+        if (one_number or w.get("kind") == "metric") and w.get("label"):
             out.append(w)
     return out
 
@@ -215,11 +256,24 @@ def _design_language(doc: dict) -> str:
         lines.append("Typography: " + ", ".join(f"{k} {v}" for k, v in list(typo.items())[:6]) + ".")
     if ds.get("informationDensity"):
         lines.append(f"Information density: {ds['informationDensity']}.")
+    # THE APPLICATION'S OWN DIRECTION: the composition the UI director wrote is
+    # what every screen is meant to feel like, and it is written down already.
+    composition = doc.get("composition") or {}
+    if composition.get("vision"):
+        lines.append(f"Direction: {composition['vision']}")
+    for conv in [c for c in (composition.get("conventions") or []) if isinstance(c, dict)][:6]:
+        if conv.get("topic") and conv.get("rule"):
+            lines.append(f"- {conv['topic']}: {conv['rule']}")
     return "\n".join(lines)
 
 
-def prompt_for(doc: dict, page: dict, *, feedback: str = "") -> str:
+def prompt_for(doc: dict, page: dict, *, feedback: str = "", section: bool = False,
+               req_limit: int = 6, req_chars: int = 0) -> str:
     """The generate prompt for one page, from its brief and nothing else.
+
+    ``section=True`` is what only this page adds to an application-wide prompt:
+    no opening line, no design language and no shell rule (those are said once
+    for every screen), and no feedback.
 
     Deterministic on purpose: the same Blueprint produces the same prompt, so
     the ledger's hash means "the brief has not changed" and a rebuild does not
@@ -234,6 +288,7 @@ def prompt_for(doc: dict, page: dict, *, feedback: str = "") -> str:
     entity = brief.get("entity") or {}
     entity_name = str(entity.get("name") or "")
 
+    shared: list[str] = []
     parts: list[str] = [
         f"Design one desktop web page for \"{app.get('name') or 'the application'}\""
         + (f", a {app['domain']} application" if app.get("domain") and app.get("domain") != "unknown" else "")
@@ -245,45 +300,92 @@ def prompt_for(doc: dict, page: dict, *, feedback: str = "") -> str:
     language = _design_language(doc)
     if language:
         parts.append("Design language, which every page of this application shares:\n" + language)
+        shared.append(parts[-1])
     parts.append(
         "Render the PAGE BODY ONLY. Do not draw a sidebar, a top navigation bar "
         "or any application shell: the application provides those around every "
         f"page. Start with the page heading \"{page.get('name') or page_id}\"."
     )
+    shell_rule = parts[-1]
     parts.append(
         "Use exactly the labels below, spelled exactly as written. They are "
         "bound to live data after generation, so a label that differs is a "
         "widget that shows nothing."
     )
+    hidden = _hidden_fields(doc, entity_name)
     metrics = _metric_widgets(brief)[:_MAX_LABELS]
     if metrics:
         parts.append("Metric tiles, each with its label and one number: "
                      + "; ".join(f"\"{w['label']}\"" for w in metrics) + ".")
-    cols = _column_defs(brief)[:_MAX_LABELS]
-    if cols and entity_name:
+    cols = _visible(_column_defs(brief), hidden, "key")[:_MAX_LABELS]
+    # A PAGE ABOUT ONE RECORD IS NOT A TABLE OF THEM: a record page (`[id]` in
+    # its route, or the pattern) was drawn as a list of rows, which the writer
+    # then had to undo. It shows the one record's fields, each labelled.
+    one_record = (str(page.get("pattern") or "") in ("record_workspace", "master_detail")
+                  or "[" in str(page.get("route") or ""))
+    if cols and entity_name and one_record:
+        parts.append(
+            f"One {entity_name} shown in full, as a record rather than a list, with each of its "
+            "fields labelled exactly: " + ", ".join(f"\"{c['label']}\"" for c in cols) + "."
+        )
+    elif cols and entity_name and str(page.get("pattern") or "") not in _NO_TABLE_PATTERNS:
         parts.append(
             f"A table of {_plural(entity_name)} with exactly these column headers, "
             "in this order, and three or four example rows: "
             + ", ".join(f"\"{c['label']}\"" for c in cols) + "."
         )
-    fields = _form_fields(brief)[:_MAX_LABELS]
+    fields = _visible(_form_fields(brief), hidden, "name")[:_MAX_LABELS]
     if fields and str(page.get("pattern") or "") in ("form", "wizard"):
         parts.append("A form with exactly these fields, labelled: "
                      + ", ".join(f"\"{f['label']}\"" for f in fields) + ".")
     buttons = [w["name"] for w in _launched_here(doc, page_id)][:_MAX_LABELS]
     buttons += [str(a) for a in (page.get("actions") or []) if str(a).strip()][:_MAX_LABELS]
+    # "Add Task" (a workflow's name) and "Add task" (the page's own word for it)
+    # are one button; drawn twice they are two, and the page keeps both.
+    seen: dict[str, str] = {}
+    for b in buttons:
+        seen.setdefault(re.sub(r"\s+", " ", b).strip().lower(), b)
+    buttons = list(seen.values())
     if buttons:
-        parts.append("Buttons, labelled exactly: "
-                     + ", ".join(f"\"{b}\"" for b in dict.fromkeys(buttons)) + ".")
+        parts.append("Buttons, labelled exactly: " + ", ".join(f"\"{b}\"" for b in buttons) + ".")
+    # WHAT A DESIGNER CANNOT KNOW, SAID PLAINLY: the values a status takes
+    # (so a badge is drawn for each, not invented), where the page leads
+    # (so its links are drawn), and what an action asks for (so its dialog
+    # has the right fields). All three come from the Blueprint, and all three
+    # are the difference between a screen and this application's screen.
+    primary = _entities_by_id(doc).get(str((page.get("data") or {}).get("primaryEntity") or ""))
+    for fld in [f for f in ((primary or {}).get("fields") or []) if isinstance(f, dict)]:
+        values = [str(v) for v in (fld.get("enumValues") or []) if str(v).strip()][:8]
+        if values and fld.get("name"):
+            parts.append(f"The {_label_of(fld['name']).lower()} of a {entity_name or 'record'} is one of "
+                         + ", ".join(f"\"{v}\"" for v in values)
+                         + "; show each as its own small coloured badge.")
+    pages_by_id = {str(p.get("id")): p for p in _live(doc.get("pages"))}
+    leads = [str(pages_by_id[t].get("name")) for t in (str(x) for x in (page.get("navigatesTo") or []))
+             if t in pages_by_id and pages_by_id[t].get("name")][:_MAX_LABELS]
+    if leads:
+        parts.append("Links or buttons that open other pages, labelled exactly: "
+                     + ", ".join(f"\"{n}\"" for n in dict.fromkeys(leads)) + ".")
+    for wf in _launched_here(doc, page_id)[:4]:
+        asks = [_label_of(str(i.get("name"))) for i in (wf.get("inputs") or [])
+                if isinstance(i, dict) and i.get("name") and i.get("kind") != "record"][:6]
+        if asks:
+            parts.append(f"The \"{wf['name']}\" action opens a short form asking for: "
+                         + ", ".join(f"\"{a}\"" for a in asks) + ".")
     states = [s for s in (page.get("states") or []) if s in ("empty", "error")]
     if "empty" in states and entity_name:
         parts.append(f"Include, visually secondary, an empty state reading "
                      f"\"No {_plural(entity_name).lower()} yet\".")
     reqs = [str(r.get("text") or r.get("statement") or r.get("description") or "")
             for r in (brief.get("requirements") or []) if isinstance(r, dict)]
-    reqs = [r for r in reqs if r][:6]
+    reqs = [r for r in reqs if r][:req_limit]
+    if req_chars:
+        reqs = [r if len(r) <= req_chars else r[: req_chars - 1].rstrip() + "\u2026" for r in reqs]
     if reqs:
         parts.append("What people come here to do:\n" + "\n".join(f"- {r}" for r in reqs))
+    if section:
+        return "\n\n".join(b for b in parts[1:] if b not in shared and b != shell_rule
+                            and not b.startswith(("Page:", "Page pattern:", "Use exactly the labels")))
     if feedback.strip():
         parts.append("The previous attempt was refused. Fix exactly this:\n" + feedback.strip())
     return "\n\n".join(parts)
@@ -317,6 +419,25 @@ def ledger_entry(output_dir: str | Path, page_id: str) -> dict | None:
     with _ledger_lock:
         entry = _read_ledger(output_dir).get(page_id)
     return entry if isinstance(entry, dict) else None
+
+
+def forget_misses(output_dir: str | Path) -> int:
+    """Take the recorded misses (``missing`` / ``failed``) out of the ledger; drawings stay.
+
+    Called when a person starts a build: what the last build could not get from UX Pilot is tried again,
+    and nothing already paid for is drawn twice. Returns how many entries went."""
+    with _ledger_lock:
+        data = _read_ledger(output_dir)
+        keep = {pid: entry for pid, entry in data.items()
+                if not (isinstance(entry, dict) and not entry.get("html")
+                        and entry.get("outcome") in ("missing", "failed"))}
+        gone = len(data) - len(keep)
+        if gone:
+            path = ledger_path(output_dir)
+            tmp = path.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(keep, indent=2, sort_keys=True), "utf-8")
+            os.replace(tmp, path)
+    return gone
 
 
 def _record(output_dir: str | Path, page_id: str, entry: dict) -> None:
@@ -391,21 +512,339 @@ def _preview_of(payload: Any) -> str:
     return ""
 
 
-async def _generate_async(gateway: Any, prompt: str) -> tuple[str, str, str]:
-    """``(design_id, html, preview_url)`` from one generation."""
+#: How long a design agent run may take before the page is written without it.
+#: A one-screen run finishes in about a minute.
+JOB_TIMEOUT_S = 420.0
+JOB_POLL_S = 8.0
+
+
+def _first_key(payload: Any, key: str) -> Any:
+    from services.uxpilot.reference import _find_key
+
+    return _find_key(payload, key)
+
+
+async def _wait_for_job(gateway: Any, prompt: str) -> dict:
+    """Start one design-agent job and return its finished state."""
+    import asyncio
+    import time
+
+    from services.uxpilot.gateway import UxPilotGatewayError
+    from services.uxpilot.reference import payload_of
+
+    started = payload_of(await gateway.call(
+        "start_design_agent", prompt=prompt, confirmed=True,
+        selectedType="desktop", generateImage=False))
+    job = _first_key(started, "agentJobId")
+    if not isinstance(job, str) or not job:
+        raise UxPilotGatewayError("protocol", "start_design_agent returned no agentJobId")
+    deadline = time.monotonic() + JOB_TIMEOUT_S
+    while True:
+        state = payload_of(await gateway.call("get_agent_job", agentJobId=job))
+        status = str(_first_key(state, "status") or "").lower()
+        if status == "completed":
+            return state if isinstance(state, dict) else {}
+        if status in ("failed", "cancelled"):
+            raise UxPilotGatewayError(
+                "tool_error", f"the design agent {status}: {str(_first_key(state, 'error') or '')[:200]}")
+        if time.monotonic() > deadline:
+            raise UxPilotGatewayError("timeout", f"the design agent did not finish in {int(JOB_TIMEOUT_S)}s")
+        await asyncio.sleep(JOB_POLL_S)
+
+
+async def _screen_html(gateway: Any, design_id: str) -> str:
     from services.uxpilot.reference import _find_html, payload_of
 
-    payload = payload_of(await gateway.call("generate_design", prompt=prompt))
-    design_id = _design_id_of(payload)
-    html = _find_html(payload)
-    preview = _preview_of(payload)
-    if not html and design_id:
-        # The generation acknowledged with an id and no markup; the reader
-        # tool has the HTML the same way it does for a page a person drew.
-        detail = payload_of(await gateway.call("get_design", design=design_id, include_html=True))
-        html = _find_html(detail)
-        preview = preview or _preview_of(detail)
+    detail = payload_of(await gateway.call(
+        "get_design", design=design_id, include_html=True, htmlLimit=100000))
+    return _find_html(detail) or ""
+
+
+async def _generate_async(gateway: Any, prompt: str) -> tuple[str, str, str]:
+    """``(design_id, html, preview_url)`` from one design-agent run, one screen."""
+    from services.uxpilot.reference import _find_html
+
+    state = await _wait_for_job(gateway, prompt)
+    screens = state.get("screens")
+    first = screens[0] if isinstance(screens, list) and screens and isinstance(screens[0], dict) else {}
+    design_id = str(first.get("designId") or _design_id_of(state) or "")
+    preview = str(first.get("previewUrl") or _preview_of(state) or "")
+    html = _find_html(state) or (await _screen_html(gateway, design_id) if design_id else "")
     return design_id, html, preview
+
+
+async def _generate_app_async(gateway: Any, prompt: str) -> list[dict]:
+    """Every screen of one run: ``[{designId, title, previewUrl, html}]``."""
+    state = await _wait_for_job(gateway, prompt)
+    out: list[dict] = []
+    for screen in state.get("screens") or []:
+        if not isinstance(screen, dict) or not screen.get("designId"):
+            continue
+        design_id = str(screen["designId"])
+        out.append({"designId": design_id, "title": str(screen.get("title") or ""),
+                    "previewUrl": str(screen.get("previewUrl") or ""),
+                    "html": await _screen_html(gateway, design_id)})
+    return out
+
+
+# ---------------------------------------------------------------------------
+# One run for the whole application
+# ---------------------------------------------------------------------------
+
+#: ONE LOCK PER APPLICATION, not one for the process. A run takes minutes (up to 420 s a batch) and the
+#: lock is held for all of it: a single module-level lock made every project on the backend wait behind
+#: whichever was drawing, one after another. What must not happen twice is one application paying for
+#: the same run, so the lock is keyed by that application's folder.
+#: THE LOCKS LIVE IN THIS PROCESS. That is enough while one build of an application runs at a time and
+#: one worker follows it (`build_in_flight` refuses a second build); with several uvicorn workers two
+#: builds of the same folder could still draw twice. Moving the lock into the ledger file would fix that.
+_app_locks: dict[str, threading.Lock] = {}
+_app_locks_guard = threading.Lock()
+
+
+def _app_lock_for(output_dir: str | Path) -> threading.Lock:
+    key = str(Path(output_dir).resolve())
+    with _app_locks_guard:
+        return _app_locks.setdefault(key, threading.Lock())
+
+
+#: How long a recorded MISS is believed: a screen UX Pilot did not draw, or a run that failed. Within a
+#: build every later page writer reads the answer instead of starting another paid run; a rebuild after
+#: this long tries again (a miss is not a verdict on the brief). Longer than a build can take (the
+#: platform allows a build an hour, plus the review), or a miss would expire in the middle of the build
+#: that recorded it and the next page writer would pay again. `forget_misses` is how a NEW build tries
+#: again sooner.
+OUTCOME_TTL_S = 6 * 3600
+
+
+def _outcome(entry: Any, digest: str) -> str:
+    """What this page's ledger entry says about THIS prompt: ``design`` (a drawing), ``missing`` (UX
+    Pilot drew no screen for it), ``failed`` (the run failed), or ``""`` (nothing, or something older)."""
+    if not isinstance(entry, dict) or entry.get("briefHash") != digest:
+        return ""
+    if entry.get("html"):
+        return "design"
+    if entry.get("outcome") in ("missing", "failed"):
+        try:
+            at = datetime.fromisoformat(str(entry.get("generatedAt")))
+        except ValueError:
+            return ""
+        if at.tzinfo is None:
+            at = at.replace(tzinfo=timezone.utc)
+        if (datetime.now(timezone.utc) - at).total_seconds() <= OUTCOME_TTL_S:
+            return str(entry["outcome"])
+    return ""
+
+
+def design_pages(doc: dict) -> list[dict]:
+    """The pages UX Pilot designs for this application: its own, not sign-in."""
+    return [p for p in _live(doc.get("pages"))
+            if str(p.get("pattern") or "") != "auth" and designer_for(doc, p) == "uxpilot"]
+
+
+#: UX Pilot refuses a prompt longer than 8,000 characters (a seven-screen application made 8,153 and
+#: the job was rejected before it started). Stay under it with room to spare.
+MAX_PROMPT_CHARS = 7800
+
+#: What gives first when a prompt is too long: the "what people come here to do" bullets, which
+#: repeat what the labels and the purpose already say. (bullets per screen, characters each)
+_PROMPT_LEVELS: tuple[tuple[int, int], ...] = ((6, 0), (3, 110), (2, 80), (0, 0))
+
+
+def app_prompt_for(doc: dict, pages: list[dict], *, level: int = 0) -> str:
+    """One prompt for every screen: the application and its shared design
+    language once, then each page's own brief under its name. Deterministic, so
+    its hash means "no page's brief has changed"."""
+    app = doc.get("application") or {}
+    names = [str(p.get("name") or p.get("id")) for p in pages]
+    parts = [
+        f"Design a desktop web application, \"{app.get('name') or 'the application'}\""
+        + (f", a {app['domain']} application" if app.get("domain") and app.get("domain") != "unknown" else "")
+        + f". Draw exactly {len(pages)} screen{'s' if len(pages) != 1 else ''} in one consistent "
+        "visual style, one per page below, each titled exactly as its page is named: "
+        + ", ".join(f"\"{n}\"" for n in names) + ". Draw no other screens."
+    ]
+    language = _design_language(doc)
+    if language:
+        parts.append("Design language, shared by every screen:\n" + language)
+    parts.append(
+        "Use exactly the labels given for each screen, spelled exactly as written: they are bound to live "
+        "data after generation, so a label that differs is a widget that shows nothing. Never draw an id, "
+        "an owner or a created/updated timestamp. Make every screen feel finished and considered: a clear "
+        "visual hierarchy, icons beside actions and dates, status told as a small tinted pill, hover and "
+        "focus states, generous spacing, a thoughtful empty state.")
+    parts.append(
+        "Render each PAGE BODY ONLY. Do not draw a sidebar, a top navigation bar or any "
+        "application shell: the application provides those around every page. Start each "
+        "screen with its page heading.")
+    for page, name in zip(pages, names):
+        route = page.get("route")
+        parts.append(f"=== Screen \"{name}\"" + (f" (route {route})" if route else "") + " ===\n"
+                     f"Purpose: {page.get('purpose') or ''}\n"
+                     + (f"Page pattern: {str(page['pattern']).replace('_', ' ')}.\n" if page.get("pattern") else "")
+                     + prompt_for(doc, page, section=True, req_limit=_PROMPT_LEVELS[level][0],
+                                  req_chars=_PROMPT_LEVELS[level][1]))
+    return "\n\n".join(parts)
+
+
+def fit_prompt(doc: dict, pages: list[dict]) -> str | None:
+    """The fullest prompt for these pages that UX Pilot will accept, or None when even the
+    barest one is too long."""
+    for level in range(len(_PROMPT_LEVELS)):
+        prompt = app_prompt_for(doc, pages, level=level)
+        if len(prompt) <= MAX_PROMPT_CHARS:
+            return prompt
+    return None
+
+
+def prompt_batches(doc: dict, pages: list[dict]) -> list[list[dict]]:
+    """The pages in as few jobs as the prompt limit allows: all of them when one prompt fits,
+    otherwise split in half until each half does. One job keeps the screens one style, so a split
+    is the last resort, and it is a fraction of the application each, not a page each."""
+    if len(pages) <= 1 or fit_prompt(doc, pages) is not None:
+        return [pages]
+    mid = len(pages) // 2
+    return prompt_batches(doc, pages[:mid]) + prompt_batches(doc, pages[mid:])
+
+
+def _screen_for(page: dict, screens: list[dict], taken: set[str], others: Iterable[str] = ()) -> dict | None:
+    """The screen drawn for this page: its title carries the page's name.
+
+    An exact title wins over a partial one wherever it is in the list, and a screen whose title belongs
+    to a LONGER sibling page ("Task Detail" beside a page called "Task") is not offered to the shorter
+    one: matching in screen order gave "Task" the screen drawn for "Task Detail". ``others`` are the
+    other pages' names in the same batch."""
+    free = [sc for sc in screens if sc["designId"] not in taken]
+    # THE TITLE AS DRAWN FIRST, THEN WITH THE SPACES TAKEN OUT: UX Pilot titles a screen "PocketPantry -
+    # MyPantry" for a page called "My Pantry" (seen on a live run), which no spaced comparison matches.
+    for norm, sep in ((_norm, " "), (_squashed, "")):
+        found = _pick_screen(norm, sep, page, free, others)
+        if found is not None:
+            return found
+    return None
+
+
+def _pick_screen(norm: Any, sep: str, page: dict, free: list[dict], others: Iterable[str]) -> dict | None:
+    want = norm(page.get("name") or page.get("id"))
+    if not want:
+        return None
+    longer = [o for o in (norm(x) for x in others) if o and o != want and want in o]
+
+    def claimed(title: str) -> bool:
+        # also with the spaces out, or "TaskDetail" would not read as the longer sibling's "Task Detail"
+        return any(o == title or o in title or _squashed(o) in _squashed(title) for o in longer)
+
+    for sc in free:
+        if norm(sc.get("title")) == want:
+            return sc
+    for sc in free:
+        title = norm(sc.get("title"))
+        if (title.endswith(sep + want) or title.startswith(want + sep)) and not claimed(title):
+            return sc
+    for sc in free:
+        title = norm(sc.get("title"))
+        if want in title and not claimed(title):
+            return sc
+    return None
+
+
+def app_designs(doc: dict, output_dir: str | Path, *, gateway: Any = None) -> dict[str, GeneratedDesign]:
+    """``{page id: design}`` for every page UX Pilot designs, from as few runs as the prompt limit
+    allows (ONE, for most applications).
+
+    From the ledger when no page's brief has changed since, so a rebuild spends nothing; otherwise
+    one run draws every screen of its batch, which is also what keeps them one style. Safe to call
+    from parallel page writers: the first one generates, the rest wait for it and read the ledger.
+
+    EVERY RUN'S OUTCOME IS RECORDED, the misses included. A page UX Pilot drew no screen for, or a run
+    that failed, is written to the ledger against the prompt that was paid for; the next page writer
+    finds an answer for every page and starts nothing. Without that, one missing screen (or one failure)
+    meant every later page writer started another paid run: a twelve-page application could pay for
+    twelve. A miss is believed for `OUTCOME_TTL_S`, so a later rebuild tries again."""
+    from services.uxpilot.credentials import UxPilotCredentialError
+    from services.uxpilot.gateway import UxPilotGatewayError
+
+    pages = design_pages(doc)
+    if not pages:
+        return {}
+    out: dict[str, GeneratedDesign] = {}
+
+    def record_miss(batch: list[dict], digest: str, outcome: str, reason: str, only: Iterable[str] | None = None) -> None:
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        for page in batch:
+            pid = str(page.get("id"))
+            if only is None or pid in only:
+                _record(output_dir, pid, {"page": pid, "briefHash": digest, "outcome": outcome,
+                                          "reason": reason, "generatedAt": now})
+
+    with _app_lock_for(output_dir):
+        for batch in prompt_batches(doc, pages):
+            prompt = fit_prompt(doc, batch) or app_prompt_for(doc, batch, level=len(_PROMPT_LEVELS) - 1)
+            digest = brief_hash(prompt)
+
+            # AN ANSWER FOR EVERY PAGE OF THE BATCH — a drawing, or a recorded miss — means nothing to start.
+            entries = {str(p.get("id")): ledger_entry(output_dir, str(p.get("id"))) for p in batch}
+            states = {pid: _outcome(entry, digest) for pid, entry in entries.items()}
+            if all(states.values()):
+                failed = next((e for pid, e in entries.items() if states[pid] == "failed"), None)
+                if failed is not None:
+                    raise GenerationFailed(str(failed.get("reason") or "UX Pilot failed"))
+                for pid, entry in entries.items():
+                    if states[pid] == "design" and entry:
+                        out[pid] = GeneratedDesign(
+                            page_id=pid, design_id=str(entry.get("designId") or ""),
+                            html=str(entry["html"]), prompt=prompt,
+                            preview_url=str(entry.get("previewUrl") or ""), reused=True)
+                continue
+
+            gw = gateway or gateway_for(output_dir)
+            try:
+                screens = _run(_generate_app_async(gw, prompt))
+            except UxPilotCredentialError as exc:
+                failure = f"no UX Pilot key could be resolved ({exc})"
+            except UxPilotGatewayError as exc:
+                failure = f"UX Pilot {exc.kind}: {exc.detail}"
+            except Exception as exc:  # noqa: BLE001 - the reason travels, the page does not die
+                failure = f"UX Pilot call failed: {type(exc).__name__}: {exc}"
+            else:
+                failure = ""
+            if failure:
+                record_miss(batch, digest, "failed", failure)
+                raise GenerationFailed(failure)
+
+            taken: set[str] = set()
+            now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            drawn = [x for x in screens if x.get("html")]
+            names = {str(p.get("id")): str(p.get("name") or p.get("id")) for p in batch}
+            missed: list[str] = []
+            for page in batch:
+                pid = str(page.get("id"))
+                sc = _screen_for(page, drawn, taken, [n for other, n in names.items() if other != pid])
+                if sc is None:
+                    missed.append(pid)
+                    continue
+                taken.add(sc["designId"])
+                _record(output_dir, pid, {
+                    "page": pid, "designId": sc["designId"], "briefHash": digest, "html": sc["html"],
+                    "previewUrl": sc["previewUrl"], "prompt": prompt, "generatedAt": now})
+                out[pid] = GeneratedDesign(page_id=pid, design_id=sc["designId"], html=sc["html"],
+                                           prompt=prompt, preview_url=sc["previewUrl"])
+            if missed:
+                record_miss(batch, digest, "missing", "UX Pilot drew no screen for this page", only=missed)
+    return out
+
+
+def _app_digest_for(doc: dict, page_id: str) -> str:
+    """The digest of the app-run prompt the page's batch is drawn from today (`app_designs`), or ""."""
+    try:
+        pages = design_pages(doc)
+        for batch in prompt_batches(doc, pages):
+            if any(str(p.get("id")) == page_id for p in batch):
+                prompt = fit_prompt(doc, batch) or app_prompt_for(doc, batch, level=len(_PROMPT_LEVELS) - 1)
+                return brief_hash(prompt)
+    except Exception:  # noqa: BLE001 - no digest means no reuse, never a failure
+        logger.debug("[uxpilot] app digest for %s could not be worked out", page_id, exc_info=True)
+    return ""
 
 
 def generate(svc: Any, page: dict, *, gateway: Any = None, feedback: str = "") -> GeneratedDesign:
@@ -419,9 +858,13 @@ def generate(svc: Any, page: dict, *, gateway: Any = None, feedback: str = "") -
     digest = brief_hash(prompt)
 
     prior = ledger_entry(svc.output_dir, page_id)
-    if prior and prior.get("briefHash") == digest and prior.get("html") and not feedback:
+    # THE APP RUN'S DRAWING IS THIS PAGE'S DRAWING. The build draws every page in one run and keys
+    # each page's entry by that run's prompt (`app_designs`), never by this page's own; checked
+    # only against the page's prompt, a recompose of an unchanged page paid for another run
+    # (PR #34 review). A redraw the person asked for (`feedback`) is the one that pays.
+    if prior and prior.get("html") and not feedback and prior.get("briefHash") in (digest, _app_digest_for(svc.doc, page_id)):
         return GeneratedDesign(page_id=page_id, design_id=str(prior.get("designId") or ""),
-                               html=str(prior["html"]), prompt=prompt,
+                               html=str(prior["html"]), prompt=str(prior.get("prompt") or prompt),
                                preview_url=str(prior.get("previewUrl") or ""), reused=True)
 
     gw = gateway or gateway_for(svc.output_dir)
@@ -458,6 +901,11 @@ _BUTTON_TYPES = ("Button", "IconButton")
 
 def _norm(text: Any) -> str:
     return re.sub(r"[^a-z0-9]+", " ", str(text or "").lower()).strip()
+
+
+def _squashed(text: Any) -> str:
+    """``_norm`` with the spaces taken out: "PocketPantry - MyPantry" and "My Pantry" meet here."""
+    return _norm(text).replace(" ", "")
 
 
 def _stamp_ids(root: dict) -> None:
@@ -814,3 +1262,40 @@ def compose(svc: Any, page: dict, *, app_root: str | Path, gateway: Any = None,
     return Outcome(root=root, data_sources=list(schema.get("dataSources") or []) + sources,
                    design_id=design.design_id, preview_url=design.preview_url,
                    warnings=warnings, reused=design.reused)
+
+
+# ---------------------------------------------------------------------------
+# The design as a reference for a React page
+# ---------------------------------------------------------------------------
+
+def reference_for(doc: dict, page: dict, output_dir: str | Path, *,
+                  gateway: Any = None) -> tuple[dict | None, str]:
+    """``(reference, said)`` for the UI engineer: the page's UX Pilot design as
+    ``{"html", "previewUrl", "designId", "reused"}``, and one line for whoever
+    watches the run.
+
+    The React writer adapts the design instead of deciding the page, so what it
+    needs is the drawing, not a bound layout tree (that is what `compose` is
+    for, and is the fallback path's business). Nothing here raises and nothing
+    here costs a page: a page that is not UX Pilot's, has no key to ask with, or
+    whose design cannot be had is written without one, and ``said`` names why
+    when the person chose UX Pilot and did not get it.
+    """
+    if str(page.get("pattern") or "") == "auth" or designer_for(doc, page) != "uxpilot":
+        return None, ""
+    route = page.get("route") or page.get("name") or page.get("id")
+    if gateway is None and not configured(output_dir):
+        return None, (f"UX Pilot is chosen but has no API key (Settings → Integrations → UX Pilot, "
+                      f"or UXPILOT_API_KEY) — writing {route} without a design.")
+    try:
+        design = app_designs(doc, output_dir, gateway=gateway).get(str(page.get("id")))
+        if design is None:
+            return None, f"UX Pilot drew no screen for {route} - writing it without a design."
+    except GenerationFailed as exc:
+        return None, f"UX Pilot could not design {route} ({exc}) — writing it without a design."
+    except Exception as exc:  # noqa: BLE001 — a design is a help, never a gate
+        return None, f"UX Pilot failed for {route} ({type(exc).__name__}) — writing it without a design."
+    ref = {"html": design.html, "previewUrl": design.preview_url,
+           "designId": design.design_id, "reused": design.reused}
+    return ref, (f"Adapting UX Pilot design {design.design_id or '(unnamed)'} for {route}"
+                 + (" (reused; brief unchanged)." if design.reused else "."))

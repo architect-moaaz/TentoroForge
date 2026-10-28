@@ -112,6 +112,30 @@ export interface RunThought {
   node?: string;
 }
 
+/**
+ * A field Smith asks the person to fill in the chat — a key, say. It names the integration
+ * row to write and what to say after; it never holds a value, and the panel sends what is
+ * typed straight to that row instead of into the conversation.
+ */
+export interface SecretField {
+  provider: string;
+  key: string;
+  label: string;
+  placeholder?: string;
+  /** The words sent as the next turn once the value is stored. */
+  saved: string;
+  /** The submit button's words; "Save key" when absent. */
+  action?: string;
+  /** The value is already stored: ask only for `extra` and store nothing. */
+  skipSave?: boolean;
+  /**
+   * A second, plain (not secret) field asked for with the value — a link, say. What is typed
+   * is sent in the next turn after `saved` (`"<saved>: <typed>"`): it is not a secret, so it
+   * may be part of the conversation, unlike the value above.
+   */
+  extra?: { label: string; placeholder?: string };
+}
+
 /** Something Smith said, in the order it said it. */
 export interface RunMessage {
   text: string;
@@ -120,6 +144,7 @@ export interface RunMessage {
   /** The server's word for the message: "progress" is a line said while a
    *  turn runs, drawn quieter than an answer. */
   status?: string;
+  secret?: SecretField;
 }
 
 /**
@@ -731,6 +756,7 @@ export function reduce(
           options: (data.options as string[]) ?? undefined,
           diffSummary: (data.diffSummary as string) || undefined,
           status: (data.status as string) || undefined,
+          secret: (data.secret as SecretField) ?? undefined,
         }].filter((m) => m.text),
       };
 
