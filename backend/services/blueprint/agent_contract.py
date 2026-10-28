@@ -1556,6 +1556,49 @@ def check_design_modules(result: "AgentResult", doc: dict | None = None) -> None
         raise InvalidDesignModules(_all_of(problems))
 
 
+class DrawnScreensShareARoute(AuthorRefusal):
+    """Two drawn screens given one route."""
+
+
+def check_drawn_routes(result: "AgentResult", doc: dict | None = None) -> None:
+    """Two drawn screens never share a route.
+
+    A page's identity is its route (`ids.page_key`), so a second screen
+    declared at a route a first already holds is not a second page: it is an
+    update of the first, and one drawn screen silently replaced another. A
+    design of hundreds of screens is declared in parts side by side, none
+    seeing the others' routes, which is where two alike choices meet; refused,
+    naming the screen that holds it, so the author picks another. A frame this
+    reply moves elsewhere no longer holds its old route."""
+    from services.blueprint.ids import page_key
+
+    bodies = [p.body for p in result.proposals
+              if p.section == "pages" and isinstance(p.body, dict)
+              and p.body.get("figmaFrame") and p.body.get("route")]
+    if not bodies:
+        return
+    moving = {str(b["figmaFrame"]) for b in bodies}
+    held: dict[str, tuple[str, str]] = {}
+    for page in (doc or {}).get("pages") or []:
+        if not isinstance(page, dict) or str(page.get("status") or "").upper() in ("REMOVED", "DEPRECATED"):
+            continue
+        frame = str(page.get("figmaFrame") or "")
+        if frame and frame not in moving and page.get("route"):
+            held[page_key(str(page["route"]))] = (frame, str(page.get("name") or ""))
+    problems: list[str] = []
+    for body in bodies:
+        key, frame = page_key(str(body["route"])), str(body["figmaFrame"])
+        other = held.get(key)
+        if other and other[0] != frame:
+            problems.append(f"pages: {body['route']} is already the page for the drawn screen "
+                            f"“{other[1] or other[0]}” ({other[0]}) — give "
+                            f"“{body.get('name') or frame}” ({frame}) a route of its own")
+        else:
+            held[key] = (frame, str(body.get("name") or ""))
+    if problems:
+        raise DrawnScreensShareARoute(_all_of(problems))
+
+
 class InvalidOwnershipRule(AuthorRefusal):
     """An ownership rule the data engine could not apply as written."""
 
@@ -2815,7 +2858,8 @@ def apply_agent_result(
     for check in (check_workflow_triggers, check_integrations, check_audit, check_tenancy, check_sign_in,
                   check_mobile, check_requirements, check_business_rules, check_entity_fields,
                   check_page_content, check_page_access, check_role_doors, check_navigation,
-                  check_analytics, check_flows, check_security, check_design_modules):
+                  check_analytics, check_flows, check_security, check_design_modules,
+                  check_drawn_routes):
         run(check, result, svc.doc)
     if refusals:
         raise refusals[0] if len(refusals) == 1 else SeveralRefusals(refusals)

@@ -297,7 +297,14 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # A workflow needs a page's id and route to say where it launches; a
     # contract's tasks and states it never reads. So `workflows` depends on
     # this node and runs beside `page_details`.
+    #
+    # ONE CALL UNTIL IT CANNOT BE. A design of hundreds of drawn screens is
+    # declared a module at a time (`page_planner.page_set_parts`): one subject
+    # per module the screens were drawn in, and one for the rest. Under
+    # `SCREENS_PER_CALL` drawn screens the only subject is the whole set.
+    # Whole: a module whose screens were never declared is not a smaller app.
     _n("page_contracts", "page_design", ("ux_architecture", "entity_fields"), ("pages",),
+       fanout="page_set", whole=True,
        note="the page set: filled or declined per feature, routes decided"),
     # One call per feature — an entity's pages together, so a list and its
     # detail are written as one flow — each given the declared page set so
@@ -547,7 +554,22 @@ FANOUT: dict[str, Any] = {
     # belongs to no entity (a dashboard, a sign-in, a drawn screen with no
     # primary record) on its own.
     "page_features": lambda doc: page_features(doc),
+    # The page set: ``[""]`` (one call) unless the drawn screens are too many
+    # for one reply, then a module's screens at a time and the rest.
+    "page_set": lambda doc: _page_set_parts(doc),
 }
+
+
+def _page_set_parts(doc: Mapping[str, Any]) -> list[str]:
+    from services.blueprint.page_planner import page_set_parts
+    return list(page_set_parts(dict(doc)))
+
+
+def _page_set_present(doc: Mapping[str, Any], subject: str) -> bool:
+    """A page-set subject is declared once its pages are (see
+    `page_planner.page_set_part_present`)."""
+    from services.blueprint.page_planner import page_set_part_present
+    return page_set_part_present(dict(doc), subject)
 
 
 def _web_pages(doc: Mapping[str, Any]) -> bool:
@@ -1183,6 +1205,7 @@ _SUBJECT_AUTHORED: dict[str, Callable[[Mapping[str, Any], str], bool]] = {
     "workflows": _steps_present,
     "page_features": _contracts_present,
     "entities": _fields_present,
+    "page_set": _page_set_present,
 }
 
 
@@ -2267,6 +2290,9 @@ def _subject_resolver(node: DagNode, doc: Mapping[str, Any]) -> Any:
     on an artifact finds the subject to re-author. `page_details` fans out
     per feature — an entity's pages together — so a finding on PAGE-004 is
     the feature that page belongs to."""
+    if node.fanout == "page_set":
+        from services.blueprint.page_planner import page_set_part_of
+        return page_set_part_of(dict(doc)).get
     if node.fanout != "page_features":
         return None
     return page_subject_of(doc).get

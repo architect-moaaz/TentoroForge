@@ -297,7 +297,14 @@ def _rows(doc: Mapping[str, Any], section: str, subject: str) -> Any:
     # A PART of a feature (`ENTITY-003~2`) is the pages it was given, by id —
     # matched on the entity, it would be judged on its sibling parts' pages.
     from services.blueprint.orchestrator import PART, feature_pages
+    from services.blueprint.page_planner import is_page_set_part, page_set_pages
 
+    # A PART OF THE PAGE SET (`screens:MODULE-003`, `features`) is the pages
+    # it declared — a module's screens are judged on themselves.
+    if is_page_set_part(subject):
+        ids = {str(p.get("id")) for p in page_set_pages(dict(doc), subject)}
+        return [row for row in value if isinstance(row, dict)
+                and (str(row.get("id")) in ids or str(row.get("page")) in ids)]
     if PART in subject:
         ids = {str(p.get("id")) for p in feature_pages(doc, subject)}
         return [row for row in value if isinstance(row, dict)

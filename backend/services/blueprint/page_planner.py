@@ -2219,6 +2219,185 @@ def design_group_modules(doc: dict) -> dict[str, str]:
             if m.get("id") and str(m.get("designGroup") or "") in groups}
 
 
+#: The most drawn screens one page-set call declares.
+#:
+#: ONE CALL FOR THE WHOLE PAGE SET IS ONE CALL TOO MANY AT FIVE HUNDRED
+#: SCREENS. Each drawn screen is a page with a route, a pattern, a module,
+#: sections and access — a few hundred output tokens — so a design of
+#: hundreds of frames asked one reply for more than its budget, and a reply
+#: cut off is a page set with no pages. Up to this many, the set is still
+#: decided in one call, as before; past it, a module's screens at a time.
+SCREENS_PER_CALL = 40
+
+#: A page-set subject that declares drawn screens: ``screens:MODULE-003``, or
+#: ``screens:MODULE-003~2`` for the second part of a large module.
+DRAWN_PART = "screens:"
+
+#: The page-set subject that declares everything else beside the drawn
+#: screens: home, the people's journeys, the record features.
+FEATURES_PART = "features"
+
+
+def _slug(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", str(text or "").lower()).strip("-")
+
+
+def _even(items: list, size: int) -> list[list]:
+    """``items`` in parts of at most ``size``, as even as they go."""
+    n = -(-len(items) // size)
+    each = -(-len(items) // n) if n else 0
+    return [items[i:i + each] for i in range(0, len(items), each)] if each else []
+
+
+def page_set_parts(doc: dict) -> dict[str, list[dict]]:
+    """``{subject: its slots}`` — how the page set is asked for.
+
+    ``{"": []}`` while the drawn screens fit one call: one question, as it
+    always was, whose slots are :func:`page_slots` — counted from the frames
+    alone, so asking costs nothing for an app with no large design. Past
+    :data:`SCREENS_PER_CALL`, one subject per module
+    the screens were drawn in (``screens:<module>``, in parts of at most that
+    many), and ``features`` for the slots that are not drawn screens. The
+    designer's groups are the modules (`modules[].designGroup`), so the split
+    follows the design rather than a count."""
+    if len(specification_frames(doc) or reference_frames(doc)) <= SCREENS_PER_CALL:
+        return {"": []}
+    slots = page_slots(doc)
+    drawn = [s for s in slots if s.get("figmaFrame")]
+    groups: dict[str, list[dict]] = {}
+    for slot in drawn:
+        key = str(slot.get("module") or "") or _slug(slot.get("group") or "") or "design"
+        groups.setdefault(key, []).append(slot)
+    out: dict[str, list[dict]] = {}
+    for key, mine in groups.items():
+        parts = _even(mine, SCREENS_PER_CALL)
+        if len(parts) == 1:
+            out[DRAWN_PART + key] = parts[0]
+        else:
+            for i, part in enumerate(parts, 1):
+                out[f"{DRAWN_PART}{key}~{i}"] = part
+    rest = [s for s in slots if not s.get("figmaFrame")]
+    if rest:
+        out[FEATURES_PART] = rest
+    return out
+
+
+def is_page_set_part(subject: str) -> bool:
+    """Whether a subject is one part of a page set asked for in parts."""
+    return subject == FEATURES_PART or subject.startswith(DRAWN_PART)
+
+
+def drawn_address(doc: dict, subject: str) -> str:
+    """The route every page of a drawn part begins with: its module's name, as
+    an address. Parts are declared side by side, none seeing another's routes,
+    so each keeps to its own — a route two parts chose alike would be one page
+    overwriting the other. Empty for the features part."""
+    if not subject.startswith(DRAWN_PART):
+        return ""
+    key = subject[len(DRAWN_PART):].split("~", 1)[0]
+    module = next((m for m in _live(doc.get("modules")) if str(m.get("id")) == key), None)
+    slug = _slug((module or {}).get("name") or (module or {}).get("designGroup") or key)
+    return "/" + slug if slug else ""
+
+
+def page_set_pages(doc: dict, subject: str) -> list[dict]:
+    """The live pages one page-set subject declared: a drawn part's are the
+    pages built from its frames, the features part's are the pages built from
+    no frame, and the whole set's are every page. Sign-in pages are declared
+    by `auth_pages`, not here."""
+    pages = [p for p in _live(doc.get("pages")) if str(p.get("pattern") or "") != "auth"]
+    if not subject:
+        return pages
+    if subject == FEATURES_PART:
+        return [p for p in pages if not p.get("figmaFrame")]
+    frames = {str(s.get("figmaFrame")) for s in page_set_parts(doc).get(subject, [])}
+    return [p for p in pages if str(p.get("figmaFrame") or "") in frames]
+
+
+def page_set_part_present(doc: dict, subject: str) -> bool:
+    """A page-set subject is declared once its pages are: every frame of a
+    drawn part has its page; the features part, and the whole set, have
+    any."""
+    if subject.startswith(DRAWN_PART):
+        frames = {str(s.get("figmaFrame")) for s in page_set_parts(doc).get(subject, [])}
+        have = {str(p.get("figmaFrame")) for p in page_set_pages(doc, subject)}
+        return bool(frames) and frames <= have
+    return bool(page_set_pages(doc, subject))
+
+
+def page_set_part_of(doc: dict) -> dict[str, str]:
+    """``{page id: the page-set subject that declared it}``."""
+    parts = page_set_parts(doc)
+    if list(parts) == [""]:
+        return {}
+    return {str(p.get("id")): subject for subject in parts
+            for p in page_set_pages(doc, subject) if p.get("id")}
+
+
+def page_set_part_prompt(doc: dict, subject: str) -> str:
+    """The question for one part of a page set asked for in parts."""
+    parts = page_set_parts(doc)
+    drawn = [s for k, v in parts.items() if k.startswith(DRAWN_PART) for s in v]
+    described = (doc.get("application") or {}).get("description") or ""
+    if subject.startswith(DRAWN_PART):
+        mine = parts.get(subject, [])
+        key = subject[len(DRAWN_PART):]
+        base, _, part = key.partition("~")
+        module = next((m for m in _live(doc.get("modules")) if str(m.get("id")) == base), None)
+        group = str((mine[0] if mine else {}).get("group") or "")
+        whose = (f"the {module.get('name')} module's" if module else
+                 f"the “{group}” group's" if group else "the design's")
+        of = sum(1 for k in parts if k.startswith(f"{DRAWN_PART}{base}~")) if part else 0
+        address = drawn_address(doc, subject)
+        return (
+            f"The connected design draws {len(drawn)} screens, too many to declare in one "
+            f"reply, so they are declared a module at a time, side by side. This call "
+            f"declares {len(mine)} of them: {whose} screens"
+            + (f" (part {part} of {of})" if part else "") + ", in the slots below.\n\n"
+            "One page per slot: no more, and none declined. Every other screen of the "
+            "design is declared by another call, so a screen you think is missing here "
+            "is most likely theirs — if this part genuinely cannot work without one, "
+            "say so in `issues`.\n\n"
+            "For each slot decide only what the screen IS — its route and its pattern. "
+            "A slot's `shows` is the heading read off the frame: route it as THAT, never "
+            "by its position in the list. Set `figmaFrame` to the slot's `figmaFrame`, "
+            "exactly, and where a slot carries a `module` the page's `module` is that one."
+            "\n\n"
+            + (f"YOUR ADDRESSES. Every route here begins with `{address}` — "
+               f"`{address}` itself, or `{address}/…`. The other parts choose their routes "
+               "at the same moment and see none of yours; keeping to the module's own "
+               "address is what stops two screens claiming one route. Two drawn screens "
+               "never share a route.\n\n" if address else
+               "Two drawn screens never share a route: give each a route its heading "
+               "names, specific enough that another part's screen would not choose it.\n\n")
+            + "The user's own words, for the routes and the wording:\n\n"
+            f"  “{described}”"
+        )
+    # The features part: the drawn screens exist, declared elsewhere.
+    by_group: dict[str, list[str]] = {}
+    for s in drawn:
+        label = str(s.get("module") or s.get("group") or "the design")
+        by_group.setdefault(label, []).append(str(s.get("shows") or s.get("name") or s.get("figmaFrame")))
+    names = {str(m.get("id")): str(m.get("name") or "") for m in _live(doc.get("modules"))}
+    lines = []
+    for label, shown in by_group.items():
+        address = drawn_address(doc, DRAWN_PART + label) if label in names else ""
+        lines.append(f"  - {names.get(label) or label}"
+                     + (f" (routes under {address})" if address else "")
+                     + f": {len(shown)} screens — " + "; ".join(shown))
+    return (
+        f"A DESIGN IS CONNECTED, AND ITS {len(drawn)} DRAWN SCREENS ARE DECLARED BY OTHER "
+        "CALLS, a module at a time. Every one of them will be a page, built from its "
+        "frame. They are:\n\n" + "\n".join(lines) + "\n\n"
+        "This call declares the rest of the application around them, from the slots "
+        "below. Declare no page for a drawn screen, and keep out of the drawn modules' "
+        "routes. Where a feature below would BE one of the drawn screens, decline it "
+        "and name the screen as the reason: the drawn one is the one that exists. "
+        "Pages here OMIT `figmaFrame`.\n\n"
+        + page_slot_prompt(doc, drawn_elsewhere=True)
+    )
+
+
 JOURNEY_PROMPT = (
     "The screens a {name} works in: one per job they come to do, each holding "
     "the records that job needs as `sections`. Walk them through their goals; a "
@@ -2373,8 +2552,12 @@ def _menu_paragraph(doc: dict) -> str:
     )
 
 
-def page_slot_prompt(doc: dict) -> str:
-    """The slot question, with the user's own words attached (§115)."""
+def page_slot_prompt(doc: dict, *, drawn_elsewhere: bool = False) -> str:
+    """The slot question, with the user's own words attached (§115).
+
+    ``drawn_elsewhere`` — the drawn screens are declared by other calls (a
+    page set asked for in parts), so the preamble about drawn slots at the top
+    of the list does not apply."""
     described = (doc.get("application") or {}).get("description") or ""
 
     # THE SPECIFICATION ASKS A DIFFERENT QUESTION, so it gets a different
@@ -2411,7 +2594,7 @@ def page_slot_prompt(doc: dict) -> str:
         )
 
     return (
-        _DRAWN_PREAMBLE if reference_frames(doc) else ""
+        _DRAWN_PREAMBLE if reference_frames(doc) and not drawn_elsewhere else ""
     ) + (
         "Fill in this application's screens: people first, then the records.\n\n"
         "A SCREEN IS A JOB. These pages are written in React, so a screen holds "

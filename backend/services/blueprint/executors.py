@@ -2720,8 +2720,29 @@ def build_prompt(
         # instruction was arguing with the question: a free list of pages admits
         # a filtered page as a good answer. Slots remove the room instead.
         from services.blueprint.page_planner import (
+            FEATURES_PART, is_page_set_part, page_set_part_prompt, page_set_parts,
             page_slot_prompt, page_slots,
         )
+
+        if subject and is_page_set_part(subject):
+            # ONE PART OF A PAGE SET TOO LARGE FOR ONE REPLY. What every part
+            # shares — the Blueprint — first, so the parts read it from the
+            # cache; this part's question and slots after the break.
+            user = (
+                "Here is the Blueprint the page set is derived from.\n\n```json\n"
+                + json.dumps(context_for(doc, agent), indent=2, sort_keys=True)
+                + "\n```" + CACHE_BREAK
+                + page_set_part_prompt(doc, subject) + "\n\n```json\n"
+                + json.dumps(page_set_parts(doc).get(subject, []), indent=2) + "\n```"
+            )
+            if subject != FEATURES_PART:
+                user += ("\n\nEVERY page you author carries `figmaFrame`, set to the "
+                         "`figmaFrame` of the slot it answers.")
+            if brief:
+                user += "\n\nSmith's brief for this call — what to change and what to keep:\n\n" + brief
+            if feedback:
+                user += "\n\nYour previous attempt was rejected:\n\n" + feedback
+            return system, user
 
         user = (
             page_slot_prompt(doc) + "\n\n```json\n"
