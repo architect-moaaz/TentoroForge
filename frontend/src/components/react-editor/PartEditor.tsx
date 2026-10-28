@@ -12,10 +12,12 @@ import { ArrowDown, ArrowUp, Copy, Loader2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 import {
-  choiceOp, choicesOf, fieldsOf, findPart, isScreenRoot, opFor, screenOf, stepOp, valueLabel,
+  choiceOp, choicesOf, fieldsOf, findPart, isScreenRoot, kitNameOf, opFor, screenOf, stepOp, valueLabel,
   type Choice, type Field, type Source,
 } from "./phoneParts";
 import { usePhonePick } from "./phonePick";
+import { STYLE_PARTS } from "./phoneSpace";
+import { SpaceBox } from "./SpaceBox";
 import type { PhoneKit } from "./types";
 import type { PhoneSession } from "./usePhoneScreen";
 
@@ -100,6 +102,8 @@ export function PartEditor({ session, kit, source }: { session: PhoneSession; ki
           ))}
         </div>
       )}
+
+      {!root && STYLE_PARTS.has(kitNameOf(part, screen.model.imports) ?? "") && <SpaceBox part={part} session={session} />}
 
       {!root && (
         <div className="flex gap-1">

@@ -123,6 +123,8 @@ def _safe_without_compiler(op: dict[str, Any], before: dict[str, Any], project: 
         if op.get("name") in WORDS_PROPS and (value or {}).get("kind") == "string":
             return True
         component = _kit_name(imports, nodes.get(str(op.get("id"))))
+        if op.get("name") == "style" and component in phone_kit.STYLE_PARTS and phone_kit.margins_only(value):
+            return True
         return bool(component) and phone_kit.allows(project.root, component, str(op.get("name")), value)
     if kind == "move":
         n, parent = nodes.get(str(op.get("id"))), str(op.get("parentId"))

@@ -88,7 +88,7 @@ export function PagesPanel({ surface = "web" }: { surface?: "web" | "phone" }) {
   );
 }
 
-function toSpec(n: NavItem): NavItemSpec {
+export function toSpec(n: NavItem): NavItemSpec {
   return { label: n.label, page: n.page ?? null, icon: n.icon ?? null, children: (n.children ?? []).map(toSpec) };
 }
 

@@ -35,7 +35,7 @@ import logging
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -228,9 +228,26 @@ async def _run_build_and_poll(
             native_build.unstage(staged)
 
     await _apply_state(build_row_id, state)
+    await _poll_until_done(build_row_id, mobile_dir, state.build_id, creds)
 
-    # Poll loop.
-    started = asyncio.get_event_loop().time()
+
+async def _poll_until_done(
+    build_row_id: uuid.UUID,
+    mobile_dir: str,
+    eas_build_id: str,
+    creds: MobileCredentials,
+    *,
+    already_waited: float = 0.0,
+    ask_first: bool = False,
+) -> None:
+    """Ask EAS about a build every `_POLL_INTERVAL_SEC` seconds and write what it says on the row, until it is over.
+
+    `already_waited` is how long the build has been going when this starts: a poll taken up again after the platform
+    restarted (`resume_open_builds`) does not get another whole hour. `ask_first` asks EAS BEFORE the clock is looked at:
+    a build that finished while the platform was down must be read as finished, never ended as "timed out" by its age."""
+    started = asyncio.get_event_loop().time() - already_waited
+    if ask_first and await _ask_once(build_row_id, mobile_dir, eas_build_id, creds):
+        return
     while True:
         # Re-read to see if someone canceled the row externally.
         async with async_session() as sess:
@@ -246,13 +263,108 @@ async def _run_build_and_poll(
         await asyncio.sleep(_POLL_INTERVAL_SEC)
         try:
             state = await poll_build(
-                mobile_dir, state.build_id,
+                mobile_dir, eas_build_id,
                 expo_token=creds.expo_eas_token,
             )
         except EasClientError as exc:
-            logger.warning("poll_build failed for %s: %s", state.build_id, exc)
+            logger.warning("poll_build failed for %s: %s", eas_build_id, exc)
             continue
         await _apply_state(build_row_id, state)
+
+
+async def _ask_once(build_row_id: uuid.UUID, mobile_dir: str, eas_build_id: str, creds: MobileCredentials) -> bool:
+    """Ask EAS about a build one time and write the answer on the row. True when the build is over (finished, failed or
+    cancelled) and there is nothing more to watch."""
+    try:
+        state = await poll_build(mobile_dir, eas_build_id, expo_token=creds.expo_eas_token)
+    except EasClientError as exc:
+        logger.warning("poll_build failed for %s: %s", eas_build_id, exc)
+        return False
+    await _apply_state(build_row_id, state)
+    return is_terminal(normalize_status(state.status))
+
+
+#: A build that has been going longer than this when the platform starts is asked about ONCE and, if EAS says it is still
+#: going, ended as too old to follow: EAS has long since finished or dropped it.
+_RESUME_MAX_AGE_SEC = 6 * 60 * 60
+
+#: The polls taken up again, held so they are not collected while they run.
+_resumed: set[asyncio.Task] = set()
+
+#: Which process takes up the open builds. The backend runs several workers and each starts this: one build watched by two of
+#: them is Expo asked twice as often and two writers on one row. A session lock in Postgres belongs to the first worker to ask;
+#: it is held as long as that worker's connection is, so a restart hands it on.
+_RESUME_LOCK_KEY = 7_204_117_331
+_resume_lock_connection: Any = None
+
+
+async def _first_worker() -> bool:
+    """Whether this process is the one that takes up the open builds. Without Postgres (a bench, a test) there is one process."""
+    global _resume_lock_connection
+    from sqlalchemy import text
+
+    from database import engine
+
+    if engine.dialect.name != "postgresql":
+        return True
+    connection = await engine.connect()
+    try:
+        got = bool((await connection.execute(text("SELECT pg_try_advisory_lock(:key)"), {"key": _RESUME_LOCK_KEY})).scalar())
+        await connection.commit()                    # the lock outlives the transaction; the connection is kept for it
+    except Exception:
+        await connection.close()
+        raise
+    if not got:
+        await connection.close()
+        return False
+    _resume_lock_connection = connection             # held for the life of this process
+    return True
+
+
+async def resume_open_builds() -> int:
+    """TAKE UP THE BUILDS THE LAST PROCESS WAS WATCHING. The check on a build lives in the platform's own process, so a restart
+    (the Claude app stops its servers now and then) left the row on "in progress" for ever, with the build long finished on
+    Expo (Gather, 2026-10-23). At start, every build still open is asked about, then watched again if EAS says it is still
+    going. A build that never reached Expo is ended and says so, since nothing is left to watch; one older than
+    `_RESUME_MAX_AGE_SEC` is asked once and ended only if EAS says it is still going. Only one worker does this
+    (`_first_worker`). Returns how many were taken up."""
+    if not await _first_worker():
+        return 0
+    now = datetime.now(timezone.utc)
+    taken = 0
+    async with async_session() as sess:
+        rows = (await sess.execute(
+            select(MobileBuild).where(MobileBuild.status.notin_(("completed", "failed", "canceled")))
+        )).scalars().all()
+        open_builds = [(r.id, r.project_id, r.eas_build_id, r.created_at, r.platform) for r in rows]
+    for row_id, project_id, eas_id, created_at, platform in open_builds:
+        age = (now - created_at).total_seconds() if created_at else 0.0
+        if not eas_id:
+            await _mark_failed(row_id, "The platform restarted before this build reached Expo. Start it again.")
+            continue
+        try:
+            async with async_session() as sess:
+                project = await sess.get(Project, project_id)
+                if project is None:
+                    continue
+                target = native_build.choose_target(project.output_dir, _blueprint_of(project.output_dir))
+                creds = await load_mobile_credentials(project.org_id, sess)
+            if target is None:
+                continue
+        except Exception as exc:  # noqa: BLE001 - one build that cannot be followed must not stop the others
+            logger.warning("[mobile_builds] build %s cannot be followed again: %s", row_id, exc)
+            continue
+        if age > _RESUME_MAX_AGE_SEC:
+            if not await _ask_once(row_id, str(target.dir), eas_id, creds):
+                await _mark_failed(row_id, "The platform restarted and this build is too old to follow. Look for it on Expo.")
+            continue
+        task = asyncio.create_task(_poll_until_done(row_id, str(target.dir), eas_id, creds, already_waited=age, ask_first=True))
+        _resumed.add(task)
+        task.add_done_callback(_resumed.discard)
+        taken += 1
+    if open_builds:
+        logger.info("[mobile_builds] %d open build(s) found at start, %d followed again", len(open_builds), taken)
+    return taken
 
 
 async def _apply_state(build_row_id: uuid.UUID, state: BuildState) -> None:
