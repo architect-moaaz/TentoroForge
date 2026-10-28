@@ -1132,11 +1132,15 @@ def figma_exact_block(reference: dict) -> str:
         + outlines
         + (f"\n\nThe values these frames are drawn with, most used first:\n{reference['values']}"
            if reference.get("values") else "")
+        + (f"\n\nEvery colour the drawing uses (none other is right): {', '.join(reference['palette'])}"
+           if reference.get("palette") else "")
         + "\n\nSOMEONE WILL PUT THIS PAGE BESIDE THE DRAWING. Build what is drawn, as drawn:\n"
         "- Every section, in the drawn order and arrangement, at the drawn proportions. Nothing "
         "added that the drawing does not show, unless the brief requires it.\n"
-        "- Its exact values: colours as drawn (the app's token class where it IS that colour, else "
-        "an arbitrary value such as `bg-[#0f766e]`), font sizes, weights and line heights "
+        "- Its exact values. COLOURS AS EXACT VALUES \u2014 `bg-[#0f766e]`, `text-[#4a4c53]`, "
+        "`border-[#e1e8eb]` \u2014 taken from the drawing, for everything you write; never a colour "
+        "token class and never a gradient the drawing does not draw (a kit component's own colours "
+        "are the app's, which are the drawing's). Font sizes, weights and line heights "
         "(`text-[13px] leading-[20px]`), radii (`rounded-[10px]`), gaps and padding "
         "(`gap-[12px] px-[24px]`), borders and shadows. Never round a value to the nearest scale step.\n"
         "- The drawn width is the desk layout; keep its columns and the content's widths as "
@@ -1632,6 +1636,35 @@ def _design_findings(doc: dict, page: dict, view: str) -> list[str]:
     return out
 
 
+#: How far, per channel on average, a written colour may be from a drawn one.
+COLOUR_TOLERANCE = 6
+_HEX_IN_VIEW = re.compile(r"#([0-9a-fA-F]{6})\b")
+_GRADIENT_CLASS = re.compile(r"(?<![\w-])(?:bg-gradient-to-\w+|bg-linear-[\w\[\]-]+|from-[\w\[\]#/-]+)")
+
+
+def _drawn_findings(view: str, reference: dict | None) -> list[str]:
+    """A page reproducing a drawing is painted in the drawing's colours. Its
+    writer reached for the app's token classes and a brand gradient the
+    drawing never drew, and the jobs list came out coral where it was drawn
+    blue (D3, 2026-10-28) — checked here, colour by colour."""
+    if not (reference or {}).get("exact") or not (reference or {}).get("palette"):
+        return []
+    drawn = [tuple(int(h[i:i + 2], 16) for i in (1, 3, 5)) for h in reference["palette"]]
+    out: list[str] = []
+    stray = []
+    for m in _HEX_IN_VIEW.finditer(view):
+        rgb = tuple(int(m.group(1)[i:i + 2], 16) for i in (0, 2, 4))
+        if min(sum(abs(a - b) for a, b in zip(rgb, d)) / 3 for d in drawn) > COLOUR_TOLERANCE:
+            stray.append("#" + m.group(1).lower())
+    if stray:
+        out.append("view.tsx: colours the drawing does not use: " + ", ".join(sorted(set(stray))[:8])
+                   + " — use the drawn colour each one stands for (the list under the drawing).")
+    if not reference.get("gradients") and _GRADIENT_CLASS.search(view):
+        out.append("view.tsx: a gradient (`" + _GRADIENT_CLASS.search(view).group(0) + "`) — the drawing "
+                   "paints solid colours; use the drawn one.")
+    return out
+
+
 def _seeing(writer: Any, reference: dict | None) -> Any:
     """The writer, shown the drawing's frames on every call when the page
     reproduces one (`figma_exact_block`) and the client can see images — the
@@ -1812,7 +1845,8 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
         # A DESIGNER'S PAGE IS NOT HELD TO THE HOUSE STYLE: those rules exist to
         # keep the model's own pages from looking alike, and here they would
         # push the rewrite back toward the look the design was chosen to replace.
-        design = [] if seeded else _design_findings(doc, page, whole)
+        design = (_drawn_findings(whole, reference) if seeded or (reference or {}).get("exact")
+                  else _design_findings(doc, page, whole))
         errors = (_static_findings(load, view) + _simulated_writes(whole) + _unwired_actions(doc, page, whole)
                   + _unfollowed_flows(doc, page, whole)
                   + _unread_handoffs(doc, page, load, whole)
@@ -2076,7 +2110,8 @@ def _write_part(doc: dict, page: dict, part: dict, app_root: Path, call: Any, wr
             note = "Your reply was not valid JSON. Return the object only."
             continue
         code = _use_client_first(str(body.get("code") or ""))
-        own = [e.replace("view.tsx", f"parts/{part['key']}.tsx") for e in _static_findings("", code)
+        own = [e.replace("view.tsx", f"parts/{part['key']}.tsx")
+               for e in _static_findings("", code) + _drawn_findings(code, reference)
                if not e.startswith("load.ts:")] + _simulated_writes(code)
         compiled = typecheck(doc, app_root, pid, load, view, parts={**siblings, part["key"]: code})
         errors = own + [e for e in compiled if e.startswith(f"parts/{part['key']}.tsx")]
@@ -2280,7 +2315,7 @@ def compose_screen(doc: dict, page: dict, app_root: Path, client: Any, parts: li
             continue
         load, view = str(body.get("load") or ""), _use_client_first(str(body.get("view") or ""))
         missing = [p for p in parts if f"./parts/{p['key']}" not in view]
-        errors = (_static_findings(load, view)
+        errors = (_static_findings(load, view) + _drawn_findings(view, shown)
                   + [f"view.tsx: the frame never places parts/{p['key']}.tsx — import {p['component']} "
                      f"from \"./parts/{p['key']}\" and render <{p['component']} data={{props}} />." for p in missing]
                   + typecheck(doc, app_root, pid, load, view, parts=stubs))
@@ -2353,7 +2388,9 @@ def compose_screen(doc: dict, page: dict, app_root: Path, client: Any, parts: li
             except page_look.LookUnavailable as exc:
                 logger.info("[ui_engineer] %s not looked at (%s); accepted as compiled", pid, exc)
                 break
-            except Exception:  # noqa: BLE001 — narration never fails a screen
+            except Exception as exc:  # noqa: BLE001 — narration never fails a screen
+                logger.warning("[ui_engineer] %s: the look failed (%s: %s); the screen is kept as it is",
+                               pid, type(exc).__name__, str(exc)[:300])
                 break
             if best is None or page_look.rank(verdict) > best[0]:
                 best = (page_look.rank(verdict), body)
@@ -2365,8 +2402,9 @@ def compose_screen(doc: dict, page: dict, app_root: Path, client: Any, parts: li
                                                    "parts": body.get("parts") or {}},
                                           reference=drawing)
                 spent.extend(more)
-            except CompileError as exc:
-                logger.info("[ui_engineer] %s: likeness rewrite did not compile (%s)", pid, str(exc)[:200])
+            except (CompileError, EditsDidNotApply, ValueError) as exc:
+                logger.warning("[ui_engineer] %s: likeness rewrite not kept (%s: %s)", pid,
+                               type(exc).__name__, str(exc)[:300])
                 break
         if best is not None:
             body = best[1]

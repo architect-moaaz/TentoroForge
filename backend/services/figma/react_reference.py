@@ -260,6 +260,72 @@ def exact_values(documents: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def drawn_palette(documents: list[dict]) -> tuple[list[str], bool]:
+    """Every solid colour the frames are painted in — fills, text and box
+    outlines — and whether any of them draws a gradient. A page reproducing
+    them is held to these (`ui_engineer._drawn_findings`)."""
+    colours: set[str] = set()
+    gradients = False
+    boxes = {"FRAME", "RECTANGLE", "INSTANCE", "COMPONENT", "COMPONENT_SET", "SECTION"}
+    for document in documents:
+        for node in _walk(document):
+            colour = _fill(node)
+            if colour == "gradient":
+                gradients = True
+            elif colour.startswith("#"):
+                colours.add(colour.split("/", 1)[0])
+            if str(node.get("type") or "") in boxes:
+                for stroke in node.get("strokes") or []:
+                    if isinstance(stroke, dict) and stroke.get("type") == "SOLID" and stroke.get("visible") is not False:
+                        hx = _hex(stroke.get("color"))
+                        if hx:
+                            colours.add(hx)
+    return sorted(colours), gradients
+
+
+def content_box(document: Any) -> dict | None:
+    """Where the page sits inside its frame: the frame less the application
+    shell it draws — a full-height column at its left edge (the sidebar) and
+    a full-width bar along its top. The built page is rendered without the
+    shell, so this is the part of the drawing it is compared with. Fractions
+    of the frame, or None when the frame draws no shell."""
+    if not isinstance(document, dict):
+        return None
+    frame = document.get("absoluteBoundingBox") or {}
+    try:
+        fx, fy, fw, fh = (float(frame[k]) for k in ("x", "y", "width", "height"))
+    except (KeyError, TypeError, ValueError):
+        return None
+    def boxes(node: dict, depth: int):
+        for child in node.get("children") or []:
+            if not isinstance(child, dict) or child.get("visible") is False:
+                continue
+            box = child.get("absoluteBoundingBox") or {}
+            try:
+                yield tuple(float(box[k]) for k in ("x", "y", "width", "height"))
+            except (KeyError, TypeError, ValueError):
+                continue
+            if depth < 3:
+                yield from boxes(child, depth + 1)
+
+    left = 0.0
+    for x, y, w, h in boxes(document, 1):
+        if abs(x - fx) < 2 and w < fw * 0.3 and h > fh * 0.8:
+            left = max(left, w)
+    # THE TOP BAR MAY SIT IN THE MAIN COLUMN, beside the sidebar rather than
+    # across the frame: a bar along the top of what is right of it.
+    top = 0.0
+    for x, y, w, h in boxes(document, 1):
+        if abs(y - fy) < 2 and x >= fx + left - 2 and w > (fw - left) * 0.6 and 24 < h < min(140, fh * 0.2):
+            top = max(top, h)
+    if not left and not top:
+        return None
+    # A top bar drawn beside the sidebar starts after it; either way the
+    # page is what is right of the one and below the other.
+    return {"x": round(left / fw, 4), "y": round(top / fh, 4),
+            "w": round(1 - left / fw, 4), "h": round(1 - top / fh, 4)}
+
+
 def screen_image(screen: Any, output_dir: str | Path, source_id: str) -> Path | None:
     """The frame's picture as a file: the store keeps it beside the screen
     (`FIGMA-001/screens/<node>.png`); an older store kept it inline as a data
@@ -394,6 +460,9 @@ def reference_for(doc: dict, page: dict, output_dir: str | Path) -> tuple[dict |
         values += "\n- the file's named colours: " + ", ".join(f"{k} {v}" for k, v in list(named["colors"].items())[:20])
     if named["text"]:
         values += "\n- the file's text styles: " + ", ".join(f"{k} = {v}" for k, v in list(named["text"].items())[:16])
-    ref.update({"exact": True, "images": images, "parts": parts, "values": values})
+    palette, gradients = drawn_palette(documents)
+    ref.update({"exact": True, "images": images, "parts": parts, "values": values,
+                "palette": palette, "gradients": gradients,
+                **({"content": box} if (box := content_box(structure.get("document"))) else {})})
     return ref, (f"Reproducing Figma frame {screen.name or node_id} for {route}"
                  + (f" with its {len(parts)} other frame{'s' if len(parts) != 1 else ''}" if parts else "") + ".")

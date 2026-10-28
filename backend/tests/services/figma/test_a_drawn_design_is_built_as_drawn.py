@@ -246,26 +246,46 @@ def test_the_writer_is_shown_the_frames_only_when_it_reproduces_them():
 
 # -- 2. the look puts the page beside the drawing ---------------------------------
 
-def test_the_look_is_taken_at_the_drawings_width_and_judged_on_likeness(monkeypatch):
+def _png(path, colour, size=(720, 500)):
+    from PIL import Image
+    Image.new("RGB", size, colour).save(path)
+    return str(path)
+
+
+def test_the_look_is_taken_at_the_pages_width_and_judged_on_one_labelled_picture(tmp_path):
     from services.blueprint import page_look
 
-    assert page_look.drawing_viewports({"exact": True, "size": [1440, 1024]})["desktop"] == (1440, 1024)
+    drawing = {"exact": True, "size": [1440, 1024], "content": {"x": 0.25, "y": 0.0, "w": 0.75, "h": 1.0},
+               "images": [_png(tmp_path / "f1.png", "#0443fa", (1440, 1024)), _png(tmp_path / "f2.png", "#ffffff")],
+               "parts": [{"as": "dialog", "label": "Pause job"}]}
+    assert page_look.drawing_viewports(drawing)["desktop"] == (1080, 1024), "the frame less its drawn sidebar"
     assert page_look.drawing_viewports(None) == page_look.VIEWPORTS
     asked = {}
 
     def critic(*, system, user, schema, images):
         asked.update(user=user, images=images)
-        return json.dumps({"score": 6, "verdict": "revise", "strengths": [], "issues": [
-            {"severity": "medium", "where": "header", "problem": "drawn 24px padding, built 16px", "fix": "p-[24px]"}]})
+        return json.dumps({"score": 9, "verdict": "pass", "strengths": [], "issues": []})
 
-    look = {"shots": {"desktop": "d.png", "mobile": "m.png"}, "errors": [],
-            "viewports": {"desktop": (1440, 1024), "mobile": (390, 844)}}
-    drawing = {"exact": True, "images": ["f1.png", "f2.png"], "parts": [{"as": "dialog", "label": "Pause job"}]}
+    look = {"shots": {"desktop": _png(tmp_path / "desktop.png", "#ff736a", (1080, 1024)),
+                      "mobile": _png(tmp_path / "mobile.png", "#ffffff", (390, 844))},
+            "errors": [], "viewports": {"desktop": (1080, 1024), "mobile": (390, 844)}}
     verdict, _ = page_look.judge({"pages": []}, {"id": "PAGE-001"}, look, critic,
                                  references=["mood.png"], drawing=drawing)
-    assert asked["images"] == ["d.png", "m.png", "f1.png", "f2.png"], "the drawing, not the mood board"
-    assert "THIS PAGE REPRODUCES A DRAWING" in asked["user"] and "dialog “Pause job”" in asked["user"]
-    assert "desktop (1440px wide)" in asked["user"] and verdict["verdict"] == "revise"
+    assert asked["images"][0].endswith("side-by-side.png"), "one picture, both labelled"
+    assert asked["images"][1:] == [look["shots"]["mobile"], drawing["images"][1]], "not the mood board"
+    assert "drawing on the LEFT" in asked["user"] and "dialog “Pause job”" in asked["user"]
+    assert "Measured: 0% of the page's colour blocks" in asked["user"]
+    # the reviewer said 9 and pass; the blocks are another colour, so it goes back
+    assert verdict["pixel"] == 0.0 and verdict["verdict"] == "revise" and verdict["likeness"] == 4.5
+    assert page_look.rank(verdict) == (1, 45)
+
+
+def test_the_same_picture_measures_as_a_match(tmp_path):
+    from PIL import Image
+
+    from services.blueprint.page_look import pixel_likeness
+    a = Image.new("RGB", (1000, 800), "#f7fafb")
+    assert pixel_likeness(a, a.resize((800, 640))) == 1.0
 
 
 def test_a_page_that_does_not_look_like_its_drawing_goes_back_with_the_drawing(monkeypatch, tmp_path):
@@ -346,3 +366,39 @@ def test_a_pill_is_not_the_corner_every_card_gets():
            + [{"type": "FRAME", "cornerRadius": 8} for _ in range(4)]}
     radius = scales([doc])["radius"]
     assert radius["md"] == "8px" and radius["full"] == "9999px"
+
+
+def test_the_primary_is_what_buttons_are_painted_in_and_icons_draw_no_borders():
+    from services.figma.palette import _document_to_pseudocode
+    from services.figma.styles import action_colours
+
+    blue = {"r": 0.016, "g": 0.263, "b": 0.98}
+    doc = {"type": "FRAME", "children": [
+        *[{"type": "INSTANCE", "name": "Button", "fills": [{"type": "SOLID", "color": blue}]} for _ in range(3)],
+        *[{"type": "FRAME", "name": "badge", "fills": [{"type": "SOLID", "color": {"r": 1, "g": 0.45, "b": 0.42}}]}
+          for _ in range(9)],
+        {"type": "VECTOR", "name": "icon", "strokes": [{"type": "SOLID", "color": {"r": 0, "g": 0, "b": 0}}]},
+    ]}
+    assert action_colours([doc]).most_common(1)[0][0] == "#0443fa"
+    assert "border-[#000000]" not in _document_to_pseudocode(doc)
+
+
+def test_a_reproduced_page_is_painted_in_the_drawings_colours():
+    from services.blueprint.ui_engineer import _drawn_findings
+
+    ref = {"exact": True, "palette": ["#0443fa", "#ffffff"], "gradients": False}
+    assert _drawn_findings('<div className="bg-[#0443fa] text-[#fffffe]" />', ref) == []
+    found = _drawn_findings('<div className="bg-[#ff736a] bg-gradient-to-r from-primary" />', ref)
+    assert "#ff736a" in found[0] and "gradient" in found[1]
+    assert _drawn_findings('<div className="bg-[#ff736a]" />', {**ref, "exact": False}) == []
+
+
+def test_the_page_is_the_frame_less_the_shell_it_draws():
+    from services.figma.react_reference import content_box
+
+    frame = {"absoluteBoundingBox": {"x": 0, "y": 0, "width": 1440, "height": 1024}, "children": [
+        {"absoluteBoundingBox": {"x": 0, "y": 0, "width": 248, "height": 1024}},
+        {"absoluteBoundingBox": {"x": 248, "y": 0, "width": 1192, "height": 1024}, "children": [
+            {"absoluteBoundingBox": {"x": 248, "y": 0, "width": 1192, "height": 72}}]}]}
+    assert content_box(frame) == {"x": 0.1722, "y": 0.0703, "w": 0.8278, "h": 0.9297}
+    assert content_box({"absoluteBoundingBox": {"x": 0, "y": 0, "width": 800, "height": 600}, "children": []}) is None
