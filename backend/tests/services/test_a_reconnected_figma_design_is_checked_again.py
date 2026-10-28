@@ -38,7 +38,8 @@ def test_connect_forgets_the_old_verdict(out, monkeypatch):
 
     monkeypatch.setattr(store, "save", lambda ref, output_dir: None)
     monkeypatch.setattr(store, "source_record", lambda ref, name="", treat_as="evidence": {"id": "FIGMA-001"})
-    monkeypatch.setattr(store, "_chrome_evidence", lambda ref: None)
-    monkeypatch.setattr(store, "_frame_headings", lambda ref: {})
-    store.connect(Svc(), object())
+    monkeypatch.setattr(store, "_chrome_evidence", lambda ref, *trees: None)
+    monkeypatch.setattr(store, "_frame_headings", lambda ref, *trees: {})
+    from types import SimpleNamespace
+    store.connect(Svc(), SimpleNamespace(screens=[]))   # connect reads each screen's tree (smithv5)
     assert figma_gate._read(out) is None, "the design was read again, so nobody has checked it yet"

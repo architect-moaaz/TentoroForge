@@ -181,7 +181,8 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     "connect_uxpilot": {"uxpilot_ref", "key_env"},
     # Undoes what the two above did to the page set: the design record goes,
     # every page stops naming a frame, and the screens are composed from the
-    # component library. Needs nothing — there is only ever one design set.
+    # component library. Needs nothing: with several designs connected, Smith
+    # reads which from the words (its id, its link) or asks.
     "disconnect_design": set(),
     # Undo. Needs nothing: it is always the last change, and asking which one
     # would be asking the person to know what Smith recorded.
@@ -566,7 +567,9 @@ VERB_HELP: dict[str, str] = {
     ),
     "connect_figma": (
         "Attach a Figma design as evidence for the application: \"use this "
-        "Figma design <url>\". Needs the design URL and the NAME of the "
+        "Figma design <url>\". Another link adds another design beside the "
+        "ones already connected; the same link again refreshes it, and carries "
+        "on a read that was cut off. Needs the design URL and the NAME of the "
         "environment variable holding the Figma token — never the token. Smith then asks whether the design is the specification or a reference."
     ),
     "connect_uxpilot": (
@@ -578,8 +581,9 @@ VERB_HELP: dict[str, str] = {
     "disconnect_design": (
         "Stop building screens from the connected Figma or UX Pilot design: "
         "\"disconnect the Figma design\", \"drop the design\", \"compose the "
-        "pages from components instead\". The design record is removed, no "
-        "page names a frame any more, and every screen is composed from the "
+        "pages from components instead\", \"disconnect FIGMA-002\". The design "
+        "record is removed (one of several, when the words name it), no page "
+        "names its frames any more, and those screens are composed from the "
         "component library. The requirements, entities and rules are untouched."
     ),
     "rename_entity": (

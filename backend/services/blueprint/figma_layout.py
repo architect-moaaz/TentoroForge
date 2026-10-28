@@ -73,23 +73,31 @@ def screen_for(doc: dict, output_dir: str | Path, node_id: str) -> Any:
     the frame is not in any stored extraction — which happens legitimately when
     a Blueprint version is restored without its design payload (§93).
     """
+    return locate(doc, output_dir, node_id)[1]
+
+
+def locate(doc: dict, output_dir: str | Path, frame: str) -> tuple[dict | None, Any]:
+    """``(design source, screen)`` for a page's `figmaFrame`, or ``(None, None)``.
+
+    A frame of a second design is named `FIGMA-002/1:2` (`store.frame_ref`) and
+    is looked for in that design only; a bare id is looked for in each.
+    One screen is read, not the whole file — a design of five hundred screens
+    is one small file per screen (`store.load_screen`)."""
     from services.figma import store
 
+    wanted, node_id = store.split_frame_ref(frame)
     for source in doc.get("designSources") or []:
         source_id = str(source.get("id") or "")
-        if not source_id:
+        if not source_id or (wanted and source_id != wanted):
             continue
         try:
-            ref = store.load(source_id, output_dir)
+            screen = store.load_screen(source_id, node_id, output_dir)
         except Exception:  # noqa: BLE001 — a bad store must not stop the build
             logger.warning("[figma] could not load %s", source_id)
             continue
-        if ref is None:
-            continue
-        for screen in ref.screens:
-            if screen.node_id == node_id:
-                return screen
-    return None
+        if screen is not None:
+            return source, screen
+    return None, None
 
 
 def compose(svc: Any, page: dict, *, app_root: str | Path) -> dict | None:
@@ -531,8 +539,12 @@ def _classify_regions(svc: Any, page: dict, code: str, screen: Any,
     if not regions:
         return []
 
-    file_key = ""
-    for source in svc.doc.get("designSources") or []:
+    # THE FILE THE FRAME IS IN. With one design that was the first source;
+    # with several, a crop asked of the first file for another file's node
+    # renders nothing, or the wrong picture.
+    owner, _screen = locate(svc.doc, svc.output_dir, frame_of(page))
+    file_key = str((owner or {}).get("fileKey") or (owner or {}).get("file_key") or "")
+    for source in ([] if file_key else svc.doc.get("designSources") or []):
         file_key = str(source.get("fileKey") or source.get("file_key") or "")
         if file_key:
             break

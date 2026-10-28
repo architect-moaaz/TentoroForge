@@ -76,7 +76,8 @@ def _summarize(doc: dict, node: str, subject: str) -> str:
         if ents:
             return f"{len(ents)} entities: {_names(ents, limit=6)}"
     if node == "page_contracts":
-        pages = _LIVE(doc.get("pages"))
+        from services.blueprint.page_planner import page_set_pages
+        pages = page_set_pages(doc, subject)  # a part of the set is its own pages
         if pages:
             return f"{len(pages)} pages: {_names(pages, limit=5)}"
     if node == "workflows":

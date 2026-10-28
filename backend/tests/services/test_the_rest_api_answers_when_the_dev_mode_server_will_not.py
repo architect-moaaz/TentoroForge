@@ -33,7 +33,7 @@ def test_metadata_comes_back_as_the_node_tree():
             "children": [{"id": "1:70", "name": "Card", "type": "FRAME",
                           "absoluteBoundingBox": {"x": 280, "y": 90, "width": 172, "height": 110}}]}
 
-    async def fake_node(file_key, node_id, token):
+    async def fake_node(file_key, node_id, token, depth=None):
         assert (file_key, node_id, token) == ("KEY", "1:2", "figd_test")
         return tree
 
