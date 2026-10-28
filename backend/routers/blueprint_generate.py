@@ -2332,7 +2332,7 @@ async def smith_chat(
                 _the_brief = _brief_with_documents(_brief_from(req.history, req.message), req.evidence)
                 named_design = _figma_in(_the_brief) or _uxpilot_in(_the_brief)
                 turn_result = handle_chat_v2(ChatV2Request(
-                    project_id=str(project_id), output_dir=str(output_dir),
+                    project_id=str(project_id), output_dir=str(output_dir), user_id=str(user.id),
                     message=req.message + shown_note,
                     attachments=shown_files,
                     history=[(t.role, t.text) for t in req.history if t.text][-10:],
@@ -2415,7 +2415,7 @@ async def smith_chat(
             # model reasoning; the stage list above still does exactly that.
             # This is the conversation, and it is where the user asked for it.
             turn_result = handle_chat_v2(ChatV2Request(
-                project_id=str(project_id), output_dir=str(output_dir),
+                project_id=str(project_id), output_dir=str(output_dir), user_id=str(user.id),
                 message=req.message + _document_note(
                     str(output_dir), attached_docs,
                     late=bool(svc is not None and (svc.doc.get("requirements") or svc.doc.get("pages")))) + shown_note,

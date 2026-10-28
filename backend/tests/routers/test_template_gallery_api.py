@@ -164,7 +164,10 @@ async def test_the_whole_journey_from_request_to_rating(auth_client, org_id, sup
         assert card["id"] == tpl["id"] and card["status"] == "approved" and card["version"] == 1
         assert card["creator"]["name"] == "Test User" and card["org_name"] == "Test Org"
         assert card["created_at"] and card["published_at"] and len(card["screenshots"]) == 2
-        assert card["can_use"] and card["can_rate"] and not card["can_manage"]
+        # Rated only by someone who used it (PR #29 review): not yet.
+        assert card["can_use"] and not card["can_rate"] and not card["can_manage"]
+        r = await outsider.put(f"/api/project-templates/{tpl['id']}/reviews/mine", json={"rating": 5})
+        assert r.status_code == 403 and "Start an app from this template first" in r.text
         assert card["source_project_id"] is None and card["review_note"] == ""  # not theirs to read
         detail = (await outsider.get(f"/api/project-templates/{tpl['id']}/detail")).json()
         assert {"screens", "records", "workflows", "roles", "rules"} <= set(detail["preview"])
@@ -179,6 +182,12 @@ async def test_the_whole_journey_from_request_to_rating(auth_client, org_id, sup
                                 json={"template_id": tpl["id"], "name": "Our hiring"})
         assert r.status_code == 201, r.text
         assert (await outsider.get("/api/template-gallery")).json()["templates"][0]["uses"] == 1
+        # A use is an organisation: a second app of the same one is not another.
+        r = await outsider.post(f"/api/orgs/{other_org}/projects/from-project-template",
+                                json={"template_id": tpl["id"], "name": "Our hiring 2"})
+        assert r.status_code == 201, r.text
+        card = (await outsider.get("/api/template-gallery")).json()["templates"][0]
+        assert card["uses"] == 1 and card["can_rate"]
 
         # 8: rated and reviewed; rating again changes the review, not the count.
         assert (await outsider.put(f"/api/project-templates/{tpl['id']}/reviews/mine",
@@ -333,10 +342,20 @@ async def test_an_admins_review_copy_is_not_a_use(auth_client, org_id, super_adm
     # Its own organisation may use its own pending template — but that is not a
     # use the Gallery counts: a builder could otherwise lift their own template
     # up the "popular" order by using it themselves.
+    review_copy = (await super_admin_client.get(f"/api/orgs/{admin_org}/projects")).json()
+    review_copy = review_copy.get("items", review_copy) if isinstance(review_copy, dict) else review_copy
+    (review_copy,) = [p for p in review_copy if p["name"] == "Review copy"]
     r = await auth_client.post(f"/api/orgs/{org_id}/projects/from-project-template",
                                json={"template_id": tpl["id"], "name": "Ours"})
     assert r.status_code == 201
+    ours = r.json()
     assert (await auth_client.get(f"/api/project-templates/{tpl['id']}")).json()["uses"] == 0
+    # Decided: the admin's test copy is removed; the organisation's own app stays (PR #29 review).
+    r = await super_admin_client.post(f"/api/admin/template-requests/{tpl['id']}/decision",
+                                      json={"decision": "approve"})
+    assert r.status_code == 200
+    assert (await super_admin_client.get(f"/api/projects/{review_copy['id']}")).status_code == 404
+    assert (await auth_client.get(f"/api/projects/{ours['id']}")).status_code == 200
 
 
 @pytest.mark.asyncio
@@ -456,13 +475,20 @@ async def test_a_gallery_of_pictures_does_not_spend_the_rate_limit():
         return PlainTextResponse("ok")
     inner = Starlette(routes=[Route("/{path:path}", ok, methods=["GET", "POST"])])
     inner.add_middleware(RateLimitMiddleware, requests_per_minute=1, burst=1)
+    import uuid
+
+    from auth import create_access_token
+    signed = {"Authorization": f"Bearer {create_access_token(uuid.uuid4())}"}
     async with AsyncClient(transport=ASGITransport(app=inner), base_url="http://t") as c:
         shot = f"/api/project-templates/{'a' * 32}/screenshots/{'b' * 32}"
-        assert all([(await c.get(shot)).status_code == 200 for _ in range(30)])
+        assert all([(await c.get(shot, headers=signed)).status_code == 200 for _ in range(30)])
         # Everything else still counts — including writes to the same address.
         assert (await c.get("/api/template-gallery")).status_code == 200
         assert (await c.get("/api/template-gallery")).status_code == 429
-        assert (await c.post(shot)).status_code == 429
+        assert (await c.post(shot, headers=signed)).status_code == 429
+        # Nobody, or a made-up sign-in, counts like any request (PR #29 review).
+        assert (await c.get(shot)).status_code == 429
+        assert (await c.get(shot, headers={"Authorization": "Bearer made-up"})).status_code == 429
 
 
 @pytest.mark.asyncio
@@ -532,6 +558,10 @@ async def test_tentoro_can_take_a_review_down_and_says_why(auth_client, org_id, 
     await super_admin_client.post(f"/api/admin/template-requests/{tpl['id']}/decision", json={"decision": "approve"})
     troll = await _person("troll@example.com", "Troll")
     try:
+        # Only someone who used it may rate it.
+        troll_org = await _org(troll, "trolls")
+        assert (await troll.post(f"/api/orgs/{troll_org}/projects/from-project-template",
+                                 json={"template_id": tpl["id"], "name": "Ours"})).status_code == 201
         await troll.put(f"/api/project-templates/{tpl['id']}/reviews/mine", json={"rating": 1, "comment": "spam spam"})
         review = (await troll.get(f"/api/project-templates/{tpl['id']}/reviews")).json()["reviews"][0]
         url = f"/api/admin/template-reviews/{review['id']}/remove"

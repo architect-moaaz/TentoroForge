@@ -386,9 +386,9 @@ function ReviewState({
           )}
           {tpl.status === "pending" && (
             <>
-              {onSubmit && (
-                <Button size="sm" variant="outline" onClick={() => onSubmit(tpl.id)}>Edit details and screenshots</Button>
-              )}
+              <p className="text-xs text-muted-foreground">
+                Waiting for Tentoro’s review. To change it, take the request back, change it, and send it again.
+              </p>
               <Button size="sm" variant="ghost" onClick={() => act.mutate("cancel-request")} disabled={act.isPending}>
                 Take back the request
               </Button>
@@ -584,6 +584,11 @@ function Reviews({ tpl, onChanged }: { tpl: TemplateDetailData; onChanged: () =>
       {tpl.status === "approved" && !tpl.can_rate && tpl.own_org && (
         <p className="text-xs text-muted-foreground">
           Your organisation built this template, so its rating is for others to give — but you can read what they say.
+        </p>
+      )}
+      {tpl.status === "approved" && !tpl.can_rate && !tpl.own_org && !tpl.is_admin && (
+        <p className="text-xs text-muted-foreground" data-testid="rate-after-use">
+          Start an app from this template first (Use this template); then you can rate it here.
         </p>
       )}
       {isLoading ? (

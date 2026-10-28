@@ -129,6 +129,24 @@ async def test_reading_a_template_waiting_for_review(cast):
 @pytest.mark.asyncio
 async def test_changing_a_template_is_its_builders_or_its_org_admins(cast):
     t = cast["tpl"]["id"]
+    # While it waits for review nobody changes it, not even its builder: the
+    # reviewer approves what they read (PR #29 review).
+    waiting = {"builder": 409, "org_admin": 409, "member": 403, "outsider": 404,
+               "tentoro": 403, "imperson": 404, "anon": 401}
+    for person in PEOPLE:
+        r = await cast["who"][person].patch(f"/api/project-templates/{t}", json={"description": DESCRIPTION + " "})
+        _expect(waiting, person, r.status_code, "rename while waiting")
+    for person in PEOPLE:
+        r = await cast["who"][person].post(f"/api/project-templates/{t}/screenshots",
+                                           files={"file": ("x.png", _png(), "image/png")})
+        _expect(waiting, person, r.status_code, "upload while waiting")
+    # Nobody outside the template's managers can take its request back or delete it.
+    for person in ("member", "outsider", "tentoro", "imperson", "anon"):
+        r = await cast["who"][person].post(f"/api/project-templates/{t}/cancel-request")
+        assert r.status_code in (401, 403, 404), (person, r.status_code)
+    assert (await cast["who"]["builder"].get(f"/api/project-templates/{t}")).json()["status"] == "pending"
+    # Taken back, its managers may change it.
+    assert (await cast["who"]["builder"].post(f"/api/project-templates/{t}/cancel-request")).status_code == 200
     manage = {"builder": 200, "org_admin": 200, "member": 403, "outsider": 404,
               "tentoro": 403, "imperson": 404, "anon": 401}
     for person in PEOPLE:
@@ -143,15 +161,12 @@ async def test_changing_a_template_is_its_builders_or_its_org_admins(cast):
     for person in PEOPLE:
         r = await cast["who"][person].put(f"/api/project-templates/{t}/screenshots/order", json={"order": []})
         _expect(order, person, r.status_code, "order")
-    # Nobody outside the template's managers can take its request back or delete it.
     for person in ("member", "outsider", "tentoro", "imperson", "anon"):
-        r = await cast["who"][person].post(f"/api/project-templates/{t}/cancel-request")
-        assert r.status_code in (401, 403, 404), (person, r.status_code)
         r = await cast["who"][person].delete(f"/api/project-templates/{t}")
         assert r.status_code in (401, 403, 404), (person, r.status_code)
         r = await cast["who"][person].delete(f"/api/project-templates/{t}/screenshots/{cast['shot']}")
         assert r.status_code in (401, 403, 404), (person, r.status_code)
-    assert (await cast["who"]["builder"].get(f"/api/project-templates/{t}")).json()["status"] == "pending"
+    assert (await cast["who"]["builder"].get(f"/api/project-templates/{t}")).json()["status"] == "draft"
 
 
 @pytest.mark.asyncio
@@ -182,18 +197,20 @@ async def test_once_approved_everyone_signed_in_may_see_use_and_rate(cast):
                  f"/api/project-templates/{t}/screenshots/{shot}", "/api/template-gallery"):
         for person in PEOPLE:
             _expect(seen, person, (await cast["who"][person].get(path)).status_code, path)
-    # Rating: not the organisation that built it; anyone else signed in may.
-    # Tentoro's admins judge the Gallery and do not score it; acting as a
-    # person, an admin rates as that person.
+    # Rating: only someone who used it (PR #29 review) — before, nobody may.
+    r = await cast["who"]["outsider"].put(f"/api/project-templates/{t}/reviews/mine", json={"rating": 4})
+    assert r.status_code == 403
+    # Using it: into an organisation the person belongs to, never into someone else's.
+    r = await cast["who"]["outsider"].post(f"/api/orgs/{cast['other_org']}/projects/from-project-template",
+                                           json={"template_id": t, "name": "Ours"})
+    assert r.status_code == 201
+    # Then: not the organisation that built it; Tentoro's admins judge the
+    # Gallery and do not score it; acting as the person, an admin rates as them.
     rate = {"builder": 403, "org_admin": 403, "member": 403, "outsider": 200,
             "tentoro": 403, "imperson": 200, "anon": 401}
     for person in PEOPLE:
         r = await cast["who"][person].put(f"/api/project-templates/{t}/reviews/mine", json={"rating": 4})
         _expect(rate, person, r.status_code, "rate")
-    # Using it: into an organisation the person belongs to, never into someone else's.
-    r = await cast["who"]["outsider"].post(f"/api/orgs/{cast['other_org']}/projects/from-project-template",
-                                           json={"template_id": t, "name": "Ours"})
-    assert r.status_code == 201
     r = await cast["who"]["outsider"].post(f"/api/orgs/{cast['org']}/projects/from-project-template",
                                            json={"template_id": t, "name": "Into theirs"})
     assert r.status_code == 403

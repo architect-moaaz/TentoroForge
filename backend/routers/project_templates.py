@@ -38,6 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from auth import get_current_user
 from database import get_db
 from models.auth import PlatformUser
+from models.project import Project
 from models.template_gallery import TemplateListing, TemplateReview
 from platform_admin import require_super_admin
 from schemas.project import ProjectResponse
@@ -136,7 +137,12 @@ async def _managed(db: AsyncSession, template_id: str, user: PlatformUser, reque
 
 
 def _editable(row: TemplateListing | None) -> None:
-    if gallery.status_of(row) not in gallery.EDITABLE:
+    status = gallery.status_of(row)
+    if status == gallery.PENDING:
+        raise HTTPException(status_code=409, detail=(
+            "It is waiting for Tentoro's review, so it can't be changed now. Press “Take back the "
+            "request”, change it, then send it again."))
+    if status not in gallery.EDITABLE:
         raise HTTPException(status_code=409, detail=(
             "This version is live in the Templates Gallery, so it can't be changed. Save the app as a template again to make a new version."))
 
@@ -501,8 +507,36 @@ async def decide_template_request(template_id: str, req: DecisionRequest, reques
         raise _fail(exc)
     await db.commit()
     background.add_task(outbox.send)
+    try:
+        await _remove_test_copies(db, template_id)
+    except Exception:  # noqa: BLE001 — the decision stands; a copy left is only clutter
+        logger.exception("[templates] removing the test copies of %s failed", template_id)
+        await db.rollback()
     who = await gallery.viewer(db, meta, admin, request.state)
     return await _card(db, meta, row, who)
+
+
+async def _remove_test_copies(db: AsyncSession, template_id: str) -> int:
+    """The admins' test copies of this template, gone once it is decided:
+    only projects made from it that are marked `review_copy` (never an
+    organisation's own app made from it)."""
+    from models.template_gallery import TemplateUse
+    from services.teardown import remove_project
+    ids = [r for (r,) in (await db.execute(select(TemplateUse.project_id).where(
+        TemplateUse.template_id == template_id, TemplateUse.is_review.is_(True),
+        TemplateUse.project_id.isnot(None)))).all()]
+    removed = 0
+    for pid in ids:
+        project = await db.get(Project, pid)
+        brief = (project.brief or {}) if project is not None else {}
+        if project is None or not ((brief.get("template") or {}).get("review_copy") is True
+                                   and (brief.get("template") or {}).get("id") == template_id):
+            continue
+        await remove_project(db, project)
+        removed += 1
+    if removed:
+        logger.info("[templates] removed %d test cop%s of %s", removed, "y" if removed == 1 else "ies", template_id)
+    return removed
 
 
 @router.post("/api/admin/template-reviews/{review_id}/remove")
@@ -648,15 +682,21 @@ async def create_from_project_template(org_id: uuid.UUID, req: UseTemplateReques
                                    description=meta.get("description") or "", db=db)
     from routers.blueprint_generate import _output_dir
     try:
-        templates.stage(req.template_id, _output_dir(project))
+        templates.stage(req.template_id, _output_dir(project), for_org=str(org_id))
     except templates.TemplateError as exc:
         await db.rollback()
         import shutil
         shutil.rmtree(_output_dir(project), ignore_errors=True)  # no orphan folder
         raise HTTPException(status_code=400, detail=str(exc))
+    # A Tentoro admin's copy of a template they review — from outside its
+    # organisation — is a TEST COPY: marked, so it is removed once the
+    # request is decided (PR #29 review: they were never cleaned up). Never
+    # an organisation's own use, which is a real app.
+    review_copy = bool(who.is_admin and not who.in_org)
     project.brief = {**(project.brief or {}),
                      "template": {"id": meta["id"], "name": meta["name"],
-                                  "version": int(meta.get("version") or 1)}}
+                                  "version": int(meta.get("version") or 1),
+                                  **({"review_copy": True} if review_copy else {})}}
     await gallery.record_use(db, meta, project_id=project.id, user=user, org_id=org_id,
                              is_review=is_review)
     await db.commit()

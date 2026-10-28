@@ -148,20 +148,50 @@ async def _submit(template_id: str, user_id: str, *, pricing_model: str, price_c
         await engine.dispose()
 
 
-def submit(output_dir: str, project_id: str, *, name: str = "", pricing_model: str = "free",
+def person(user_id: str) -> tuple[str, str] | None:
+    """(id, name) of a platform user, or None."""
+    from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+    from sqlalchemy.pool import NullPool
+
+    from config import DATABASE_URL
+    from models.auth import PlatformUser
+
+    async def go() -> tuple[str, str] | None:
+        engine = create_async_engine(DATABASE_URL, poolclass=NullPool)
+        try:
+            async with AsyncSession(engine) as db:
+                u = await db.get(PlatformUser, uuid.UUID(str(user_id)))
+                return (str(u.id), str(u.name or u.email or "")) if u else None
+        finally:
+            await engine.dispose()
+    try:
+        return asyncio.run(go())
+    except Exception:  # noqa: BLE001 — not known: the caller says so
+        logger.exception("[smith-templates] could not read user %s", user_id)
+        return None
+
+
+def submit(output_dir: str, project_id: str, *, user_id: str, name: str = "", pricing_model: str = "free",
            price_cents: int | None = None, currency: str | None = None) -> str:
-    """Send this app's newest template (or the one named) for review: the app's
-    own page pictures added first when it has none. The answer, in words."""
+    """Send this app's newest template (or this app's one named) for review,
+    AS THE PERSON ASKING — their own right to submit is checked, never the
+    owner's (PR #29 review). Pictures are never added for them: a reviewer
+    sees what the builder chose. The answer, in words."""
     from services import project_templates as templates
     from services import template_gallery as gallery
     facts = templates.project_facts(str(project_id))
     if not facts:
         return "I could not find which organisation this app belongs to, so nothing was sent."
     org = facts["org_id"]
-    items = mine(project_id)
+    if not user_id:
+        return (f"I can't tell who is asking, so nothing was sent. Open [Templates](/org/{org}/templates) and "
+                "press “Submit for review” on the template.")
+    # Only THIS app's templates: a name never reaches another app's.
+    items = [t for t in mine(project_id) if t["fromThisApp"]]
     want = name.strip().lower()
-    pick = next((t for t in items if want and want in str(t["name"]).lower()), None) if want else None
-    pick = pick or next((t for t in items if t["fromThisApp"] and t["status"] in ("draft", "rejected")), None)
+    pick = next((t for t in items if want and want in str(t["name"]).lower()
+                 and t["status"] in ("draft", "rejected")), None) if want else None
+    pick = pick or next((t for t in items if t["status"] in ("draft", "rejected")), None)
     if pick is None:
         live = next((t for t in items if t["fromThisApp"]), None)
         if live and live["status"] in ("pending", "approved"):
@@ -169,26 +199,19 @@ def submit(output_dir: str, project_id: str, *, name: str = "", pricing_model: s
                     f"{STATUS_SAID[live['status']]}. Nothing to send.")
         return ("This app has no template to send yet. Say “save this app as a template” first, "
                 "then ask me to submit it.")
-    added = []
     if not pick["screenshots"]:
-        try:
-            added = templates.add_app_screens(str(pick["id"]), output_dir)
-        except Exception:  # noqa: BLE001 — said below
-            logger.exception("[smith-templates] could not add the app's pictures")
-    if not pick["screenshots"] and not added:
-        return (f"“{pick['name']}” needs at least one picture before Tentoro can review it, and this app has none "
-                f"I can add. Open [Templates](/org/{org}/templates?submit={pick['id']}), add a screenshot, and "
-                "press Submit for review — or ask me again once the app has been built.")
+        return (f"“{pick['name']}” (version {pick['version']}) needs at least one picture before Tentoro can review "
+                f"it. Open [Submit for review](/org/{org}/templates?submit={pick['id']}): there you can add the "
+                "app's own screens with one click, or upload pictures, look at them, and send it.")
     try:
-        row, _results = asyncio.run(_submit(str(pick["id"]), facts["owner_id"], pricing_model=pricing_model,
+        row, _results = asyncio.run(_submit(str(pick["id"]), str(user_id), pricing_model=pricing_model,
                                             price_cents=price_cents, currency=currency))
     except gallery.GalleryError as exc:
         return f"Not sent: {exc}"
-    pics = f" I added {len(added)} picture{'s' if len(added) != 1 else ''} of the app's own pages first." if added else ""
     return (f"Sent “{pick['name']}” (version {pick['version']}) to Tentoro for review, as a "
-            f"{'free' if pricing_model == 'free' else 'paid'} template.{pics} You will get a notification when they "
+            f"{'free' if pricing_model == 'free' else 'paid'} template. You will get a notification when they "
             f"decide; until then it shows “Waiting for review” in [Templates](/org/{org}/templates), where you can "
-            "also add more pictures, change the description or price, or cancel the request.")
+            "also take the request back if you want to change something first.")
 
 
 __all__ = ["STATUS_SAID", "mine", "status_said", "submit"]

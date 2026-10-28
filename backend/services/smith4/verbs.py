@@ -80,6 +80,8 @@ class Ctx:
     unattended: bool = False
     #: The ask an agreed plan was made from, while one of its steps runs.
     asked_from: str = ""
+    #: The person typing (platform user id); "" when the platform runs it.
+    user_id: str = ""
 
     @property
     def out(self) -> str:
@@ -872,9 +874,14 @@ def save_as_template(ctx: Ctx, u: dict) -> Outcome:
         return Outcome(status="needs_user", said=(
             "I could not find which organisation this project belongs to, so I have not saved "
             "a template. Use “Save as template” at the top of the project instead."))
+    # Saved as the person asking — the builder named on the template — and
+    # as the app's owner only when the platform runs the turn.
+    from services.smith.template_ops import person
+    by = person(ctx.user_id) if ctx.user_id else None
     try:
         meta = templates.save(output_dir=ctx.out, org_id=facts["org_id"],
-                              created_by=facts["owner_id"], created_by_name=facts["owner_name"],
+                              created_by=by[0] if by else facts["owner_id"],
+                              created_by_name=by[1] if by else facts["owner_name"],
                               source_project_id=str(ctx.project_id),
                               name=_s(u, "new_value") or "")
     except templates.TemplateError as exc:
@@ -915,7 +922,7 @@ def submit_template(ctx: Ctx, u: dict) -> Outcome:
     """Send this app's template to Tentoro for review, as the Templates page's
     Submit for review does: every check, the reviewers told."""
     from services.smith.template_ops import submit
-    said = submit(ctx.out, str(ctx.project_id), name=_s(u, "new_value"))
+    said = submit(ctx.out, str(ctx.project_id), user_id=ctx.user_id, name=_s(u, "new_value"))
     sent = said.startswith("Sent ")
     return Outcome(status="resolved" if sent else "needs_user", said=said)
 

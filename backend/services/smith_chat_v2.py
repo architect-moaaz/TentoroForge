@@ -46,6 +46,9 @@ class ChatV2Request:
     project_id: str
     output_dir: str
     message: str
+    #: Who is typing (a platform user id), when a person is: verbs that act
+    #: as someone (submitting a template) act as THEM, never as the owner.
+    user_id: str = ""
     #: Earlier turns as (role, text), oldest first. Empty is a first turn, not
     #: an error — and a caller that has no transcript (self-heal, cron) simply
     #: has none.
@@ -123,6 +126,7 @@ def handle_chat_v2(req: ChatV2Request) -> ChatV2Response:
         evidence=list(req.evidence or []),
         attachments=list(req.attachments or []),
         app_name=req.app_name,
+        user_id=req.user_id,
         check_after=not req.defer_check,
     )
     return ChatV2Response(status=out.status, answer=out.said, options=list(out.options),

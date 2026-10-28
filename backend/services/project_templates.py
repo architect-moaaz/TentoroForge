@@ -329,21 +329,58 @@ def shape(doc: dict) -> str:
 def _based_on(output_dir: Path, doc: dict) -> dict | None:
     """The template this app was started from, and whether it is still the
     same app — so a reviewer sees where it came from, and a copy of another
-    team's template is not shared as someone else's own."""
+    team's template is not shared as someone else's own.
+
+    WHOSE WORK, THROUGH ANY NUMBER OF COPIES (PR #29 review). An unchanged
+    copy of a template that was itself an unchanged copy names the FIRST
+    one's organisation — "use X, save T1, use T1, save T2" no longer makes
+    T2 one's own. And the facts are read from what the project recorded when
+    it was made, so deleting X does not lift the check either."""
     src = source_of(output_dir)
     if not src or not src.get("template_id") or src.get("status") == PENDING:
         return None
     orig = get(str(src["template_id"]))
     same = None
-    if orig is not None:
-        try:
-            same = shape(load_definition(str(orig["id"]))) == shape(doc)
-        except Exception:  # noqa: BLE001 — unknown, not "the same"
-            same = None
-    return {"template_id": str(src["template_id"]), "name": str(src.get("name") or (orig or {}).get("name") or ""),
-            "org_id": str((orig or {}).get("org_id") or ""),
-            "creator": str((orig or {}).get("created_by_name") or ""),
-            "lineage": lineage_of(orig) if orig else "", "mode": str(src.get("mode") or ""), "same": same}
+    try:
+        was = shape(load_definition(str(orig["id"]))) if orig is not None else src.get("shape")
+        same = (was == shape(doc)) if was else None
+    except Exception:  # noqa: BLE001 — unknown, not "the same"
+        same = None
+    here = {"template_id": str(src["template_id"]), "name": str(src.get("name") or (orig or {}).get("name") or ""),
+            "org_id": str((orig or {}).get("org_id") or src.get("org_id") or ""),
+            "creator": str((orig or {}).get("created_by_name") or src.get("creator") or ""),
+            "lineage": lineage_of(orig) if orig else str(src.get("lineage") or ""),
+            "mode": str(src.get("mode") or ""), "same": same}
+    root = ((orig or {}).get("based_on") if orig is not None else src.get("root")) or None
+    if same is True and isinstance(root, dict) and root.get("same") is True and root.get("org_id"):
+        return {**root, "via": here["name"]}
+    return here
+
+
+def for_another_organisation(doc: dict) -> dict:
+    """A definition as another organisation starts from it: what the app IS,
+    without what belongs to the company that made it (PR #29 review) — the
+    spreadsheets it loaded (their names and counts; the copy seeds its own
+    sample rows instead), its single sign-on providers, and the words its
+    people said that the requirements quote. In place; returned."""
+    data = doc.get("data")
+    if isinstance(data, dict) and data.get("imports"):
+        data["imports"] = []
+    sign_in = (doc.get("security") or {}).get("signIn")
+    if isinstance(sign_in, dict) and sign_in.get("sso"):
+        sign_in["sso"] = []
+        if not sign_in.get("password") and not sign_in.get("magicLink"):
+            sign_in["password"] = True
+        if (doc.get("security") or {}).get("authentication") == "sso":
+            doc["security"]["authentication"] = "email_password"
+    for r in doc.get("requirements") or []:
+        if isinstance(r, dict) and r.get("evidence"):
+            r["evidence"] = [e for e in r["evidence"] if isinstance(e, dict)
+                             and e.get("type") not in ("conversation", "document", "message")]
+    for d in doc.get("decisions") or []:
+        if isinstance(d, dict) and d.get("source") == "user" and d.get("reason"):
+            d["reason"] = "Carried over from the template."
+    return doc
 
 
 def save(*, output_dir: str | Path, org_id: str, created_by: str = "",
@@ -533,6 +570,27 @@ def _decoded_size(data: bytes) -> tuple[int, int]:
         raise TemplateError("That file is not a picture Forge can read — use PNG, JPEG or WebP.")
 
 
+def _without_metadata(data: bytes, ext: str) -> bytes:
+    """The picture again, with nothing but its pixels: no EXIF (a phone's
+    location, the camera, the time), no text chunks (PR #29 review: JPEG
+    uploads kept theirs). Turned the way EXIF said first, so it still shows
+    upright."""
+    import io
+
+    from PIL import Image, ImageOps
+
+    with Image.open(io.BytesIO(data)) as img:
+        img = ImageOps.exif_transpose(img)
+        out = io.BytesIO()
+        if ext == "jpg":
+            img.convert("RGB").save(out, format="JPEG", quality=92, optimize=True)
+        elif ext == "webp":
+            img.save(out, format="WEBP", quality=92)
+        else:
+            img.save(out, format="PNG", optimize=True)
+        return out.getvalue()
+
+
 def add_screenshot(template_id: str, data: bytes, *, caption: str = "",
                    source: str = "upload") -> dict:
     """Keep one screenshot with the template. Returns its entry in the meta."""
@@ -547,6 +605,11 @@ def add_screenshot(template_id: str, data: bytes, *, caption: str = "",
         raise TemplateError("Screenshots must be PNG, JPEG or WebP pictures.")
     width, height = _decoded_size(data)
     ext, media = kind
+    try:
+        data = _without_metadata(data, ext)
+    except Exception:  # noqa: BLE001 — it decoded above; a picture we cannot rewrite is not kept as it was
+        raise TemplateError("That picture could not be prepared — try saving it again as PNG or JPEG.")
+    width, height = _decoded_size(data)  # after turning it upright
     shot = {"id": uuid.uuid4().hex, "ext": ext, "media_type": media, "width": width,
             "height": height, "caption": str(caption or "").strip()[:200],
             "source": source if source in ("upload", "app") else "upload", "added_at": _now()}
@@ -735,21 +798,38 @@ def preview(doc: dict) -> dict:
 # Using a template: staged in the project, then made into its definition
 # --------------------------------------------------------------------------- #
 
-def stage(template_id: str, output_dir: str | Path) -> dict:
-    """Put the template beside a new project, waiting for Smith to use it."""
+def stage(template_id: str, output_dir: str | Path, *, for_org: str = "") -> dict:
+    """Put the template beside a new project, waiting for Smith to use it.
+
+    For ANOTHER organisation (`for_org` not the template's), what belongs to
+    the company that made it stays behind: its logo (`brand/`), its screens'
+    hand edits (`patches.json`, which carry its own words and pictures), and
+    the parts of the definition `for_another_organisation` takes out."""
     meta = get(template_id)
     if not meta:
         raise TemplateError("That template does not exist.")
     src = _dir(template_id)
     dest = Path(output_dir) / STAGE_DIR
     dest.mkdir(parents=True, exist_ok=True)
-    for f in ("blueprint.json", "ids.json", PATCHES):
+    elsewhere = bool(for_org) and str(for_org) != str(meta.get("org_id") or "")
+    for f in ("blueprint.json", "ids.json") + (() if elsewhere else (PATCHES,)):
         if (src / f).is_file():
             shutil.copyfile(src / f, dest / f)
-    if (src / "brand").is_dir():
+    if elsewhere and (dest / "blueprint.json").is_file():
+        _write_json(dest / "blueprint.json",
+                    for_another_organisation(json.loads((dest / "blueprint.json").read_text("utf-8"))))
+    if not elsewhere and (src / "brand").is_dir():
         shutil.copytree(src / "brand", dest / "brand", dirs_exist_ok=True)
+    try:
+        was = shape(load_definition(template_id))
+    except Exception:  # noqa: BLE001 — unknown: the check falls back to the template, while it exists
+        was = ""
+    # Whose work it is, kept with the project: the check that a copy is not
+    # shared as one's own must not depend on the template still existing.
     source = {"template_id": template_id, "name": meta["name"],
               "description": meta.get("description") or "", "summary": meta.get("summary") or {},
+              "org_id": str(meta.get("org_id") or ""), "creator": str(meta.get("created_by_name") or ""),
+              "lineage": lineage_of(meta), "shape": was, "root": meta.get("based_on") or None,
               "status": PENDING, "mode": "", "staged_at": _now()}
     _write_json(dest / "source.json", source)
     return source

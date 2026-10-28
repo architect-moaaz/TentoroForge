@@ -60,7 +60,10 @@ STATUSES = (DRAFT, PENDING, APPROVED, REJECTED, REMOVED, SUPERSEDED)
 SUBMITTABLE = (DRAFT, REJECTED, REMOVED)
 #: While these, the builder may still change what the reviewer will read.
 #: Once approved it is what the Gallery shows: a change is a new version.
-EDITABLE = (DRAFT, PENDING, REJECTED, REMOVED)
+#: What its builder may still change. Not while it waits for review: the
+#: reviewer must approve what they read (PR #29 review) — cancel the request
+#: to change it.
+EDITABLE = (DRAFT, REJECTED, REMOVED)
 
 DESCRIPTION_MIN = 30
 NOTE_MAX = 2000
@@ -112,6 +115,9 @@ class Viewer:
     user: PlatformUser
     member: OrgMember | None = None  # of the template's organisation
     is_admin: bool = False
+    #: They, or an organisation they belong to, started an app from it (any
+    #: version): only those may rate it (PR #29 review).
+    used: bool = False
 
     @property
     def in_org(self) -> bool:
@@ -139,9 +145,20 @@ async def membership(db: AsyncSession, org_id: Any, user: PlatformUser) -> OrgMe
         OrgMember.invite_status == InviteStatus.accepted))).scalar_one_or_none()
 
 
+async def has_used(db: AsyncSession, meta: dict, user: PlatformUser) -> bool:
+    """Has this person, or an organisation they belong to, started an app from
+    this template (any version; an admin's test copy is not a use)?"""
+    orgs = select(OrgMember.org_id).where(OrgMember.user_id == user.id,
+                                          OrgMember.invite_status == InviteStatus.accepted)
+    found = (await db.execute(select(TemplateUse.id).where(
+        TemplateUse.lineage == templates.lineage_of(meta), TemplateUse.is_review.is_(False),
+        or_(TemplateUse.user_id == user.id, TemplateUse.org_id.in_(orgs))).limit(1))).first()
+    return found is not None
+
+
 async def viewer(db: AsyncSession, meta: dict, user: PlatformUser, request_state: Any = None) -> Viewer:
     return Viewer(user=user, member=await membership(db, meta.get("org_id"), user),
-                  is_admin=is_admin(user, request_state))
+                  is_admin=is_admin(user, request_state), used=await has_used(db, meta, user))
 
 
 def may_manage(meta: dict, who: Viewer) -> bool:
@@ -586,12 +603,14 @@ async def record_use(db: AsyncSession, meta: dict, *, project_id: uuid.UUID, use
 # --------------------------------------------------------------------------- #
 
 async def stats(db: AsyncSession, lineages: list[str]) -> dict[str, dict]:
-    """Uses (an admin's test copies are not uses) and ratings, per lineage."""
+    """Uses and ratings, per lineage. A use is an ORGANISATION that started an
+    app from it — ten projects of one company are one use (PR #29 review);
+    an admin's test copy is none, nor an app deleted since."""
     out = {ln: {"uses": 0, "rating": None, "ratings": 0} for ln in lineages}
     if not lineages:
         return out
     for ln, n in (await db.execute(
-            select(TemplateUse.lineage, func.count()).where(
+            select(TemplateUse.lineage, func.count(func.distinct(TemplateUse.org_id))).where(
                 TemplateUse.lineage.in_(lineages), TemplateUse.is_review.is_(False),
                 # A use whose app was deleted since is not one any more.
                 TemplateUse.project_id.isnot(None))
@@ -663,11 +682,11 @@ async def reviews(db: AsyncSession, lineage: str, *, limit: int = 100) -> list[d
 
 
 def may_rate(meta: dict, status: str, who: Viewer) -> bool:
-    """Anyone signed in may rate a template in the Gallery — except the
+    """Someone who USED it may rate a template in the Gallery — except the
     organisation that made it: its builder and their colleagues would be
     marking their own work, and the stars are for people choosing one. Nor
     Tentoro's admins: they judge what is in the Gallery, so they do not score it."""
-    return (status == APPROVED and not who.in_org and not who.is_admin
+    return (status == APPROVED and who.used and not who.in_org and not who.is_admin
             and str(meta.get("created_by")) != str(who.user.id))
 
 
@@ -683,6 +702,8 @@ async def rate(db: AsyncSession, meta: dict, row: TemplateListing | None, who: V
         raise GalleryError("Your organisation built this template, so its rating is for others to give.", 403)
     if who.is_admin:
         raise GalleryError("Tentoro's admins decide what is in the Gallery, so they do not rate it.", 403)
+    if not who.used:
+        raise GalleryError("Start an app from this template first; then you can rate it.", 403)
     if isinstance(rating, bool) or not isinstance(rating, int) or not 1 <= rating <= 5:
         raise GalleryError("A rating is a whole number of stars from 1 to 5.")
     comment = str(comment or "").strip()

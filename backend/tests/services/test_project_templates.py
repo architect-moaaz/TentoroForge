@@ -383,3 +383,134 @@ def test_an_unchanged_copy_of_another_teams_template_is_not_shared_as_ones_own(s
     # The organisation's own template, saved again, is its own work.
     again = templates.save(output_dir=saved and output_base / "src00001", org_id=ORG, source_project_id="p1")
     assert not any(c["key"] == "own_work" for c in gallery.checks(again))
+
+
+THIRD_ORG = "33333333-3333-3333-3333-333333333333"
+
+
+def _exact(saved_id: str, out: Path, org: str) -> None:
+    templates.stage(saved_id, out, for_org=org)
+    templates.use_exact(out, app_name="A copy")
+
+
+def test_an_exact_copy_stays_the_first_teams_work_through_any_number_of_copies(saved, output_base):
+    """PR #29 review: use X, save T1, use T1, save T2 — T2 named T1 (the same
+    organisation) and passed. Now it names X's organisation."""
+    from services import template_gallery as gallery
+    one = _project(output_base, "copy0001", defined=False)
+    _exact(saved["id"], one, OTHER_ORG)
+    t1 = templates.save(output_dir=one, org_id=OTHER_ORG, source_project_id="p2")
+    two = _project(output_base, "copy0002", defined=False)
+    _exact(t1["id"], two, OTHER_ORG)
+    t2 = templates.save(output_dir=two, org_id=OTHER_ORG, source_project_id="p3")
+    assert t2["based_on"]["org_id"] == ORG and t2["based_on"]["same"] is True
+    assert t2["based_on"]["template_id"] == saved["id"] and t2["based_on"]["via"] == t1["name"]
+    assert next(c for c in gallery.checks(t2) if c["key"] == "own_work")["ok"] is False
+    # And by a third organisation, through the second's copy, still the first's.
+    three = _project(output_base, "copy0003", defined=False)
+    _exact(t2["id"], three, THIRD_ORG)
+    t3 = templates.save(output_dir=three, org_id=THIRD_ORG, source_project_id="p4")
+    assert t3["based_on"]["org_id"] == ORG
+
+
+def test_deleting_the_original_does_not_lift_the_check(saved, output_base):
+    from services import template_gallery as gallery
+    one = _project(output_base, "copy0001", defined=False)
+    _exact(saved["id"], one, OTHER_ORG)
+    assert templates.delete(saved["id"])
+    mine = templates.save(output_dir=one, org_id=OTHER_ORG, source_project_id="p2")
+    assert mine["based_on"]["org_id"] == ORG and mine["based_on"]["same"] is True
+    assert next(c for c in gallery.checks(mine) if c["key"] == "own_work")["ok"] is False
+
+
+def test_a_changed_copy_is_ones_own_work_and_says_where_it_started(saved, output_base):
+    from services import template_gallery as gallery
+    one = _project(output_base, "copy0001", defined=False)
+    _exact(saved["id"], one, OTHER_ORG)
+    svc = BlueprintService.load(output_dir=one)
+    svc.doc["roles"].append({"id": "ROLE-099", "name": "Auditor", "description": "Reads everything.",
+                             "status": "PROPOSED"})
+    svc.save()
+    mine = templates.save(output_dir=one, org_id=OTHER_ORG, source_project_id="p2")
+    assert mine["based_on"]["same"] is False
+    keys = {c["key"]: c for c in gallery.checks(mine)}
+    assert keys["own_work"]["ok"] and keys["started_from"]["ok"]
+
+
+def test_another_organisation_starts_without_the_makers_own_data(output_base):
+    """PR #29 review: a copy kept the spreadsheets loaded, SSO, the people's
+    words, the logo and the hand edits of the company that made it — and its
+    tables came up empty because the imports said they held real rows."""
+    src = _project(output_base, "src00002")
+    path = src / ".forge" / "blueprint" / "current.json"
+    doc = json.loads(path.read_text())
+    ent = doc["data"]["entities"][0]
+    doc["data"]["imports"] = [{"id": "h1", "entity": ent["id"], "table": ent.get("table") or "x",
+                               "source": "Acme payroll 2026.xlsx", "rowCount": 412}]
+    doc.setdefault("security", {})["signIn"] = {"password": False, "magicLink": False, "sso": [
+        {"id": "entra", "name": "Acme Entra", "kind": "oidc", "provider": "entra", "domains": ["acme.com"]}]}
+    doc["requirements"][0]["evidence"] = [{"type": "conversation", "message": "Acme's Jane says: payroll is late"}]
+    path.write_text(json.dumps(doc))
+    (src / ".forge" / templates.PATCHES).write_text(json.dumps([{"id": "e1", "status": "active", "text": "Acme"}]))
+    made = templates.save(output_dir=src, org_id=ORG, source_project_id="p9", name="Payroll")
+
+    other = _project(output_base, "copy0009", defined=False)
+    templates.stage(made["id"], other, for_org=OTHER_ORG)
+    staged = other / templates.STAGE_DIR
+    copy = json.loads((staged / "blueprint.json").read_text())
+    assert copy["data"]["imports"] == []
+    assert copy["security"]["signIn"]["sso"] == [] and copy["security"]["signIn"]["password"] is True
+    assert "Acme" not in json.dumps(copy["requirements"][0].get("evidence") or [])
+    assert not (staged / "brand").exists() and not (staged / templates.PATCHES).exists()
+    from services.blueprint.projection import seed_rows
+    assert seed_rows(copy).get(ent.get("table") or "x"), "its tables get sample rows"
+    templates.use_exact(other, app_name="Ours")  # and the copy is a valid definition
+    # Its own organisation keeps everything.
+    own = _project(output_base, "copy0010", defined=False)
+    templates.stage(made["id"], own, for_org=ORG)
+    kept = json.loads((own / templates.STAGE_DIR / "blueprint.json").read_text())
+    assert kept["data"]["imports"] and (own / templates.STAGE_DIR / "brand" / "logo.svg").is_file()
+
+
+def test_a_picture_keeps_nothing_but_its_pixels(saved):
+    import io
+
+    from PIL import Image
+    img = Image.new("RGB", (60, 30), (10, 120, 60))
+    exif = img.getexif()
+    exif[0x010F] = "PrivateCam"
+    exif[0x0112] = 6  # taken on its side
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", exif=exif)
+    shot = templates.add_screenshot(saved["id"], buf.getvalue())
+    path, _media = templates.screenshot_file(saved["id"], shot["id"])
+    data = path.read_bytes()
+    assert b"PrivateCam" not in data and not dict(Image.open(io.BytesIO(data)).getexif())
+    assert (shot["width"], shot["height"]) == (30, 60), "turned upright, and its size says so"
+
+
+def test_smith_submits_as_the_person_asking_and_never_adds_pictures(saved, source, monkeypatch):
+    from services.smith import template_ops
+    monkeypatch.setattr(templates, "project_facts", lambda _pid: {
+        "org_id": ORG, "owner_id": "u1", "name": "ATS", "owner_name": "Areeb"})
+    monkeypatch.setattr(template_ops, "_rows", lambda ids: {})
+    monkeypatch.setattr(template_ops, "_uses", lambda lineages: {})
+    added = []
+    monkeypatch.setattr(templates, "add_app_screens", lambda *a, **k: added.append(a) or [])
+    sent = []
+
+    async def fake_submit(template_id, user_id, **k):
+        sent.append((template_id, user_id))
+        return None, []
+    monkeypatch.setattr(template_ops, "_submit", fake_submit)
+    meta = templates.get(saved["id"])
+    meta["source_project_id"] = "p1"
+    (templates._dir(saved["id"]) / "meta.json").write_text(json.dumps(meta))
+    # No picture: asked for, none added, nothing sent.
+    said = template_ops.submit(str(source), "p1", user_id="member-7")
+    assert "needs at least one picture" in said and not added and not sent
+    templates.add_screenshot(saved["id"], _png())
+    # Nobody known: nothing sent.
+    assert "can't tell who is asking" in template_ops.submit(str(source), "p1", user_id="")
+    said = template_ops.submit(str(source), "p1", user_id="member-7")
+    assert said.startswith("Sent ") and sent == [(saved["id"], "member-7")], "as the person, never the owner"

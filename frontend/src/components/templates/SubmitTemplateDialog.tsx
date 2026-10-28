@@ -237,7 +237,9 @@ export function SubmitTemplateDialog({
           </div>
         ) : locked ? (
           <p className="rounded-lg border bg-muted/40 p-4 text-sm text-muted-foreground">
-            {tpl.status === "approved"
+            {tpl.status === "pending"
+              ? "This version is waiting for Tentoro's review, so it can't be changed now. To change it, open it and press “Take back the request”, make your changes, then send it again."
+              : tpl.status === "approved"
               ? "This version is in the Gallery as it was approved. To change it, save the app as a template again — that makes the next version, which is reviewed in turn."
               : "A newer version of this template is in the Gallery; this one can no longer be submitted."}
           </p>
