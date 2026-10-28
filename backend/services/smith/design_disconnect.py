@@ -33,15 +33,74 @@ from typing import Any, Callable
 DRAWN_BY = frozenset({"figma", "uxpilot"})
 
 
-def disconnect(svc: Any, request: str, *, interpretation: str = "") -> dict[str, Any]:
-    """Remove every design source and every page's frame; commit; say what changed.
+def _owned_by(source: dict, frame: str, sources: list[dict]) -> bool:
+    """Whether a page's `figmaFrame` is a frame of ``source``: named for it
+    (`FIGMA-002/1:2`), or a bare id — which is the first design's that holds
+    it, as `figma_layout.locate` reads it (node ids repeat across files)."""
+    from services.figma.store import split_frame_ref
+
+    sid, node = split_frame_ref(frame)
+    if sid:
+        return sid == str(source.get("id") or "")
+    holder = next((s for s in sources
+                   if any(str(f.get("nodeId") or "") == node for f in s.get("frames") or [])), None)
+    return holder is not None and str(holder.get("id") or "") == str(source.get("id") or "")
+
+
+def which(svc: Any, words: str) -> tuple[str, list[dict]]:
+    """``(source id or "", connected sources)`` — the design ``words`` name, by
+    its id (`FIGMA-002`) or by the link it was connected from."""
+    import re
+
+    from services.figma.url import parse
+
+    sources = [s for s in (svc.doc.get("designSources") or []) if s.get("id")]
+    text = str(words or "")
+    m = re.search(r"\b((?:FIGMA|UXPILOT)-\d{3,})\b", text, re.I)
+    if m:
+        wanted = m.group(1).upper()
+        if any(str(s["id"]) == wanted for s in sources):
+            return wanted, sources
+    for token in re.findall(r"https?://\S+", text):
+        target = parse(token.rstrip(").,"))
+        if target is None:
+            continue
+        for s in sources:
+            if (str(s.get("fileKey") or "") == target.file_key
+                    and str(s.get("nodeId") or "") == str(target.node_id or "")):
+                return str(s["id"]), sources
+    return "", sources
+
+
+def disconnect(svc: Any, request: str, *, interpretation: str = "",
+               source: str = "") -> dict[str, Any]:
+    """Remove one design source (``source``) or every one, and every page's
+    frame from it; commit; say what changed.
 
     Returns ``{"applied": False, "reason"}`` when nothing is connected —
     there is nothing to undo, and a commit with no diff is a version that says
     nothing.
+
+    ONE DESIGN OF SEVERAL. An application may hold several designs now — a
+    second file, or a large file connected a page at a time — and dropping
+    one must leave the others' screens drawn: only pages whose frame belongs
+    to it are unbound, and only their drawn layouts retired.
     """
-    sources = [str(s.get("id") or "") for s in (svc.doc.get("designSources") or [])]
-    bound = [p for p in (svc.doc.get("pages") or []) if p.get("figmaFrame")]
+    connected = [s for s in (svc.doc.get("designSources") or [])]
+    if source:
+        chosen = [s for s in connected if str(s.get("id") or "") == source]
+        if not chosen:
+            return {"applied": False,
+                    "reason": f"no design {source} is connected — connected: "
+                              + (", ".join(str(s.get("id")) for s in connected) or "none")}
+    else:
+        chosen = connected
+    sources = [str(s.get("id") or "") for s in chosen]
+    if source:
+        bound = [p for p in (svc.doc.get("pages") or [])
+                 if p.get("figmaFrame") and _owned_by(chosen[0], str(p["figmaFrame"]), connected)]
+    else:
+        bound = [p for p in (svc.doc.get("pages") or []) if p.get("figmaFrame")]
     if not sources and not bound:
         return {"applied": False, "reason": "no design is connected to this application"}
     before = svc.snapshot()
@@ -49,16 +108,26 @@ def disconnect(svc: Any, request: str, *, interpretation: str = "") -> dict[str,
     for page in bound:
         page.pop("figmaFrame", None)
     layouts = list(svc.doc.get("pageLayouts") or [])
-    kept = [l for l in layouts if str(l.get("composedBy") or "") not in DRAWN_BY]
+    gone = set(unbound)
+    kept = [l for l in layouts
+            if str(l.get("composedBy") or "") not in DRAWN_BY
+            or (source and str(l.get("page") or "") not in gone)]
     dropped = len(layouts) - len(kept)
     svc.doc["pageLayouts"] = kept
-    svc.doc["designSources"] = []
+    remaining = [s for s in connected if str(s.get("id") or "") not in set(sources)]
+    svc.doc["designSources"] = remaining
+    # A MODULE IS NO LONGER A GROUP OF A DESIGN THAT IS GONE. The module and
+    # its pages stay — they are the product — but it stops naming a group.
+    groups = {str(f.get("group") or "") for s in remaining for f in s.get("frames") or []}
+    for module in svc.doc.get("modules") or []:
+        if isinstance(module, dict) and module.get("designGroup") and module["designGroup"] not in groups:
+            module.pop("designGroup", None)
     record = svc.commit(
         user_request=request,
         smith_interpretation=interpretation or (
             f"Disconnected {', '.join(s for s in sources if s) or 'the design'}: "
             f"{len(unbound)} page(s) no longer name a frame and {dropped} drawn "
-            "layout(s) are retired; every screen is composed from the component "
+            "layout(s) are retired; those screens are composed from the component "
             "library."
         ),
         before=before,
@@ -109,13 +178,14 @@ def recompose(svc: Any, plan: list[str], *, request: str, app_root: str,
 
 
 def disconnect_and_recompose(output_dir: str | Path, request: str, *,
-                             reasoning: Callable[..., None] | None = None) -> dict[str, Any]:
+                             reasoning: Callable[..., None] | None = None,
+                             source: str = "") -> dict[str, Any]:
     """The whole move, for a chat turn: load, disconnect, recompose, report."""
     from services.blueprint.service import BlueprintService
     from services.llm_client import tell
 
     svc = BlueprintService.load(output_dir=str(output_dir))
-    out = disconnect(svc, request)
+    out = disconnect(svc, request, source=source)
     if not out.get("applied"):
         return out
     tell(reasoning, (f"Disconnected {', '.join(out['sources']) or 'the design'}; "

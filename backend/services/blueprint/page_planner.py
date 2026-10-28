@@ -2135,7 +2135,7 @@ def reference_frames(doc: dict) -> list[dict]:
     return _screen_frames(doc, specification=False)
 
 
-def frame_slots(frames: list[dict], *, sole: bool = True) -> list[dict]:
+def frame_slots(frames: list[dict], *, sole: bool = True, doc: dict | None = None) -> list[dict]:
     """One slot per designed screen: the design IS the answer space.
 
     THE QUESTION NARROWS; THE ANSWER IS NOT FILTERED. `page_slots` says of its
@@ -2155,9 +2155,14 @@ def frame_slots(frames: list[dict], *, sole: bool = True) -> list[dict]:
         why += (" The entity features below are built around it, not instead "
                 "of it.")
 
+    from services.figma.store import frame_ref
+
+    modules = design_group_modules(doc) if doc is not None else {}
     slots: list[dict] = []
     for frame in frames:
-        node_id = frame["nodeId"]
+        # A SECOND DESIGN'S FRAME NAMES ITS DESIGN. Node ids repeat across
+        # Figma files; `FIGMA-002/1:2` is the one in the second file.
+        node_id = frame_ref(str(frame.get("source") or ""), frame["nodeId"])
         name = str(frame.get("name") or "").strip() or node_id
         # WHAT THE FRAME SHOWS IS WHAT IT IS. Fifteen frames of one real file
         # carried one name, so the planner routed them by position — the
@@ -2179,8 +2184,39 @@ def frame_slots(frames: list[dict], *, sole: bool = True) -> list[dict]:
         }
         if shows:
             slot["shows"] = shows
+        # THE DESIGNER'S GROUP IS THE MODULE. A frame drawn in the Billing
+        # section is a Billing screen; the architect made one module per
+        # group (`modules[].designGroup`), and the page goes in it — which is
+        # what lets a design of hundreds of screens be built a module at a time.
+        group = str(frame.get("group") or "").strip()
+        if group:
+            slot["group"] = group
+            if modules.get(group):
+                slot["module"] = modules[group]
+                slot["prompt"] += (" It is drawn in the design's \u201c%s\u201d group: "
+                                   "its page's `module` is %s." % (group, modules[group]))
         slots.append(slot)
     return slots
+
+
+def design_groups(doc: dict) -> list[str]:
+    """The connected designs' groups, in the order they were drawn — only
+    when there are two or more; one group says nothing about modules."""
+    seen: list[str] = []
+    for source in doc.get("designSources") or []:
+        for frame in source.get("frames") or []:
+            group = str(frame.get("group") or "").strip()
+            if group and frame.get("looksLikeScreen", True) and group not in seen:
+                seen.append(group)
+    return seen if len(seen) >= 2 else []
+
+
+def design_group_modules(doc: dict) -> dict[str, str]:
+    """``{design group: module id}`` from the modules that say which group they are."""
+    groups = set(design_groups(doc))
+    return {str(m.get("designGroup")): str(m.get("id"))
+            for m in _live(doc.get("modules"))
+            if m.get("id") and str(m.get("designGroup") or "") in groups}
 
 
 JOURNEY_PROMPT = (
@@ -2224,7 +2260,7 @@ def page_slots(doc: dict) -> list[dict]:
     # specification.
     designed = specification_frames(doc)
     if designed:
-        return frame_slots(designed)
+        return frame_slots(designed, doc=doc)
 
     entities = (doc.get("data") or {}).get("entities") or []
 
@@ -2301,7 +2337,7 @@ def page_slots(doc: dict) -> list[dict]:
     # survives — but the screens it drew are already answered, so they are
     # stated rather than left to be noticed. First in the list because they
     # are the fixed points the rest is arranged around.
-    return frame_slots(reference_frames(doc), sole=False) + slots
+    return frame_slots(reference_frames(doc), sole=False, doc=doc) + slots
 
 
 _DRAWN_PREAMBLE = (
@@ -2358,9 +2394,11 @@ def page_slot_prompt(doc: dict) -> str:
             "the frame as THAT, never by its position in the list — one real "
             "file had fifteen frames with one layer name and got fourteen wrong "
             "routes. "
-            "Set `figmaFrame` to the frame's `nodeId`, which the slot already "
-            "carries: it is how the screen gets built from the drawing rather "
-            "than composed from components.\n\n"
+            "Set `figmaFrame` to the `figmaFrame` the slot carries, exactly: "
+            "it is how the screen gets built from the drawing rather "
+            "than composed from components. Where a slot carries a `module`, "
+            "the page's `module` is that one — the designer drew it in that "
+            "group.\n\n"
             "Do NOT add pages the design does not show. A list behind a "
             "dashboard's numbers, a form that creates what it displays, a "
             "sign-in — all reasonable, all absent from these frames, and all "

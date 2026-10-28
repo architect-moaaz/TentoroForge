@@ -42,7 +42,8 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Any, Iterable
+import asyncio
+from typing import Any, Callable, Iterable
 
 from services.figma.gateway import FigmaGateway, FigmaGatewayError
 from services.figma.url import FigmaTarget
@@ -67,6 +68,9 @@ class ScreenRef:
     node_id: str
     name: str
     canvas: str = ""
+    #: The Figma section the frame sits in ("Billing", or "Billing / Invoices"
+    #: when sections nest); empty for a frame placed straight on its page.
+    section: str = ""
     width: float = 0.0
     height: float = 0.0
     looks_like_screen: bool = True
@@ -78,6 +82,11 @@ class ScreenRef:
     @property
     def evidence_locator(self) -> str:
         return f"{self.canvas}/{self.name}".strip("/")
+
+    @property
+    def group(self) -> str:
+        """The designer's own grouping: the section, else the Figma page."""
+        return self.section or self.canvas
 
 
 @dataclass(frozen=True)
@@ -185,13 +194,24 @@ _NON_SCREEN = re.compile(
 )
 
 
+#: Screens read per round: the batch a REST request carries, and how often
+#: what has been read is handed to `keep` — so a read that is cut off has
+#: lost at most one round.
+ROUND = 20
+#: Design-context calls in flight at once when the MCP answers with code.
+MCP_CONCURRENCY = 4
+
+
 async def extract(
     gateway: FigmaGateway,
     target: FigmaTarget,
     *,
     source_id: str = "FIGMA-001",
-    max_screens: int = 40,
+    max_screens: int | None = None,
     with_images: bool = True,
+    done: Callable[[str], "ScreenRef | None"] | None = None,
+    keep: Callable[["ScreenRef"], "ScreenRef | None"] | None = None,
+    progress: Callable[[int, int], None] | None = None,
 ) -> DesignReference:
     """Build a :class:`DesignReference` from a live Figma file.
 
@@ -201,6 +221,20 @@ async def extract(
     an empty design, so a step that fails records a gap and the extraction
     continues — but a failure to reach Figma *at all* propagates, because a
     reference built from nothing is not a thin reference, it is a wrong one.
+
+    EVERY FRAME, NOT THE FIRST FORTY. ``max_screens`` was 40 and counted
+    covers and icon sheets against it, so a file of five hundred screens
+    became forty and said nothing about the rest. It is unlimited unless a
+    caller asks, and counts only screens.
+
+    READ IN ROUNDS THAT CAN BE PICKED UP. Screens are read ``ROUND`` at a
+    time — several design-context calls at once, or one REST request for the
+    round — and each finished screen is handed to ``keep``, which may return
+    a lighter copy to hold (its picture moved to disk). ``done`` answers a
+    screen a cut-off read already finished, so asking again carries on
+    instead of starting over. Figma refusing for rate limit or transport
+    stops the read with ``FigmaGatewayError`` rather than marking the rest
+    missing — those are the failures a second try fixes.
     """
     ref = DesignReference(target=target, source_id=source_id)
 
@@ -229,55 +263,37 @@ async def extract(
         ref.gaps.append("file publishes no design variables; tokens must be "
                         "derived from the frames themselves")
 
-    # §44/§53 — structure per screen, and §55 — prototype interactions.
-    for screen in list(ref.screens):
+    # §44/§53 — structure per screen, §55 — prototype interactions, and §53's
+    # render — round by round, each finished screen kept as it lands.
+    pending: list[str] = []
+    for index, screen in enumerate(list(ref.screens)):
         if not screen.looks_like_screen:
             continue
-        context = None
-        try:
-            context = await gateway.call(
-                "get_design_context", file_key=target.file_key,
-                node_id=screen.node_id,
-                # WITHOUT THIS THE SERVER ANSWERS WITH METADATA INSTEAD OF CODE,
-                # silently, whenever the node is large — its own words: "code
-                # should always be returned, instead of returning just metadata
-                # if the output size is too large".
-                #
-                # A real dashboard frame (3902x1975, 104 nested elements) came
-                # back as 139KB of the same `<frame>` markup `get_metadata`
-                # returns. `_structure_from_code` stored it as `code`, so the
-                # reference looked complete and every consumer of it — the
-                # label harvest, the asset list, the whole pixel path, which
-                # parses React JSX — silently had nothing to work with.
-                #
-                # A screen big enough to be worth reproducing is exactly the
-                # screen that trips the size cutoff, so this is not an edge.
-                forceCode=True,
-            )
-        except FigmaGatewayError as exc:
-            # THE CODE PATH IS THE HOSTED MCP'S, AND IT IS GATED TO PARTNERS.
-            # When it will not answer, the REST API still returns the frame's
-            # native node tree, which `build_page_schema` composes into the same
-            # page. So a failure here is not the end of the screen — it is the
-            # cue to fetch the REST node document below.
-            logger.info("[figma] no design context for %s (%s); fetching the "
-                        "REST node tree", screen.name, exc.kind)
-
-        payload = payload_of(context) if context is not None else None
-        if isinstance(payload, str) and payload.strip():
-            _attach_structure(ref, screen, context)   # the hosted MCP's code
+        prior = done(screen.node_id) if done else None
+        if prior is not None:
+            ref.screens[index] = prior
+            _harvest(ref, (prior.structure or {}).get("document"))
             continue
-
-        document = payload if isinstance(payload, dict) else None
-        if document is None:
-            try:
-                document = await gateway.rest_node(
-                    file_key=target.file_key, node_id=screen.node_id)
-            except FigmaGatewayError as exc:
-                ref.gaps.append(f"no structure for {screen.name} ({exc.kind})")
-                continue
-        # Routed through the same seam; its dict branch stores a REST document.
-        _attach_structure(ref, screen, [{"type": "structured", "data": document}])
+        pending.append(screen.node_id)
+    total = sum(1 for s in ref.screens if s.looks_like_screen)
+    read = total - len(pending)
+    state: dict[str, Any] = {"code": None}
+    for start in range(0, len(pending), ROUND):
+        ids = pending[start:start + ROUND]
+        await _read_structures(gateway, ref, target, ids, state)
+        if with_images:
+            await _read_images(gateway, ref, ids)
+        if keep:
+            for nid in ids:
+                screen = ref.screen(nid)
+                if screen is None:
+                    continue
+                lighter = keep(screen)
+                if lighter is not None:
+                    ref.screens[ref.screens.index(screen)] = lighter
+        read += len(ids)
+        if progress:
+            progress(read, total)
 
     # §55 wants navigation, modal relationships and drill-down from prototype
     # links. Generated TSX cannot express them, so when that is all the server
@@ -303,33 +319,154 @@ async def extract(
         # and says nothing about the design, so it is not recorded as a gap.
         pass
 
-    if with_images:
-        await _attach_images(gateway, ref)
-
     return ref
 
 
-async def _attach_images(gateway: FigmaGateway, ref: DesignReference) -> None:
-    """§53 — render each screen, so fidelity is checkable by looking."""
-    for index, screen in enumerate(ref.screens):
-        if not screen.looks_like_screen:
-            continue
+_TRANSIENT = ("rate_limited", "unreachable", "timeout")
+
+
+async def _read_structures(gateway: Any, ref: DesignReference, target: FigmaTarget,
+                           ids: list[str], state: dict[str, Any]) -> None:
+    """One round's structure: the MCP's code where it gives code, else the
+    REST node trees — one request for the round where the gateway can.
+
+    ASKED ONCE WHETHER THE MCP GIVES CODE. Its design context is gated to
+    partners, so in production every ask failed — three attempts per screen,
+    five hundred screens. The first refusal that is not about the frame
+    itself (`tool_error` is) says the server will not answer any frame, and
+    the rest of the file goes straight to the REST API."""
+    rest_ids: list[str] = []
+    use_mcp = state.get("code") is not False and not getattr(gateway, "rest_preferred", False)
+    if use_mcp:
+        sem = asyncio.Semaphore(MCP_CONCURRENCY)
+
+        async def one(node_id: str) -> None:
+            async with sem:
+                if state.get("code") is False:
+                    rest_ids.append(node_id)
+                    return
+                screen = ref.screen(node_id)
+                try:
+                    context = await gateway.call(
+                        "get_design_context", file_key=target.file_key,
+                        node_id=node_id,
+                        # WITHOUT THIS THE SERVER ANSWERS WITH METADATA INSTEAD
+                        # OF CODE, silently, whenever the node is large — its
+                        # own words: "code should always be returned, instead of
+                        # returning just metadata if the output size is too
+                        # large". A real dashboard frame (3902x1975) came back
+                        # as 139KB of `<frame>` markup stored as `code`, and
+                        # every consumer of it silently had nothing to work with.
+                        forceCode=True,
+                    )
+                except FigmaGatewayError as exc:
+                    # THE CODE PATH IS THE HOSTED MCP'S, AND IT IS GATED TO
+                    # PARTNERS. The REST API still returns the frame's native
+                    # node tree, which `build_page_schema` composes into the
+                    # same page — the cue to fetch that, not the end of it.
+                    if exc.kind == "rate_limited":
+                        raise
+                    if exc.kind != "tool_error" and not state.get("code"):
+                        state["code"] = False
+                    logger.info("[figma] no design context for %s (%s); fetching the "
+                                "REST node tree", getattr(screen, "name", node_id), exc.kind)
+                    rest_ids.append(node_id)
+                    return
+                payload = payload_of(context)
+                if isinstance(payload, str) and payload.strip():
+                    state["code"] = True
+                    _attach_structure(ref, ref.screen(node_id), context)  # the MCP's code
+                elif isinstance(payload, dict):
+                    _attach_structure(ref, ref.screen(node_id),
+                                      [{"type": "structured", "data": payload}])
+                else:
+                    rest_ids.append(node_id)
+
+        await asyncio.gather(*(one(n) for n in ids))
+    else:
+        rest_ids = list(ids)
+    if not rest_ids:
+        return
+
+    if hasattr(gateway, "rest_nodes"):
+        docs = await gateway.rest_nodes(file_key=target.file_key, node_ids=rest_ids)
+        for nid in rest_ids:
+            screen = ref.screen(nid)
+            document = docs.get(nid)
+            if screen is None:
+                continue
+            if not document:
+                ref.gaps.append(f"no structure for {screen.name} (tool_error)")
+                continue
+            # Routed through the same seam; its dict branch stores a REST document.
+            _attach_structure(ref, screen, [{"type": "structured", "data": document}])
+        return
+
+    for nid in rest_ids:
+        screen = ref.screen(nid)
         try:
-            blocks = await gateway.call(
-                "get_screenshot",
-                file_key=ref.target.file_key,
-                node_id=screen.node_id,
-            )
+            document = await gateway.rest_node(file_key=target.file_key, node_id=nid)
         except FigmaGatewayError as exc:
-            ref.gaps.append(f"no render for {screen.name} ({exc.kind})")
+            if exc.kind == "rate_limited":
+                raise
+            ref.gaps.append(f"no structure for {screen.name} ({exc.kind})")
             continue
-        image = next((b for b in blocks if b.get("type") == "image"), None)
-        if not image:
-            continue
-        mime = image.get("mimeType") or "image/png"
-        ref.screens[index] = _replace(
-            screen, image=f"data:{mime};base64,{image.get('data', '')}"
-        )
+        _attach_structure(ref, screen, [{"type": "structured", "data": document}])
+
+
+async def _read_images(gateway: Any, ref: DesignReference, ids: list[str]) -> None:
+    """§53 — render one round's screens, so fidelity is checkable by looking.
+
+    From the REST API that is one render request for the round; through the
+    MCP, a screenshot each, several at a time."""
+    import base64
+
+    screens = [s for s in (ref.screen(n) for n in ids) if s is not None and s.looks_like_screen]
+    if not screens:
+        return
+    if getattr(gateway, "rest_preferred", False) and hasattr(gateway, "rest_images"):
+        try:
+            pngs = await gateway.rest_images(file_key=ref.target.file_key,
+                                             node_ids=[s.node_id for s in screens])
+        except FigmaGatewayError as exc:
+            if exc.kind == "rate_limited":
+                raise
+            ref.gaps.extend(f"no render for {s.name} ({exc.kind})" for s in screens)
+            return
+        for screen in screens:
+            data = pngs.get(screen.node_id)
+            if not data:
+                ref.gaps.append(f"no render for {screen.name} (tool_error)")
+                continue
+            ref.screens[ref.screens.index(screen)] = _replace(
+                screen, image="data:image/png;base64," + base64.b64encode(data).decode("ascii"))
+        return
+
+    sem = asyncio.Semaphore(MCP_CONCURRENCY)
+
+    async def one(screen: ScreenRef) -> None:
+        async with sem:
+            try:
+                blocks = await gateway.call(
+                    "get_screenshot",
+                    file_key=ref.target.file_key,
+                    node_id=screen.node_id,
+                )
+            except FigmaGatewayError as exc:
+                if exc.kind == "rate_limited":
+                    raise
+                ref.gaps.append(f"no render for {screen.name} ({exc.kind})")
+                return
+            image = next((b for b in blocks if b.get("type") == "image"), None)
+            if not image:
+                return
+            mime = image.get("mimeType") or "image/png"
+            current = ref.screen(screen.node_id)
+            ref.screens[ref.screens.index(current)] = _replace(
+                current, image=f"data:{mime};base64,{image.get('data', '')}"
+            )
+
+    await asyncio.gather(*(one(s) for s in screens))
 
 
 # ---------------------------------------------------------------------------
@@ -427,10 +564,11 @@ def _nodes_from_markup(text: str) -> dict | None:
     # is kept as one.
     root_is_canvas = _MARKUP_TYPES.get(root.tag.lower()) == "CANVAS"
 
-    def convert(element: Any, depth: int = 0) -> dict:
+    def convert(element: Any, depth: int = 0, held: bool = False) -> dict:
+        # `held`: the parent holds screens — the page, or a section on it.
         attrib = element.attrib
         kind = _MARKUP_TYPES.get(element.tag.lower(), element.tag.upper())
-        if kind == "FRAME" and root_is_canvas and depth > 1:
+        if kind == "FRAME" and root_is_canvas and depth > 1 and not held:
             kind = "GROUP"
         node: dict[str, Any] = {
             "type": kind,
@@ -450,7 +588,8 @@ def _nodes_from_markup(text: str) -> dict | None:
             # Under the name the REST payload uses, so `_screens_from_metadata`
             # reads one field regardless of which server answered.
             node["absoluteBoundingBox"] = box
-        children = [convert(child, depth + 1) for child in element]
+        holds = kind == "CANVAS" or (kind == "SECTION" and (depth <= 1 or held))
+        children = [convert(child, depth + 1, holds) for child in element]
         if children:
             node["children"] = children
         return node
@@ -458,7 +597,54 @@ def _nodes_from_markup(text: str) -> dict | None:
     return convert(root)
 
 
-def _screens_from_metadata(blocks, *, limit: int) -> list[ScreenRef]:
+#: The node types that can be a screen.
+_SCREEN_TYPES = ("FRAME", "COMPONENT", "COMPONENT_SET", "SECTION")
+
+
+def _screen_nodes(payload: Any) -> list[tuple[str, str, dict]]:
+    """``(Figma page, section, node)`` for every node, in document order.
+
+    A SECTION THAT HOLDS SCREENS IS A GROUP, NOT A SCREEN. Large files are
+    organised in sections — Billing here, Onboarding there — and a section
+    was read as one screen, its forty frames demoted to its insides. A
+    section with frames in it now names their group and they are the
+    screens; a section with only drawing in it is still a screen itself."""
+    out: list[tuple[str, str, dict]] = []
+
+    def walk(node: Any, canvas: str, section: str) -> None:
+        if isinstance(node, list):
+            for item in node:
+                walk(item, canvas, section)
+            return
+        if not isinstance(node, dict):
+            return
+        if isinstance(node.get("document"), dict):
+            walk(node["document"], canvas, section)
+            return
+        if isinstance(node.get("nodes"), dict):
+            for entry in node["nodes"].values():
+                walk(entry.get("document", entry) if isinstance(entry, dict) else entry, canvas, section)
+            return
+        kind = str(node.get("type") or "").upper()
+        name = str(node.get("name") or "").strip()
+        kids = [c for c in node.get("children") or [] if isinstance(c, dict)]
+        if kind == "CANVAS":
+            canvas = name
+        if kind == "SECTION" and any(str(c.get("type") or "").upper() in _SCREEN_TYPES for c in kids):
+            inner = f"{section} / {name}" if section and name else (name or section)
+            for child in kids:
+                walk(child, canvas, inner)
+            return
+        if node.get("id"):
+            out.append((canvas, section, node))
+        for child in kids:
+            walk(child, canvas, section)
+
+    walk(payload, "", "")
+    return out
+
+
+def _screens_from_metadata(blocks, *, limit: int | None = None) -> list[ScreenRef]:
     payload = payload_of(blocks)
     if isinstance(payload, str):
         payload = _nodes_from_markup(payload) or payload
@@ -468,24 +654,32 @@ def _screens_from_metadata(blocks, *, limit: int) -> list[ScreenRef]:
         # the same rule applies here or a screen's inner frames read as
         # screens of their own.
         payload = _demote_nested_frames(payload)
-    nodes = _walk_nodes(payload)
 
     screens: list[ScreenRef] = []
-    for canvas, node in nodes:
+    counted = 0
+    for canvas, section, node in _screen_nodes(payload):
         node_type = str(node.get("type") or "").upper()
-        if node_type not in ("FRAME", "COMPONENT", "COMPONENT_SET", "SECTION"):
+        if node_type not in _SCREEN_TYPES:
             continue
         name = str(node.get("name") or "").strip()
         if not name:
             continue
         box = node.get("absoluteBoundingBox") or node.get("boundingBox") or {}
+        looks = not bool(_NON_SCREEN.match(name))
+        # ONLY SCREENS COUNT AGAINST A LIMIT. A cover, an icon sheet and a
+        # styleguide board took three of forty places in a file that had
+        # more screens than places.
+        if limit and looks and counted >= limit:
+            continue
+        counted += looks
         screens.append(ScreenRef(
             node_id=str(node.get("id") or ""),
             name=name,
             canvas=canvas,
+            section=section,
             width=float(box.get("width") or node.get("width") or 0),
             height=float(box.get("height") or node.get("height") or 0),
-            looks_like_screen=not bool(_NON_SCREEN.match(name)),
+            looks_like_screen=looks,
             # THE SCREEN'S GEOMETRY, KEPT. The metadata carries every element's
             # box, auto-layout or not; the design context code does not for
             # auto-layout, and a dashboard whose cards took their size from
@@ -493,8 +687,6 @@ def _screens_from_metadata(blocks, *, limit: int) -> list[ScreenRef]:
             # own coordinates, which is how the crops and the transform read.
             structure={"boxes": _boxes_under(node, box)},
         ))
-        if len(screens) >= limit:
-            break
     return [s for s in screens if s.node_id]
 
 
@@ -513,6 +705,8 @@ def _demote_nested_frames(payload: Any) -> Any:
         return any(has_canvas(c) for c in node.get("children") or [])
 
     def convert(node: dict, below_screen: bool, parent_is_canvas: bool, rootless: bool) -> dict:
+        # `parent_is_canvas` reads "the parent holds screens": a page, or a
+        # section a page holds — a section is how a large file groups them.
         out = dict(node)
         kind = str(node.get("type") or "").upper()
         is_screen_level = parent_is_canvas or (rootless and not below_screen)
@@ -521,7 +715,8 @@ def _demote_nested_frames(payload: Any) -> Any:
         kids = node.get("children") or []
         if kids:
             child_below = below_screen or (kind == "FRAME" and is_screen_level) or kind == "GROUP"
-            out["children"] = [convert(c, child_below, kind == "CANVAS", rootless) if isinstance(c, dict) else c
+            holds = kind == "CANVAS" or (kind == "SECTION" and is_screen_level and not below_screen)
+            out["children"] = [convert(c, child_below, holds, rootless) if isinstance(c, dict) else c
                                for c in kids]
         return out
 
@@ -659,10 +854,22 @@ def _attach_structure(ref: DesignReference, screen: ScreenRef, blocks) -> None:
     # MCP's code string through `jsx_to_schema`. (Spreading the tree's own keys
     # into `structure` left the composer with no `code` and no `document`, so
     # the page silently fell through to A2UI.)
+    # THE BOXES FROM THE FRAME'S OWN TREE. The listing of a large file is a
+    # few levels deep, so it carries the screens' outlines and little of
+    # their insides; the frame's own document has every element.
+    own = payload.get("absoluteBoundingBox") or payload.get("boundingBox")
+    boxes = (_boxes_under(payload, own) if isinstance(own, dict) else []) \
+        or (screen.structure or {}).get("boxes") or []
     ref.screens[index] = _replace(
         screen, structure={"source": "rest_node_document", "document": payload,
-                           "boxes": (screen.structure or {}).get("boxes") or []})
+                           "boxes": boxes})
+    _harvest(ref, payload)
 
+
+def _harvest(ref: DesignReference, payload: Any) -> None:
+    """The components and prototype links a REST node tree carries."""
+    if not isinstance(payload, dict):
+        return
     known = {c.node_id for c in ref.components}
     for _canvas, node in _walk_nodes(payload):
         node_type = str(node.get("type") or "").upper()

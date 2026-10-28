@@ -132,7 +132,7 @@ def test_the_page_contracts_prompt_requires_the_frame_on_those_slots():
     visibly missing."""
     user = build_prompt(_doc(), "page_contracts")[1]
     assert "A DESIGN IS CONNECTED AS A REFERENCE" in user
-    assert "must carry that `nodeId`" in user
+    assert "must carry that `figmaFrame`" in user
     assert "never give one frame to two pages" in user
 
 

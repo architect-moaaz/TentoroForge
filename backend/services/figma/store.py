@@ -1,6 +1,7 @@
 """Where the extracted design lives (PRD §14, §41, §91, §92).
 
-Beside the Blueprint, not inside it — ``.forge/figma/FIGMA-001.json`` — for the
+Beside the Blueprint, not inside it — ``.forge/figma/FIGMA-001.json`` and a
+folder of one file per screen beside it — for the
 same reason ``services.smith.conversation`` keeps the transcript out.
 
 §91 snapshots the entire Blueprint on every accepted change. One Figma
@@ -65,6 +66,30 @@ def next_source_id(doc: dict, provider: str = "figma") -> str:
     return f"{prefix}-{max(used, default=0) + 1:03d}"
 
 
+def frame_ref(source_id: str, node_id: str) -> str:
+    """What `pages[].figmaFrame` holds for a frame of ``source_id``.
+
+    Node ids are unique within one Figma file, not across files — two files
+    both have a `1:2`. With more than one design connected a bare id could
+    name either, so a frame of any design after the first is qualified:
+    `FIGMA-002/1:2`. The first design's frames stay bare, so every page built
+    before a second design could be connected still names its frame."""
+    node_id = str(node_id or "")
+    if not source_id or str(source_id).endswith("-001"):
+        return node_id
+    return f"{source_id}/{node_id}"
+
+
+def split_frame_ref(ref: str) -> tuple[str, str]:
+    """``(source id or "", node id)`` — the inverse of :func:`frame_ref`.
+    Figma node ids never hold a slash."""
+    ref = str(ref or "").strip()
+    head, sep, tail = ref.partition("/")
+    if sep and _ID.match(head):
+        return head, tail
+    return "", ref
+
+
 def source_record(ref: DesignReference, *, name: str = "",
                   treat_as: str = "evidence") -> dict[str, Any]:
     """The Blueprint's ``designSources`` entry for this reference.
@@ -88,6 +113,7 @@ def source_record(ref: DesignReference, *, name: str = "",
                 "nodeId": s.node_id,
                 "name": s.name,
                 "looksLikeScreen": s.looks_like_screen,
+                **({"group": s.group} if getattr(s, "group", "") else {}),
             }
             for s in ref.screens
         ],
@@ -95,26 +121,158 @@ def source_record(ref: DesignReference, *, name: str = "",
     }
 
 
+# ---------------------------------------------------------------------------
+# One file per screen
+# ---------------------------------------------------------------------------
+#
+# A FILE OF FIVE HUNDRED SCREENS IS NOT ONE JSON DOCUMENT. Each screen carries
+# its whole node tree and a rendered PNG, and as one file that was hundreds of
+# megabytes — written whole on every connect and read whole by every page the
+# build composed, twelve at a time. So the reference is an index
+# (`FIGMA-001.json`: the file, the tokens, every screen's name and size) and a
+# folder (`FIGMA-001/screens/`) with each screen's structure in its own JSON
+# and its picture as a PNG beside it. `load` still answers the whole
+# reference; `load_screen` answers one screen without reading the others.
+#
+# The folder is also how a cut-off read carries on: each screen is written the
+# moment it is read (`reader`), and while `reading.json` marks a read of the
+# same file as unfinished, asking again skips what is already there.
+
+LAYOUT = "screens"
+
+
+def _source_dir(output_dir: str | Path, source_id: str) -> Path:
+    return store_dir(output_dir) / source_id
+
+
+def _screens_dir(output_dir: str | Path, source_id: str) -> Path:
+    return _source_dir(output_dir, source_id) / "screens"
+
+
+def _safe(node_id: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_-]", "_", str(node_id)) or "_"
+
+
+def _put_screen(output_dir: str | Path, source_id: str, screen: ScreenRef) -> ScreenRef:
+    """Write one screen's structure and picture; return it with the picture as
+    a path (relative to the store folder) instead of inline bytes."""
+    import base64
+    from dataclasses import replace
+
+    folder = _screens_dir(output_dir, source_id)
+    folder.mkdir(parents=True, exist_ok=True)
+    name = _safe(screen.node_id)
+    image = screen.image or ""
+    if image.startswith("data:") and "," in image:
+        try:
+            (folder / f"{name}.png").write_bytes(base64.b64decode(image.split(",", 1)[1]))
+            image = f"{source_id}/screens/{name}.png"
+        except (ValueError, OSError):
+            image = ""
+    light = replace(screen, image=image)
+    (folder / f"{name}.json").write_text(json.dumps(asdict(light)), "utf-8")
+    return light
+
+
+def _get_screen(output_dir: str | Path, source_id: str, node_id: str) -> ScreenRef | None:
+    path = _screens_dir(output_dir, source_id) / f"{_safe(node_id)}.json"
+    if not path.exists():
+        return None
+    try:
+        return ScreenRef(**json.loads(path.read_text("utf-8")))
+    except (ValueError, TypeError, OSError):
+        return None
+
+
+def reader(output_dir: str | Path, source_id: str, target: FigmaTarget):
+    """``(done, keep, finish, resumed)`` for one read of ``target``.
+
+    ``keep`` writes each screen as it is read; ``done`` answers the screens an
+    unfinished read of the SAME file and node already wrote — a finished
+    earlier read is the design as it was then, and is read again. ``finish``
+    clears the mark once the reference is saved. ``resumed`` counts the
+    screens that will not be read again."""
+    import shutil
+
+    folder = _source_dir(output_dir, source_id)
+    mark = folder / "reading.json"
+    this = {"fileKey": target.file_key, "nodeId": target.node_id or ""}
+    resuming = False
+    if mark.exists():
+        try:
+            resuming = json.loads(mark.read_text("utf-8")) == this
+        except (ValueError, OSError):
+            resuming = False
+    if not resuming:
+        shutil.rmtree(_screens_dir(output_dir, source_id), ignore_errors=True)
+    folder.mkdir(parents=True, exist_ok=True)
+    mark.write_text(json.dumps(this), "utf-8")
+    resumed = len(list(_screens_dir(output_dir, source_id).glob("*.json"))) if resuming else 0
+
+    def done(node_id: str) -> ScreenRef | None:
+        return _get_screen(output_dir, source_id, node_id) if resuming else None
+
+    def keep(screen: ScreenRef) -> ScreenRef:
+        return _put_screen(output_dir, source_id, screen)
+
+    def finish() -> None:
+        mark.unlink(missing_ok=True)
+
+    return done, keep, finish, resumed
+
+
 def save(ref: DesignReference, output_dir: str | Path) -> Path:
-    """Write the full reference. Returns the path written."""
+    """Write the reference: the index, and each screen in its own file.
+    Returns the index path."""
     directory = store_dir(output_dir)
     directory.mkdir(parents=True, exist_ok=True)
+    from dataclasses import replace
+
+    ref.screens = [_put_screen(output_dir, ref.source_id, s) for s in ref.screens]
+    index = _as_dict(ref)
+    index["layout"] = LAYOUT
+    index["screens"] = [asdict(replace(s, structure={}, image=s.image)) for s in ref.screens]
     path = directory / f"{ref.source_id}.json"
-    path.write_text(json.dumps(_as_dict(ref), indent=2), "utf-8")
+    path.write_text(json.dumps(index), "utf-8")
     return path
 
 
-def load(source_id: str, output_dir: str | Path) -> DesignReference | None:
+def _read_index(source_id: str, output_dir: str | Path) -> dict | None:
+    path = store_dir(output_dir) / f"{source_id}.json"
+    if not path.exists():
+        return None
+    return json.loads(path.read_text("utf-8"))
+
+
+def load(source_id: str, output_dir: str | Path, *, screens: bool = True) -> DesignReference | None:
     """Read a stored reference back, or ``None`` if it is not there.
 
     ``None`` rather than raising: a Blueprint restored from a version snapshot
     (§93) legitimately names a source whose payload was never copied, and the
     caller's job is to say so rather than crash.
+
+    ``screens=False`` leaves each screen's structure unread — the names, sizes
+    and groups only, for a caller that wants the shape of a large file.
     """
-    path = store_dir(output_dir) / f"{source_id}.json"
-    if not path.exists():
+    raw = _read_index(source_id, output_dir)
+    if raw is None:
         return None
-    return _from_dict(json.loads(path.read_text("utf-8")))
+    ref = _from_dict(raw)
+    if raw.get("layout") == LAYOUT and screens:
+        ref.screens = [_get_screen(output_dir, source_id, s.node_id) or s for s in ref.screens]
+    return ref
+
+
+def load_screen(source_id: str, node_id: str, output_dir: str | Path) -> ScreenRef | None:
+    """One stored screen, whole, without reading the rest of the file."""
+    raw = _read_index(source_id, output_dir)
+    if raw is None:
+        return None
+    if raw.get("layout") == LAYOUT:
+        if not any(str(s.get("node_id")) == node_id for s in raw.get("screens") or []):
+            return None
+        return _get_screen(output_dir, source_id, node_id)
+    return next((s for s in _from_dict(raw).screens if s.node_id == node_id), None)
 
 
 def connect(svc: Any, ref: DesignReference, *, name: str = "",
@@ -131,13 +289,14 @@ def connect(svc: Any, ref: DesignReference, *, name: str = "",
     # frame carries says which groups and destinations the designer drew, and
     # the agent that authors `navigation.tree` reads it from here. Best-effort:
     # a design with one frame, or frames that share nothing, records none.
-    chrome = _chrome_evidence(ref)
+    trees = _screen_trees(ref)
+    chrome = _chrome_evidence(ref, trees)
     if chrome:
         record["chrome"] = chrome
     # WHAT EACH FRAME SHOWS, so the planner can route it by its identity rather
     # than its position. Read with the shared chrome removed, or every frame's
     # first heading would be the brand.
-    shows = _frame_headings(ref)
+    shows = _frame_headings(ref, trees)
     for frame in record.get("frames") or []:
         heading = shows.get(str(frame.get("nodeId") or ""))
         if heading:
@@ -244,13 +403,13 @@ def _screen_trees(ref: DesignReference) -> dict[str, dict]:
     return trees
 
 
-def _chrome_evidence(ref: DesignReference) -> dict[str, Any]:
+def _chrome_evidence(ref: DesignReference, trees: dict[str, dict] | None = None) -> dict[str, Any]:
     """The rail the screens share, read as brand, groups and destinations."""
     try:
         from services.figma import chrome as _chrome
     except Exception:  # noqa: BLE001
         return {}
-    roots: list[dict] = list(_screen_trees(ref).values())
+    roots: list[dict] = list((trees if trees is not None else _screen_trees(ref)).values())
     shared = _chrome.chrome_for(roots)
     if not shared or not roots:
         return {}
@@ -264,13 +423,13 @@ def _chrome_evidence(ref: DesignReference) -> dict[str, Any]:
     return {"sidebar": {**nav, "drawn": drawn}, "sharedBy": len(roots)}
 
 
-def _frame_headings(ref: DesignReference) -> dict[str, str]:
+def _frame_headings(ref: DesignReference, trees: dict[str, dict] | None = None) -> dict[str, str]:
     """node id -> the first heading the frame shows once its chrome is gone."""
     try:
         from services.figma import chrome as _chrome
     except Exception:  # noqa: BLE001
         return {}
-    trees: dict[str, dict] = _screen_trees(ref)
+    trees = trees if trees is not None else _screen_trees(ref)
     shared = _chrome.chrome_for(list(trees.values()))
 
     def _words(text) -> bool:

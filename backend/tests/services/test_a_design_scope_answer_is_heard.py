@@ -37,7 +37,7 @@ def test_the_model_is_told_the_verb_takes_the_answer():
 def connected(monkeypatch):
     calls: list[dict] = []
 
-    def connect(output_dir, *, figma_url, token_env, treat_as):
+    def connect(output_dir, *, figma_url, token_env, treat_as, **_kw):
         calls.append({"figma_url": figma_url, "token_env": token_env, "treat_as": treat_as})
         return {"summary": f"Pulled in 6 frames as the {treat_as}."}
     monkeypatch.setattr("services.smith.figma_connect.connect", connect)

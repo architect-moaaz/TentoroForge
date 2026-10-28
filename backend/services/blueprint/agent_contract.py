@@ -1521,6 +1521,41 @@ def check_navigation(result: "AgentResult", doc: dict | None = None) -> None:
         raise InvalidNavigation(_all_of(problems))
 
 
+class InvalidDesignModules(AuthorRefusal):
+    """A module set that leaves one of the design's groups without a module."""
+
+
+def check_design_modules(result: "AgentResult", doc: dict | None = None) -> None:
+    """Every group the connected design is drawn in has its module.
+
+    The groups are the designer's own (`designSources[].frames[].group`): a
+    module per group is how a design of hundreds of screens is built a module
+    at a time. Checked on an answer that proposes the module set (two or more
+    modules) — a one-module edit is not asked about groups it never touched —
+    and a `designGroup` naming no group is refused whatever the answer."""
+    from services.blueprint.page_planner import design_groups
+
+    proposed = [p.body for p in result.proposals
+                if p.section == "modules" and isinstance(p.body, dict)]
+    if not proposed:
+        return
+    groups = design_groups(doc or {})
+    named = {str(b.get("designGroup") or "").strip() for b in proposed} - {""}
+    problems = [f"modules: designGroup \"{g}\" is not one of the design's groups "
+                f"({', '.join(groups) or 'it has none'}) — use a group's exact name or leave it out"
+                for g in sorted(named - set(groups))]
+    if len(proposed) >= 2 and groups:
+        have = named | {str(m.get("designGroup") or "").strip()
+                        for m in (doc or {}).get("modules") or [] if isinstance(m, dict)}
+        missing = [g for g in groups if g not in have]
+        if missing:
+            problems.append("modules: the design is drawn in groups with no module: "
+                            + ", ".join(f"\"{g}\"" for g in missing)
+                            + " — give each its own module with `designGroup` set to that exact name")
+    if problems:
+        raise InvalidDesignModules(_all_of(problems))
+
+
 class InvalidOwnershipRule(AuthorRefusal):
     """An ownership rule the data engine could not apply as written."""
 
@@ -2780,7 +2815,7 @@ def apply_agent_result(
     for check in (check_workflow_triggers, check_integrations, check_audit, check_tenancy, check_sign_in,
                   check_mobile, check_requirements, check_business_rules, check_entity_fields,
                   check_page_content, check_page_access, check_role_doors, check_navigation,
-                  check_analytics, check_flows, check_security):
+                  check_analytics, check_flows, check_security, check_design_modules):
         run(check, result, svc.doc)
     if refusals:
         raise refusals[0] if len(refusals) == 1 else SeveralRefusals(refusals)

@@ -32,16 +32,31 @@ from services.figma.reference import DesignReference
 #: Labels per screen. Enough for a screen's vocabulary to be legible; beyond
 #: this it is table rows and placeholder copy, which say nothing new.
 _MAX_LABELS = 40
+#: Labels for the whole design, and the fewest a screen keeps. Forty labels on
+#: each of five hundred screens is twenty thousand — a brief no single call
+#: can read — so a large design shares this budget across its screens.
+_LABEL_BUDGET = 4000
+_MIN_LABELS = 6
 
 
-def screen_entry(screen: Any) -> dict[str, Any]:
+def labels_per_screen(count: int) -> int:
+    """How many labels each screen of a ``count``-screen design keeps."""
+    if count <= 0:
+        return _MAX_LABELS
+    return max(_MIN_LABELS, min(_MAX_LABELS, _LABEL_BUDGET // count))
+
+
+def screen_entry(screen: Any, max_labels: int = _MAX_LABELS) -> dict[str, Any]:
     structure = screen.structure or {}
-    labels = list(structure.get("labels") or [])[:_MAX_LABELS]
+    labels = list(structure.get("labels") or [])[:max_labels]
     entry: dict[str, Any] = {
         "nodeId": screen.node_id,
         "name": screen.name,
         "canvas": screen.canvas,
     }
+    group = getattr(screen, "group", "")
+    if group:
+        entry["group"] = group
     if screen.width:
         entry["size"] = f"{int(screen.width)}x{int(screen.height)}"
     if labels:
@@ -59,7 +74,7 @@ def design_brief(ref: DesignReference) -> dict[str, Any]:
         "provider": ref.provider or "figma",
         "file": ref.target.describe(),
         "counts": ref.summary(),
-        "screens": [screen_entry(s) for s in screens],
+        "screens": [screen_entry(s, labels_per_screen(len(screens))) for s in screens],
         # Recorded separately so the agent can see what was deliberately not
         # treated as a screen, and disagree — §49 keeps inference reviewable
         # rather than deciding it upstream.

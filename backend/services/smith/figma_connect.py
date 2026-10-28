@@ -92,6 +92,17 @@ def summarise(ref: Any, record: dict) -> str:
     if named:
         lines += ["", "Screens: " + ", ".join(named[:12])
                   + (f" and {len(named) - 12} more" if len(named) > 12 else "")]
+    # THE DESIGNER'S GROUPS, which become the modules — so a large file can be
+    # built a part at a time, and the person sees the parts before the build.
+    groups: dict[str, int] = {}
+    for s in ref.screens:
+        if getattr(s, "looks_like_screen", False) and getattr(s, "group", ""):
+            groups[s.group] = groups.get(s.group, 0) + 1
+    if len(groups) >= 2:
+        lines += ["", f"Drawn in {len(groups)} groups, each of which becomes a module you "
+                  "can build on its own: "
+                  + ", ".join(f"{g} ({n})" for g, n in list(groups.items())[:15])
+                  + (f" and {len(groups) - 15} more" if len(groups) > 15 else "")]
     if ref.gaps:
         lines += ["", "What the design does not answer:"]
         lines += [f"  - {g}" for g in ref.gaps[:6]]
@@ -115,9 +126,27 @@ def summarise(ref: Any, record: dict) -> str:
     return "\n".join(lines)
 
 
+def source_id_for(doc: dict, target: Any) -> str:
+    """The id this link is connected under.
+
+    THE SAME FILE AND NODE AGAIN IS THE SAME SOURCE — reconnecting refreshes
+    it. ANOTHER LINK IS ANOTHER SOURCE. Every connect used to be `FIGMA-001`,
+    so a second file, or a second page of a file too large to take whole,
+    replaced the first: an application could hold one design."""
+    from services.figma.store import next_source_id
+
+    for source in doc.get("designSources") or []:
+        if (str(source.get("type") or "figma") == "figma"
+                and str(source.get("fileKey") or "") == target.file_key
+                and str(source.get("nodeId") or "") == str(target.node_id or "")):
+            return str(source.get("id"))
+    return next_source_id(doc, "figma")
+
+
 def connect(output_dir: Any, *, figma_url: str, token_env: str,
             treat_as: str = "evidence",
-            max_screens: int = 40, with_images: bool = True) -> dict[str, Any]:
+            max_screens: int | None = None, with_images: bool = True,
+            progress: Any = None) -> dict[str, Any]:
     """Extract the design and attach it to the Blueprint.
 
     Returns ``{"record": <designSources entry>, "summary": <text>}``.
@@ -173,9 +202,21 @@ def connect(output_dir: Any, *, figma_url: str, token_env: str,
         resolver=resolver,
         endpoint=endpoint_from(values),
     )
+    from services.figma.store import reader
+
+    source_id = source_id_for(svc.doc, target)
+    done, keep, finish, resumed = reader(output_dir, source_id, target)
+    state = {"read": resumed, "total": 0}
+
+    def _progress(read: int, total: int) -> None:
+        state.update(read=read, total=total)
+        if progress:
+            progress(read, total)
+
     try:
-        ref = _run(extract(gateway, target, max_screens=max_screens,
-                           with_images=with_images))
+        ref = _run(extract(gateway, target, source_id=source_id,
+                           max_screens=max_screens, with_images=with_images,
+                           done=done, keep=keep, progress=_progress))
     except FigmaCredentialError as exc:
         # Names the reference, never the value — that is the whole point of the
         # credential being a reference.
@@ -184,11 +225,27 @@ def connect(output_dir: Any, *, figma_url: str, token_env: str,
             f"in the environment the backend runs in, then ask me again."
         ) from exc
     except FigmaGatewayError as exc:
+        # A READ CUT OFF PART WAY IS KEPT. Every screen read so far is on
+        # disk, and asking again carries on from there (`store.reader`).
+        if exc.kind in ("rate_limited", "unreachable", "timeout") and state["read"]:
+            raise FigmaConnectError(
+                f"Figma stopped answering after {state['read']} of {state['total'] or 'the'} "
+                f"screens ({exc.kind}). What was read is kept — ask me to connect the same "
+                f"link again in a few minutes and I'll carry on from there."
+            ) from exc
         # `.detail` is already redacted by the gateway.
         raise FigmaConnectError(f"Figma {exc.kind}: {exc.detail}") from exc
 
     record = attach(svc, ref, treat_as=treat_as)
-    return {"record": record, "summary": summarise(ref, record)}
+    finish()
+    summary = summarise(ref, record)
+    others = [str(s.get("id")) + (f" ({s.get('name') or s.get('url') or s.get('fileKey')})")
+              for s in svc.doc.get("designSources") or [] if s.get("id") != record.get("id")]
+    if others:
+        summary += ("\n\nThis application now holds " + str(len(others) + 1) + " designs — "
+                    "the others: " + ", ".join(others) + ". Each builds its own screens; "
+                    "say “disconnect " + str(record.get("id")) + "” to drop just this one.")
+    return {"record": record, "summary": summary, "resumed": resumed}
 
 
 _FIGMA_URL_RE = re.compile(r"https?://(?:www\.)?figma\.com/(?:file|design|board)/[^\s<>\"')]+")
