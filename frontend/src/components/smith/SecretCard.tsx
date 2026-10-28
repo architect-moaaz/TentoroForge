@@ -70,8 +70,14 @@ export function SecretCard({
         const body = (await res.json().catch(() => null)) as { detail?: unknown } | null;
         const detail = typeof body?.detail === "string" ? body.detail.trim() : "";
         setState("error");
+        // A 403 is either not being an admin, or integrations switched off for the organisation;
+        // the server says which (`features.disabled_message`), and "ask an admin" is wrong for the
+        // second: an admin cannot turn it on either (PR #34 review).
+        const featureOff = res.status === 403 && /not enabled for your organisation/i.test(detail);
         setError(
-          res.status === 403
+          featureOff
+            ? `${detail} You can build with the Forge UI Designer instead.`
+            : res.status === 403
             ? "Only an organisation admin can save integration keys. Ask an admin, or build with the Forge UI Designer instead."
             : detail && detail.length < 300
               ? `The key could not be saved: ${detail} You can build with the Forge UI Designer instead.`

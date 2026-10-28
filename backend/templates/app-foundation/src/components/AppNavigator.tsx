@@ -184,7 +184,15 @@ export function AppNavigator({ children }: { children: React.ReactNode }) {
       if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
       const a = (e.target as Element | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
       if (!a || (a.target && a.target !== "_self") || a.hasAttribute("download") || a.hasAttribute("data-hard-nav")) return;
-      const href = a.getAttribute("href") || "";
+      let href = a.getAttribute("href") || "";
+      // AN ANCHOR THAT ALREADY CARRIES THE BASE PATH (`${NEXT_PUBLIC_BASE_PATH}/connect-ai`) is
+      // given to the router without it: `router.push` adds the base path itself, and twice is a
+      // 404 under the Preview tab's prefix (PR #34 review).
+      const base = (process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/+$/, "");
+      if (base && (href === base || href.startsWith(`${base}/`) || href.startsWith(`${base}?`))) {
+        href = href.slice(base.length) || "/";
+        if (!href.startsWith("/")) href = `/${href}`;
+      }
       // Same-site paths only: not external, a hash, mailto:, an API route or an asset.
       if (!href.startsWith("/") || href.startsWith("//") || /^\/(api|_next)(\/|$)/.test(href)) return;
       e.preventDefault();

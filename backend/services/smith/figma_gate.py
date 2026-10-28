@@ -259,7 +259,18 @@ def handle(svc: Any, output_dir: Any, *, link: str = "", choice: str = "",
     """One Figma step: a link was given, a way forward was chosen, or a connected design needs its check.
 
     ``connect`` and ``client`` are the two things that reach the network; they are parameters so the
-    flow is tested without either."""
+    flow is tested without either.
+
+    THE CHECK IS SPEND. It runs from the chat route, outside any Smith turn, so its model calls
+    belonged to no usage scope and never reached the organisation's ledger (PR #34 review)."""
+    from services.build_usage import usage_scope
+
+    with usage_scope(agent="figma_coverage", output_dir=str(output_dir or ""), phase="define", kind="smith"):
+        return _handle(svc, output_dir, link=link, choice=choice, client=client, connect=connect)
+
+
+def _handle(svc: Any, output_dir: Any, *, link: str = "", choice: str = "",
+            client: Any = None, connect: Callable[[Any, str], None] | None = None) -> Outcome:
     from services.smith.figma_connect import FigmaConnectError
 
     do_connect = connect or _connect

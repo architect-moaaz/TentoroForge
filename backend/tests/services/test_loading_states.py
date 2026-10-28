@@ -82,6 +82,9 @@ def test_plain_anchors_in_the_shell_navigate_softly():
     assert "router.push(href)" in source
     assert "e.defaultPrevented" in source, "next/link already handles its own clicks"
     assert "(api|_next)" in source, "an API route or an asset is never a page"
+    # An anchor that already carries the base path (`${NEXT_PUBLIC_BASE_PATH}/connect-ai`) is
+    # pushed without it: `router.push` adds it, and twice is a 404 under the Preview prefix.
+    assert "href = href.slice(base.length)" in source and "NEXT_PUBLIC_BASE_PATH" in source
 
 
 def test_the_root_loading_state_is_the_shape_of_the_app_not_a_card():

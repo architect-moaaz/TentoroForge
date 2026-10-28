@@ -71,9 +71,12 @@ const config: Config = {
         card: { DEFAULT: "hsl(var(--card))", foreground: "hsl(var(--card-foreground))" },
       },
       // The design's families (tokens.css): `font-heading` for titles, `font-sans` for the body.
+      // A var() WITH A FALLBACK: an app whose design names no body face has no
+      // `--font-body`, and a bare var() makes the whole font-family invalid at
+      // computed time, so every page fell back to the browser's serif (PR #34 review).
       fontFamily: {
-        sans: ["var(--font-body)", "ui-sans-serif", "system-ui", "sans-serif"],
-        heading: ["var(--font-heading)", "var(--font-body)", "ui-sans-serif", "system-ui", "sans-serif"],
+        sans: ["var(--font-body, ui-sans-serif)", "ui-sans-serif", "system-ui", "sans-serif"],
+        heading: ["var(--font-heading, var(--font-body, ui-sans-serif))", "ui-sans-serif", "system-ui", "sans-serif"],
       },
       borderRadius: {
         lg: "var(--radius)",

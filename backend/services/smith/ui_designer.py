@@ -140,6 +140,39 @@ def is_question(text: str) -> bool:
     return _MARK in (text or "")
 
 
+#: A reply longer than this is a new request, not an answer to the question.
+_SHORT_REPLY = 10
+#: "the first one", "option 2": the cards are shown in OPTIONS order.
+_ORDINALS: dict[str, str] = {"first": FORGE, "1": FORGE, "1st": FORGE, "second": UXPILOT, "2": UXPILOT,
+                             "2nd": UXPILOT, "third": FIGMA, "3": FIGMA, "3rd": FIGMA}
+#: "not figma", "don't use UX Pilot": a designer named to be refused is not chosen.
+_REFUSALS = frozenset({"not", "no", "dont", "don", "never", "without"})
+
+
+def named(message: str) -> str:
+    """The one designer a short reply names — "Let's use UX Pilot", "figma please", "the first
+    one" — or "" when it names none, more than one, or refuses the one it names.
+
+    THE ANSWER IS THE PERSON'S WORDS, NOT ONLY THE BUTTON'S. Only the exact option text was
+    heard, so "Let's use UX Pilot" fell through to the loop, which has no verb that sets the
+    designer, and the next "build" asked again (PR #34 review) — the loop the Figma
+    "specification or reference" question had on forge-v3."""
+    text = _norm(message)
+    words = text.split()
+    if not words or len(words) > _SHORT_REPLY:
+        return ""
+    exact = _ANSWERS.get(text)
+    if exact:
+        return exact
+    padded = f" {text} "
+    found = {choice for alias, choice in _ANSWERS.items() if f" {alias} " in padded}
+    if not found and len(words) <= 4:
+        found = {_ORDINALS[w] for w in words if w in _ORDINALS}
+    if len(found) != 1 or any(w in _REFUSALS for w in words):
+        return ""
+    return found.pop()
+
+
 def answer_in(message: str, history: Iterable[tuple[str, str]]) -> str:
     """``forge`` / ``uxpilot`` when ``message`` answers the question Smith just
     asked, else "". The turn immediately before must be the question: the
@@ -153,10 +186,13 @@ def answer_in(message: str, history: Iterable[tuple[str, str]]) -> str:
     from services.smith import figma_gate
 
     if is_key_prompt(text) or figma_gate.is_prompt(text) or figma_gate.is_check_pending(text):
-        return FORGE if _norm(message) == _norm(USE_FORGE_INSTEAD) else ""
+        # A change of mind at the key or design step: "use Forge instead", or another designer named.
+        if _norm(message) == _norm(USE_FORGE_INSTEAD):
+            return FORGE
+        return named(message)
     if not is_question(text):
         return ""
-    return _ANSWERS.get(_norm(message), "")
+    return named(message)
 
 
 def record(svc: Any, choice: str, *, reason: str = "Chosen at the approval gate.") -> str:
@@ -239,9 +275,15 @@ def key_prompt() -> dict[str, Any]:
 
 def _platform_default() -> bool:
     """An operator who set `FORGE_UI_DESIGNER` has decided for every application on the platform."""
+    return bool(_platform_choice())
+
+
+def _platform_choice() -> str:
+    """``forge`` / ``uxpilot`` as the platform's `FORGE_UI_DESIGNER` sets it, else ""."""
     import os
 
-    return os.environ.get("FORGE_UI_DESIGNER", "").strip().lower() in (FORGE, UXPILOT)
+    value = os.environ.get("FORGE_UI_DESIGNER", "").strip().lower()
+    return value if value in (FORGE, UXPILOT) else ""
 
 
 def gate(doc: dict, output_dir: Any) -> dict[str, Any] | None:
@@ -252,7 +294,11 @@ def gate(doc: dict, output_dir: Any) -> dict[str, Any] | None:
     design was checked and falls short of the requirements and the person has not said what to do."""
     if undecided(doc) and not _platform_default():
         return {"text": question(doc), "options": list(OPTIONS), "status": "asked"}
-    if chosen(doc) == UXPILOT and not configured(output_dir):
+    # THE PLATFORM'S CHOICE IS A CHOICE TOO. With `FORGE_UI_DESIGNER=uxpilot` and no key saved,
+    # nothing was recorded on the application, this was skipped, and every page was quietly written
+    # by Forge with only a step line saying so (PR #34 review). The key is asked for the same way.
+    defined = bool(_live(doc.get("requirements")) or live_pages(doc))
+    if (chosen(doc) or (_platform_choice() if defined else "")) == UXPILOT and not configured(output_dir):
         return key_prompt()
     if chosen(doc) == FIGMA:
         from services.smith import figma_gate

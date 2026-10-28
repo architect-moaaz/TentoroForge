@@ -834,6 +834,19 @@ def app_designs(doc: dict, output_dir: str | Path, *, gateway: Any = None) -> di
     return out
 
 
+def _app_digest_for(doc: dict, page_id: str) -> str:
+    """The digest of the app-run prompt the page's batch is drawn from today (`app_designs`), or ""."""
+    try:
+        pages = design_pages(doc)
+        for batch in prompt_batches(doc, pages):
+            if any(str(p.get("id")) == page_id for p in batch):
+                prompt = fit_prompt(doc, batch) or app_prompt_for(doc, batch, level=len(_PROMPT_LEVELS) - 1)
+                return brief_hash(prompt)
+    except Exception:  # noqa: BLE001 - no digest means no reuse, never a failure
+        logger.debug("[uxpilot] app digest for %s could not be worked out", page_id, exc_info=True)
+    return ""
+
+
 def generate(svc: Any, page: dict, *, gateway: Any = None, feedback: str = "") -> GeneratedDesign:
     """The page's design: from the ledger when its brief is unchanged, else
     from UX Pilot. Raises :class:`GenerationFailed` with the reason."""
@@ -845,9 +858,13 @@ def generate(svc: Any, page: dict, *, gateway: Any = None, feedback: str = "") -
     digest = brief_hash(prompt)
 
     prior = ledger_entry(svc.output_dir, page_id)
-    if prior and prior.get("briefHash") == digest and prior.get("html") and not feedback:
+    # THE APP RUN'S DRAWING IS THIS PAGE'S DRAWING. The build draws every page in one run and keys
+    # each page's entry by that run's prompt (`app_designs`), never by this page's own; checked
+    # only against the page's prompt, a recompose of an unchanged page paid for another run
+    # (PR #34 review). A redraw the person asked for (`feedback`) is the one that pays.
+    if prior and prior.get("html") and not feedback and prior.get("briefHash") in (digest, _app_digest_for(svc.doc, page_id)):
         return GeneratedDesign(page_id=page_id, design_id=str(prior.get("designId") or ""),
-                               html=str(prior["html"]), prompt=prompt,
+                               html=str(prior["html"]), prompt=str(prior.get("prompt") or prompt),
                                preview_url=str(prior.get("previewUrl") or ""), reused=True)
 
     gw = gateway or gateway_for(svc.output_dir)
