@@ -147,6 +147,13 @@ def test_projects_do_not_wait_for_each_other(tmp_path):
     (["Task", "Task Detail"], "Task Detail", ["Task Detail"], "Task Detail"),
     # a partial match with nobody else claiming the screen is still accepted
     (["Tasks"], "Tasks", ["App - Tasks board"], "App - Tasks board"),
+    # UX Pilot squeezes the spaces out of a title (seen on a live run: "PocketPantry - MyPantry")
+    (["My Pantry", "Recipe Ideas"], "My Pantry", ["PocketPantry - RecipeIdeas", "PocketPantry - MyPantry"],
+     "PocketPantry - MyPantry"),
+    (["My Pantry", "Recipe Ideas"], "Recipe Ideas", ["PocketPantry - MyPantry", "PocketPantry - RecipeIdeas"],
+     "PocketPantry - RecipeIdeas"),
+    # squeezed, and a longer sibling still keeps its own screen
+    (["Task", "Task Detail"], "Task", ["App - TaskDetail"], None),
 ])
 def test_a_screen_goes_to_the_page_it_was_drawn_for(names, page, screens, expected):
     pages = [{"id": f"P{i}", "name": n} for i, n in enumerate(names)]

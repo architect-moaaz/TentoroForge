@@ -714,24 +714,35 @@ def _screen_for(page: dict, screens: list[dict], taken: set[str], others: Iterab
     to a LONGER sibling page ("Task Detail" beside a page called "Task") is not offered to the shorter
     one: matching in screen order gave "Task" the screen drawn for "Task Detail". ``others`` are the
     other pages' names in the same batch."""
-    want = _norm(page.get("name") or page.get("id"))
+    free = [sc for sc in screens if sc["designId"] not in taken]
+    # THE TITLE AS DRAWN FIRST, THEN WITH THE SPACES TAKEN OUT: UX Pilot titles a screen "PocketPantry -
+    # MyPantry" for a page called "My Pantry" (seen on a live run), which no spaced comparison matches.
+    for norm, sep in ((_norm, " "), (_squashed, "")):
+        found = _pick_screen(norm, sep, page, free, others)
+        if found is not None:
+            return found
+    return None
+
+
+def _pick_screen(norm: Any, sep: str, page: dict, free: list[dict], others: Iterable[str]) -> dict | None:
+    want = norm(page.get("name") or page.get("id"))
     if not want:
         return None
-    longer = [o for o in (_norm(x) for x in others) if o and o != want and want in o]
+    longer = [o for o in (norm(x) for x in others) if o and o != want and want in o]
 
     def claimed(title: str) -> bool:
-        return any(o == title or o in title for o in longer)
+        # also with the spaces out, or "TaskDetail" would not read as the longer sibling's "Task Detail"
+        return any(o == title or o in title or _squashed(o) in _squashed(title) for o in longer)
 
-    free = [sc for sc in screens if sc["designId"] not in taken]
     for sc in free:
-        if _norm(sc.get("title")) == want:
+        if norm(sc.get("title")) == want:
             return sc
     for sc in free:
-        title = _norm(sc.get("title"))
-        if (title.endswith(" " + want) or title.startswith(want + " ")) and not claimed(title):
+        title = norm(sc.get("title"))
+        if (title.endswith(sep + want) or title.startswith(want + sep)) and not claimed(title):
             return sc
     for sc in free:
-        title = _norm(sc.get("title"))
+        title = norm(sc.get("title"))
         if want in title and not claimed(title):
             return sc
     return None
@@ -873,6 +884,11 @@ _BUTTON_TYPES = ("Button", "IconButton")
 
 def _norm(text: Any) -> str:
     return re.sub(r"[^a-z0-9]+", " ", str(text or "").lower()).strip()
+
+
+def _squashed(text: Any) -> str:
+    """``_norm`` with the spaces taken out: "PocketPantry - MyPantry" and "My Pantry" meet here."""
+    return _norm(text).replace(" ", "")
 
 
 def _stamp_ids(root: dict) -> None:
