@@ -337,3 +337,12 @@ def test_a_figma_node_response_keeps_its_style_names(monkeypatch):
     monkeypatch.setattr(figma_client, "_get", get)
     out = asyncio.run(figma_client.fetch_figma_nodes("KEY", ["1:1"], "token"))
     assert out["1:1"]["_styles"] == {"S:1": {"name": "Primary/600"}}
+
+
+def test_a_pill_is_not_the_corner_every_card_gets():
+    from services.figma.styles import scales
+
+    doc = {"type": "FRAME", "children": [{"type": "FRAME", "cornerRadius": 999} for _ in range(9)]
+           + [{"type": "FRAME", "cornerRadius": 8} for _ in range(4)]}
+    radius = scales([doc])["radius"]
+    assert radius["md"] == "8px" and radius["full"] == "9999px"

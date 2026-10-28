@@ -20,6 +20,8 @@ from services.figma.react_reference import _fill, _walk
 
 #: A value must recur this often to be part of a scale rather than a one-off.
 MIN_USES = 3
+#: A corner radius this large rounds any control into a pill.
+PILL = 100
 
 
 def _documents(screens: Iterable[Any]) -> list[dict]:
@@ -95,10 +97,19 @@ def scales(documents: list[dict]) -> dict[str, dict[str, str]]:
                     if style.get("lineHeightPx"):
                         lines[(size, int(round(float(style["lineHeightPx"]))))] += 1
     out: dict[str, dict[str, str]] = {}
-    radius = _scale(radii, ("sm", "md", "lg", "xl"))
+    # A PILL IS NOT A CORNER. A radius past half of any control's height draws
+    # a fully rounded shape, and pills are what a design draws most often —
+    # one real file's commonest radius was 999, which as `--radius` made every
+    # card and input a capsule. They are `full`; the scale is the rest.
+    pills = sum(n for v, n in radii.items() if v >= PILL)
+    corners = Counter({v: n for v, n in radii.items() if v < PILL})
+    radius = _scale(corners, ("sm", "md", "lg", "xl"))
     if radius:
         # `--radius` is the one components ask for: the corner drawn most.
-        radius["md"] = f"{radii.most_common(1)[0][0]}px"
+        radius["md"] = f"{corners.most_common(1)[0][0]}px"
+    if pills >= MIN_USES:
+        radius["full"] = "9999px"
+    if radius:
         out["radius"] = radius
     space = _scale(spacing, ("xs", "sm", "md", "lg", "xl", "2xl"))
     if space:
