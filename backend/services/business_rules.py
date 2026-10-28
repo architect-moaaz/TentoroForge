@@ -436,6 +436,12 @@ _ACTION_SAID = {
 }
 
 
+def _or_list(items: list[str]) -> str:
+    """"travel, meals or office"."""
+    items = [str(i) for i in items]
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " or " + items[-1] if items else ""
+
+
 def _human(field: str) -> str:
     return re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", field).lower()
 
@@ -474,7 +480,9 @@ def _condition_problems(when: str, ent: dict | None) -> list[str]:
         if kinds.get(name) == "enum":
             choices = [str(v) for v in _enum_values(fields[name])]
             for val in re.findall(r'"((?:[^"\\]|\\.)*)"', m.group(2)):
-                if val not in choices:
+                if val == "":
+                    out.append(f"Choose a value for {_human(name)} ({_or_list(choices)}).")
+                elif val not in choices:
                     out.append(f"“{val}” is not one of {_human(name)}’s choices ({', '.join(choices)}).")
     # Patterns: written in the rule, valid in the app's engine, never one that can take forever.
     for m in re.finditer(r'\bmatches\s*\(\s*[^,()]+,\s*("(?:[^"\\]|\\.)*"|[^)]*)\s*\)', when):
@@ -542,6 +550,8 @@ def _comparison_problem(name: str, k: str, op: str, right: str, rk: tuple, field
         return f"{what} is {kind_word}; it is compared with {shown[:40]}, which is not."
     if k == "enum" and rk[0] == "literal" and op in ("=", "!="):
         choices = [str(v) for v in _enum_values(fields[name])]
+        if rk[2] == "":
+            return f"Choose a value for {_human(name)} ({_or_list(choices)})."
         if rk[2] not in choices:
             return f"“{rk[2]}” is not one of {_human(name)}’s choices ({', '.join(choices)})."
     return None

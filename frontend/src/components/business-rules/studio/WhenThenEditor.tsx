@@ -175,7 +175,7 @@ export function WhenThenEditor({
         <label className="block space-y-1">
           <span className="text-xs font-medium">Describe the rule in one sentence <span className="font-normal text-muted-foreground">(optional — if you leave it empty, or change the rule and leave this as it was, Forge writes it to match)</span></span>
           <Textarea className="min-h-[48px] text-sm" disabled={disabled} value={draft.statement ?? ""}
-                    placeholder="An expense above 5000 needs a manager note."
+                    placeholder="Say in one sentence what the rule does."
                     onChange={(e) => onChange({ ...draft, statement: e.target.value })} />
         </label>
         <button type="button" onClick={() => setAdvanced(!advanced)} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">

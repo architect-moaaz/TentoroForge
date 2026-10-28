@@ -555,7 +555,7 @@ function RuleSheet({ projectId, draft, setDraft, views, catalogue, model, buildi
             <SheetTitle className="sr-only">{nameOf || "New rule"}</SheetTitle>
             <SheetDescription className="sr-only">Edit a business rule</SheetDescription>
             <input value={nameOf} onChange={(e) => setName(e.target.value)} disabled={draft.kind === "prerequisite"}
-                   placeholder={draft.kind === "decision_table" ? "Give it a name — e.g. Category by amount" : "Give it a name — e.g. Big expenses need a note"}
+                   placeholder={draft.kind === "decision_table" ? "Give it a name — e.g. Category by amount" : "Give it a name — e.g. Large amounts need approval"}
                    aria-label="Rule name" className="w-full bg-transparent text-lg font-semibold outline-none placeholder:text-muted-foreground/60" />
             <p className="text-xs text-muted-foreground">
               {{ condition_action: "If → then rule", decision_table: "Table rule", statement: "Note — the app doesn’t check it", prerequisite: "Set up by Smith" }[draft.kind]}
@@ -587,31 +587,15 @@ function RuleSheet({ projectId, draft, setDraft, views, catalogue, model, buildi
         {/* Wide: editor and side panel scroll on their own. Narrow: one column, one scroll. */}
         <div className="grid h-[calc(100%-57px)] grid-cols-1 overflow-y-auto lg:grid-cols-[1fr_380px] lg:overflow-hidden">
           <div className="space-y-4 p-5 lg:overflow-y-auto">
+            {/* The sentence keeps room for three lines, and what is still missing
+                is listed BELOW the editor: a box above it that grew or shrank with
+                every pick moved the dropdowns under the pointer, and a click
+                meant for "category" pressed "Add a condition" (2026-10-28). */}
             {sentence && (
-              <p className="rounded-lg bg-muted/50 px-3 py-2 text-sm" data-testid="reads-as">
+              <p className="min-h-[4.25rem] rounded-lg bg-muted/50 px-3 py-2 text-sm" data-testid="reads-as">
                 <span className="mr-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">In plain words</span>{sentence}
               </p>
             )}
-            {problems.length > 0 && (gentle ? (
-              // A NEW RULE BEING WRITTEN IS NOT WRONG, ONLY UNFINISHED: what is
-              // missing is a calm to-do list until the person presses Save.
-              <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-sm text-sky-950 dark:border-sky-900 dark:bg-sky-950/30 dark:text-sky-100" data-testid="problems" data-tone="todo">
-                <p className="mb-1 text-xs font-semibold">To finish this rule:</p>
-                <ul className="space-y-0.5">
-                  {problems.map((p, i) => <li key={i} className="flex gap-1.5"><span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-sky-500" />{p}</li>)}
-                </ul>
-              </div>
-            ) : (
-              <ul className="space-y-1 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-900 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-200" data-testid="problems">
-                {problems.map((p, i) => <li key={i} className="flex gap-1.5"><AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />{p}</li>)}
-              </ul>
-            ))}
-            {(check?.advice ?? []).length > 0 && (
-              <ul className="space-y-1 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-                {check!.advice!.map((a, i) => <li key={i} className="flex gap-1.5"><Lightbulb className="mt-0.5 h-3.5 w-3.5 shrink-0" />{a}</li>)}
-              </ul>
-            )}
-
             {draft.kind === "condition_action" && (
               <WhenThenEditor draft={draft.ca} onChange={(ca) => setDraft({ ...draft, ca })} models={model.models}
                               getFields={model.getFields} enumValuesForType={model.enumValuesForType}
@@ -678,6 +662,25 @@ function RuleSheet({ projectId, draft, setDraft, views, catalogue, model, buildi
                   here you can turn it on or off. To change it, ask Smith in the chat.
                 </p>
               </div>
+            )}
+            {problems.length > 0 && (gentle ? (
+              // A NEW RULE BEING WRITTEN IS NOT WRONG, ONLY UNFINISHED: what is
+              // missing is a calm to-do list until the person presses Save.
+              <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-sm text-sky-950 dark:border-sky-900 dark:bg-sky-950/30 dark:text-sky-100" data-testid="problems" data-tone="todo">
+                <p className="mb-1 text-xs font-semibold">To finish this rule:</p>
+                <ul className="space-y-0.5">
+                  {problems.map((p, i) => <li key={i} className="flex gap-1.5"><span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-sky-500" />{p}</li>)}
+                </ul>
+              </div>
+            ) : (
+              <ul className="space-y-1 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-900 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-200" data-testid="problems">
+                {problems.map((p, i) => <li key={i} className="flex gap-1.5"><AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />{p}</li>)}
+              </ul>
+            ))}
+            {(check?.advice ?? []).length > 0 && (
+              <ul className="space-y-1 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+                {check!.advice!.map((a, i) => <li key={i} className="flex gap-1.5"><Lightbulb className="mt-0.5 h-3.5 w-3.5 shrink-0" />{a}</li>)}
+              </ul>
             )}
           </div>
 
