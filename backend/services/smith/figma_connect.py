@@ -109,8 +109,9 @@ def summarise(ref: Any, record: dict) -> str:
     if str(record.get("treatAs")) == "specification":
         lines += [
             "",
-            "Held as the SPECIFICATION: the application gets one page per frame "
-            "above and no others. Nothing will be added around them — no "
+            "Held as the SPECIFICATION: the application is built from the frames "
+            "above and nothing else — each one a page, or a dialog, tab, step or "
+            "state of one, as drawn. Nothing will be added around them — no "
             "sign-in, no lists behind the numbers, no forms to create what they "
             "show — unless you drew it. Say “build” when you want the run.",
         ]

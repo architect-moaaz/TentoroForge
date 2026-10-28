@@ -1599,7 +1599,8 @@ NODE_TASKS: dict[str, str] = {
         "about; omit for a dashboard or a sign-in), `access`, `sections` (the "
         "records the screen holds and where they sit), `addsHere: true` on a "
         "page whose main records are added on it, `menuEntry` (the menu entry "
-        "the screen answers), and `figmaFrame` where a slot carries one. "
+        "the screen answers), and `figmaFrame` where a slot carries one, with `frames` for "
+        "the other drawn frames the page is made of (its dialogs, tabs, steps and states). "
         # WHO MAY OPEN IT IS DECIDED HERE, NOT LATER. This brief said "no
         # users" while the checks on the same reply refused every restricted
         # page without them and every role without a door: FitTrackr
@@ -2737,7 +2738,8 @@ def build_prompt(
             )
             if subject != FEATURES_PART:
                 user += ("\n\nEVERY page you author carries `figmaFrame`, set to the "
-                         "`figmaFrame` of the slot it answers.")
+                         "`figmaFrame` of its main frame's slot, and its other frames in "
+                         "`frames`.")
             if brief:
                 user += "\n\nSmith's brief for this call — what to change and what to keep:\n\n" + brief
             if feedback:
@@ -2770,8 +2772,9 @@ def build_prompt(
             # specification a page without one is a screen nobody drew.
             user += (
                 "\n\nEVERY page you author must carry `figmaFrame`, set to the "
-                "`figmaFrame` of the slot it answers. A page without one is a screen "
-                "nobody drew, and this design is the specification."
+                "`figmaFrame` of its main frame's slot, with the other frames it is "
+                "made of in `frames`. A page without one is a screen nobody drew, and "
+                "this design is the specification."
             )
         elif doc.get("designSources"):
             # The frames arrive as slots now rather than as a list to be
@@ -2784,8 +2787,9 @@ def build_prompt(
             user += (
                 "\n\nA DESIGN IS CONNECTED AS A REFERENCE. Its frames are the "
                 "first slots above, each carrying the `figmaFrame` it must be "
-                "built from. Every page answering one of those slots must "
-                "carry that `figmaFrame` \u2014 it is how the screen is built from "
+                "built from. Every page built from them carries its main "
+                "frame as `figmaFrame` and the rest in `frames` \u2014 it is how "
+                "the screen is built from "
                 "the drawing rather than composed from components, and it is "
                 "the part of this application somebody actually drew.\n\n"
                 "Pages answering the entity features OMIT `figmaFrame` "
@@ -3454,7 +3458,7 @@ def pin_entity_identity(svc: Any, entity_id: str, result: AgentResult) -> None:
 #: `states` would read as an authored contract to the resume rule.
 _DECLARED_PAGE_FIELDS: frozenset[str] = frozenset({
     "name", "route", "purpose", "pattern", "module", "data", "access", "entry",
-    "presentation", "figmaFrame", "requirements", "confidence", "status",
+    "presentation", "figmaFrame", "frames", "requirements", "confidence", "status",
     "addsHere", "sections", "menuEntry",
     # WHO MAY OPEN IT. The brief asks for `users` on every restricted page and
     # `check_page_access` refuses a restricted page without them — and this
@@ -3465,8 +3469,8 @@ _DECLARED_PAGE_FIELDS: frozenset[str] = frozenset({
 })
 
 #: What the declaration decided and the contract author may not move.
-_PINNED_PAGE_FIELDS: tuple[str, ...] = ("id", "route", "figmaFrame", "module", "addsHere", "sections",
-                                        "menuEntry")
+_PINNED_PAGE_FIELDS: tuple[str, ...] = ("id", "route", "figmaFrame", "frames", "module", "addsHere",
+                                        "sections", "menuEntry")
 
 
 def pin_page_set(result: AgentResult, doc: dict | None = None) -> None:
@@ -3503,6 +3507,11 @@ def pin_page_set(result: AgentResult, doc: dict | None = None) -> None:
         frame = str(proposal.body.get("figmaFrame") or "")
         if frame in frame_modules:
             proposal.body["module"] = frame_modules[frame]
+        # A PAGE'S MAIN FRAME IS NOT ALSO ONE OF ITS PARTS: listed in both, it
+        # is one drawing said twice.
+        if isinstance(proposal.body.get("frames"), list):
+            proposal.body["frames"] = [f for f in proposal.body["frames"]
+                                       if isinstance(f, dict) and str(f.get("frame") or "") != frame]
         # A SCREEN'S RECORD IS ITS MAIN SECTION'S, as the declaration is told.
         # Left unsaid, the screen had no record at all: its contract's facts
         # could not resolve (`related` needs one) and seven of ToroCommerce's

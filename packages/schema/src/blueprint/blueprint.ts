@@ -823,6 +823,25 @@ export const PageContract = z.object({
    *  `designSources[].frames[].nodeId`, whichever provider holds it. */
   figmaFrame: z.string().optional(),
   /**
+   * THE OTHER DRAWN FRAMES THIS PAGE IS MADE OF. A design draws a screen
+   * several times — with its dialog open, on its second tab, at step three of
+   * its wizard, empty — and each drawing is a frame. One page per frame made
+   * a job's "Pause" dialog a page of its own; here it is part of the job's
+   * page, as what it is (`as`), with what a person calls it (`label`) and,
+   * when it is one of the page's `sections`, that section's `key`.
+   * `figmaFrame` stays the page's main frame.
+   */
+  frames: z
+    .array(
+      z.object({
+        frame: z.string(),
+        as: z.enum(["tab", "panel", "dialog", "drawer", "step", "state"]),
+        label: z.string().default(""),
+        section: z.string().optional(),
+      }),
+    )
+    .optional(),
+  /**
    * Per-page override of `application.uiDesigner`. Absent means "follow the
    * application". Set when the user asks for one page to be drawn by the
    * other designer — "redraw the dashboard with UX Pilot" — so the choice is
@@ -2518,6 +2537,24 @@ export const DesignSourceFrame = z.object({
    * put in that module, so a large design builds module by module.
    */
   group: z.string().optional(),
+  /**
+   * WHERE THE PROTOTYPE GOES FROM HERE: each link the designer wired from this
+   * frame to another of the design's frames, how it opens (`overlay` — over
+   * this screen, a dialog or drawer; `swap` — replaces the overlay that is
+   * open; `navigate` — another screen; `state` — a variant of this one;
+   * `scroll` — within it) and the words on what is pressed (`via`). The page
+   * set reads them to group frames into pages: a frame opened as an overlay
+   * is part of the page it opens over.
+   */
+  links: z
+    .array(
+      z.object({
+        to: z.string(),
+        kind: z.enum(["navigate", "overlay", "swap", "state", "scroll"]),
+        via: z.string().optional(),
+      }),
+    )
+    .optional(),
 });
 
 export const DesignSource = z.object({

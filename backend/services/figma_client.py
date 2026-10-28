@@ -125,7 +125,14 @@ async def fetch_figma_nodes(file_key: str, node_ids: list[str], token: str,
             return
         nodes = (r.json() or {}).get("nodes") or {}
         for nid in ids:
-            out[nid] = ((nodes.get(nid) or {}).get("document")) or {}
+            entry = nodes.get(nid) or {}
+            document = entry.get("document") or {}
+            # THE STYLES' NAMES TRAVEL WITH THE TREE. A node says `styles:
+            # {"fill": "S:12"}`; what S:12 is called ("Primary/600") is only in
+            # the response beside the document, so it is kept on it.
+            if document and entry.get("styles"):
+                document = {**document, "_styles": entry["styles"]}
+            out[nid] = document
 
     async with httpx.AsyncClient(timeout=120.0) as client:
         for i in range(0, len(node_ids), batch_size):

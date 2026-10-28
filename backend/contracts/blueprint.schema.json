@@ -1111,6 +1111,40 @@
           "figmaFrame": {
             "type": "string"
           },
+          "frames": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "frame": {
+                  "type": "string"
+                },
+                "as": {
+                  "type": "string",
+                  "enum": [
+                    "tab",
+                    "panel",
+                    "dialog",
+                    "drawer",
+                    "step",
+                    "state"
+                  ]
+                },
+                "label": {
+                  "type": "string",
+                  "default": ""
+                },
+                "section": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "frame",
+                "as"
+              ],
+              "additionalProperties": false
+            }
+          },
           "designedBy": {
             "$ref": "#/properties/application/properties/uiDesigner"
           },
@@ -3245,6 +3279,35 @@
                 },
                 "group": {
                   "type": "string"
+                },
+                "links": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "to": {
+                        "type": "string"
+                      },
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "navigate",
+                          "overlay",
+                          "swap",
+                          "state",
+                          "scroll"
+                        ]
+                      },
+                      "via": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "to",
+                      "kind"
+                    ],
+                    "additionalProperties": false
+                  }
                 }
               },
               "required": [

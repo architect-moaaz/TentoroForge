@@ -35,6 +35,26 @@ logger = logging.getLogger(__name__)
 
 #: Looks per page: one at the compiled page, one at its rewrite.
 LOOKS = 2
+#: Looks for a page that reproduces a drawing: closing the distance to a
+#: picture takes more rounds than passing a taste bar.
+EXACT_LOOKS = 3
+
+
+def looks_for(reference: dict | None) -> int:
+    """How many looks a page gets: more when it must match a drawing."""
+    return EXACT_LOOKS if (reference or {}).get("exact") and (reference or {}).get("images") else LOOKS
+
+
+def drawing_viewports(reference: dict | None) -> dict[str, tuple[int, int]]:
+    """The viewports a page is shot at: the desk at the drawing's own width
+    when it reproduces one — compared at 1280 against a 1440 frame, every
+    column would be "too narrow" — and the phone as always."""
+    size = (reference or {}).get("size") or []
+    if (reference or {}).get("exact") and len(size) == 2 and size[0]:
+        width = max(1024, min(1920, int(size[0])))
+        height = max(700, min(1400, int(size[1] or 900)))
+        return {"desktop": (width, height), "mobile": VIEWPORTS["mobile"]}
+    return dict(VIEWPORTS)
 #: Viewports the reviewer is shown — a desk and a phone.
 VIEWPORTS: dict[str, tuple[int, int]] = {"desktop": (1280, 900), "mobile": (390, 844)}
 #: The tallest screenshot sent to the reviewer, in pixels (scale factor 1).
@@ -63,7 +83,8 @@ def frame_html(css: str, vendor_js: str, page_js: str) -> str:
 
 
 def render(doc: dict, page: dict, app_root: Path, load: str, view: str, out_dir: Path,
-           parts: dict[str, str] | None = None) -> dict[str, Any]:
+           parts: dict[str, str] | None = None,
+           viewports: dict[str, tuple[int, int]] | None = None) -> dict[str, Any]:
     """Bundle the candidate and screenshot it at every viewport.
 
     ``{"shots": {name: path}, "errors": [...]}`` — the errors are what the
@@ -125,7 +146,7 @@ def render(doc: dict, page: dict, app_root: Path, load: str, view: str, out_dir:
             with sync_playwright() as pw:
                 browser = pw.chromium.launch(headless=True)
                 try:
-                    for name, (w, h) in VIEWPORTS.items():
+                    for name, (w, h) in (viewports or VIEWPORTS).items():
                         tab = browser.new_page(viewport={"width": w, "height": h}, device_scale_factor=1)
                         tab.on("pageerror", lambda e: errors.append(f"view.tsx: {e}"))
                         tab.on("console", lambda m: errors.append(f"console: {m.text}")
@@ -153,7 +174,7 @@ def render(doc: dict, page: dict, app_root: Path, load: str, view: str, out_dir:
     for e in errors:
         if e not in seen:
             seen.append(e)
-    return {"shots": shots, "errors": seen[:12]}
+    return {"shots": shots, "errors": seen[:12], "viewports": dict(viewports or VIEWPORTS)}
 
 
 def change_review_schema() -> dict[str, Any]:
@@ -179,8 +200,24 @@ def caused_by_change(verdict: dict) -> list[dict]:
             if i.get("fromChange") and i.get("severity") in ("high", "medium")]
 
 
+#: What the reviewer is told when the page reproduces a drawing.
+DRAWING_RULE = (
+    "\n\nTHIS PAGE REPRODUCES A DRAWING, and the last {n} image(s) are it: the page as drawn "
+    "first, then its other frames ({parts}). The drawing includes the application's sidebar and "
+    "top bar; the page is rendered without them, so compare everything INSIDE them. Judge one "
+    "thing: how close the desk screenshot is to the drawing. List every visible difference \u2014 "
+    "an element missing or added, a different order or alignment, a size, a gap or padding, a "
+    "colour, a font size, weight or line height, a radius, a border, a word of copy, an icon \u2014 "
+    "each with `where`, the `problem` stated as drawn vs built (\u201cdrawn 24px padding, built 16px\u201d) "
+    "and the `fix` in the page's own terms. Real data in place of the drawing's examples is not a "
+    "difference; its layout is. The score is the likeness: 10 is indistinguishable inside the "
+    "shell, 8 is a close match with small slips, 5 is the same parts arranged differently. The "
+    "phone screenshot only has to work: nothing cut off, nothing overlapping."
+)
+
+
 def judge(doc: dict, page: dict, look: dict, client: Any, *, references: list[Path] = (),
-          change: str = "") -> tuple[dict, Any]:
+          change: str = "", drawing: dict | None = None) -> tuple[dict, Any]:
     """The reviewer's verdict on the screenshots. Returns the verdict and
     what the call cost, as `(usage, elapsed)`.
 
@@ -196,11 +233,12 @@ def judge(doc: dict, page: dict, look: dict, client: Any, *, references: list[Pa
 
     proved = "\n".join(f"- {e}" for e in look.get("errors") or []) or "(none)"
     names = list(look.get("shots") or {})
+    widths = look.get("viewports") or VIEWPORTS
     user = ("The page's contract:\n```json\n" + json.dumps(_page_brief(doc, page), indent=1)
             + "\n```\nIt is rendered with sample data in place of the database — judge the design, "
             "the hierarchy and the behaviour it implies, not the rows.\n\n"
             f"What the browser proved broken:\n{proved}\n\n"
-            + "The screenshots, in order: " + ", ".join(f"{n} ({VIEWPORTS[n][0]}px wide)" for n in names)
+            + "The screenshots, in order: " + ", ".join(f"{n} ({widths[n][0]}px wide)" for n in names)
             + ". Judge both: a page that is right at a desk and broken on a phone does not pass.")
     if change:
         user += ("\n\nTHIS PAGE ALREADY EXISTED AND WAS JUST CHANGED. What was asked:\n"
@@ -213,6 +251,13 @@ def judge(doc: dict, page: dict, look: dict, client: Any, *, references: list[Pa
                  "and doing what was asked is not an issue. Judge how well it was done, never "
                  "whether it should have been.")
     images = [look["shots"][n] for n in names]
+    drawn = [str(x) for x in (drawing or {}).get("images") or [] if x] if (drawing or {}).get("exact") else []
+    if drawn and not change:
+        parts = ", ".join(f"{p.get('as')} \u201c{p.get('label')}\u201d" for p in (drawing or {}).get("parts") or []
+                          if isinstance(p, dict)) or "none"
+        user += DRAWING_RULE.format(n=len(drawn), parts=parts)
+        images += drawn
+        references = []                     # the drawing is the bar, not the user's mood board
     if references:
         user += (f"\n\nThe last {len(references)} image(s) are what the user showed as the standard "
                  f"they want: {READ_FOR['page_look']}")
@@ -253,14 +298,20 @@ def rank(verdict: dict) -> tuple[int, int]:
 
 
 def look_at(doc: dict, page: dict, app_root: Path, load: str, view: str, client: Any, *,
-            attempt: int = 1, change: str = "", parts: dict[str, str] | None = None) -> tuple[dict, Any]:
-    """Render, then judge. Raises LookUnavailable when this machine cannot."""
+            attempt: int = 1, change: str = "", parts: dict[str, str] | None = None,
+            drawing: dict | None = None) -> tuple[dict, Any]:
+    """Render, then judge. Raises LookUnavailable when this machine cannot.
+    With ``drawing`` (a reproduced frame, `react_reference`) the page is shot
+    at the drawing's width and judged on its likeness to it."""
     from services.blueprint import references
 
     out_dir = Path(app_root).parent / ".forge" / "look" / str(page.get("id")) / f"look-{attempt}"
-    look = render(doc, page, Path(app_root), load, view, out_dir, parts=parts)
+    look = render(doc, page, Path(app_root), load, view, out_dir, parts=parts,
+                  viewports=drawing_viewports(drawing))
     shown = references.paths(app_root.parent) if getattr(client, "accepts_images", True) else []
-    verdict, spent = judge(doc, page, look, client, references=shown, change=change)
+    verdict, spent = judge(doc, page, look, client, references=shown, change=change, drawing=drawing)
+    if (drawing or {}).get("exact"):
+        verdict["likeness"] = verdict.get("score")
     verdict["shots"] = look["shots"]
     verdict["attempt"] = attempt
     # WHAT WAS LOOKED AT AND WHAT WAS SAID, KEPT BESIDE THE SCREENSHOTS. The

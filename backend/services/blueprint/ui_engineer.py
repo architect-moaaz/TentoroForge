@@ -1097,8 +1097,70 @@ def figma_reference_block(reference: dict) -> str:
     )
 
 
+def figma_exact_block(reference: dict) -> str:
+    """A page whose drawing is the specification: reproduce it.
+
+    `figma_reference_block` adapts a frame — keep what the designer decided,
+    write the page in the app's own style. A design connected as the
+    specification is the other request: the page IS the drawing. So the
+    writer sees the frames themselves (attached, the main frame first) and the
+    exact values they are drawn with, and is held to them; the look that
+    follows compares the page with the same pictures (`page_look`)."""
+    size = reference.get("size") or []
+    frame = str(reference.get("frame") or "").strip()
+    parts = [p for p in reference.get("parts") or [] if isinstance(p, dict)]
+    shown = len(reference.get("images") or [])
+    listed = "".join(
+        f"\n  {i}. the page's {p.get('as') or 'part'}"
+        + (f" \u201c{p['label']}\u201d" if p.get("label") else "")
+        + (f" (section `{p['section']}`)" if p.get("section") else "")
+        + (f", {p['size'][0]}x{p['size'][1]}" if len(p.get("size") or []) == 2 and p["size"][0] else "")
+        for i, p in enumerate(parts, 2))
+    outlines = "".join(
+        f"\n\nIts {p.get('as') or 'part'} \u201c{p.get('label') or ''}\u201d, layer by layer:\n```text\n{p['outline']}\n```"
+        for p in parts if p.get("outline"))
+    tsx = reference.get("format") == "figma-tsx"
+    return (
+        "\n# THE DRAWING IS THE SPECIFICATION \u2014 REPRODUCE IT"
+        + (f"\nThe frame \u201c{frame}\u201d" if frame else "\nThe frame")
+        + (f" ({size[0]}x{size[1]})" if len(size) == 2 and size[0] else "")
+        + (f" and the page's other frames are attached as {shown} image(s), in this order:\n"
+           f"  1. the page as it opens{listed}" if shown else " is described below")
+        + "\n\nThe main frame, layer by layer \u2014 kind, name, size, layout (row/col, gap, pad), fill (bg), "
+        "radius (r), and for text the words, size/weight and colour:\n"
+        + ("```tsx\n" if tsx else "```text\n") + str(reference.get("html") or "") + "\n```"
+        + outlines
+        + (f"\n\nThe values these frames are drawn with, most used first:\n{reference['values']}"
+           if reference.get("values") else "")
+        + "\n\nSOMEONE WILL PUT THIS PAGE BESIDE THE DRAWING. Build what is drawn, as drawn:\n"
+        "- Every section, in the drawn order and arrangement, at the drawn proportions. Nothing "
+        "added that the drawing does not show, unless the brief requires it.\n"
+        "- Its exact values: colours as drawn (the app's token class where it IS that colour, else "
+        "an arbitrary value such as `bg-[#0f766e]`), font sizes, weights and line heights "
+        "(`text-[13px] leading-[20px]`), radii (`rounded-[10px]`), gaps and padding "
+        "(`gap-[12px] px-[24px]`), borders and shadows. Never round a value to the nearest scale step.\n"
+        "- The drawn width is the desk layout; keep its columns and the content's widths as "
+        "`max-w-[...]`, and let it stack on a phone.\n"
+        "- Every word the drawing shows that is not data \u2014 headings, labels, button and tab "
+        "names, helper text, empty-state copy \u2014 exactly as written.\n"
+        "- Everything that is data (names, numbers, dates, rows, statuses) comes from `load.ts`, laid "
+        "out exactly as the drawing lays out its examples.\n"
+        "- The other frames are this page too: each `dialog` a `Dialog`, each `drawer` a `Sheet`, "
+        "each `tab` a tab of the page, each `step` a step of its form, each `state` the page in that "
+        "state \u2014 each drawn as its frame shows, opened by what the drawing presses.\n"
+        "- Every button or form that changes data is a workflow from the brief. A control the brief "
+        "has no workflow for is still drawn, disabled, and named in `needs`.\n"
+        "- The application draws the sidebar and top bar around every page: leave those out, and "
+        "reproduce everything inside them.\n"
+        "- Icons are `lucide-react`, the one the drawing shows at the drawn size; a photo the brief "
+        "has no data for keeps its drawn box, filled with the drawn background.\n"
+    )
+
+
 def reference_block(reference: dict) -> str:
     """The designer's page, and what the writer is told to do with it."""
+    if reference.get("exact"):
+        return figma_exact_block(reference)
     if str(reference.get("format") or "").startswith("figma"):
         return figma_reference_block(reference)
     preview = str(reference.get("previewUrl") or "").strip()
@@ -1570,6 +1632,19 @@ def _design_findings(doc: dict, page: dict, view: str) -> list[str]:
     return out
 
 
+def _seeing(writer: Any, reference: dict | None) -> Any:
+    """The writer, shown the drawing's frames on every call when the page
+    reproduces one (`figma_exact_block`) and the client can see images — the
+    look's rewrite too, which is where the page is set beside them."""
+    images = [str(x) for x in ((reference or {}).get("images") or []) if x]
+    if not images or not (reference or {}).get("exact") or not getattr(writer, "accepts_images", False):
+        return writer
+
+    def call(**kwargs: Any) -> Any:
+        return writer(**kwargs, images=images)
+    return call
+
+
 def _with(client: Any, **changes: Any) -> Any:
     """The same client, asked differently — or the same client, when it is
     not one of ours (a test's stub, a plain callable)."""
@@ -1645,7 +1720,11 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
     spent: list[Any] = []
     note = feedback
     last_errors: list[str] = []
-    looks_left = page_look.LOOKS if critic is not None else 0
+    #: A page reproducing a drawing is looked at beside it, and gets the
+    #: rounds closing that distance takes (`page_look.looks_for`).
+    drawing = reference if (reference or {}).get("exact") and current is None and relayout_of is None else None
+    looks = page_look.looks_for(drawing)
+    looks_left = looks if critic is not None else 0
     #: A page that already existed is being CHANGED: the reviewer checks the
     #: change did not break it, and sends it back only for that. Its taste
     #: notes are about the page as it was — sent back for a 7/10 the first
@@ -1676,10 +1755,11 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
     # nothing at all. Without a plan the client is left as it was: that is the
     # old path, and it is what a repair round uses.
     writer = _with(client, effort=WRITE_EFFORT, max_tokens=WRITE_MAX_TOKENS) if (plan or seeded) else client
+    writer = _seeing(writer, reference)
     # A look's rewrite has its own round: the compile rounds are for
     # compiling, and a page sent back by the reviewer on the last of them
     # would have nowhere to go.
-    rounds = COMPILE_ROUNDS + (page_look.LOOKS - 1 if looks_left else 0)
+    rounds = COMPILE_ROUNDS + (looks - 1 if looks_left else 0)
     for round_ in range(1, rounds + 1):
         t0 = time.monotonic()
         editing = current is not None
@@ -1763,8 +1843,8 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
                 looks_left -= 1
                 try:
                     verdict, cost = page_look.look_at(doc, page, Path(app_root), load, view, critic,
-                                                      attempt=page_look.LOOKS - looks_left,
-                                                      change=change, parts=parts)
+                                                      attempt=looks - looks_left,
+                                                      change=change, parts=parts, drawing=drawing)
                 except page_look.LookUnavailable as exc:
                     logger.info("[ui_engineer] %s not looked at (%s); accepted as compiled", page.get("id"), exc)
                     looks_left = 0
@@ -1784,8 +1864,10 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
                     must_fix = (verdict.get("verdict") != "pass" and not changing) or (
                         changing and bool(verdict.get("broken") or page_look.caused_by_change(verdict)))
                     if seeded:
-                        # Taste was the designer's call; only a broken page goes back.
-                        must_fix = bool(verdict.get("broken"))
+                        # Taste was the designer's call; only a broken page goes back —
+                        # or, for a drawing reproduced, one that does not look like it.
+                        must_fix = bool(verdict.get("broken")) or (
+                            drawing is not None and verdict.get("verdict") != "pass")
                     if must_fix and looks_left and round_ < rounds:
                         # THE REVIEW IS A REFUSAL, NOT A WISH. Handed as the
                         # brief ("what is wanted of it now") the first trial's
@@ -2184,6 +2266,7 @@ def compose_screen(doc: dict, page: dict, app_root: Path, client: Any, parts: li
     shown = reference if seeded else None
     plan = None if (feedback or seeded) else _page_plan(doc, page, client, system, spent, brief)
     writer = _with(client, effort=WRITE_EFFORT, max_tokens=WRITE_MAX_TOKENS) if (plan or seeded) else client
+    writer = _seeing(writer, shown if seeded else None)
 
     # 1. THE FRAME: the screen's data and where each part goes.
     load = view = ""
@@ -2252,17 +2335,41 @@ def compose_screen(doc: dict, page: dict, app_root: Path, client: Any, parts: li
             "parts": written, "requirements": list(page.get("requirements") or [])}
     # 4. LOOKED AT AS ONE SCREEN, when a reviewer is at hand. A look never
     # loses a screen: the review is reported, and the screen kept as compiled.
+    # A SCREEN REPRODUCING A DRAWING is looked at beside it and, while it does
+    # not look like it, edited with the differences as the brief (the edit
+    # path names parts, so a split screen is changed where it differs).
+    drawing = shown if (shown or {}).get("exact") else None
     if critic is not None:
-        try:
-            verdict, cost = page_look.look_at(doc, page, Path(app_root), load, view, critic, parts=written)
-            if cost[0] is not None:
-                spent.append((cost[0], cost[1], "page_reviewer"))
-            if on_look is not None:
-                on_look(verdict)
-        except page_look.LookUnavailable as exc:
-            logger.info("[ui_engineer] %s not looked at (%s); accepted as compiled", pid, exc)
-        except Exception:  # noqa: BLE001 — narration never fails a screen
-            pass
+        best: tuple[tuple[int, int], dict] | None = None
+        for attempt in range(1, page_look.looks_for(drawing) + 1):
+            try:
+                verdict, cost = page_look.look_at(doc, page, Path(app_root), body["load"], body["view"], critic,
+                                                  attempt=attempt, parts=body.get("parts") or None,
+                                                  drawing=drawing)
+                if cost[0] is not None:
+                    spent.append((cost[0], cost[1], "page_reviewer"))
+                if on_look is not None:
+                    on_look(verdict)
+            except page_look.LookUnavailable as exc:
+                logger.info("[ui_engineer] %s not looked at (%s); accepted as compiled", pid, exc)
+                break
+            except Exception:  # noqa: BLE001 — narration never fails a screen
+                break
+            if best is None or page_look.rank(verdict) > best[0]:
+                best = (page_look.rank(verdict), body)
+            if drawing is None or verdict.get("verdict") == "pass" or attempt == page_look.looks_for(drawing):
+                break
+            try:
+                body, more = compose_page(doc, page, app_root, client, feedback=page_look.look_brief(verdict),
+                                          current={"load": body["load"], "view": body["view"],
+                                                   "parts": body.get("parts") or {}},
+                                          reference=drawing)
+                spent.extend(more)
+            except CompileError as exc:
+                logger.info("[ui_engineer] %s: likeness rewrite did not compile (%s)", pid, str(exc)[:200])
+                break
+        if best is not None:
+            body = best[1]
     logger.info("[ui_engineer] %s composed as a screen: frame + %d part(s), %d chars",
                 pid, len(written), len(load) + len(view) + sum(len(c) for c in written.values()))
     return body, spent

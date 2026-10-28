@@ -114,11 +114,22 @@ def source_record(ref: DesignReference, *, name: str = "",
                 "name": s.name,
                 "looksLikeScreen": s.looks_like_screen,
                 **({"group": s.group} if getattr(s, "group", "") else {}),
+                **({"links": links} if (links := _frame_links(ref, s)) else {}),
             }
             for s in ref.screens
         ],
         "gaps": list(ref.gaps),
     }
+
+
+def _frame_links(ref: DesignReference, screen: Any) -> list[dict[str, str]]:
+    """A screen's prototype links to the design's other screens
+    (`reference.screen_links`). A link to a layer that is not one of them —
+    a component's own variant, a frame in another file — says nothing about
+    which page this frame is part of, so it is left out."""
+    screens = {s.node_id for s in ref.screens}
+    return [link for link in ((getattr(screen, "structure", None) or {}).get("links") or [])
+            if isinstance(link, dict) and link.get("to") in screens and link.get("to") != screen.node_id]
 
 
 # ---------------------------------------------------------------------------

@@ -132,7 +132,7 @@ def test_the_page_contracts_prompt_requires_the_frame_on_those_slots():
     visibly missing."""
     user = build_prompt(_doc(), "page_contracts")[1]
     assert "A DESIGN IS CONNECTED AS A REFERENCE" in user
-    assert "must carry that `figmaFrame`" in user
+    assert "carries its main frame as `figmaFrame` and the rest in `frames`" in user
     assert "never give one frame to two pages" in user
 
 
@@ -178,9 +178,12 @@ def test_two_sources_can_mean_different_things():
 
 # --------------------------------------------------------------- the prompts
 
-def test_the_specification_prompt_asks_for_one_page_per_frame():
+def test_the_specification_prompt_asks_for_every_frame_placed():
+    """Not one page per frame: a frame is a page, or a dialog, tab, step or
+    state of one (`pages[].frames`) — see test_a_drawn_design_is_built_as_drawn."""
     text = page_slot_prompt(_doc("specification")).lower()
-    assert "one page per frame" in text
+    assert "place every drawn frame" in text and "none is declined" in text
+    assert "one page per frame" not in text
     # None of the entity-feature reasoning applies when nothing is declinable.
     assert "decline a feature" not in text
 
