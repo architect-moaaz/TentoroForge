@@ -582,6 +582,37 @@ def test_a_shared_components_words_can_be_typed_into_and_its_files_are_written_a
     assert _drawn_present(new, COMPONENTS_KEY)
 
 
+DOCS = """export default function DocsView() {
+  return (
+    <div className="flex flex-col" data-layer="Docs">
+      <div className="flex flex-row" data-layer="Doc">
+        <p className="text-[14px]">Trade licence</p>
+        <div className="w-[80px] shrink-0"><DhButtonLink label={"Upload"} /></div>
+      </div>
+      <div className="flex flex-row" data-layer="Doc">
+        <p className="text-[14px]">Signatory ID</p>
+      </div>
+    </div>
+  );
+}
+"""
+
+
+def test_a_look_whose_row_draws_nothing_there_does_not_draw_the_element():
+    answer = {"contract": {"data": [{"name": "documents", "kind": "list", "label": "Documents", "fields": [
+                  {"name": "title", "label": "Document", "type": "string"},
+                  {"name": "status", "label": "Status", "type": "enum", "options": ["Missing", "Verified"]}]}],
+                  "actions": [{"name": "onUpload", "label": "Upload", "kind": "run", "nodes": ["4"]}]},
+              "lists": [{"prop": "documents", "rows": ["2", "5"], "looks": [{"node": "4", "field": "status", "by": [
+                  {"value": "Missing", "row": "2"}, {"value": "Verified", "row": "5"}]}]}],
+              "values": [{"node": "3", "expr": "row.title"}], "inputs": [], "shows": []}
+    out, problems = P.apply(DOCS, answer, "DocsView")
+    assert problems == [], problems
+    code = out["code"]
+    assert 'row.status === "Missing" ? (' in code and "null" in code and "props.onUpload(row)" in code
+    assert [r["status"] for r in out["sample"]["documents"]] == ["Missing", "Verified"]
+
+
 def test_an_answer_that_names_what_is_not_there_is_asked_again():
     wrong = json.loads(json.dumps(ANSWER))
     wrong["values"][0] = {"node": "99", "expr": "row.name"}

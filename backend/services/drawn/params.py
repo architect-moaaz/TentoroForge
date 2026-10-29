@@ -363,10 +363,9 @@ def _resolve(root: M.Node, reply: dict, *, children: bool) -> tuple[_Plan, list[
                         there = M.counterpart(template, holder, nodes[at])
                     else:
                         there = None
-                if there is None:
-                    problems.append(f"{what}: row {drawn.id} draws nothing where element {at} is")
-                    bad = True
-                    continue
+                # A ROW THAT DRAWS NOTHING THERE IS THAT LOOK: a document's
+                # button drawn only for the statuses that have one (DITANS
+                # R-205, 2026-10-30). For that value the element is not drawn.
                 by.append((str(b.get("value")), there))
             if by:
                 looks.append({"node": at, "field": str(lk["field"]), "by": by, "list": prop})
@@ -695,11 +694,14 @@ class _Writer:
         decided = next((d[2] for d in done if len(d) == 3 and d[0] == "field" and d[1] == f), None)
         if decided is not None:
             value, drawn = next(((v, d) for v, d in lk["by"] if v == decided), lk["by"][-1])
+            if drawn is None:
+                return ["  " * depth + "null"]
             return self.piece(M.relook(n, drawn, set(self.plan.values)), depth, row, done, child=False, key=key)
         out: list[str] = []
         for i, (value, drawn) in enumerate(lk["by"]):
-            body = self.piece(M.relook(n, drawn, set(self.plan.values)), depth + 1, row,
-                              done | {("field", f, value)}, child=False, key=key)
+            body = ["  " * (depth + 1) + "null"] if drawn is None else \
+                self.piece(M.relook(n, drawn, set(self.plan.values)), depth + 1, row,
+                           done | {("field", f, value)}, child=False, key=key)
             if i == len(lk["by"]) - 1:
                 out += [pad + "(", *body, pad + ")"]
             else:
@@ -809,10 +811,16 @@ def _sample(plan: _Plan, contract: dict) -> dict[str, Any]:
                 continue
             here = drawn if lk["node"] == template.id else M.counterpart(template, drawn, plan.nodes[lk["node"]])
             if here is None:
+                # Not drawn in this row: the value whose look draws nothing there.
+                absent = [v for v, d in lk["by"] if d is None]
+                if len(absent) == 1:
+                    rec[lk["field"]] = absent[0]
                 continue
             # The value whose drawn look this row's element has.
-            exact = [v for v, d in lk["by"] if d is here or M.look(d) == M.look(here)]
-            rec[lk["field"]] = exact[0] if exact else max(lk["by"], key=lambda vd: alike(vd[1], here))[0]
+            drawn_looks = [(v, d) for v, d in lk["by"] if d is not None]
+            exact = [v for v, d in drawn_looks if d is here or M.look(d) == M.look(here)]
+            if exact or drawn_looks:
+                rec[lk["field"]] = exact[0] if exact else max(drawn_looks, key=lambda vd: alike(vd[1], here))[0]
 
     by_prop: dict[str, list[dict]] = {}
     for listed in plan.lists:
