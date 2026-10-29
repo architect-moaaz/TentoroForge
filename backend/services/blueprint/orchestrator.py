@@ -592,7 +592,8 @@ def _drawn_present(doc: Mapping[str, Any], subject: str) -> bool:
     from services.drawn.convert import COMPONENTS_KEY
     rows = [v for v in doc.get("drawnViews") or [] if isinstance(v, dict)]
     if subject == COMPONENTS_KEY:
-        return any(v.get("kind") == "component" for v in rows)
+        from services.drawn.components import FORMAT
+        return any(v.get("kind") == "component" and v.get("format") == FORMAT for v in rows)
     return any(str(v.get("key")) == subject for v in rows)
 
 

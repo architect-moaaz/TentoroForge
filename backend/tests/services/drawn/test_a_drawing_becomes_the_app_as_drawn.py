@@ -522,6 +522,66 @@ def test_what_an_answer_forgot_to_declare_or_left_unpressed_is_settled_by_constr
     assert problems == [] and "props.extra" not in out["code"]
 
 
+FIELDS = """export default function OrgView() {
+  return (
+    <div className="flex flex-col" data-layer="Form">
+      <div className="w-[300px] shrink-0"><DhTextField label={"Legal name"} value={"Al Noor Healthcare LLC"} /></div>
+      <div className="flex flex-col" data-layer="Steps">
+        <div className="flex flex-col" data-layer="Step">
+          <p className="text-[14px]">Licence</p>
+        </div>
+        <div className="flex flex-col" data-layer="Step">
+          <p className="text-[14px]">Documents</p>
+          <div className="flex flex-col" data-layer="Tasks">
+            <div className="flex flex-row" data-layer="Task">
+              <p className="text-[12px]">Upload passport</p>
+            </div>
+            <div className="flex flex-row" data-layer="Task">
+              <p className="text-[12px]">Upload degree</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+"""
+
+
+def test_a_component_drawn_as_a_field_is_the_input_and_a_list_in_a_lists_rows_is_the_data():
+    answer = {"contract": {"data": [{"name": "tasks", "kind": "list", "label": "Tasks", "fields": [
+                  {"name": "title", "label": "Task", "type": "string"}]}], "actions": []},
+              "lists": [{"prop": "steps", "rows": ["4", "6"]}, {"prop": "tasks", "rows": ["9", "11"]}],
+              "values": [{"node": "5", "expr": "row.name"}, {"node": "10", "expr": "row.title"}],
+              "inputs": [{"node": "2", "form": "organisation", "field": "legalName", "kind": "text", "prop": "value"}],
+              "shows": []}
+    answer["contract"]["data"].append({"name": "steps", "kind": "list", "label": "Steps", "fields": []})
+    out, problems = P.apply(FIELDS, answer, "OrgView")
+    assert problems == [], problems
+    code = out["code"]
+    # the text field's value word is the input, the form and its field declared by it
+    assert 'valueInput={{ value: String(props.organisation.legalName ?? ""), onChange: (v: string) => ' \
+           'props.onOrganisationChange("legalName", v) }}' in code
+    assert out["sample"]["organisation"] == {"legalName": "Al Noor Healthcare LLC"}
+    # the steps are drawn as they are; the tasks inside them are the list
+    assert code.count(".map((row) => (") == 1 and "props.tasks.map" in code and ">Licence</p>" in code
+    assert out["sample"]["tasks"] == [{"id": "1", "title": "Upload passport"}, {"id": "2", "title": "Upload degree"}]
+
+
+def test_a_shared_components_words_can_be_typed_into_and_its_files_are_written_again_when_that_changes():
+    from services.blueprint.orchestrator import _drawn_present
+    from services.drawn.components import FORMAT, _typed
+    from services.drawn.convert import COMPONENTS_KEY
+
+    typed = _typed("value")
+    assert typed.startswith("props.valueInput ? (") and typed.endswith(": props.value")
+    assert "<input" in typed and "<select" in typed
+    old = {"drawnViews": [{"key": "component:DhTag", "kind": "component", "name": "DhTag", "code": "x"}]}
+    assert not _drawn_present(old, COMPONENTS_KEY)
+    new = {"drawnViews": [{"key": "component:DhTag", "kind": "component", "name": "DhTag", "code": "x", "format": FORMAT}]}
+    assert _drawn_present(new, COMPONENTS_KEY)
+
+
 def test_an_answer_that_names_what_is_not_there_is_asked_again():
     wrong = json.loads(json.dumps(ANSWER))
     wrong["values"][0] = {"node": "99", "expr": "row.name"}
