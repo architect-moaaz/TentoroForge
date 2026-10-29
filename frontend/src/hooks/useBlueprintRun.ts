@@ -134,6 +134,11 @@ export interface SecretField {
    * may be part of the conversation, unlike the value above.
    */
   extra?: { label: string; placeholder?: string };
+  /**
+   * The person may sign in to this service instead of pasting a key ("figma": Connect Figma).
+   * Once connected the key field is not asked for: their own sign-in is what reads.
+   */
+  connect?: "figma";
 }
 
 /** Something Smith said, in the order it said it. */

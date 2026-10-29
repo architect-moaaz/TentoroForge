@@ -81,6 +81,26 @@ class FigmaCredential:
         return f"FigmaCredential(ref={self.ref!r})"
 
 
+class OAuthAccessToken(str):
+    """A token a person granted Forge by signing in to Figma (`services.figma.oauth`).
+
+    Figma reads the two kinds of token from different headers: a personal
+    access token from ``X-Figma-Token``, an OAuth token only from
+    ``Authorization: Bearer``. The kind travels with the value, so every REST
+    call picks its header from what it was handed (`figma_client.auth_headers`)
+    rather than from the token's shape. ``strip`` keeps the kind, because every
+    caller strips what it is given.
+    """
+
+    __slots__ = ()
+
+    def strip(self, chars: str | None = None) -> "OAuthAccessToken":
+        return OAuthAccessToken(str.strip(self, chars))
+
+    def __repr__(self) -> str:  # never the value
+        return "OAuthAccessToken(...)"
+
+
 class SecretResolver(Protocol):
     """§97's Secrets Service, narrowed to the one operation Figma needs."""
 

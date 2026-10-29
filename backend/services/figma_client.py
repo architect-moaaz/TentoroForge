@@ -6,11 +6,15 @@ exposes MCP-style tool functions.
 from __future__ import annotations
 
 import asyncio
+import os
 
 import httpx
 
 
-FIGMA_BASE = "https://api.figma.com/v1"
+#: Figma's API. Overridable (`FIGMA_API_BASE`) so the OAuth flow and the reads
+#: can be run end to end against a stand-in on this machine.
+FIGMA_API_BASE = (os.environ.get("FIGMA_API_BASE") or "https://api.figma.com").rstrip("/")
+FIGMA_BASE = f"{FIGMA_API_BASE}/v1"
 
 #: How many times one request is tried when Figma says "too many" (429) or
 #: fails on its side (5xx), and the longest single wait honoured.
@@ -24,6 +28,26 @@ class FigmaRateLimited(RuntimeError):
     Separate from a plain failure so a caller reading a five-hundred-frame
     file can stop where it is and carry on later, instead of recording every
     remaining frame as missing."""
+
+
+class FigmaHTTPError(RuntimeError):
+    """Figma answered with an error status. ``status`` is kept so a caller can
+    tell "this token cannot open that file" (403/404) from a failure."""
+
+    def __init__(self, status: int, message: str) -> None:
+        self.status = status
+        super().__init__(message)
+
+
+def auth_headers(token: str) -> dict[str, str]:
+    """The header Figma reads ``token`` from: ``Authorization: Bearer`` for a
+    token a person granted by signing in (`OAuthAccessToken`), ``X-Figma-Token``
+    for a personal access token."""
+    from services.figma.credentials import OAuthAccessToken
+
+    if isinstance(token, OAuthAccessToken):
+        return {"Authorization": f"Bearer {token.strip()}"}
+    return {"X-Figma-Token": (token or "").strip()}
 
 
 def _wait_for(r: httpx.Response, attempt: int) -> float:
@@ -69,10 +93,10 @@ async def fetch_figma_node(file_key: str, node_id: str, token: str,
         r = await _get(
             client, f"{FIGMA_BASE}/files/{file_key}/nodes",
             params=params,
-            headers={"X-Figma-Token": token},
+            headers=auth_headers(token),
         )
         if r.status_code != 200:
-            raise RuntimeError(f"figma fetch failed: {r.status_code} {r.text[:200]}")
+            raise FigmaHTTPError(r.status_code, f"figma fetch failed: {r.status_code} {r.text[:200]}")
         body = r.json()
         node_payload = (body.get("nodes") or {}).get(node_id) or {}
         return node_payload.get("document") or {}
@@ -85,10 +109,10 @@ async def fetch_figma_file_meta(file_key: str, token: str) -> dict:
         r = await _get(
             client, f"{FIGMA_BASE}/files/{file_key}",
             params={"depth": 1},
-            headers={"X-Figma-Token": token},
+            headers=auth_headers(token),
         )
         if r.status_code != 200:
-            raise RuntimeError(f"figma meta fetch failed: {r.status_code} {r.text[:200]}")
+            raise FigmaHTTPError(r.status_code, f"figma meta fetch failed: {r.status_code} {r.text[:200]}")
         return r.json()
 
 
@@ -111,7 +135,7 @@ async def fetch_figma_nodes(file_key: str, node_ids: list[str], token: str,
 
     async def one_batch(client: httpx.AsyncClient, ids: list[str]) -> None:
         r = await _get(client, f"{FIGMA_BASE}/files/{file_key}/nodes",
-                       params={"ids": ",".join(ids)}, headers={"X-Figma-Token": token})
+                       params={"ids": ",".join(ids)}, headers=auth_headers(token))
         if r.status_code != 200:
             if len(ids) > 1 and r.status_code not in (401, 403, 404):
                 half = len(ids) // 2
@@ -119,7 +143,7 @@ async def fetch_figma_nodes(file_key: str, node_ids: list[str], token: str,
                 await one_batch(client, ids[half:])
                 return
             if r.status_code in (401, 403):
-                raise RuntimeError(f"figma fetch failed: {r.status_code} {r.text[:200]}")
+                raise FigmaHTTPError(r.status_code, f"figma fetch failed: {r.status_code} {r.text[:200]}")
             for nid in ids:
                 out[nid] = {}
             return
@@ -244,11 +268,11 @@ async def fetch_figma_image_urls(
                     "format": format,
                     "scale": scale,
                 },
-                headers={"X-Figma-Token": token},
+                headers=auth_headers(token),
             )
             if r.status_code != 200:
-                raise RuntimeError(
-                    f"figma image export failed ({r.status_code}): {r.text[:200]}"
+                raise FigmaHTTPError(
+                    r.status_code, f"figma image export failed ({r.status_code}): {r.text[:200]}"
                 )
             payload = r.json() or {}
             images = payload.get("images") or {}
@@ -269,8 +293,8 @@ async def fetch_figma_file(file_key: str, token: str, depth: int = 2) -> dict:
         r = await _get(
             client, f"{FIGMA_BASE}/files/{file_key}",
             params={"depth": depth},
-            headers={"X-Figma-Token": token},
+            headers=auth_headers(token),
         )
         if r.status_code != 200:
-            raise RuntimeError(f"figma file fetch failed: {r.status_code} {r.text[:200]}")
+            raise FigmaHTTPError(r.status_code, f"figma file fetch failed: {r.status_code} {r.text[:200]}")
         return r.json()

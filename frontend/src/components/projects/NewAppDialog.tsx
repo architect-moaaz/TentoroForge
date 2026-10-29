@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { Project } from "@/types/project";
+import { FigmaConnect } from "@/components/figma/FigmaConnect";
 
 interface NewAppDialogProps {
   orgId: string;
@@ -352,6 +353,9 @@ export function NewAppDialog({ orgId, open, onOpenChange }: NewAppDialogProps) {
                 {figmaUrlError && (
                   <p className="mt-1 text-xs text-destructive">{figmaUrlError}</p>
                 )}
+                {/* Read as the person who connected: a file shared with them, not only the
+                    organisation's token's own files. */}
+                <FigmaConnect className="mt-2" />
               </div>
             )}
             {/* NO TOKEN FIELD. It asked for the PAT and put it in

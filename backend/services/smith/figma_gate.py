@@ -141,10 +141,13 @@ def unchecked(doc: dict, output_dir: Any) -> bool:
 
 
 def token_configured(output_dir: Any) -> bool:
-    from services.figma.integrations import config_for
+    """A token to read with: the acting person's own (Connect Figma), the organisation's, or the
+    environment's."""
+    from services.figma.integrations import PERSON_TOKEN_KEY, config_for
 
     try:
-        if (config_for(output_dir) or {}).get(TOKEN_KEY):
+        values = config_for(output_dir) or {}
+        if values.get(PERSON_TOKEN_KEY) or values.get(TOKEN_KEY):
             return True
     except Exception:  # noqa: BLE001 — unknown is "ask for it"
         pass
@@ -184,14 +187,17 @@ def prompt(output_dir: Any, *, problem: str = "") -> dict[str, Any]:
                 f"already saved. {link_help}")
         return {"text": text, "options": [USE_FORGE_INSTEAD], "status": "asked", "secret": {
             "provider": "figma", "key": TOKEN_KEY, "label": "Figma access token", "saved": FIGMA_SAVED,
-            "action": "Read design", "skipSave": True, "extra": link_field}}
-    text = (f"{lead}{_PROMPT_MARK}: paste the link and your Figma access token in the box below. The token is "
+            "action": "Read design", "skipSave": True, "extra": link_field, "connect": "figma"}}
+    # CONNECT FIGMA FIRST. Signing in to Figma reads the design as the person, with whatever their
+    # account can open; a pasted personal token stays the way for a platform with no OAuth app.
+    text = (f"{lead}{_PROMPT_MARK}: paste the link in the box below and press Connect Figma to sign in "
+            f"with the Figma account that can open it, or paste a Figma access token instead. A token is "
             f"saved, encrypted, with your organisation's integrations and is never written into this "
             f"conversation. Create one in Figma under Settings → Security → Personal access tokens, with "
             f"read access to files. {link_help}")
     return {"text": text, "options": [USE_FORGE_INSTEAD], "status": "asked", "secret": {
         "provider": "figma", "key": TOKEN_KEY, "label": "Figma access token", "placeholder": "figd_...",
-        "saved": FIGMA_SAVED, "action": "Save and read design", "extra": link_field}}
+        "saved": FIGMA_SAVED, "action": "Save and read design", "extra": link_field, "connect": "figma"}}
 
 
 def _pending_message(state: dict[str, Any]) -> dict[str, Any]:

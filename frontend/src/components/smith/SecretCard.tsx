@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useParams } from "next/navigation";
 import { CheckCircle2, KeyRound, Loader2 } from "lucide-react";
 import type { SecretField } from "@/hooks/useBlueprintRun";
+import { FigmaConnect } from "@/components/figma/FigmaConnect";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
 
@@ -32,9 +33,11 @@ export function SecretCard({
   const [extra, setExtra] = useState("");
   const [state, setState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [error, setError] = useState("");
+  const [signedIn, setSignedIn] = useState(false);
   const needsExtra = Boolean(field.extra);
-  // `skipSave`: the value is already stored, so only the plain field is asked for.
-  const needsSecret = !field.skipSave;
+  // `skipSave`: the value is already stored, so only the plain field is asked for. A person who
+  // signed in to the service (`connect`) is read as themselves: no key is asked for either.
+  const needsSecret = !field.skipSave && !signedIn;
 
   const save = async () => {
     const typed = value.trim();
@@ -129,9 +132,12 @@ export function SecretCard({
           />
         </>
       )}
+      {field.connect === "figma" && (
+        <FigmaConnect className="pt-0.5" onStatus={(s) => setSignedIn(s.connected)} />
+      )}
       {needsSecret && (
         <label htmlFor={`secret-${field.key}`} className="flex items-center gap-1.5 text-xs font-medium">
-          <KeyRound className="h-3.5 w-3.5" /> {field.label}
+          <KeyRound className="h-3.5 w-3.5" /> {field.connect && !field.skipSave ? `Or paste a ${field.label} instead` : field.label}
         </label>
       )}
       <div className="flex gap-1.5">
@@ -159,7 +165,7 @@ export function SecretCard({
           className="inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded bg-primary px-3 text-xs font-medium text-primary-foreground disabled:opacity-50"
         >
           {state === "saving" && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-          {field.action ?? "Save key"}
+          {signedIn && !field.skipSave ? "Read design" : field.action ?? "Save key"}
         </button>
       </div>
       {state === "error" && (
