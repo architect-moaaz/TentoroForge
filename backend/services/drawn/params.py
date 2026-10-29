@@ -208,7 +208,10 @@ def _dropped_row(plan: _Plan, at: str, expr: Any) -> bool:
     return at in plan.dropped and at not in plan.scope and str(expr or "").strip().startswith("row.")
 
 
-def _path(plan: _Plan, expr: str, at: str, problems: list[str], what: str) -> bool:
+def _path(plan: _Plan, expr: str, at: str, problems: list[str], what: str, *, whole: bool = False) -> bool:
+    """Whether ``expr`` reads something the contract has (declaring what it
+    can). ``whole``: a condition may ask of a record itself — shown while
+    there is one."""
     m = _PATH.match(expr.strip())
     if not m:
         problems.append(f"{what}: `{expr}` is not `props.<name>`, `props.<name>.<field>` or `row.<field>`")
@@ -247,6 +250,8 @@ def _path(plan: _Plan, expr: str, at: str, problems: list[str], what: str) -> bo
         problems.append(f"{what}: `{name}` is a value, read as `props.{name}`")
         return False
     if kind in ("record", "form") and not sub:
+        if whole:
+            return True
         problems.append(f"{what}: `{name}` is a {kind}, read as `props.{name}.<field>`")
         return False
     if kind in ("record", "form"):
@@ -289,6 +294,11 @@ def _resolve(root: M.Node, reply: dict, *, children: bool) -> tuple[_Plan, list[
         prop = str(entry.get("prop") or "")
         slot = plan.slots.get(prop)
         what = f"the list `{prop}`"
+        if slot is None and re.match(r"^[A-Za-z_]\w*$", prop):
+            # A list declares itself, as a value does what it reads.
+            slot = {"name": prop, "label": prop, "kind": "list", "fields": []}
+            plan.slots[prop] = slot
+            plan.data.append(slot)
         if slot is None or slot.get("kind") != "list":
             problems.append(f"{what} is not a `list` in the contract")
             continue
@@ -393,6 +403,12 @@ def _resolve(root: M.Node, reply: dict, *, children: bool) -> tuple[_Plan, list[
         if not _path(plan, str(v.get("expr") or ""), n.id, problems, what):
             continue
         unit = n.unit()
+        if n.body is None and not unit.is_component and unit.tag != "img":
+            # Named by its box, the value is the one text, picture or component in it.
+            held = [t for t in n.walk() if t is not n and (t.body is not None or t.tag == "img" or t.is_component)
+                    and not (t.parent is not None and t.parent.unit() is t)]
+            if len(held) == 1:
+                n, unit = held[0], held[0].unit()
         prop = str(v.get("prop") or "")
         if unit.is_component:
             words = [k for k, _v in unit.attrs]
@@ -510,7 +526,7 @@ def _resolve(root: M.Node, reply: dict, *, children: bool) -> tuple[_Plan, list[
             continue
         if _dropped_row(plan, n.id, s.get("when")):
             continue
-        if _path(plan, str(s.get("when") or ""), n.id, problems, f"the condition at {n.id}"):
+        if _path(plan, str(s.get("when") or ""), n.id, problems, f"the condition at {n.id}", whole=True):
             plan.shows[n.id] = s
 
     if children:
@@ -835,7 +851,9 @@ def _sample(plan: _Plan, contract: dict) -> dict[str, Any]:
     for listed in plan.lists:
         by_prop.setdefault(listed["prop"], []).append(listed)
     for prop, entries in by_prop.items():
-        slot = plan.slots[prop]
+        slot = plan.slots.get(prop)
+        if slot is None:
+            continue
         rows: list[dict] = []
         # A TABLE DRAWN BY COLUMN is one entry per column: the n-th cell of
         # each is the n-th row.
@@ -864,7 +882,11 @@ def _sample(plan: _Plan, contract: dict) -> dict[str, Any]:
         m = _PATH.match(expr)
         if not m or m.group(1) != "props":
             return
-        slot = plan.slots[m.group(2)]
+        slot = plan.slots.get(m.group(2))
+        if slot is None:
+            return  # left out of the contract: nothing reads it
+        if not m.group(3) and slot.get("kind") in ("record", "form"):
+            return  # a record asked of itself is always given
         if m.group(3):
             rec = out.setdefault(m.group(2), {"id": "1"} if slot.get("kind") == "record" else {})
             rec[m.group(3)] = coerce(slot, m.group(3), value)
@@ -877,6 +899,8 @@ def _sample(plan: _Plan, contract: dict) -> dict[str, Any]:
             put(v["expr"], M.prop_value(n, v["prop"]) if n.unit().is_component else M.plain(n))
     for nid, inp in plan.inputs.items():
         n = plan.nodes[nid]
+        if inp["form"] not in plan.slots:
+            continue
         path = f"props.{inp['form']}.{inp['field']}"
         if inp["kind"] in ("text", "select"):
             drawn = M.prop_value(n, inp["prop"]) if inp.get("prop") and n.unit().is_component else M.plain(n)
