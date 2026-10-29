@@ -4147,6 +4147,10 @@ MAX_TOKENS_BY_NODE: dict[str, int] = {
     # Screens, records, processes, rules, conventions and benchmarks of a
     # whole field in one reply; the headroom is free when unused.
     "domain_reference": 64000,
+    # One drawn screen's bindings, by number. A dense screen (hundreds of
+    # elements) was cut off at 32,000 twice in one DITANS run (2026-10-30);
+    # the answer is small, the thinking over a big screen is not.
+    "drawn_views": 64000,
     # Names the entities and their relationships without a field; the 64k
     # the single call needed went on fields, which `entity_fields` writes one
     # entity at a time inside the default.
