@@ -21,6 +21,11 @@ from services.drawn.tsx import Emitter, _box, _px, _walk, is_vector_only
 
 #: A component is shared when at least this many of its uses are alike.
 MIN_USES = 3
+#: How a component's file is written. A build writes the files again when it
+#: changes (`orchestrator._drawn_present`): they come from the drawing with no
+#: model, and a file written before its words could be typed into kept an app's
+#: forms read-only (DITANS, 2026-10-30).
+FORMAT = 2
 
 
 def _texts(node: dict) -> list[dict]:
@@ -118,11 +123,37 @@ class Library:
         return f"<{shared.name} {props} />"
 
     def files(self) -> dict[str, str]:
-        """``{Name: component file}`` for every shared component."""
+        """``{Name: component file}`` for every shared component.
+
+        EACH WORD CAN BE TYPED INTO. A design system's text field is a
+        component whose words are its label, its value and its help; a screen
+        that uses it as an input gives the value word an ``<word>Input`` and the
+        component draws an input in that word's own place and look (its font and
+        colour are inherited from the drawn text)."""
         out = {}
         for shared in self.shared.values():
-            props = "; ".join(f"{k}: React.ReactNode" for k in shared.keys)
+            props = "; ".join(f"{k}: React.ReactNode; {k}Input?: FieldInput" for k in shared.keys)
+            template = shared.template
+            for k in shared.keys:
+                template = template.replace("{props." + k + "}", "{" + _typed(k) + "}")
             out[shared.name] = (
-                f"export default function {shared.name}(props: {{ {props} }}) {{\n"
-                f"  return (\n{shared.template}  );\n}}\n")
+                FIELD_INPUT
+                + f"export default function {shared.name}(props: {{ {props} }}) {{\n"
+                f"  return (\n{template}  );\n}}\n")
         return out
+
+
+#: What a screen hands a component's word to make it an input.
+FIELD_INPUT = ("type FieldInput = { value: string; onChange(value: string): void; placeholder?: string; "
+               "options?: string[] };\n\n")
+_FIELD_CLASSES = "w-full min-w-0 bg-transparent outline-none border-0 p-0 m-0 appearance-none"
+
+
+def _typed(key: str) -> str:
+    """The word, or the input a screen made of it."""
+    field = f"props.{key}Input"
+    return (f"{field} ? ({field}.options ? <select className=\"{_FIELD_CLASSES}\" value={{{field}.value}} "
+            f"onChange={{(e) => {field}!.onChange(e.target.value)}}>{{{field}.options.map((o) => "
+            f"<option key={{o}} value={{o}}>{{o}}</option>)}}</select> : <input className=\"{_FIELD_CLASSES}\" "
+            f"value={{{field}.value}} placeholder={{{field}.placeholder}} "
+            f"onChange={{(e) => {field}!.onChange(e.target.value)}} />) : props.{key}")

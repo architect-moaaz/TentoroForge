@@ -102,7 +102,7 @@ def _schema(children: bool) -> dict[str, Any]:
                 "node": {"type": "string"}, "form": {"type": "string"}, "field": {"type": "string"},
                 "kind": {"type": "string", "enum": ["text", "select", "toggle", "choice"]},
                 "value": {"type": "string"}, "placeholder": {"type": "boolean"},
-                "on_look": {"type": "string"}, "off_look": {"type": "string"},
+                "on_look": {"type": "string"}, "off_look": {"type": "string"}, "prop": {"type": "string"},
             }}},
         "shows": {"type": "array", "items": {
             "type": "object", "additionalProperties": False, "required": ["node", "when"],
@@ -152,7 +152,8 @@ Pressed inside a list's template row, it is given that row.
 
 INPUTS — what the person sets is a field of a `form`: `{node, form, field, kind}`. `text` and `select`: `node` is
 the text showing the value (it becomes the input; `placeholder: true` when the drawn words are a hint such as
-"Search…", not a value). `toggle`: `node` is the switch. `choice`: `node` is one option (a chip, a radio row,
+"Search…", not a value), or a shared component drawn as a field, with `prop` the one of its words that is the
+value. `toggle`: `node` is the switch. `choice`: `node` is one option (a chip, a radio row,
 a segment) and `value` the option it sets; `on_look` / `off_look` are the numbers of an option drawn selected
 and one drawn not selected, so the selection shows.
 
@@ -190,6 +191,8 @@ class _Plan:
     controls: list[str] = field(default_factory=list)
     #: The contract's `data`, for what the bindings declare.
     data: list = field(default_factory=list)
+    #: Elements of a list given up for the lists inside its rows.
+    dropped: set[str] = field(default_factory=set)
     #: node id → the field that picks its look and, by value, the element drawn in it.
     looks: dict[str, dict] = field(default_factory=dict)
     components: set[str] = field(default_factory=set)
@@ -198,6 +201,11 @@ class _Plan:
 
 def _fields(slot: dict) -> dict[str, dict]:
     return {str(f.get("name")): f for f in slot.get("fields") or [] if isinstance(f, dict) and f.get("name")}
+
+
+def _dropped_row(plan: _Plan, at: str, expr: Any) -> bool:
+    """A row's binding inside a list given up for the lists in its rows."""
+    return at in plan.dropped and at not in plan.scope and str(expr or "").strip().startswith("row.")
 
 
 def _path(plan: _Plan, expr: str, at: str, problems: list[str], what: str) -> bool:
@@ -266,7 +274,18 @@ def _resolve(root: M.Node, reply: dict, *, children: bool) -> tuple[_Plan, list[
             return None
         return n
 
-    for entry in reply.get("lists") or []:
+    # A LIST INSIDE ANOTHER LIST'S ROWS: THE INNER ONE IS THE DATA. A ladder
+    # drawn as steps each holding its tasks was answered as both, and refused
+    # as "its rows are already another list's" (DITANS readiness ladder,
+    # 2026-10-30). The outer rows are drawn as they are, and what was bound
+    # to them as a row is left as drawn.
+    entries = [e for e in reply.get("lists") or [] if isinstance(e, dict)]
+    inside = [{n.id for r in e.get("rows") or [] if str(r) in nodes for n in nodes[str(r)].walk()} for e in entries]
+    outer = {i for i, area in enumerate(inside)
+             if any(j != i and set(map(str, entries[j].get("rows") or [])) & area for j in range(len(entries)))}
+    for i in outer:
+        plan.dropped |= inside[i]
+    for entry in (e for i, e in enumerate(entries) if i not in outer):
         prop = str(entry.get("prop") or "")
         slot = plan.slots.get(prop)
         what = f"the list `{prop}`"
@@ -328,7 +347,22 @@ def _resolve(root: M.Node, reply: dict, *, children: bool) -> tuple[_Plan, list[
                     problems.append(f"{what}: a look's row {b.get('row')} is not an element")
                     bad = True
                     continue
-                there = drawn if at == template.id else M.counterpart(template, drawn, nodes[at])
+                if at == template.id:
+                    there = drawn
+                elif any(drawn is r for r in rows):
+                    there = M.counterpart(template, drawn, nodes[at])
+                else:
+                    # NAMED BY AN ELEMENT, NOT ITS ROW: the look is that element
+                    # as drawn, or the one at the element's place in the row it
+                    # sits in (DITANS wzml1sa6, 2026-10-30: "row 14 draws
+                    # nothing where element 14 is").
+                    holder = next((r for r in rows if any(n is drawn for n in r.walk())), None)
+                    if M.same_kind(nodes[at], drawn):
+                        there = drawn
+                    elif holder is not None:
+                        there = M.counterpart(template, holder, nodes[at])
+                    else:
+                        there = None
                 if there is None:
                     problems.append(f"{what}: row {drawn.id} draws nothing where element {at} is")
                     bad = True
@@ -355,6 +389,8 @@ def _resolve(root: M.Node, reply: dict, *, children: bool) -> tuple[_Plan, list[
         if n is None or n.id in plan.skip:
             continue
         what = f"the value at {n.id}"
+        if _dropped_row(plan, n.id, v.get("expr")):
+            continue
         if not _path(plan, str(v.get("expr") or ""), n.id, problems, what):
             continue
         unit = n.unit()
@@ -409,15 +445,45 @@ def _resolve(root: M.Node, reply: dict, *, children: bool) -> tuple[_Plan, list[
             continue
         what = f"the input at {n.id}"
         form, name, kind = str(inp.get("form") or ""), str(inp.get("field") or ""), str(inp.get("kind") or "")
+        # AN INPUT DECLARES ITS FORM AND FIELD, as a value does what it reads:
+        # a record the person types into is a form.
         slot = plan.slots.get(form)
-        if slot is None or slot.get("kind") != "form":
-            problems.append(f"{what}: `{form}` is not a `form` in the contract")
+        if not re.match(r"^[A-Za-z_]\w*$", form) or not re.match(r"^[A-Za-z_]\w*$", name):
+            problems.append(f"{what}: `{form}.{name}` is not a form and field name")
+            continue
+        if slot is None:
+            slot = {"name": form, "label": form, "kind": "form", "fields": []}
+            plan.slots[form] = slot
+            plan.data.append(slot)
+        if slot.get("kind") == "record":
+            slot["kind"] = "form"
+        if slot.get("kind") != "form":
+            problems.append(f"{what}: `{form}` is a {slot.get('kind')}, not a form")
             continue
         if name not in _fields(slot):
-            problems.append(f"{what}: the form `{form}` has no field `{name}`")
-            continue
+            slot.setdefault("fields", []).append({"name": name, "label": name,
+                                                   "type": "boolean" if kind == "toggle" else "string"})
         if n.id in plan.scope:
             problems.append(f"{what} is inside a list's rows — a row's control is an action given the row")
+            continue
+        unit = n.unit()
+        if kind in ("text", "select") and unit.is_component:
+            # A SHARED COMPONENT DRAWN AS A FIELD IS THE INPUT. A design
+            # system's text field is a component whose words are its label,
+            # value and help; refused as "not the text showing its value", every
+            # form drawn with one failed three rounds (DITANS R-204, 2026-10-30).
+            # The word that is the value is named, or read off the words' names.
+            words = [k for k, _v in unit.attrs]
+            prop = str(inp.get("prop") or "")
+            if prop not in words:
+                named = [w for w in words if re.search(r"value|text|input|placeholder|content", w, re.I)]
+                prop = words[0] if len(words) == 1 else (named[0] if len(named) == 1 else "")
+            if not prop:
+                problems.append(f"{what}: `{unit.tag}` has the words {words}; say which is the value in `prop`")
+                continue
+            if n.id in plan.actions:
+                plan.actions.pop(n.id)
+            plan.inputs[n.id] = {**inp, "form": form, "field": name, "kind": kind, "prop": prop}
             continue
         if kind in ("text", "select") and n.body is None:
             # Named by its box, the input is the one text drawn in it.
@@ -442,6 +508,8 @@ def _resolve(root: M.Node, reply: dict, *, children: bool) -> tuple[_Plan, list[
     for s in reply.get("shows") or []:
         n = node(s.get("node"), f"the condition at {s.get('node')}", quiet_root=True)
         if n is None or n.id in plan.skip:
+            continue
+        if _dropped_row(plan, n.id, s.get("when")):
             continue
         if _path(plan, str(s.get("when") or ""), n.id, problems, f"the condition at {n.id}"):
             plan.shows[n.id] = s
@@ -651,6 +719,18 @@ class _Writer:
             u_attrs = list(unit.attrs)
             for v in values:
                 u_attrs = [(k, "{" + v["expr"] + "}" if k == v["prop"] else val) for k, val in u_attrs]
+            typed = plan.inputs.get(n.id)
+            if typed and typed["kind"] in ("text", "select") and typed.get("prop"):
+                form, field_name, word = typed["form"], typed["field"], typed["prop"]
+                options = ""
+                if typed["kind"] == "select":
+                    drawn = M.prop_value(unit, word)
+                    choices = list(dict.fromkeys([*(_fields(plan.slots[form])[field_name].get("options") or []), drawn]))
+                    options = f", options: {json.dumps(choices)}"
+                hint = f", placeholder: {json.dumps(M.prop_value(unit, word))}" if typed.get("placeholder") else ""
+                u_attrs.append((f"{word}Input", "{{ value: String(props." + form + "." + field_name + ' ?? ""), '
+                                "onChange: (v: string) => props." + change_handler(form) + "("
+                                + json.dumps(field_name) + ", v)" + hint + options + " }}"))
             comp = f"<{unit.tag}{_attrs(u_attrs)} />"
             if unit is n:
                 if not press and not key:
@@ -782,7 +862,8 @@ def _sample(plan: _Plan, contract: dict) -> dict[str, Any]:
         n = plan.nodes[nid]
         path = f"props.{inp['form']}.{inp['field']}"
         if inp["kind"] in ("text", "select"):
-            put(path, "" if inp.get("placeholder") else M.plain(n))
+            drawn = M.prop_value(n, inp["prop"]) if inp.get("prop") and n.unit().is_component else M.plain(n)
+            put(path, "" if inp.get("placeholder") else drawn)
         elif inp["kind"] == "choice":
             on = plan.nodes.get(str(inp.get("on_look") or ""))
             off = plan.nodes.get(str(inp.get("off_look") or ""))

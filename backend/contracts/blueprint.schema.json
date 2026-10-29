@@ -4443,6 +4443,9 @@
           "portal": {
             "type": "string"
           },
+          "format": {
+            "type": "integer"
+          },
           "status": {
             "$ref": "#/properties/product/properties/capabilities/items/properties/status"
           },

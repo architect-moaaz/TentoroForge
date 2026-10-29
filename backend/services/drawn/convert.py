@@ -203,11 +203,13 @@ def _prepare(doc: dict, output_dir: str | Path) -> Prepared:
 def component_rows(prepared: Prepared) -> list[dict]:
     """A `drawnViews` row for every shared component. No model: its props are
     its words."""
+    from services.drawn.components import FORMAT
+
     rows = []
     for name, code in prepared.components.items():
         keys = prepared.component_keys.get(name, [])
         body = ('"use client";\nimport type * as React from "react";\n\n' + code)
-        rows.append({"key": f"component:{name}", "kind": "component", "name": name, "code": body,
+        rows.append({"key": f"component:{name}", "kind": "component", "name": name, "code": body, "format": FORMAT,
                      "contract": {"data": [{"name": k, "kind": "value", "label": k, "fields": [], "type": "string"}
                                            for k in keys], "actions": []},
                      "sample": {}, "source": hashlib.sha1(code.encode()).hexdigest()[:16]})

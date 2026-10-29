@@ -1459,6 +1459,9 @@ export const DrawnView = z.object({
   /** The product it frames (a shell) or is drawn in (a screen): the frame's
    *  `portal`. A design of several products has a shell for each. */
   portal: z.string().optional(),
+  /** A shared component's file format (`drawn.components.FORMAT`): a build
+   *  writes the files again when it changes. */
+  format: z.number().int().optional(),
   ...artifactBase,
 });
 
