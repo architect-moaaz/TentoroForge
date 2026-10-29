@@ -515,6 +515,16 @@ def test_what_an_answer_forgot_to_declare_or_left_unpressed_is_settled_by_constr
     by_element["lists"][0]["looks"][0]["by"] = [{"value": "Live", "row": "6"}, {"value": "Paused", "row": "9"}]
     out, problems = P.apply(STATIC, by_element, "TenantsView")
     assert problems == [] and "<DhTagWarning label={row.status} />" in out["code"]
+    # a list the contract forgot declares itself; a condition may ask of a record itself
+    undeclared = json.loads(json.dumps(ANSWER))
+    undeclared["contract"]["data"] = [d for d in undeclared["contract"]["data"] if d["name"] != "tenants"]
+    undeclared["contract"]["data"].append({"name": "selected", "kind": "record", "label": "Tenant", "fields": []})
+    undeclared["shows"] = [{"node": "2", "when": "props.selected"}]
+    undeclared["values"].append({"node": "2", "expr": "props.selected.title"})
+    out, problems = P.apply(STATIC, undeclared, "TenantsView")
+    assert problems == [], problems
+    assert "props.tenants.map((row) => (" in out["code"] and "props.selected && (" in out["code"]
+    assert out["sample"]["selected"]["title"] == "Tenants" and len(out["sample"]["tenants"]) == 3
     # a value on the whole screen binds nothing and is left out
     root_value = json.loads(json.dumps(ANSWER))
     root_value["values"].append({"node": "1", "expr": "props.extra"})
