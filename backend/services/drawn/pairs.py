@@ -25,6 +25,10 @@ from typing import Any
 PHONE_MAX = 600
 #: …and at least this wide for a desktop.
 WIDE_MIN = 900
+#: Phone drawings asked about in one call. All 194 of DITANS's in one answer
+#: spent 32,000 tokens reasoning and wrote nothing, then, given 64,000, was cut
+#: off 70,000 characters in (2026-10-30); a batch is a short answer.
+BATCH = 30
 
 
 def _frames(doc: dict) -> list[dict]:
@@ -91,8 +95,8 @@ def _line(f: dict) -> str:
 def user_prompt(phones: list[dict], wides: list[dict], *, feedback: str = "") -> str:
     out = [f"PHONE DRAWINGS ({len(phones)}):\n" + "\n".join(_line(f) for f in phones),
            f"DESKTOP DRAWINGS ({len(wides)}):\n" + "\n".join(_line(f) for f in wides),
-           "Return every pair you find: the phone drawing, its desktop twin, and in a few words what makes them "
-           "the same screen."]
+           "Return every pair you find for these phone drawings: the phone drawing, its desktop twin, and in at "
+           "most eight words what makes them the same screen."]
     if feedback:
         out.append("Your previous answer was refused:\n" + feedback)
     return "\n\n".join(out)
@@ -134,19 +138,24 @@ def settle(raw: list[dict], phones: list[dict], wides: list[dict]) -> tuple[list
 
 
 def pair(client: Any, doc: dict, *, usage: list | None = None) -> tuple[list[dict], list[str]]:
-    """Ask once which drawings are the same screen. ``([], [])`` when the
-    design does not draw both sizes."""
+    """Which drawings are the same screen, asked a batch of phone drawings at
+    a time against every desktop one; each drawing in one pair at most.
+    ``([], [])`` when the design does not draw both sizes."""
     import time
 
     phones, wides = candidates(doc)
     if not phones:
         return [], []
-    t0 = time.monotonic()
-    reply = client(system=SYSTEM, user=user_prompt(phones, wides), schema=schema(phones, wides))
-    if usage is not None and getattr(reply, "usage", None) is not None:
-        usage.append((reply.usage, time.monotonic() - t0))
-    body = json.loads(getattr(reply, "text", reply))
-    return settle(body.get("pairs") or [], phones, wides)
+    found: list[dict] = []
+    for at in range(0, len(phones), BATCH):
+        batch = phones[at:at + BATCH]
+        t0 = time.monotonic()
+        reply = client(system=SYSTEM, user=user_prompt(batch, wides), schema=schema(batch, wides))
+        if usage is not None and getattr(reply, "usage", None) is not None:
+            usage.append((reply.usage, time.monotonic() - t0))
+        body = json.loads(getattr(reply, "text", reply))
+        found += [x for x in body.get("pairs") or [] if isinstance(x, dict)]
+    return settle(found, phones, wides)
 
 
 def _live(doc: dict) -> list[dict]:
