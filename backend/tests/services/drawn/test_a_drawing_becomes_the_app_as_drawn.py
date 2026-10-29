@@ -502,6 +502,14 @@ def test_what_an_answer_forgot_to_declare_or_left_unpressed_is_settled_by_constr
     assert "onClose" not in out["code"] and all(a["name"] != "onClose" for a in out["contract"]["actions"])
     assert 'value={props.promo.code ?? ""}' in out["code"]
     assert out["sample"]["pageTitle"] == "Tenants"
+    # a look named on another row's element is that element's place in the template,
+    # and an element named both as a choice and an action is the choice
+    other = json.loads(json.dumps(ANSWER))
+    other["lists"][0]["looks"][0]["node"] = "9"
+    other["contract"]["actions"].append({"name": "onPickEgypt", "label": "Egypt", "kind": "run", "nodes": ["16"]})
+    out, problems = P.apply(STATIC, other, "TenantsView")
+    assert problems == [], problems
+    assert 'row.status === "Live" ?' in out["code"] and "onPickEgypt" not in out["code"]
 
 
 def test_an_answer_that_names_what_is_not_there_is_asked_again():

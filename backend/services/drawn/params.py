@@ -291,6 +291,14 @@ def _resolve(root: M.Node, reply: dict, *, children: bool) -> tuple[_Plan, list[
         inside = {n.id for n in template.walk()}
         for lk in entry.get("looks") or []:
             at = str(lk.get("node") or template.id)
+            # Named in another row, the element is its place in the template:
+            # the row itself is the template row, an element in it the one at
+            # the same place (DITANS wzml1sa6, 2026-10-30).
+            if at not in inside and at in nodes:
+                other = next((r for r in rows if r.id == at or any(n.id == at for n in r.walk())), None)
+                if other is not None:
+                    there = template if other.id == at else M.counterpart(other, template, nodes[at])
+                    at = there.id if there is not None else at
             if at not in inside:
                 problems.append(f"{what}: a look's node {at} is not in its template row {template.id}")
                 bad = True
@@ -420,8 +428,9 @@ def _resolve(root: M.Node, reply: dict, *, children: bool) -> tuple[_Plan, list[
             problems.append(f"{what}: a choice says the `value` it sets")
             continue
         if n.id in plan.actions:
-            problems.append(f"{what}: element {n.id} is pressed for `{plan.actions[n.id]['name']}` too")
-            continue
+            # What the person sets is what the element does; the action named
+            # for it too is pressed elsewhere or nowhere (and then left out).
+            plan.actions.pop(n.id)
         if all(node(inp[key], what) is not None for key in ("on_look", "off_look") if inp.get(key)):
             plan.inputs[n.id] = {**inp, "form": form, "field": name, "kind": kind}
 
