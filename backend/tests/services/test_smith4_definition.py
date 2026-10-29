@@ -177,3 +177,21 @@ def test_the_routers_work_does_not_rebind_the_chat_handler_locally():
     bound_locally = {a.asname or a.name for n in ast.walk(work) if isinstance(n, ast.ImportFrom)
                      for a in n.names}
     assert "handle_chat_v2" not in bound_locally and "ChatV2Request" not in bound_locally
+
+
+def test_the_brief_the_app_keeps_is_the_brief_when_the_chat_does_not_carry_it(tmp_path):
+    """"Carry on with the definition", in a chat whose history did not carry
+    the imported brief, was read as a 28-character brief and Smith asked what
+    the app is for (DITANS wzml1sa6, 2026-10-30)."""
+    from services.blueprint.service import BlueprintService
+    from services.smith4.definition import brief_of
+    from services.smith4.verbs import Ctx
+
+    kept = "DITANS Health: a healthcare recruitment platform with six portals, from the Figma design."
+    BlueprintService.create(output_dir=str(tmp_path), app_id="d", name="DITANS Health", domain="unknown",
+                            description=kept)
+    brief = brief_of(Ctx(output_dir=str(tmp_path), project_id="p", message="Carry on with the definition", ask=""))
+    assert brief.startswith(kept) and brief.endswith("Carry on with the definition")
+    # a chat that does carry it is not given it twice
+    again = brief_of(Ctx(output_dir=str(tmp_path), project_id="p", message=kept, ask=""))
+    assert again.count(kept) == 1
