@@ -403,6 +403,12 @@ def _resolve(root: M.Node, reply: dict, *, children: bool) -> tuple[_Plan, list[
         if not _path(plan, str(v.get("expr") or ""), n.id, problems, what):
             continue
         unit = n.unit()
+        if n.body is None and not unit.is_component and unit.tag != "img":
+            # Named by its box, the value is the one text, picture or component in it.
+            held = [t for t in n.walk() if t is not n and (t.body is not None or t.tag == "img" or t.is_component)
+                    and not (t.parent is not None and t.parent.unit() is t)]
+            if len(held) == 1:
+                n, unit = held[0], held[0].unit()
         prop = str(v.get("prop") or "")
         if unit.is_component:
             words = [k for k, _v in unit.attrs]
@@ -845,7 +851,9 @@ def _sample(plan: _Plan, contract: dict) -> dict[str, Any]:
     for listed in plan.lists:
         by_prop.setdefault(listed["prop"], []).append(listed)
     for prop, entries in by_prop.items():
-        slot = plan.slots[prop]
+        slot = plan.slots.get(prop)
+        if slot is None:
+            continue
         rows: list[dict] = []
         # A TABLE DRAWN BY COLUMN is one entry per column: the n-th cell of
         # each is the n-th row.
@@ -874,7 +882,9 @@ def _sample(plan: _Plan, contract: dict) -> dict[str, Any]:
         m = _PATH.match(expr)
         if not m or m.group(1) != "props":
             return
-        slot = plan.slots[m.group(2)]
+        slot = plan.slots.get(m.group(2))
+        if slot is None:
+            return  # left out of the contract: nothing reads it
         if not m.group(3) and slot.get("kind") in ("record", "form"):
             return  # a record asked of itself is always given
         if m.group(3):
@@ -889,6 +899,8 @@ def _sample(plan: _Plan, contract: dict) -> dict[str, Any]:
             put(v["expr"], M.prop_value(n, v["prop"]) if n.unit().is_component else M.plain(n))
     for nid, inp in plan.inputs.items():
         n = plan.nodes[nid]
+        if inp["form"] not in plan.slots:
+            continue
         path = f"props.{inp['form']}.{inp['field']}"
         if inp["kind"] in ("text", "select"):
             drawn = M.prop_value(n, inp["prop"]) if inp.get("prop") and n.unit().is_component else M.plain(n)
