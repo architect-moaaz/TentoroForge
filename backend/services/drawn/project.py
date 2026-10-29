@@ -11,6 +11,13 @@ notifications and account menu where the drawing puts its bell.
 
 Without a drawn shell the wrapper is the template's: it says `DRAWN_SHELL =
 false`, and the layout draws its own frame as before.
+
+A DESIGN OF SEVERAL PRODUCTS HAS A FRAME FOR EACH (`convert.portals`): the
+candidate's, the recruiter's, the administrator's. The wrapper draws the one
+the page you are on was drawn in; a page no portal drew (signing in, a page
+the design left out) gets the frame of the portal the signed-in role's pages
+are drawn in. On a phone, a page drawn for the phone too is shown bare: the
+phone drawing is the whole screen, and a desktop sidebar around it is not.
 """
 from __future__ import annotations
 
@@ -28,15 +35,76 @@ import * as React from "react";
 
 export const DRAWN_SHELL = false;
 
-export default function DrawnShell(props: { children?: React.ReactNode; controls?: React.ReactNode }) {
+export default function DrawnShell(props: { children?: React.ReactNode; controls?: React.ReactNode; role?: string }) {
   return <>{props.children}</>;
 }
 '''
 
 
+def _shells(doc: dict) -> list[dict]:
+    return [v for v in doc.get("drawnViews") or [] if isinstance(v, dict) and v.get("kind") == "shell"
+            and v.get("status") != "DEPRECATED" and v.get("code")]
+
+
 def _shell(doc: dict) -> dict | None:
-    return next((v for v in doc.get("drawnViews") or [] if isinstance(v, dict) and v.get("kind") == "shell"
-                 and v.get("status") != "DEPRECATED"), None)
+    shells = _shells(doc)
+    return shells[0] if shells else None
+
+
+def _live_pages(doc: dict) -> list[dict]:
+    return [p for p in doc.get("pages") or [] if isinstance(p, dict) and p.get("status") != "DEPRECATED"
+            and p.get("route")]
+
+
+def portal_routes(doc: dict, shells: list[dict]) -> list[list[str]]:
+    """``[[route, shell key]]`` — the frame each drawn page was drawn in."""
+    from services.drawn.convert import _spec_frames
+    from services.figma.store import frame_ref
+
+    by_portal = {str(s.get("portal") or ""): str(s["key"]) for s in shells}
+    portal_of = {frame_ref(str(src.get("id") or ""), str(f["nodeId"])): str(f.get("portal") or "")
+                 for src, f in _spec_frames(doc)}
+    out = []
+    for page in _live_pages(doc):
+        key = by_portal.get(portal_of.get(str(page.get("figmaFrame") or ""), ""))
+        if key:
+            out.append([str(page["route"]), key])
+    return out
+
+
+def role_portals(doc: dict, routes: list[list[str]]) -> dict[str, str]:
+    """``{role name: shell key}`` — the frame a role's pages are drawn in, so
+    a page no portal drew is framed as that person's other pages are."""
+    from collections import Counter
+
+    names = {str(r.get("id")): str(r.get("name") or "") for r in doc.get("roles") or []
+             if isinstance(r, dict) and r.get("id")}
+    key_of = dict((route, key) for route, key in routes)
+    counts: dict[str, Counter] = {}
+    for page in _live_pages(doc):
+        key = key_of.get(str(page["route"]))
+        if not key:
+            continue
+        for user in page.get("users") or []:
+            name = names.get(str(user), str(user))
+            if name:
+                counts.setdefault(name, Counter())[key] += 1
+    return {name: c.most_common(1)[0][0] for name, c in counts.items()}
+
+
+def phone_routes(doc: dict) -> list[str]:
+    """The pages drawn for the phone: too (`drawn.pairs`), or only — a push
+    notification drawn at phone size is the whole phone screen as well."""
+    from services.blueprint.page_planner import page_frames
+    from services.drawn.convert import _spec_frames
+    from services.drawn.pairs import PHONE_MAX, phone_of
+    from services.figma.store import frame_ref
+
+    twins = set(phone_of(doc))
+    narrow = {frame_ref(str(s.get("id") or ""), str(f["nodeId"])) for s, f in _spec_frames(doc)
+              if 0 < float(f.get("width") or 0) < PHONE_MAX}
+    return sorted({str(p["route"]) for p in _live_pages(doc)
+                   if page_frames(p) & twins or str(p.get("figmaFrame") or "") in narrow})
 
 
 def nav_routes(doc: dict, shell: dict) -> list[dict]:
@@ -70,7 +138,8 @@ def nav_routes(doc: dict, shell: dict) -> list[dict]:
     return out
 
 
-def _wrapper(shell: dict, nav: list[dict]) -> str:
+def _props(shell: dict) -> str:
+    """The drawn view's props besides `nav`, `controls` and the page."""
     from services.drawn.contract import change_handler
 
     contract = shell.get("contract") or {}
@@ -92,25 +161,58 @@ def _wrapper(shell: dict, nav: list[dict]) -> str:
     sample = shell.get("sample") or {}
     rest = " ".join(f"{s['name']}={{{json.dumps(sample.get(s['name']))}}}" for s in others
                     if sample.get(s["name"]) is not None)
+    return " ".join(x for x in (" ".join(handlers), " ".join(forms), rest) if x)
+
+
+def _wrapper(shells: list[tuple[dict, list[dict]]], routes: list[list[str]], roles: dict[str, str],
+             phone: list[str]) -> str:
+    """The wrapper the layout renders: the frame for this page, bound."""
+    imports, frames, table = [], [], []
+    for i, (shell, nav) in enumerate(shells):
+        imports.append(f'import ShellView{i} from "./drawn/{shell["name"]}";')
+        frames.append(
+            f"function Frame{i}(props: {{ children?: React.ReactNode; controls?: React.ReactNode }}) {{\n"
+            "  const router = useRouter();\n"
+            f"  const nav = useNav(NAV{i});\n"
+            f"  return <ShellView{i} nav={{nav as any}} controls={{props.controls}} {_props(shell)}>"
+            "{props.children}</ShellView" + str(i) + ">;\n"
+            "}\n")
+        table.append(f"  {json.dumps(str(shell['key']))}: Frame{i},")
+        frames.insert(0, f"const NAV{i} = {json.dumps(nav, indent=2, ensure_ascii=False)};\n")
     return (
         '"use client";\n'
-        "// The design's own frame, bound: its menu led to the pages, the page you are on lit.\n"
+        "// The design's own frame, bound: its menu led to the pages, the page you are on lit —\n"
+        "// the frame of the product the page was drawn in, when the design draws several.\n"
         'import * as React from "react";\n'
         'import { usePathname, useRouter } from "next/navigation";\n'
-        'import ShellView from "./drawn/DrawnShell";\n\n'
+        'import { useIsPhone } from "@/components/DrawnResponsive";\n'
+        + "\n".join(imports) + "\n\n"
         "export const DRAWN_SHELL = true;\n\n"
-        f"const NAV = {json.dumps(nav, indent=2, ensure_ascii=False)};\n\n"
-        "export default function DrawnShell(props: { children?: React.ReactNode; controls?: React.ReactNode }) {\n"
+        "type Entry = { href: string; [key: string]: unknown };\n\n"
+        "function useNav(entries: Entry[]) {\n"
         "  const path = usePathname() || \"/\";\n"
-        "  const router = useRouter();\n"
-        "  const best = NAV.map((n) => n.href).filter((h) => h !== \"#\" && (path === h || path.startsWith(h + \"/\")))\n"
+        "  const best = entries.map((n) => n.href).filter((h) => h !== \"#\" && (path === h || path.startsWith(h + \"/\")))\n"
         "    .sort((a, b) => b.length - a.length)[0];\n"
-        "  const nav = NAV.map((n, i) => ({ ...n, id: String(i), active: n.href === best }));\n"
-        "  return (\n"
-        f"    <ShellView nav={{nav as any}} controls={{props.controls}} {' '.join(handlers)} {' '.join(forms)} {rest}>\n"
-        "      {props.children}\n"
-        "    </ShellView>\n"
-        "  );\n"
+        "  return entries.map((n, i) => ({ ...n, id: String(i), active: n.href === best }));\n"
+        "}\n\n"
+        + "\n".join(frames) + "\n"
+        "const FRAMES: Record<string, (props: { children?: React.ReactNode; controls?: React.ReactNode }) => React.ReactElement> = {\n"
+        + "\n".join(table) + "\n};\n"
+        f"const FIRST = {json.dumps(str(shells[0][0]['key']))};\n"
+        f"const ROUTES: [string, string][] = {json.dumps(routes, indent=2)};\n"
+        f"const ROLES: Record<string, string> = {json.dumps(roles, indent=2, ensure_ascii=False)};\n"
+        f"const PHONE: string[] = {json.dumps(phone, indent=2)};\n\n"
+        "function matches(route: string, path: string): boolean {\n"
+        "  const pattern = \"^\" + route.replace(/\\[\\.\\.\\.[^\\]]+\\]/g, \".+\").replace(/\\[[^\\]]+\\]/g, \"[^/]+\") + \"/?$\";\n"
+        "  return new RegExp(pattern).test(path);\n"
+        "}\n\n"
+        "export default function DrawnShell(props: { children?: React.ReactNode; controls?: React.ReactNode; role?: string }) {\n"
+        "  const path = usePathname() || \"/\";\n"
+        "  const phone = useIsPhone();\n"
+        "  if (phone && PHONE.some((r) => matches(r, path))) return <>{props.children}</>;\n"
+        "  const drawn = ROUTES.find(([r]) => matches(r, path));\n"
+        "  const Frame = FRAMES[drawn ? drawn[1] : ROLES[props.role ?? \"\"] ?? FIRST] ?? FRAMES[FIRST];\n"
+        "  return <Frame controls={props.controls}>{props.children}</Frame>;\n"
         "}\n"
     )
 
@@ -121,21 +223,26 @@ def project_drawn(doc: dict, output_dir: str | Path, app_root: str | Path) -> di
 
     root = Path(app_root)
     copied = copy_into(output_dir, root)
-    shell = _shell(doc)
+    shells = _shells(doc)
     wrapper = root / WRAPPER
     wrapper.parent.mkdir(parents=True, exist_ok=True)
-    if shell is None:
+    if not shells:
         if not wrapper.is_file() or "DRAWN_SHELL = true" in wrapper.read_text("utf-8"):
             wrapper.write_text(DEFAULT_WRAPPER, encoding="utf-8")
         return {"assets": copied, "shell": False}
     drawn = root / DRAWN_DIR
     drawn.mkdir(parents=True, exist_ok=True)
-    (drawn / "DrawnShell.tsx").write_text(str(shell["code"]), encoding="utf-8")
     components = {str(v.get("name")): str(v.get("code")) for v in doc.get("drawnViews") or []
                   if isinstance(v, dict) and v.get("kind") == "component"}
-    for name, code in components.items():
-        if re.search(r'from "\./' + re.escape(name) + r'"', str(shell["code"])):
-            (drawn / f"{name}.tsx").write_text(code, encoding="utf-8")
-    nav = nav_routes(doc, shell)
-    wrapper.write_text(_wrapper(shell, nav), encoding="utf-8")
-    return {"assets": copied, "shell": True, "nav": len(nav)}
+    bound = []
+    for shell in shells:
+        (drawn / f"{shell['name']}.tsx").write_text(str(shell["code"]), encoding="utf-8")
+        for name, code in components.items():
+            if re.search(r'from "\./' + re.escape(name) + r'"', str(shell["code"])):
+                (drawn / f"{name}.tsx").write_text(code, encoding="utf-8")
+        bound.append((shell, nav_routes(doc, shell)))
+    routes = portal_routes(doc, shells)
+    roles = role_portals(doc, routes)
+    wrapper.write_text(_wrapper(bound, routes, roles, phone_routes(doc)), encoding="utf-8")
+    return {"assets": copied, "shell": True, "shells": len(shells), "nav": sum(len(n) for _s, n in bound),
+            "phone": len(phone_routes(doc))}

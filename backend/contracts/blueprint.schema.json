@@ -3280,6 +3280,12 @@
                 "group": {
                   "type": "string"
                 },
+                "portal": {
+                  "type": "string"
+                },
+                "width": {
+                  "type": "number"
+                },
                 "links": {
                   "type": "array",
                   "items": {
@@ -4434,6 +4440,9 @@
           "source": {
             "type": "string"
           },
+          "portal": {
+            "type": "string"
+          },
           "status": {
             "$ref": "#/properties/product/properties/capabilities/items/properties/status"
           },
@@ -4455,6 +4464,47 @@
           "kind",
           "name",
           "code"
+        ],
+        "additionalProperties": false
+      },
+      "default": []
+    },
+    "drawnPairs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "phone": {
+            "type": "string",
+            "minLength": 1
+          },
+          "wide": {
+            "type": "string",
+            "minLength": 1
+          },
+          "because": {
+            "type": "string",
+            "default": ""
+          },
+          "status": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/status"
+          },
+          "requirements": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/requirements"
+          },
+          "decisions": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/decisions"
+          },
+          "confidence": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/confidence"
+          },
+          "syncNote": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/syncNote"
+          }
+        },
+        "required": [
+          "phone",
+          "wide"
         ],
         "additionalProperties": false
       },

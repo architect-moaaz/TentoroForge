@@ -71,6 +71,11 @@ class ScreenRef:
     #: The Figma section the frame sits in ("Billing", or "Billing / Invoices"
     #: when sections nest); empty for a frame placed straight on its page.
     section: str = ""
+    #: The top-level Figma section the frame sits in — one of the products a
+    #: file draws side by side ("D3 · Employer / Recruiter", "D6 · DITANS
+    #: Admin"), each with its own frame, menu and people. Empty for a frame
+    #: placed straight on its page.
+    portal: str = ""
     width: float = 0.0
     height: float = 0.0
     looks_like_screen: bool = True
@@ -633,29 +638,30 @@ def _in_chapter(group: str, node: dict, labels: list[tuple[float, str]]) -> str:
     return f"{group} / {above[-1]}" if group else above[-1]
 
 
-def _screen_nodes(payload: Any) -> list[tuple[str, str, dict]]:
-    """``(Figma page, section, node)`` for every node, in document order.
+def _screen_nodes(payload: Any) -> list[tuple[str, str, dict, str]]:
+    """``(Figma page, section, node, portal)`` for every node, in document
+    order — the portal being the top-level section that holds it.
 
     A SECTION THAT HOLDS SCREENS IS A GROUP, NOT A SCREEN. Large files are
     organised in sections — Billing here, Onboarding there — and a section
     was read as one screen, its forty frames demoted to its insides. A
     section with frames in it now names their group and they are the
     screens; a section with only drawing in it is still a screen itself."""
-    out: list[tuple[str, str, dict]] = []
+    out: list[tuple[str, str, dict, str]] = []
 
-    def walk(node: Any, canvas: str, section: str) -> None:
+    def walk(node: Any, canvas: str, section: str, portal: str = "") -> None:
         if isinstance(node, list):
             for item in node:
-                walk(item, canvas, section)
+                walk(item, canvas, section, portal)
             return
         if not isinstance(node, dict):
             return
         if isinstance(node.get("document"), dict):
-            walk(node["document"], canvas, section)
+            walk(node["document"], canvas, section, portal)
             return
         if isinstance(node.get("nodes"), dict):
             for entry in node["nodes"].values():
-                walk(entry.get("document", entry) if isinstance(entry, dict) else entry, canvas, section)
+                walk(entry.get("document", entry) if isinstance(entry, dict) else entry, canvas, section, portal)
             return
         kind = str(node.get("type") or "").upper()
         name = str(node.get("name") or "").strip()
@@ -666,12 +672,12 @@ def _screen_nodes(payload: Any) -> list[tuple[str, str, dict]]:
         if kind == "SECTION" and any(str(c.get("type") or "").upper() in _SCREEN_TYPES for c in kids):
             inner = f"{section} / {name}" if section and name else (name or section)
             for child in kids:
-                walk(child, canvas, _in_chapter(inner, child, labels))
+                walk(child, canvas, _in_chapter(inner, child, labels), portal or name)
             return
         if node.get("id"):
-            out.append((canvas, section, node))
+            out.append((canvas, section, node, portal))
         for child in kids:
-            walk(child, canvas, _in_chapter(section, child, labels))
+            walk(child, canvas, _in_chapter(section, child, labels), portal)
 
     walk(payload, "", "")
     return out
@@ -690,7 +696,7 @@ def _screens_from_metadata(blocks, *, limit: int | None = None) -> list[ScreenRe
 
     screens: list[ScreenRef] = []
     counted = 0
-    for canvas, section, node in _screen_nodes(payload):
+    for canvas, section, node, portal in _screen_nodes(payload):
         node_type = str(node.get("type") or "").upper()
         if node_type not in _SCREEN_TYPES:
             continue
@@ -710,6 +716,7 @@ def _screens_from_metadata(blocks, *, limit: int | None = None) -> list[ScreenRe
             name=name,
             canvas=canvas,
             section=section,
+            portal=portal,
             width=float(box.get("width") or node.get("width") or 0),
             height=float(box.get("height") or node.get("height") or 0),
             looks_like_screen=looks,

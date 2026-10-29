@@ -4817,11 +4817,14 @@ def make_executor(
             tell(reasoning, f"Kept {len(rows)} shared components and {report.get('saved', 0) + report.get('kept', 0)} "
                  "icons and pictures from the design" + (f"; {len(report['missing'])} could not be rendered"
                                                           if report.get("missing") else "") + ".", "step", spec.node)
-        elif spec.subject == convert.SHELL_KEY:
-            row = convert.shell_row(client, prepared, usage=spent)
+        elif convert.is_shell_subject(spec.subject):
+            row = convert.shell_row(client, prepared, spec.subject, usage=spent)
             rows = [row] if row else []
-            tell(reasoning, "Converted the frame every screen is drawn in." if rows
-                 else "The design draws no shared frame.", "step", spec.node)
+            where = spec.subject[len(convert.SHELL_PREFIX):] if spec.subject.startswith(convert.SHELL_PREFIX) else ""
+            tell(reasoning, (f"Converted the frame {where}'s screens are drawn in." if where else
+                             "Converted the frame every screen is drawn in.") if rows
+                 else (f"{where} draws no shared frame." if where else "The design draws no shared frame."),
+                 "step", spec.node)
         else:
             if spec.subject not in prepared.static:
                 raise ValueError(f"{spec.subject} has no stored drawing to convert")
@@ -4833,6 +4836,31 @@ def make_executor(
         return AgentResult(task_id=spec.task_id, agent=spec.agent, confidence=0.9,
                            proposals=[ArtifactProposal(section="drawnViews", natural_key=row["key"], body=row)
                                       for row in rows])
+
+    def _pair_drawn(spec: TaskSpec) -> AgentResult:
+        """Which phone and desktop drawings are one screen (`drawn.pairs`):
+        one call, none when the design draws only one size."""
+        import copy as _copy
+
+        from services.drawn import pairs as drawn_pairs
+        from services.llm_client import tell
+
+        with svc.lock:
+            doc = _copy.deepcopy(svc.doc)
+        phones, _wides = drawn_pairs.candidates(doc)
+        proposals: list[ArtifactProposal] = []
+        if phones:
+            client = model.for_task(spec.node, spec.agent) if isinstance(model, ModelRouter) else model
+            spent: list = []
+            found, left = drawn_pairs.pair(client, doc, usage=spent)
+            project = str((svc.doc.get("application") or {}).get("id", ""))
+            for u, elapsed in spent:
+                if usage is not None and u is not None:
+                    usage.record(node=spec.node, agent=spec.agent, usage=u, elapsed_s=elapsed, project=project)
+            tell(reasoning, f"{len(found)} of {len(phones)} phone screens are drawn for the desktop too; each pair "
+                 "is one page." + (f" Left out: {'; '.join(left[:5])}." if left else ""), "step", spec.node)
+            proposals = [ArtifactProposal(section="drawnPairs", natural_key=p["phone"], body=p) for p in found]
+        return AgentResult(task_id=spec.task_id, agent=spec.agent, confidence=0.9, proposals=proposals)
 
     def _compose_native(spec: TaskSpec) -> AgentResult:
         """One page as a React Native screen (see ``native_engineer``): the web
@@ -4947,6 +4975,8 @@ def make_executor(
     def executor(spec: TaskSpec) -> AgentResult:
         if spec.node == "drawn_views":
             return _convert_drawn(spec)
+        if spec.node == "drawn_pairs":
+            return _pair_drawn(spec)
         if spec.agent in ("ui_director", "ui_engineer"):
             return _compose_ui(spec)
         if spec.agent == "native_engineer":

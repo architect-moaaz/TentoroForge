@@ -60,8 +60,13 @@ def _statements(doc: dict, output_dir: str | Path, ref: str) -> list[str]:
 
 def document(doc: dict, output_dir: str | Path) -> str:
     """The flow document, or "" when the application has no drawn views."""
+    from services.drawn.pairs import phone_of, wide_of
+
+    twins, phones = phone_of(doc), wide_of(doc)
+    # A phone drawing of a desktop screen is that screen: said with it, not again.
     views = {str(v.get("frame")): v for v in doc.get("drawnViews") or []
-             if isinstance(v, dict) and v.get("kind") == "screen" and v.get("frame")}
+             if isinstance(v, dict) and v.get("kind") == "screen" and v.get("frame")
+             and str(v.get("frame")) not in phones}
     if not views:
         return ""
     frames = _frames(doc)
@@ -75,11 +80,21 @@ def document(doc: dict, output_dir: str | Path) -> str:
              "The design is held as the specification and its screens are built as drawn. This is what each "
              "screen shows, what a person does on it and where that leads, and what it says in its own "
              "words — the application's rules as the design states them.", ""]
-    shell = next((v for v in doc.get("drawnViews") or [] if isinstance(v, dict) and v.get("kind") == "shell"), None)
-    if shell:
+    from services.drawn.convert import portals
+
+    products = portals(doc)
+    if len(products) > 1:
+        lines += ["## The products the design draws", "",
+                  f"The design draws {len(products)} products side by side, each in its own frame with its own "
+                  "menu, for its own kind of person — one application on one set of records:", ""]
+        lines += [f"- {p}" for p in products] + [""]
+    shells = [v for v in doc.get("drawnViews") or [] if isinstance(v, dict) and v.get("kind") == "shell"]
+    for shell in shells:
         nav = [str(row.get("label") or "") for row in (shell.get("sample") or {}).get("nav") or [] if isinstance(row, dict)]
         if nav:
-            lines += ["## The frame every screen is drawn in", "", "Its menu: " + ", ".join(n for n in nav if n), ""]
+            head = (f"## The frame {shell['portal']}'s screens are drawn in" if shell.get("portal")
+                    else "## The frame every screen is drawn in")
+            lines += [head, "", "Its menu: " + ", ".join(n for n in nav if n), ""]
     for chapter, refs in chapters.items():
         lines += [f"## {chapter}", ""]
         for ref in refs:
@@ -104,6 +119,8 @@ def document(doc: dict, output_dir: str | Path) -> str:
             statements = _statements(doc, output_dir, ref)
             if statements:
                 lines.append("- It says: " + " · ".join(f"“{s}”" for s in statements))
+            if twins.get(ref):
+                lines.append(f"- Also drawn for the phone, as {name_of.get(twins[ref], twins[ref])}.")
             lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 

@@ -1080,7 +1080,7 @@ export default async function DashboardLayout({
     return (
       <ShellStateProvider>
         {trackerTag}
-        <DrawnShell controls={cluster}>{children}</DrawnShell>
+        <DrawnShell controls={cluster} role={role}>{children}</DrawnShell>
       </ShellStateProvider>
     );
   }

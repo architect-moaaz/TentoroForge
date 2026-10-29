@@ -4,6 +4,6 @@ import * as React from "react";
 
 export const DRAWN_SHELL = false;
 
-export default function DrawnShell(props: { children?: React.ReactNode; controls?: React.ReactNode }) {
+export default function DrawnShell(props: { children?: React.ReactNode; controls?: React.ReactNode; role?: string }) {
   return <>{props.children}</>;
 }

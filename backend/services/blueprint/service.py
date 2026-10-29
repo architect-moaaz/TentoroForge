@@ -121,6 +121,8 @@ KEYED_LIST_SECTIONS: dict[str, tuple[str, ...]] = {
     "nativeCode": ("page",),
     # One converted view per drawn frame (or the shell, or a shared component).
     "drawnViews": ("key",),
+    # One pair per phone drawing (its desktop twin beside it).
+    "drawnPairs": ("phone",),
     "data.relationships": ("from", "to", "kind"),
     "data.constraints": ("entity", "kind", "expression"),
 }

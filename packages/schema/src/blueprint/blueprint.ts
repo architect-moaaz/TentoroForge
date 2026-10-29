@@ -1456,6 +1456,27 @@ export const DrawnView = z.object({
   /** A hash of the deterministic conversion the view was made from, so a
    *  frame changed in Figma is seen as changed. */
   source: z.string().optional(),
+  /** The product it frames (a shell) or is drawn in (a screen): the frame's
+   *  `portal`. A design of several products has a shell for each. */
+  portal: z.string().optional(),
+  ...artifactBase,
+});
+
+/**
+ * ONE SCREEN DRAWN TWICE: for a phone and for a desktop. A design that draws a
+ * product's app and its web version draws the same screens at both sizes —
+ * the job search at 393 pixels and at 1440 — and they are one page, showing
+ * the phone drawing on a phone and the desktop one elsewhere, on the same
+ * records and processes. Which drawings are the same screen is decided once,
+ * from what each shows, and kept here.
+ */
+export const DrawnPair = z.object({
+  /** Natural key — the phone drawing's frame reference. */
+  phone: z.string().min(1),
+  /** The desktop drawing of the same screen. */
+  wide: z.string().min(1),
+  /** What makes them the same screen, in a sentence. */
+  because: z.string().default(""),
   ...artifactBase,
 });
 
@@ -2619,6 +2640,15 @@ export const DesignSourceFrame = z.object({
    */
   group: z.string().optional(),
   /**
+   * THE PRODUCT IT IS DRAWN IN: the top-level Figma section that holds it.
+   * One file may draw several products side by side — a candidate app, a
+   * recruiter portal, an admin back office — each with its own frame, menu
+   * and people. Absent for a frame placed straight on its page.
+   */
+  portal: z.string().optional(),
+  /** The frame's drawn width, in pixels: a phone screen or a desktop one. */
+  width: z.number().optional(),
+  /**
    * WHERE THE PROTOTYPE GOES FROM HERE: each link the designer wired from this
    * frame to another of the design's frames, how it opens (`overlay` — over
    * this screen, a dialog or drawer; `swap` — replaces the overlay that is
@@ -3450,6 +3480,8 @@ export const Blueprint = z.object({
   nativeCode: z.array(NativeCode).default([]),
   /** A design held as the specification, converted to React (see `DrawnView`). */
   drawnViews: z.array(DrawnView).default([]),
+  /** Phone and desktop drawings of one screen (see `DrawnPair`). */
+  drawnPairs: z.array(DrawnPair).default([]),
   /** The frame files this application owns (see `FrameCode`). */
   frameCode: z.array(FrameCode).default([]),
 

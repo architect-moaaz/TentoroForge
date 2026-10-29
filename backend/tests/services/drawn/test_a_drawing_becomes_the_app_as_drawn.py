@@ -205,7 +205,7 @@ def test_chapter_headings_on_the_canvas_are_the_frames_groups():
         {"id": "6:3", "type": "FRAME", "name": "A-01", "absoluteBoundingBox": _box(0, 80, 1440, 1024)},
         {"id": "6:4", "type": "TEXT", "characters": "5 · Promotions", "absoluteBoundingBox": _box(0, 1200, 300, 40)},
         {"id": "6:5", "type": "FRAME", "name": "A-11", "absoluteBoundingBox": _box(1500, 1280, 1440, 1024)}]}
-    groups = {node["name"]: sec for _c, sec, node in _screen_nodes({"document": section}) if node.get("type") == "FRAME"}
+    groups = {node["name"]: sec for _c, sec, node, _p in _screen_nodes({"document": section}) if node.get("type") == "FRAME"}
     assert groups == {"A-01": "Section 1 / 1 · Operations & tenants", "A-11": "Section 1 / 5 · Promotions"}
 
 
@@ -328,7 +328,7 @@ def test_the_drawn_frame_is_the_apps_frame_with_its_menu_led_to_the_pages(tmp_pa
 def test_the_layout_shows_the_drawn_frame_when_there_is_one():
     layout = (Path(__file__).resolve().parents[3] / "templates/app-foundation/src/app/(dashboard)/layout.tsx").read_text()
     assert 'import DrawnShell, { DRAWN_SHELL } from "@/components/DrawnShell";' in layout
-    assert "<DrawnShell controls={cluster}>{children}</DrawnShell>" in layout
+    assert "<DrawnShell controls={cluster} role={role}>{children}</DrawnShell>" in layout
     default = Path(__file__).resolve().parents[3] / "templates/app-foundation/src/components/DrawnShell.tsx"
     assert "DRAWN_SHELL = false" in default.read_text()
 

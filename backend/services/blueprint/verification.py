@@ -80,6 +80,7 @@ UNVERIFIED_HERE = (
 SECTION_OWNER: dict[str, str] = {
     "requirements": "requirement",
     "drawnViews": "ui_engineer",
+    "drawnPairs": "ui_engineer",
     "product": "product_analysis",
     "domainReference": "domain_intelligence",
     "modules": "solution_architecture",

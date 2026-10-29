@@ -108,16 +108,28 @@ def digest(doc: dict, *, limit: int = 60000) -> str:
     """Every drawn screen's contract, for the data model, the records' fields,
     the processes and the access rules to be written against — "" when the
     application has none."""
+    from services.drawn.pairs import wide_of
+
+    # A phone drawing of a desktop screen shows what that screen shows.
+    phones = wide_of(doc)
     views = [v for v in doc.get("drawnViews") or [] if isinstance(v, dict) and v.get("kind") == "screen"
-             and v.get("status") != "DEPRECATED"]
+             and v.get("status") != "DEPRECATED" and str(v.get("key")) not in phones]
     if not views:
         return ""
     frames = {}
     for source in doc.get("designSources") or []:
         for f in source.get("frames") or []:
             frames[str(f.get("nodeId"))] = str(f.get("shows") or f.get("name") or "")
+    # A design of several products, product by product: each is for its own people.
+    if len({str(v.get("portal") or "") for v in views} - {""}) > 1:
+        order = {p: i for i, p in enumerate(dict.fromkeys(str(v.get("portal") or "") for v in views))}
+        views = sorted(views, key=lambda v: order[str(v.get("portal") or "")])
     lines = []
+    portal = None
     for view in views:
+        if view.get("portal") and view.get("portal") != portal:
+            portal = view.get("portal")
+            lines.append(f"# {portal} — a product of its own, for its own people")
         contract = view.get("contract") or {}
         lines.append(f"## {frames.get(str(view.get('frame') or '').split('/')[-1]) or view.get('name')}  "
                      f"(view {view.get('name')})")

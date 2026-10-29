@@ -74,6 +74,8 @@ def _screens(doc: dict) -> dict[str, dict]:
 def views_of(doc: dict, page: dict) -> list[tuple[str, str, dict]]:
     """``(as, label, row)`` for every drawn view of a page: its main frame's
     first (`as` = "main"), then its other frames in the order listed."""
+    from services.drawn.pairs import phone_of
+
     screens = _screens(doc)
     out = []
     main = screens.get(str(page.get("figmaFrame") or ""))
@@ -83,6 +85,13 @@ def views_of(doc: dict, page: dict) -> list[tuple[str, str, dict]]:
     for entry in page.get("frames") or []:
         if isinstance(entry, dict) and str(entry.get("frame") or "") in screens:
             out.append((str(entry.get("as") or "state"), str(entry.get("label") or ""), screens[str(entry["frame"])]))
+    # Each view's phone drawing, when the design draws one: `phone`, with the
+    # desktop view it stands in for as its label.
+    twins = phone_of(doc)
+    for _as, _label, row in list(out):
+        phone = screens.get(twins.get(str(row.get("key")), ""))
+        if phone is not None:
+            out.append(("phone", str(row["name"]), phone))
     return out
 
 
@@ -117,13 +126,18 @@ def _unchecked(code: str) -> str:
 
 
 def _targets(doc: dict) -> dict[str, dict]:
-    """``{frame ref: page}`` — where a navigate action leads."""
+    """``{frame ref: page}`` — where a navigate action leads. A phone drawing
+    leads where its desktop twin does: they are one page."""
     from services.blueprint.page_planner import page_frames
+    from services.drawn.pairs import wide_of
     out = {}
     for page in doc.get("pages") or []:
         if isinstance(page, dict) and page.get("status") != "DEPRECATED":
             for f in page_frames(page):
                 out.setdefault(f, page)
+    for phone, wide in wide_of(doc).items():
+        if wide in out:
+            out.setdefault(phone, out[wide])
     return out
 
 
@@ -139,8 +153,9 @@ def user_prompt(doc: dict, page: dict, *, feedback: str = "") -> str:
     for as_, label, row in views:
         contract = row.get("contract") or {}
         lines.append(f"### `{row['name']}` from \"./parts/{row['name']}\" — "
-                     + ("the page as it opens" if as_ == "main" else f"its {as_} “{label}” (the whole page "
-                                                                     f"as drawn with it open)")
+                     + ("the page as it opens" if as_ == "main" else
+                        f"the phone drawing of `{label}`, shown instead of it on a phone" if as_ == "phone" else
+                        f"its {as_} “{label}” (the whole page as drawn with it open)")
                      + "\n```ts\n" + props_type(row["name"], contract) + "```")
         acts = []
         for action in contract.get("actions") or []:
@@ -165,6 +180,9 @@ def user_prompt(doc: dict, page: dict, *, feedback: str = "") -> str:
         "the way the sample shows them (“7 of 10”, “1 Mar 2027”); an `enum` prop takes "
         "one of its drawn values; every row's `id` is the record's id. A record a view shows (one row, not a "
         "list) is always given, as drawn: the one chosen, else the first.\n"
+        "- A view drawn for the phone (\"the phone drawing of X\") is the same screen as X: show it instead of X "
+        "while `useIsPhone()` (`import { useIsPhone } from \"@/components/DrawnResponsive\"`) is true, fed the "
+        "same records and its actions wired to the same pages, views and processes, by its own prop names.\n"
         "- Each action: `navigate` goes to its page with `router.push(href(pages.x))`; `open` shows that view; "
         "`submit` and `run` run the process from the brief that does it, the way the SDK runs workflows, and "
         "show the main view again when it is done. A form's change handler updates the form's state.\n"

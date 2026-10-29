@@ -234,7 +234,11 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # The journey the design draws, as a document the requirements are read
     # from: screens, what each action does and where it leads, what each
     # screen states as its rules.
-    _n("drawn_flow", "ui_engineer", ("drawn_views",), (), kind="service",
+    # A screen drawn for a phone and again for a desktop is one page: which
+    # drawings are the same screen is decided once (`drawn.pairs`).
+    _n("drawn_pairs", "ui_engineer", ("drawn_views",), ("drawnPairs",),
+       note="the phone and desktop drawings of one screen, paired"),
+    _n("drawn_flow", "ui_engineer", ("drawn_pairs",), (), kind="service",
        note="the drawn journey, written down for the requirements"),
     _n("requirements", "requirement", ("drawn_flow",), ("requirements",)),
     # §51 puts Figma Intelligence upstream of domain, page, entity, workflow
@@ -578,9 +582,9 @@ FANOUT: dict[str, Any] = {
 
 
 def _drawn_subjects(doc: Mapping[str, Any]) -> list[str]:
-    from services.drawn.convert import COMPONENTS_KEY, SHELL_KEY, frame_subjects
+    from services.drawn.convert import COMPONENTS_KEY, frame_subjects, shell_subjects
     frames = frame_subjects(dict(doc))
-    return [*frames, SHELL_KEY, COMPONENTS_KEY] if frames else []
+    return [*frames, *shell_subjects(dict(doc)), COMPONENTS_KEY] if frames else []
 
 
 def _drawn_present(doc: Mapping[str, Any], subject: str) -> bool:
@@ -887,7 +891,7 @@ INCREMENTAL_SECTIONS: frozenset[str] = frozenset({
     # A page's code follows its page: adding a page must give it one.
     "pageCode", "nativeCode",
     # A drawn view is one frame's, converted again when that frame changes.
-    "drawnViews",
+    "drawnViews", "drawnPairs",
     "data.entities", "data.relationships",
     "data.constraints", "apis", "workflows", "businessRules", "tests",
     # The paths between the screens follow the screens and the processes.
@@ -2683,6 +2687,8 @@ OBSERVER_ROUNDS_BY_NODE: dict[str, int] = {
     # the Promo codes view was sent back over a link to a screen left out of
     # the run (d6drawn, 2026-10-28), eight minutes for nothing.
     "drawn_views": 0,
+    # Its answer can only name drawings that exist, each once (`drawn.pairs`).
+    "drawn_pairs": 0,
 }
 
 

@@ -56,6 +56,7 @@ WRITABLE_SECTIONS: frozenset[str] = frozenset(
        "navigation", "designSystem", "security",
        "runtime", "database", "deployment", "product", "codeMap",
        "pageLayouts", "pageCode", "nativeCode", "composition", "completeness", "drawnViews",
+       "drawnPairs",
        "domainReference", "mobile"}
 )
 
@@ -312,7 +313,8 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
         "ui_engineer",
         # …and the design's screens as React views (`drawn_views`): the same
         # engineer, converting a drawing rather than writing a page.
-        {"pageCode", "drawnViews"},
+        # …and which phone and desktop drawings are one screen (`drawn_pairs`).
+        {"pageCode", "drawnViews", "drawnPairs"},
         tools={"blueprint:read", "page_contract:read", "design_system:read",
                "sdk:read", "tsc:check"},
     ),
