@@ -254,12 +254,15 @@ def _resolve(root: M.Node, reply: dict, *, children: bool) -> tuple[_Plan, list[
     problems: list[str] = []
     nodes = plan.nodes
 
-    def node(i: Any, what: str) -> M.Node | None:
+    def node(i: Any, what: str, *, quiet_root: bool = False) -> M.Node | None:
         n = nodes.get(str(i))
         if n is None:
             problems.append(f"{what}: there is no element {i}")
         elif n is root:
-            problems.append(f"{what}: element {i} is the whole screen")
+            # A value, an input or a condition on the whole screen binds
+            # nothing a person sees; it is left out rather than refused.
+            if not quiet_root:
+                problems.append(f"{what}: element {i} is the whole screen")
             return None
         return n
 
@@ -291,6 +294,14 @@ def _resolve(root: M.Node, reply: dict, *, children: bool) -> tuple[_Plan, list[
         inside = {n.id for n in template.walk()}
         for lk in entry.get("looks") or []:
             at = str(lk.get("node") or template.id)
+            # Named in another row, the element is its place in the template:
+            # the row itself is the template row, an element in it the one at
+            # the same place (DITANS wzml1sa6, 2026-10-30).
+            if at not in inside and at in nodes:
+                other = next((r for r in rows if r.id == at or any(n.id == at for n in r.walk())), None)
+                if other is not None:
+                    there = template if other.id == at else M.counterpart(other, template, nodes[at])
+                    at = there.id if there is not None else at
             if at not in inside:
                 problems.append(f"{what}: a look's node {at} is not in its template row {template.id}")
                 bad = True
@@ -340,7 +351,7 @@ def _resolve(root: M.Node, reply: dict, *, children: bool) -> tuple[_Plan, list[
         plan.skip |= {r.id for r in rows[1:]}
 
     for v in reply.get("values") or []:
-        n = node(v.get("node"), f"the value at {v.get('node')}")
+        n = node(v.get("node"), f"the value at {v.get('node')}", quiet_root=True)
         if n is None or n.id in plan.skip:
             continue
         what = f"the value at {n.id}"
@@ -393,7 +404,7 @@ def _resolve(root: M.Node, reply: dict, *, children: bool) -> tuple[_Plan, list[
             a.pop("on")  # pressed outside the rows, it is given none
 
     for inp in reply.get("inputs") or []:
-        n = node(inp.get("node"), f"the input at {inp.get('node')}")
+        n = node(inp.get("node"), f"the input at {inp.get('node')}", quiet_root=True)
         if n is None or n.id in plan.skip:
             continue
         what = f"the input at {n.id}"
@@ -411,8 +422,10 @@ def _resolve(root: M.Node, reply: dict, *, children: bool) -> tuple[_Plan, list[
         if kind in ("text", "select") and n.body is None:
             # Named by its box, the input is the one text drawn in it.
             texts = [t for t in n.walk() if t.body is not None and t.unit() is t and t is not n]
-            if len(texts) == 1:
-                n = texts[0]
+            # The text that fills the box is the value; a unit or a hint beside it is drawn as it is.
+            filling = [t for t in texts if re.search(r"(?:^|\s)(?:flex-1|w-full|self-stretch)(?:\s|$)", t.classes())]
+            if len(texts) == 1 or len(filling) == 1:
+                n = (filling or texts)[0]
         if kind in ("text", "select") and (n.body is None or n.unit() is not n):
             problems.append(f"{what}: a {kind} input's node is the text showing its value")
             continue
@@ -420,13 +433,14 @@ def _resolve(root: M.Node, reply: dict, *, children: bool) -> tuple[_Plan, list[
             problems.append(f"{what}: a choice says the `value` it sets")
             continue
         if n.id in plan.actions:
-            problems.append(f"{what}: element {n.id} is pressed for `{plan.actions[n.id]['name']}` too")
-            continue
+            # What the person sets is what the element does; the action named
+            # for it too is pressed elsewhere or nowhere (and then left out).
+            plan.actions.pop(n.id)
         if all(node(inp[key], what) is not None for key in ("on_look", "off_look") if inp.get(key)):
             plan.inputs[n.id] = {**inp, "form": form, "field": name, "kind": kind}
 
     for s in reply.get("shows") or []:
-        n = node(s.get("node"), f"the condition at {s.get('node')}")
+        n = node(s.get("node"), f"the condition at {s.get('node')}", quiet_root=True)
         if n is None or n.id in plan.skip:
             continue
         if _path(plan, str(s.get("when") or ""), n.id, problems, f"the condition at {n.id}"):
