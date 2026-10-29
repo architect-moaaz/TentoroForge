@@ -489,6 +489,21 @@ def test_a_field_shown_as_words_is_words():
     assert out["sample"]["terms"]["newAccountsOnly"] == "Tenants"
 
 
+def test_what_an_answer_forgot_to_declare_or_left_unpressed_is_settled_by_construction():
+    answer = json.loads(json.dumps(ANSWER))
+    # a value naming a slot the contract forgot, an action pressed on the whole screen,
+    # an action pressed nowhere, and the text input named by its box
+    answer["values"].append({"node": "2", "expr": "props.pageTitle"})
+    answer["contract"]["actions"].append({"name": "onClose", "label": "Close", "kind": "navigate", "nodes": ["1"]})
+    answer["inputs"][0]["node"] = "13"
+    out, problems = P.apply(STATIC, answer, "TenantsView")
+    assert problems == [], problems
+    assert "{props.pageTitle}" in out["code"] and "pageTitle?: string" in out["code"]
+    assert "onClose" not in out["code"] and all(a["name"] != "onClose" for a in out["contract"]["actions"])
+    assert 'value={props.promo.code ?? ""}' in out["code"]
+    assert out["sample"]["pageTitle"] == "Tenants"
+
+
 def test_an_answer_that_names_what_is_not_there_is_asked_again():
     wrong = json.loads(json.dumps(ANSWER))
     wrong["values"][0] = {"node": "99", "expr": "row.name"}
@@ -536,9 +551,10 @@ def test_a_refused_screen_still_reports_what_it_spent():
     spent = []
 
     class Reply:
-        text, usage = json.dumps({"contract": SMALL, "lists": [], "values": [], "inputs": [], "shows": []}), object()
+        text, usage = json.dumps({"contract": SMALL, "lists": [], "values": [{"node": "99", "expr": "props.x"}],
+                                  "inputs": [], "shows": []}), object()
 
-    with pytest.raises(ValueError, match="nothing reads"):
+    with pytest.raises(ValueError, match="there is no element 99"):
         P.parameterise(lambda **_kw: Reply(), "TenantsView", STATIC, heading="T", image=None, links=[],
                        components={}, usage=spent)
     assert len(spent) == P.ROUNDS
