@@ -45,10 +45,12 @@ def connected(monkeypatch):
 
 
 def test_the_answer_typed_after_the_question_pulls_the_design_in(tmp_path, connected):
+    from services.blueprint import app_target
     from services.smith4 import handle
     from tests.services._loop_fixtures import _Chooser, _repo, _Writes
 
     _repo(tmp_path)
+    app_target.write(tmp_path, "responsive")
     ask = f"can you observe this figma design {URL} and convert the design and process"
     first = handle(project_id="p1", output_dir=str(tmp_path), message=ask, move=_Writes(tmp_path),
                    choose=_Chooser(CALL))
@@ -65,8 +67,10 @@ def test_the_answer_typed_after_the_question_pulls_the_design_in(tmp_path, conne
 
 
 def test_a_scope_the_call_carries_is_used_as_it_is(tmp_path, connected):
+    from services.blueprint import app_target
     from services.smith4.verbs import Ctx, connect_figma
 
+    app_target.write(tmp_path, "responsive")
     out = connect_figma(Ctx(output_dir=str(tmp_path), project_id="p", message="go on", ask=""),
                         {"verb": "connect_figma", "figma_url": URL, "token_env": "FIGMA_ACCESS_TOKEN",
                          "treat_as": "reference"})
@@ -91,3 +95,22 @@ def test_ux_pilot_hears_the_answer_the_same_way(tmp_path, monkeypatch):
     out = connect_uxpilot(Ctx(output_dir=str(tmp_path), project_id="p", message="Reference", ask=""),
                           {"verb": "connect_uxpilot", "uxpilot_ref": "page-123", "key_env": "UXPILOT_API_KEY"})
     assert out.status == "resolved" and seen == ["evidence"]
+
+
+def test_a_design_imported_into_a_new_app_makes_the_app_first(tmp_path, connected):
+    """"Import a design" opens with the connect, before any definition: the
+    read loaded a Blueprint that did not exist, and the person was told only
+    "FileNotFoundError" (DITANS, 2026-10-29)."""
+    from services.blueprint import app_target
+    from services.smith4.verbs import Ctx, connect_figma
+
+    call = {"verb": "connect_figma", "figma_url": URL, "treat_as": "specification"}
+    # Where people will use it is asked first, as the definition asks it.
+    out = connect_figma(Ctx(output_dir=str(tmp_path), project_id="p", message="build it", ask=""), call)
+    assert out.status == "needs_user" and out.finding and not connected
+    app_target.write(tmp_path, "responsive")
+    out = connect_figma(Ctx(output_dir=str(tmp_path), project_id="p", message="build it", ask="",
+                            app_name="DITANS Health"), call)
+    assert out.status == "resolved" and connected[-1]["treat_as"] == "specification"
+    assert (tmp_path / ".forge" / "blueprint" / "current.json").is_file()
+

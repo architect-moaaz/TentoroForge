@@ -625,6 +625,22 @@ def connect_figma(ctx: Ctx, u: dict) -> Outcome:
             "• Reference: the screens become requirements and the design language, and "
             "the application is built around them — usually more pages than frames.\n\n"
             "Say “specification” or “reference”."))
+    # A NEW APP HAS NO BLUEPRINT YET, AND THE DESIGN COMES FIRST. "Import a
+    # design" opens with this verb, before any definition; the read loaded a
+    # Blueprint that did not exist and the person was told only
+    # "FileNotFoundError" (DITANS, 2026-10-29). The app is made here as the
+    # definition makes it (where people use it is asked first), but nothing
+    # is run: the definition that follows is written against the design.
+    if not (Path(ctx.out) / ".forge" / "blueprint" / "current.json").is_file():
+        from services.blueprint.service import BlueprintService
+        from services.smith import brief as brief_mod
+        from services.smith4.definition import platform_question, settle_platform
+
+        if settle_platform(ctx) is None:
+            question = platform_question(ctx)
+            return Outcome(status="needs_user", said=question, finding=question)
+        BlueprintService.create(output_dir=ctx.out, app_id=Path(ctx.out).name, name=ctx.app_name or "Application",
+                                domain="unknown", description=brief_mod.brief_from(ctx.history, ctx.message))
     try:
         # A LARGE FILE TAKES MINUTES; SAY HOW FAR IT HAS GOT.
         from services.llm_client import tell
