@@ -4097,6 +4097,11 @@ EFFORT_BY_NODE: dict[str, str] = {
     # costs a subject its correctness.
     "page_details": "medium",
     "workflow_steps": "medium",
+    # ONE DRAWN SCREEN AGAINST ITS OWN MARKUP: which numbered element is which
+    # prop. At `high` most of a screen's 3-29k output tokens were thinking
+    # (DITANS D6 Promotions, 2026-10-29). A refused round is asked again at
+    # `high` (`drawn.params.parameterise`, `retry`).
+    "drawn_views": "medium",
     # Tests are enumerated from what the Blueprint already claims, not invented.
     # A short list of named third parties.
     "integrations": "low",
@@ -4232,6 +4237,15 @@ def after_refusal(client: Any, spec: Any) -> Any:
             or getattr(spec, "node", "") not in RETRY_AT_HIGH
             or not dataclasses.is_dataclass(client) or not hasattr(client, "effort")
             or str(client.effort) not in ("low", "medium")):
+        return client
+    return at_high(client)
+
+
+def at_high(client: Any) -> Any:
+    """``client`` at `high` effort when it runs below it, else as it is."""
+    import dataclasses
+
+    if not dataclasses.is_dataclass(client) or str(getattr(client, "effort", "")) not in ("low", "medium"):
         return client
     return dataclasses.replace(client, effort="high")
 
@@ -4822,7 +4836,7 @@ def make_executor(
                      "icons and pictures from the design" + (f"; {len(report['missing'])} could not be rendered"
                                                               if report.get("missing") else "") + ".", "step", spec.node)
             elif convert.is_shell_subject(spec.subject):
-                row = convert.shell_row(client, prepared, spec.subject, usage=spent)
+                row = convert.shell_row(client, prepared, spec.subject, usage=spent, retry=at_high(client))
                 rows = [row] if row else []
                 where = spec.subject[len(convert.SHELL_PREFIX):] if spec.subject.startswith(convert.SHELL_PREFIX) else ""
                 tell(reasoning, (f"Converted the frame {where}'s screens are drawn in." if where else
@@ -4833,7 +4847,7 @@ def make_executor(
                 if spec.subject not in prepared.static:
                     raise ValueError(f"{spec.subject} has no stored drawing to convert")
                 tell(reasoning, f"Converting {prepared.headings.get(spec.subject) or spec.subject} to React.", "step", spec.node)
-                rows = [convert.screen_row(client, prepared, spec.subject, usage=spent)]
+                rows = [convert.screen_row(client, prepared, spec.subject, usage=spent, retry=at_high(client))]
         finally:
             for u, elapsed in spent:
                 if usage is not None and u is not None:

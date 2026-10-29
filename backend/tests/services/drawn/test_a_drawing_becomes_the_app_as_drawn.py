@@ -253,6 +253,42 @@ def test_the_sample_is_read_from_the_drawing():
     assert status["options"] == ["Live", "Paused"] and '"Live" | "Paused"' in out["code"]
 
 
+CODES = """export default function PromoCodesView() {
+  return (
+    <div className="flex flex-col">
+      <div className="flex flex-row gap-x-[8px]" data-layer="Row">
+        <p className="text-[14px]">GULFNURSE30</p>
+        <div className="w-[60px] shrink-0"><DhTagSuccess label={"Active"} /></div>
+      </div>
+      <div className="flex flex-row gap-x-[8px] opacity-[0.6]" data-layer="Row">
+        <p className="text-[14px]">NURSEWEEK50</p>
+        <div className="w-[60px] shrink-0"><DhTagNeutral label={"Expired"} /></div>
+        <div className="w-[80px] shrink-0"><DhButtonLink label={"Extend"} /></div>
+      </div>
+    </div>
+  );
+}
+"""
+
+
+def test_a_look_drawn_with_more_than_the_template_keeps_what_it_draws():
+    answer = {"contract": {"data": [{"name": "codes", "kind": "list", "label": "Codes", "fields": [
+                  {"name": "code", "label": "Code", "type": "string"},
+                  {"name": "status", "label": "Status", "type": "enum", "options": ["Active", "Expired"]}]}],
+                  "actions": [{"name": "onExtend", "label": "Extend", "kind": "run", "nodes": ["8"]}]},
+              "lists": [{"prop": "codes", "rows": ["2", "5"], "looks": {"field": "status", "by": [
+                  {"value": "Active", "row": "2"}, {"value": "Expired", "row": "5"}]}}],
+              "values": [{"node": "3", "expr": "row.code"}, {"node": "4", "expr": "row.status"}],
+              "inputs": [], "shows": []}
+    out, problems = P.apply(CODES, answer, "PromoCodesView")
+    assert problems == [], problems
+    code = out["code"]
+    expired = code[code.index(") :"):]
+    assert "opacity-[0.6]" in expired and "{row.code}" in expired and "<DhTagNeutral label={row.status} />" in expired
+    assert "onClick={() => props.onExtend(row)}><DhButtonLink" in expired
+    assert out["sample"]["codes"][1] == {"id": "2", "code": "NURSEWEEK50", "status": "Expired"}
+
+
 def test_an_answer_that_names_what_is_not_there_is_asked_again():
     wrong = json.loads(json.dumps(ANSWER))
     wrong["values"][0] = {"node": "99", "expr": "row.name"}
@@ -269,11 +305,31 @@ def test_an_answer_that_names_what_is_not_there_is_asked_again():
         assert "controls" not in schema["properties"]
         return Reply(next(replies))
 
+    harder = []
+
+    def retry(**kw):
+        harder.append(kw["user"])
+        return client(**kw)
+
     out = P.parameterise(client, "TenantsView", STATIC, heading="Tenants", image=None, links=[], components={},
-                         usage=spent)
+                         usage=spent, retry=retry)
     assert out["rounds"] == 2 and len(spent) == 2
+    assert len(harder) == 1, "a refused round is asked again of the client that thinks harder"
     assert "there is no element 99" in asked[1]
     assert out["code"].startswith('"use client";')
+
+
+def test_a_drawn_screen_is_bound_at_medium_and_asked_again_at_high():
+    from dataclasses import dataclass
+
+    from services.blueprint.executors import EFFORT_BY_NODE, at_high
+
+    @dataclass
+    class Client:
+        effort: str
+
+    assert EFFORT_BY_NODE["drawn_views"] == "medium"
+    assert at_high(Client("medium")).effort == "high" and at_high(Client("xhigh")).effort == "xhigh"
 
 
 def test_a_refused_screen_still_reports_what_it_spent():

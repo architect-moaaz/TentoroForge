@@ -214,7 +214,8 @@ def component_rows(prepared: Prepared) -> list[dict]:
     return rows
 
 
-def screen_row(client: Any, prepared: Prepared, ref: str, *, usage: list | None = None) -> dict:
+def screen_row(client: Any, prepared: Prepared, ref: str, *, usage: list | None = None,
+               retry: Any = None) -> dict:
     """A screen's `drawnViews` row: its view, contract and sample."""
     from services.drawn.params import parameterise
 
@@ -222,7 +223,7 @@ def screen_row(client: Any, prepared: Prepared, ref: str, *, usage: list | None 
     used = {n: prepared.component_keys.get(n, []) for n in prepared.components if f"<{n} " in static}
     out = parameterise(client, name, static, heading=prepared.headings.get(ref, ""),
                        image=prepared.images.get(ref), links=prepared.links.get(ref, []),
-                       components=used, usage=usage)
+                       components=used, usage=usage, retry=retry)
     return {"key": ref, "kind": "screen", "name": name, "frame": ref, "code": out["code"],
             "contract": out["contract"], "sample": out["sample"],
             "source": hashlib.sha1(static.encode()).hexdigest()[:16],
@@ -232,7 +233,8 @@ def screen_row(client: Any, prepared: Prepared, ref: str, *, usage: list | None 
 SHELL_BRIEF = "The application's shell: the sidebar and top bar every screen is drawn in"
 
 
-def shell_row(client: Any, prepared: Prepared, key: str = SHELL_KEY, *, usage: list | None = None) -> dict | None:
+def shell_row(client: Any, prepared: Prepared, key: str = SHELL_KEY, *, usage: list | None = None,
+              retry: Any = None) -> dict | None:
     """A shell's `drawnViews` row (the design's, or one portal's), or None
     when that part of the design draws none."""
     from services.drawn.params import parameterise
@@ -244,7 +246,7 @@ def shell_row(client: Any, prepared: Prepared, key: str = SHELL_KEY, *, usage: l
     used = {n: prepared.component_keys.get(n, []) for n in prepared.components if f"<{n} " in static}
     out = parameterise(client, name, static, heading=SHELL_BRIEF, image=shell.get("image") or None,
                        links=prepared.links.get(str(shell["frame"]), []), components=used, usage=usage,
-                       children=True)
+                       children=True, retry=retry)
     return {"key": key, "kind": "shell", "name": name, "frame": shell["frame"],
             "code": out["code"], "contract": out["contract"], "sample": out["sample"],
             "source": hashlib.sha1(static.encode()).hexdigest()[:16],

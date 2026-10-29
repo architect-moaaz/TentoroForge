@@ -185,7 +185,7 @@ class _Plan:
     components: set[str] = field(default_factory=set)
 
     def bound(self) -> set[str]:
-        return set(self.values) | set(self.inputs)
+        return set(self.values) | set(self.inputs) | set(self.actions) | set(self.shows)
 
 
 def _fields(slot: dict) -> dict[str, dict]:
@@ -257,7 +257,7 @@ def _resolve(root: M.Node, reply: dict, *, children: bool) -> tuple[_Plan, list[
             problems.append(f"{what}: its rows {[r.id for r in rows]} are not siblings of one element")
             continue
         template = rows[0]
-        if any(t in plan.scope for t in (n.id for n in template.walk())) or template.id in plan.skip:
+        if any(n.id in plan.scope or n.id in plan.skip for r in rows for n in r.walk()):
             problems.append(f"{what}: its rows are already another list's")
             continue
         names = _fields(slot)
@@ -270,24 +270,17 @@ def _resolve(root: M.Node, reply: dict, *, children: bool) -> tuple[_Plan, list[
             if str(looks.get("field")) not in names:
                 problems.append(f"{what}: `looks` names `{looks.get('field')}`, not one of its fields")
                 continue
-            bad = False
-            for by in looks.get("by") or []:
-                drawn = node(by.get("row"), what)
-                if drawn is None:
-                    bad = True
-                elif not M.same_shape(template, drawn):
-                    problems.append(f"{what}: row {drawn.id} is not drawn with the same elements as row "
-                                    f"{template.id} — it is no look of it; leave it out of `looks`")
-                    bad = True
-            if bad:
+            if any(node(by.get("row"), what) is None for by in looks.get("by") or []):
                 continue
         resolved = {**entry, "prop": prop, "rows": [r.id for r in rows]}
         plan.lists.append(resolved)
         plan.templates[template.id] = resolved
-        for n in template.walk():
-            plan.scope[n.id] = prop
-        for r in rows[1:]:
-            plan.skip |= {n.id for n in r.walk()}
+        # Every row is the list's: a look drawn only on one (an Extend button
+        # on an expired code) is bound where it is drawn, given the row.
+        for r in rows:
+            for n in r.walk():
+                plan.scope[n.id] = prop
+        plan.skip |= {r.id for r in rows[1:]}
 
     for v in reply.get("values") or []:
         n = node(v.get("node"), f"the value at {v.get('node')}")
@@ -358,14 +351,7 @@ def _resolve(root: M.Node, reply: dict, *, children: bool) -> tuple[_Plan, list[
         if n.id in plan.actions:
             problems.append(f"{what}: element {n.id} is pressed for `{plan.actions[n.id]['name']}` too")
             continue
-        ok = True
-        for key in ("on_look", "off_look"):
-            if inp.get(key):
-                drawn = node(inp[key], what)
-                if drawn is None or not M.same_shape(n, drawn):
-                    problems.append(f"{what}: {key} {inp[key]} is not drawn with the same elements as {n.id}")
-                    ok = False
-        if ok:
+        if all(node(inp[key], what) is not None for key in ("on_look", "off_look") if inp.get(key)):
             plan.inputs[n.id] = {**inp, "form": form, "field": name, "kind": kind}
 
     for s in reply.get("shows") or []:
@@ -668,10 +654,11 @@ def user_prompt(name: str, static: str, *, heading: str, links: list[dict], comp
 
 def parameterise(client: Any, name: str, static: str, *, heading: str, image: str | None,
                  links: list[dict], components: dict[str, list[str]],
-                 usage: list | None = None, children: bool = False) -> dict[str, Any]:
+                 usage: list | None = None, children: bool = False, retry: Any = None) -> dict[str, Any]:
     """``{"code", "contract", "sample", "rounds"}`` for one screen. Raises
     ValueError with the last findings when no round comes back right; every
-    round's spend is in ``usage`` either way."""
+    round's spend is in ``usage`` either way. A round after a refusal is asked
+    of ``retry`` when given (the same model thinking harder)."""
     import time
 
     feedback = ""
@@ -682,7 +669,7 @@ def parameterise(client: Any, name: str, static: str, *, heading: str, image: st
         kwargs: dict[str, Any] = {"system": system, "user": user, "schema": _schema(children)}
         if image and getattr(client, "accepts_images", False):
             kwargs["images"] = [image]
-        reply = client(**kwargs)
+        reply = (retry if feedback and retry is not None else client)(**kwargs)
         if usage is not None and getattr(reply, "usage", None) is not None:
             usage.append((reply.usage, time.monotonic() - t0))
         try:

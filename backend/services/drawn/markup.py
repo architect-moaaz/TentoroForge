@@ -198,15 +198,6 @@ def look(node: Node) -> tuple:
             tuple(look(c) for c in node.children))
 
 
-def same_shape(a: Node, b: Node) -> bool:
-    """Whether ``b`` draws the same elements as ``a`` (its looks may differ)."""
-    if a.is_component != b.is_component or (not a.is_component and a.tag != b.tag):
-        return False
-    if (a.body is None) != (b.body is None) or len(a.children) != len(b.children):
-        return False
-    return all(same_shape(x, y) for x, y in zip(a.children, b.children))
-
-
 def counterpart(root: Node, other: Node, node: Node) -> Node | None:
     """The node of ``other`` at the place ``node`` has in ``root``."""
     path = []
@@ -225,22 +216,38 @@ def counterpart(root: Node, other: Node, node: Node) -> Node | None:
 
 
 def relook(content: Node, look_of: Node, bound: set[str]) -> Node:
-    """``content``'s elements in ``look_of``'s looks: what is bound (`bound`,
-    by node id) keeps ``content``'s; everything else — classes, a component,
-    an unbound text or icon — is ``look_of``'s, the way the drawing draws it."""
-    out = copy.copy(content)
-    if content.id in bound:
+    """``content`` drawn as ``look_of`` is: ``look_of``'s elements and looks,
+    with what is bound in ``content`` (`bound`, by node id — a value, an
+    input, an action, a condition) kept where ``look_of`` has an element of
+    its kind at the same place. Everything else — classes, a component, an
+    unbound text or icon, an element only this look draws — is
+    ``look_of``'s, the way the drawing draws it.
+
+    THE SAME ROW, NOT THE SAME ELEMENTS. An expired promo code is drawn with
+    an Extend button beside its pill; refused as no look of the active row,
+    the screen failed three rounds (DITANS A-11, 2026-10-29)."""
+    out = _relook(content, look_of, bound)
+    # It stands where ``content`` stands, whichever element it is drawn from.
+    out.id, out.parent = content.id, content.parent
+    return out
+
+
+def _relook(content: Node, look_of: Node, bound: set[str]) -> Node:
+    kind_matches = content.is_component == look_of.is_component and \
+        (content.is_component or content.tag == look_of.tag) and (content.body is None) == (look_of.body is None)
+    if content.id in bound and kind_matches:
+        out = copy.copy(content)
         attrs = dict(content.attrs)
         for k, v in look_of.attrs:
             if k in ("className", "style"):
                 attrs[k] = v
         out.attrs = list(attrs.items())
-    else:
-        out.attrs = list(look_of.attrs)
-        out.body = look_of.body
         if look_of.is_component:
             out.tag = look_of.tag
-    out.children = [relook(c, l, bound) for c, l in zip(content.children, look_of.children)]
+    else:
+        out = copy.copy(look_of)
+    out.children = [_relook(content.children[i] if i < len(content.children) else c, c, bound)
+                    for i, c in enumerate(look_of.children)]
     for c in out.children:
         c.parent = out
     return out
