@@ -510,6 +510,11 @@ def test_what_an_answer_forgot_to_declare_or_left_unpressed_is_settled_by_constr
     out, problems = P.apply(STATIC, other, "TenantsView")
     assert problems == [], problems
     assert 'row.status === "Live" ?' in out["code"] and "onPickEgypt" not in out["code"]
+    # a value on the whole screen binds nothing and is left out
+    root_value = json.loads(json.dumps(ANSWER))
+    root_value["values"].append({"node": "1", "expr": "props.extra"})
+    out, problems = P.apply(STATIC, root_value, "TenantsView")
+    assert problems == [] and "props.extra" not in out["code"]
 
 
 def test_an_answer_that_names_what_is_not_there_is_asked_again():
