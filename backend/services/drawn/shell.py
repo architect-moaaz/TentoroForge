@@ -133,14 +133,35 @@ def read_all(documents: dict[str, dict]) -> dict[str, Screen]:
     return screens
 
 
+def _words(node: dict | None) -> frozenset[str]:
+    out: set[str] = set()
+
+    def walk(n: dict) -> None:
+        if str(n.get("type") or "") == "TEXT" and str(n.get("characters") or "").strip():
+            out.add(str(n["characters"]).strip())
+        for c in _children(n):
+            walk(c)
+
+    if node:
+        walk(node)
+    return frozenset(out)
+
+
 def the_shell(screens: dict[str, Screen]) -> tuple[str, Screen] | None:
-    """The screen whose sidebar and top bar stand for every screen's: the
-    first that has both (or a sidebar), when most screens draw one."""
+    """The screen whose sidebar and top bar stand for every screen's, when
+    most screens draw one: the one whose sidebar says what most screens'
+    sidebars say, with a top bar where one is drawn.
+
+    THE TYPICAL SIDEBAR, NOT THE FIRST. Taken from the first screen, the
+    recruiter's frame was the one drawn while the organisation awaits
+    verification ("Verification pending" under its name) and the candidate's
+    had its Profile group opened out (DITANS, 2026-10-29)."""
     with_side = [(k, s) for k, s in screens.items() if s.sidebar is not None]
     if len(with_side) < max(1, len(screens) // 2):
         return None
-    both = [(k, s) for k, s in with_side if s.topbar is not None]
-    return (both or with_side)[0]
+    both = [(k, s) for k, s in with_side if s.topbar is not None] or with_side
+    seen = Counter(_words(s.sidebar) for _k, s in with_side)
+    return max(both, key=lambda ks: seen[_words(ks[1].sidebar)])
 
 
 def shell_markup(screen: Screen, emitter: Any, name: str = "DrawnShell") -> str:
