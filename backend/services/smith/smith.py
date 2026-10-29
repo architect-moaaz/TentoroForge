@@ -133,7 +133,11 @@ GATES: frozenset[str] = frozenset({"BLUEPRINT_REVIEW", "PLAN_REVIEW"})
 #: requirement does not pay for a frame built on the version they rejected.
 #: Named rather than derived, because "is this a domain claim" is a judgement
 #: about meaning and not a property of the graph.
-DOMAIN_NODES: tuple[str, ...] = ("drawn_views", "drawn_flow", "requirements", "domain_reference")
+#: CLOSED UNDER ITS DEPENDENCIES: a step left out of the plan holds nothing
+#: back. Without `drawn_pairs` here, `drawn_flow` (which waits on it) ran in
+#: the run's first second, before one screen was converted, and the
+#: requirements were written with no drawn flow (DITANS wzml1sa6, 2026-10-29).
+DOMAIN_NODES: tuple[str, ...] = ("drawn_views", "drawn_pairs", "drawn_flow", "requirements", "domain_reference")
 
 #: The product model — the second gate. What the application is MADE of,
 #: named and described, and nothing written in detail: the product frame, the

@@ -47,8 +47,16 @@ def test_the_reference_node_runs_after_the_requirements_and_before_the_model():
     assert DAG["domain_reference"].produces == frozenset({"domainReference"})
     assert "domain_reference" in DAG["application_model"].depends_on
     assert is_foundational(DAG["domain_reference"])
-    assert DOMAIN_NODES == ("drawn_views", "drawn_flow", "requirements", "domain_reference")  # a drawn design is converted first; with none, both are no-ops
-    assert domain_nodes() == ["drawn_views", "drawn_flow", "requirements", "domain_reference"]
+    # a drawn design is converted first; with none, each is a no-op
+    assert DOMAIN_NODES == ("drawn_views", "drawn_pairs", "drawn_flow", "requirements", "domain_reference")
+    assert domain_nodes() == ["drawn_views", "drawn_pairs", "drawn_flow", "requirements", "domain_reference"]
+
+
+def test_the_definition_waits_for_everything_it_depends_on():
+    """A step left out of the plan holds nothing back: without `drawn_pairs`,
+    `drawn_flow` ran before any screen was converted (DITANS, 2026-10-29)."""
+    for key in DOMAIN_NODES:
+        assert DAG[key].depends_on <= set(DOMAIN_NODES), (key, DAG[key].depends_on - set(DOMAIN_NODES))
 
 
 def test_the_model_nodes_are_told_what_to_answer_and_how_to_decline():

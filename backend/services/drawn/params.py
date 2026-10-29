@@ -188,6 +188,8 @@ class _Plan:
     inputs: dict[str, dict] = field(default_factory=dict)
     shows: dict[str, dict] = field(default_factory=dict)
     controls: list[str] = field(default_factory=list)
+    #: The contract's `data`, for what the bindings declare.
+    data: list = field(default_factory=list)
     #: node id → the field that picks its look and, by value, the element drawn in it.
     looks: dict[str, dict] = field(default_factory=dict)
     components: set[str] = field(default_factory=set)
@@ -204,19 +206,31 @@ def _path(plan: _Plan, expr: str, at: str, problems: list[str], what: str) -> bo
         problems.append(f"{what}: `{expr}` is not `props.<name>`, `props.<name>.<field>` or `row.<field>`")
         return False
     base, name, sub = m.groups()
+
+    # A VALUE DECLARES WHAT IT READS. Bound by number to a field the contract
+    # forgot (`props.newKitLabel`, `row.owner`), the screen was refused three
+    # rounds for it (DITANS wzml1sa6, 2026-10-29); what it reads is words.
+    def declare(slot: dict, field: str) -> None:
+        if field != "id" and field not in _fields(slot):
+            slot.setdefault("fields", []).append({"name": field, "label": field, "type": "string"})
+
     if base == "row":
         listed = plan.scope.get(at)
         if listed is None:
             problems.append(f"{what}: `{expr}` is not inside a list's template row")
             return False
-        if sub or (name != "id" and name not in _fields(plan.slots[listed])):
-            problems.append(f"{what}: the list `{listed}` has no field `{name}`")
+        if sub:
+            problems.append(f"{what}: a row's field is `row.<field>`, one name")
             return False
+        declare(plan.slots[listed], name)
         return True
     slot = plan.slots.get(name)
     if slot is None:
-        problems.append(f"{what}: the contract has no `{name}`")
-        return False
+        slot = {"name": name, "label": name, "kind": "record" if sub else "value", "fields": []}
+        if not sub:
+            slot["type"] = "string"
+        plan.slots[name] = slot
+        plan.data.append(slot)
     kind = str(slot.get("kind") or "value")
     if kind == "list":
         problems.append(f"{what}: `{name}` is a list — its rows are a `lists` entry, its fields `row.<field>`")
@@ -224,15 +238,17 @@ def _path(plan: _Plan, expr: str, at: str, problems: list[str], what: str) -> bo
     if kind == "value" and sub:
         problems.append(f"{what}: `{name}` is a value, read as `props.{name}`")
         return False
-    if kind in ("record", "form") and (not sub or (sub != "id" and sub not in _fields(slot))):
-        problems.append(f"{what}: `{name}` is a {kind} with no field `{sub or '?'}`")
+    if kind in ("record", "form") and not sub:
+        problems.append(f"{what}: `{name}` is a {kind}, read as `props.{name}.<field>`")
         return False
+    if kind in ("record", "form"):
+        declare(slot, sub)
     return True
 
 
 def _resolve(root: M.Node, reply: dict, *, children: bool) -> tuple[_Plan, list[str]]:
     contract = reply.get("contract") or {}
-    plan = _Plan(root=root, nodes=M.index(root),
+    plan = _Plan(root=root, nodes=M.index(root), data=contract.setdefault("data", []),
                  slots={str(s.get("name")): s for s in contract.get("data") or []
                         if isinstance(s, dict) and s.get("name")})
     problems: list[str] = []
@@ -297,8 +313,8 @@ def _resolve(root: M.Node, reply: dict, *, children: bool) -> tuple[_Plan, list[
             by = []
             for b in lk.get("by") or []:
                 drawn = nodes.get(str(b.get("row")))
-                if drawn is None or drawn not in rows:
-                    problems.append(f"{what}: a look's row {b.get('row')} is not one of its rows {[r.id for r in rows]}")
+                if drawn is None:
+                    problems.append(f"{what}: a look's row {b.get('row')} is not an element")
                     bad = True
                     continue
                 there = drawn if at == template.id else M.counterpart(template, drawn, nodes[at])
@@ -352,11 +368,13 @@ def _resolve(root: M.Node, reply: dict, *, children: bool) -> tuple[_Plan, list[
             continue
         scopes: dict[str | None, list[str]] = {}
         for i in a.get("nodes") or []:
+            # The whole screen is not a button, and an element already
+            # pressed for one action is that action's; an action left with
+            # nothing to press is one the drawing does not have (`apply`).
+            if str(i) == root.id or str(i) in plan.actions:
+                continue
             n = node(i, f"the action `{name}`")
             if n is None or n.id in plan.skip:
-                continue
-            if n.id in plan.actions:
-                problems.append(f"element {n.id} is pressed for both `{plan.actions[n.id]['name']}` and `{name}`")
                 continue
             plan.actions[n.id] = a
             scopes.setdefault(plan.scope.get(n.id), []).append(n.id)
@@ -390,6 +408,11 @@ def _resolve(root: M.Node, reply: dict, *, children: bool) -> tuple[_Plan, list[
         if n.id in plan.scope:
             problems.append(f"{what} is inside a list's rows — a row's control is an action given the row")
             continue
+        if kind in ("text", "select") and n.body is None:
+            # Named by its box, the input is the one text drawn in it.
+            texts = [t for t in n.walk() if t.body is not None and t.unit() is t and t is not n]
+            if len(texts) == 1:
+                n = texts[0]
         if kind in ("text", "select") and (n.body is None or n.unit() is not n):
             problems.append(f"{what}: a {kind} input's node is the text showing its value")
             continue
@@ -789,13 +812,19 @@ def apply(static: str, reply: dict, name: str, *, components: dict[str, list[str
             + "\n".join(body) + "\n  );\n}\n")
     for a in contract["actions"]:
         a.pop("nodes", None)
-    missing = unused(code, contract)
-    if missing:
-        forms = {change_handler(s["name"]): s["name"] for s in contract["data"] if s.get("kind") == "form"}
-        problems.append("the contract declares props nothing reads: " + ", ".join(
-            f"{m} (the form `{forms[m]}` has no `inputs`)" if m in forms else m for m in missing[:10])
-            + " — bind each by number or leave it out")
-        return None, problems
+    # WHAT NOTHING READS IS NOT IN THE CONTRACT. An action with no element to
+    # press, a slot nothing shows: the drawing has no such thing, and asking
+    # again three rounds for it failed screens that were right (DITANS
+    # wzml1sa6, 2026-10-29). A form nobody types into is a record.
+    missing = set(unused(code, contract))
+    for slot in contract["data"]:
+        if slot.get("kind") == "form" and change_handler(slot["name"]) in missing:
+            missing.discard(change_handler(slot["name"]))
+            if slot["name"] not in missing:
+                slot["kind"] = "record"
+    contract["actions"] = [a for a in contract["actions"] if a.get("name") not in missing]
+    contract["data"] = [d for d in contract["data"] if d.get("name") not in missing]
+    plan.slots = {str(d["name"]): d for d in contract["data"]}
     # Read before the type is written: an enum's options grow by what is drawn.
     sample = _sample(plan, contract)
     return {"code": finish(name, code, contract, children=children), "contract": contract,
