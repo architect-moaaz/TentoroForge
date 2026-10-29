@@ -4102,6 +4102,8 @@ EFFORT_BY_NODE: dict[str, str] = {
     # (DITANS D6 Promotions, 2026-10-29). A refused round is asked again at
     # `high` (`drawn.params.parameterise`, `retry`).
     "drawn_views": "medium",
+    # Matching drawings by what they show is reading, not deliberating.
+    "drawn_pairs": "medium",
     # Tests are enumerated from what the Blueprint already claims, not invented.
     # A short list of named third parties.
     "integrations": "low",
@@ -4151,6 +4153,9 @@ MAX_TOKENS_BY_NODE: dict[str, int] = {
     # elements) was cut off at 32,000 twice in one DITANS run (2026-10-30);
     # the answer is small, the thinking over a big screen is not.
     "drawn_views": 64000,
+    # Every phone drawing against every desktop one, in one reply: cut off at
+    # 32,000 twice on DITANS's 194 phones and 381 desktops (2026-10-30).
+    "drawn_pairs": 64000,
     # Names the entities and their relationships without a field; the 64k
     # the single call needed went on fields, which `entity_fields` writes one
     # entity at a time inside the default.
@@ -4827,6 +4832,8 @@ def make_executor(
             doc = _copy.deepcopy(svc.doc)
         prepared = convert.prepare(doc, svc.output_dir)
         client = model.for_task(spec.node, spec.agent) if isinstance(model, ModelRouter) else model
+        # A retry after a reply that ran out of room thinks less, with more room.
+        client = after_no_answer(client, str(getattr(spec, "feedback", "") or ""))
         spent: list = []
         project = str((svc.doc.get("application") or {}).get("id", ""))
         # WHAT A FAILED CONVERSION SPENT IS SPENT. Recorded only on success, the
@@ -4874,6 +4881,8 @@ def make_executor(
         proposals: list[ArtifactProposal] = []
         if phones:
             client = model.for_task(spec.node, spec.agent) if isinstance(model, ModelRouter) else model
+            # A retry after a reply that ran out of room thinks less, with more room.
+            client = after_no_answer(client, str(getattr(spec, "feedback", "") or ""))
             spent: list = []
             project = str((svc.doc.get("application") or {}).get("id", ""))
             try:
