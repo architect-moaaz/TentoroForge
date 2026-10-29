@@ -180,7 +180,7 @@ def test_the_three_phases_partition_the_dag():
 def test_the_domain_phase_authors_what_everything_else_reads():
     """The split is only worth making if the cheap half is the half the rest
     of the DAG depends on."""
-    assert set(domain_nodes()) == {"drawn_views", "drawn_flow", "requirements", "domain_reference"}  # a drawn design is converted first; with none, both are no-ops
+    assert set(domain_nodes()) == {"drawn_views", "drawn_pairs", "drawn_flow", "requirements", "domain_reference"}  # a drawn design is converted first; with none, each is a no-op
     downstream = set(definition_nodes())
     # The product model is the first thing worked out once they are agreed.
     from services.smith.smith import model_nodes
@@ -389,7 +389,8 @@ def test_a_build_runs_the_whole_dag_not_a_sub_plan(smith):
     smith.executor = watcher
     say(smith, plan_json(intent="describe", proposals=reqs("Post a role.")))
     say(smith, plan_json(intent="command", command="define"))
-    # With no drawn design, `drawn_views` has no frames and `drawn_flow` calls no model.
+    # With no drawn design, `drawn_views` has no frames and `drawn_flow` calls no model;
+    # `drawn_pairs` is asked, and with no phone drawings answers without one.
     assert set(ran) == set(domain_nodes()) - {"drawn_views", "drawn_flow"}, "the domain gate runs the cheap half"
 
     say(smith, plan_json(intent="command", command="approve"))

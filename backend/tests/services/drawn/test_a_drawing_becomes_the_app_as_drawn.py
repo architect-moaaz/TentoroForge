@@ -687,7 +687,7 @@ def test_the_build_converts_the_frames_first_and_the_requirements_read_the_journ
     from services.smith.smith import domain_nodes
 
     assert "drawn_flow" in DAG["requirements"].depends_on and DAG["drawn_views"].fanout == "drawn_frames"
-    assert domain_nodes()[:2] == ["drawn_views", "drawn_flow"]
+    assert domain_nodes()[:3] == ["drawn_views", "drawn_pairs", "drawn_flow"]
     doc = {"designSources": [{"id": "FIGMA-001", "treatAs": "specification", "frames": [{"nodeId": "1:1"}]},
                              {"id": "FIGMA-002", "treatAs": "evidence", "frames": [{"nodeId": "1:1"}]}]}
     assert subjects_for(DAG["drawn_views"], doc) == ["1:1", "shell", "components"]
