@@ -257,3 +257,29 @@ def test_the_planner_hears_who_a_screen_is_for():
     slots = {s["figmaFrame"]: s for s in frame_slots(specification_frames(doc), doc=doc)}
     assert slots["2:1"]["portal"] == "Recruiter"
     assert "one of the 3 products the design draws side by side" in slots["2:1"]["prompt"]
+
+
+def test_pairing_asks_a_batch_of_phone_drawings_at_a_time_and_holds_nothing_back(monkeypatch):
+    """194 phone drawings in one answer wrote nothing, then was cut off 70,000
+    characters in; a failed pairing held the requirements back (DITANS, 2026-10-30)."""
+    from services.blueprint.orchestrator import DAG
+    from services.drawn import pairs
+
+    phones = [{"ref": f"F/{i}:1", "name": f"M-{i}", "shows": "", "portal": "App", "group": "", "width": 393,
+               "data": [], "actions": []} for i in range(65)]
+    wides = [{"ref": f"F/{i}:2", "name": f"W-{i}", "shows": "", "portal": "Web", "group": "", "width": 1440,
+              "data": [], "actions": []} for i in range(65)]
+    monkeypatch.setattr(pairs, "candidates", lambda doc: (phones, wides))
+    asked = []
+
+    def client(*, system, user, schema):
+        batch = schema["properties"]["pairs"]["items"]["properties"]["phone"]["enum"]
+        asked.append(len(batch))
+        return json.dumps({"pairs": [{"phone": p, "wide": p.replace(":1", ":2"), "because": "same"} for p in batch]
+                                    + [{"phone": batch[0], "wide": "F/0:2", "because": "again"}]})
+
+    found, left = pairs.pair(client, {})
+    assert asked == [pairs.BATCH, pairs.BATCH, 65 - 2 * pairs.BATCH]
+    assert len(found) == 65 and all(p["wide"] == p["phone"].replace(":1", ":2") for p in found)
+    assert left, "a drawing named twice across batches is kept once"
+    assert DAG["drawn_pairs"].optional

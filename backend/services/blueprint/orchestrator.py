@@ -236,7 +236,9 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # screen states as its rules.
     # A screen drawn for a phone and again for a desktop is one page: which
     # drawings are the same screen is decided once (`drawn.pairs`).
-    _n("drawn_pairs", "ui_engineer", ("drawn_views",), ("drawnPairs",),
+    # OPTIONAL: unpaired, a phone drawing is a page of its own. A pairing that
+    # failed held the journey and the requirements back (DITANS, 2026-10-30).
+    _n("drawn_pairs", "ui_engineer", ("drawn_views",), ("drawnPairs",), optional=True,
        note="the phone and desktop drawings of one screen, paired"),
     _n("drawn_flow", "ui_engineer", ("drawn_pairs",), (), kind="service",
        note="the drawn journey, written down for the requirements"),
