@@ -34,8 +34,29 @@ MAX_CLARIFY_TURNS = 4
 
 
 def brief_of(ctx: Ctx) -> str:
-    """Everything the person has said, with the documents they supplied."""
-    return brief_mod.with_documents(brief_mod.brief_from(ctx.history, ctx.message), ctx.evidence)
+    """Everything the person has said, with the documents they supplied.
+
+    THE BRIEF THE APP KEEPS IS SAID. A design imported into a new app records
+    the person's brief on the Blueprint; a later turn whose history did not
+    carry it ("Carry on with the definition") read a 28-character brief and
+    asked what the app is for, of a person who had written 16,000 characters
+    on it (DITANS wzml1sa6, 2026-10-30)."""
+    said = brief_mod.brief_from(ctx.history, ctx.message)
+    kept = _kept_brief(ctx.out)
+    if kept and kept not in said:
+        said = kept + (f"\n\n{said}" if said.strip() else "")
+    return brief_mod.with_documents(said, ctx.evidence)
+
+
+def _kept_brief(output_dir: str) -> str:
+    import json
+
+    path = Path(output_dir) / ".forge" / "blueprint" / "current.json"
+    try:
+        doc = json.loads(path.read_text("utf-8")) if path.is_file() else {}
+    except (OSError, ValueError):
+        return ""
+    return str((doc.get("application") or {}).get("description") or "").strip()
 
 
 def user_turns(ctx: Ctx) -> int:
@@ -174,6 +195,11 @@ def define_application(ctx: Ctx, args: dict) -> dict:
     # every agent reads the description, so a BRD written into it was read
     # twice by the two that read documents and paid for by every other.
     brief = str(args.get("brief") or "").strip() or brief_mod.brief_from(ctx.history, ctx.message)
+    # The brief the app keeps, in the person's words, when this turn's chat
+    # does not carry it (`brief_of`).
+    kept = _kept_brief(ctx.out)
+    if kept and kept not in brief:
+        brief = f"{kept}\n\n{brief}" if brief.strip() else kept
     if not brief:
         return _finding("There is nothing to define: the person has not said what the application is for.")
     if brief_mod.is_functionless(brief):
@@ -186,7 +212,7 @@ def define_application(ctx: Ctx, args: dict) -> dict:
         if existing.is_file():
             svc = BlueprintService.load(output_dir=output_dir)
             prior = str((svc.doc.get("application") or {}).get("description") or "")
-            merged = brief if not prior else (prior if brief in prior else f"{prior}\n\n{brief}")
+            merged = brief if not prior or prior in brief else (prior if brief in prior else f"{prior}\n\n{brief}")
             svc.doc.setdefault("application", {})["description"] = merged
             svc.validate(); svc.save()
         else:
