@@ -229,15 +229,7 @@ def screen_row(client: Any, prepared: Prepared, ref: str, *, usage: list | None 
             **({"portal": prepared.portal_of[ref]} if prepared.portal_of.get(ref) else {})}
 
 
-SHELL_BRIEF = (
-    "THIS IS THE APPLICATION'S SHELL — the sidebar and top bar every screen is drawn in — not a screen. "
-    "Make the sidebar's destinations one list prop `nav` (fields: `label`, `icon` (the drawn img src), "
-    "`href`, `active` (boolean), and `section` (the group heading it sits under, \"\" for none)) drawn with "
-    "the active look where `active` is true and the other look elsewhere; keep group headings as drawn. "
-    "Replace the bell and the account avatar with `{props.controls}` (the application puts its own there) "
-    "and keep `{props.children}` where the page goes. The top bar's search is a `form` `search` (field "
-    "`query`); its main button is an action."
-)
+SHELL_BRIEF = "The application's shell: the sidebar and top bar every screen is drawn in"
 
 
 def shell_row(client: Any, prepared: Prepared, key: str = SHELL_KEY, *, usage: list | None = None) -> dict | None:

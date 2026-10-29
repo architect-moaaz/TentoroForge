@@ -4811,28 +4811,33 @@ def make_executor(
         client = model.for_task(spec.node, spec.agent) if isinstance(model, ModelRouter) else model
         spent: list = []
         project = str((svc.doc.get("application") or {}).get("id", ""))
-        if spec.subject == convert.COMPONENTS_KEY:
-            rows = convert.component_rows(prepared)
-            report = convert.export_assets(prepared, svc.output_dir)
-            tell(reasoning, f"Kept {len(rows)} shared components and {report.get('saved', 0) + report.get('kept', 0)} "
-                 "icons and pictures from the design" + (f"; {len(report['missing'])} could not be rendered"
-                                                          if report.get("missing") else "") + ".", "step", spec.node)
-        elif convert.is_shell_subject(spec.subject):
-            row = convert.shell_row(client, prepared, spec.subject, usage=spent)
-            rows = [row] if row else []
-            where = spec.subject[len(convert.SHELL_PREFIX):] if spec.subject.startswith(convert.SHELL_PREFIX) else ""
-            tell(reasoning, (f"Converted the frame {where}'s screens are drawn in." if where else
-                             "Converted the frame every screen is drawn in.") if rows
-                 else (f"{where} draws no shared frame." if where else "The design draws no shared frame."),
-                 "step", spec.node)
-        else:
-            if spec.subject not in prepared.static:
-                raise ValueError(f"{spec.subject} has no stored drawing to convert")
-            tell(reasoning, f"Converting {prepared.headings.get(spec.subject) or spec.subject} to React.", "step", spec.node)
-            rows = [convert.screen_row(client, prepared, spec.subject, usage=spent)]
-        for u, elapsed in spent:
-            if usage is not None and u is not None:
-                usage.record(node=spec.node, agent=spec.agent, usage=u, elapsed_s=elapsed, project=project)
+        # WHAT A FAILED CONVERSION SPENT IS SPENT. Recorded only on success, the
+        # rounds of a screen refused three times were missing from the run's cost
+        # (DITANS, 2026-10-29).
+        try:
+            if spec.subject == convert.COMPONENTS_KEY:
+                rows = convert.component_rows(prepared)
+                report = convert.export_assets(prepared, svc.output_dir)
+                tell(reasoning, f"Kept {len(rows)} shared components and {report.get('saved', 0) + report.get('kept', 0)} "
+                     "icons and pictures from the design" + (f"; {len(report['missing'])} could not be rendered"
+                                                              if report.get("missing") else "") + ".", "step", spec.node)
+            elif convert.is_shell_subject(spec.subject):
+                row = convert.shell_row(client, prepared, spec.subject, usage=spent)
+                rows = [row] if row else []
+                where = spec.subject[len(convert.SHELL_PREFIX):] if spec.subject.startswith(convert.SHELL_PREFIX) else ""
+                tell(reasoning, (f"Converted the frame {where}'s screens are drawn in." if where else
+                                 "Converted the frame every screen is drawn in.") if rows
+                     else (f"{where} draws no shared frame." if where else "The design draws no shared frame."),
+                     "step", spec.node)
+            else:
+                if spec.subject not in prepared.static:
+                    raise ValueError(f"{spec.subject} has no stored drawing to convert")
+                tell(reasoning, f"Converting {prepared.headings.get(spec.subject) or spec.subject} to React.", "step", spec.node)
+                rows = [convert.screen_row(client, prepared, spec.subject, usage=spent)]
+        finally:
+            for u, elapsed in spent:
+                if usage is not None and u is not None:
+                    usage.record(node=spec.node, agent=spec.agent, usage=u, elapsed_s=elapsed, project=project)
         return AgentResult(task_id=spec.task_id, agent=spec.agent, confidence=0.9,
                            proposals=[ArtifactProposal(section="drawnViews", natural_key=row["key"], body=row)
                                       for row in rows])
@@ -4852,11 +4857,13 @@ def make_executor(
         if phones:
             client = model.for_task(spec.node, spec.agent) if isinstance(model, ModelRouter) else model
             spent: list = []
-            found, left = drawn_pairs.pair(client, doc, usage=spent)
             project = str((svc.doc.get("application") or {}).get("id", ""))
-            for u, elapsed in spent:
-                if usage is not None and u is not None:
-                    usage.record(node=spec.node, agent=spec.agent, usage=u, elapsed_s=elapsed, project=project)
+            try:
+                found, left = drawn_pairs.pair(client, doc, usage=spent)
+            finally:
+                for u, elapsed in spent:
+                    if usage is not None and u is not None:
+                        usage.record(node=spec.node, agent=spec.agent, usage=u, elapsed_s=elapsed, project=project)
             tell(reasoning, f"{len(found)} of {len(phones)} phone screens are drawn for the desktop too; each pair "
                  "is one page." + (f" Left out: {'; '.join(left[:5])}." if left else ""), "step", spec.node)
             proposals = [ArtifactProposal(section="drawnPairs", natural_key=p["phone"], body=p) for p in found]

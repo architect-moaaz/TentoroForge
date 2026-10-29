@@ -3,45 +3,50 @@
 `tsx` draws a frame exactly, with the designer's example content written in:
 "MedStaff Partners", "7 of 10", five table rows. What of that is data, what
 is fixed copy, which rows are one list and what each button does is a
-judgement about meaning, so it is a model's — but a model's that may not
-touch the drawing. It is shown the frame and its markup, and returns the same
-markup with the example content replaced by props, the repeated rows by one
-`.map`, the buttons calling handlers and the inputs controlled; with the
-CONTRACT that says what each prop is; and with the drawing's own values in
-that shape (`sample`).
+judgement about meaning, so it is a model's — but a model's that does not
+touch the drawing. It is shown the frame and its markup with every element
+numbered (`markup.numbered`), and answers with the CONTRACT that says what
+each prop is and, by number, where each prop goes: which texts are values,
+which sibling rows are one list (and which field picks a row's look), which
+elements each action is pressed on, which texts are inputs, which elements
+are drawn only in some states.
 
-What it returns is checked, not trusted (`check`): every class the drawing
-was converted with is still there, every prop the contract declares is read,
-and nothing loads data. A reply that fails is sent back with the findings.
+THE VIEW IS WRITTEN BY CODE FROM THAT ANSWER (`apply`), so the markup is the
+drawing by construction: the first row of a list is kept as its template, a
+look chosen by a field is another drawn row's classes on the template's
+elements, and nothing else changes. The SAMPLE — the drawing's own content in
+the contract's shape — is read from the drawing too: every drawn row through
+the template's bindings.
+
+Asked to write the markup back with props in it, the model emitted up to 38k
+tokens a screen and lost or invented classes on half of them: four of eight
+D6 Promotions conversions were refused after three rounds (DITANS,
+2026-10-29). An answer by number is a few thousand tokens, and what is
+checked is only what a model can get wrong: a number that is not there, a
+path the contract does not have, a prop nothing reads.
 """
 from __future__ import annotations
 
 import json
 import re
+from dataclasses import dataclass, field
 from typing import Any
 
+from services.drawn import markup as M
 from services.drawn.contract import change_handler, props_type, unused
 
 #: Rounds a screen gets to come back right.
 ROUNDS = 3
-#: The share of the drawing's distinct classes a view must keep. A table
-#: collapsed to one row and a `.map` keeps every row's classes; what may go is
-#: a drawn example the contract makes conditional (an empty state not shown).
-KEEP = 0.95
-#: …and a shell. Its menu is one list drawn in two looks (the page you are on,
-#: the rest), and its brief takes the drawn bell and avatar out for the app's
-#: own controls, so their classes go by design: D6's shell kept 28, then 24, of
-#: its 31 class strings (d6drawn, 2026-10-28). The render shows the rest.
-SHELL_KEEP = 0.7
 
 _FIELD_TYPES = ["string", "text", "number", "money", "percent", "date", "datetime", "boolean", "enum",
                 "email", "phone", "url", "image", "id"]
 
-REPLY_SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "additionalProperties": False,
-    "required": ["contract", "sample_json", "code"],
-    "properties": {
+_PATH = re.compile(r"^(props|row)\.([A-Za-z_]\w*)(?:\.([A-Za-z_]\w*))?$")
+
+
+def _schema(children: bool) -> dict[str, Any]:
+    ids = {"type": "array", "items": {"type": "string"}}
+    props: dict[str, Any] = {
         "contract": {
             "type": "object",
             "additionalProperties": False,
@@ -66,110 +71,598 @@ REPLY_SCHEMA: dict[str, Any] = {
                     }}},
                 "actions": {"type": "array", "items": {
                     "type": "object", "additionalProperties": False,
-                    "required": ["name", "label", "kind"],
+                    "required": ["name", "label", "kind", "nodes"],
                     "properties": {
                         "name": {"type": "string"}, "label": {"type": "string"},
                         "kind": {"type": "string", "enum": ["navigate", "open", "submit", "run"]},
                         "target": {"type": "string"}, "on": {"type": "string"},
+                        "nodes": ids,
                     }}},
             },
         },
-        "sample_json": {"type": "string",
-                        "description": "The drawing's own content in the contract's shape, as JSON: every row it shows."},
-        "code": {"type": "string", "description": "The view's file, without the Props type (it is generated)."},
-    },
-}
-
-SYSTEM = """You turn one drawn screen, already converted to React markup, into a view that takes its content as props.
-
-THE MARKUP IS THE DESIGN AND YOU DO NOT CHANGE IT. Keep every element, every className, every style, every
-image and the nesting exactly. You do four things to it and nothing else:
-
-1. EXAMPLE CONTENT BECOMES PROPS. What would be different for another record or another day — names, numbers,
-   dates, amounts, statuses, counts, the rows of a table, the cards of a list, a selected record's details, the
-   values in an input — is read from props. What is the same whatever the data — headings, column headers,
-   labels, helper text, button words, the rules and notes the screen states — stays written as it is.
-2. REPEATED ROWS BECOME ONE LIST. Rows, cards or chips of one structure repeated as siblings become
-   `props.x.map((row) => …)` over a `list` prop, keeping ONE row's markup with `key={row.id}`. Rows of one
-   shape that each name a different thing (settings, entitlements, key/value lines, a checklist) are ONE list
-   with `label` and `value` fields — never one field per row. A row's action names the list in `on`. Where rows of
-   one list are drawn in different looks (a status pill green on one, amber on another), the look follows an
-   `enum` field: `row.status === "Active" ? <the green one> : <the amber one>` — both drawn looks kept.
-3. EVERY PRESSABLE THING CALLS A HANDLER. A button, a row's action, a tab, a link: `onClick={() => props.onX()}`,
-   or `props.onX(row)` on a row. The handler's name is the words on it: "New tenant" → `onNewTenant`.
-   `navigate` goes to another screen, `open` opens a dialog, drawer or tab of this one, `submit` sends a form,
-   `run` does something to a record. Give `target` when the screen's links (below) say where it leads.
-4. INPUTS ARE CONTROLLED. An input, select, checkbox or chip choice the person sets is a field of a `form`
-   prop: `value={props.f.code}` and `onChange={(e) => props.onFChange("code", e.target.value)}` (the change
-   handler is always `on<Form>Change`, generated for you); a chip choice is `props.f.market === "Egypt"` for the
-   selected look and `props.onFChange("market", "Egypt")` on press.
-
-THE CONTRACT says what every prop is: `data` (list / record / form / value, each field with the type the
-drawing shows — a date, money, an enum with the drawn options) and `actions`. Every prop you read is in it and
-everything in it is read. Names are camelCase; handlers are `on` + PascalCase.
-
-THE SAMPLE is the drawing's own content in the contract's shape — every row it draws, every value — so the view
-renders exactly as drawn before there is data. Every row has an `id` ("1", "2", …). Values are what the view
-displays, as drawn ("7 of 10", "1 Mar 2027"), except enums (one of the options) and booleans.
-
-THE FILE: start with `"use client";` and `import type * as React from "react";`, import shared components only
-from the paths given, and `export default function <Name>(props: <Name>Props)`. Do NOT write the Props type — it
-is generated from your contract. No data loading, no fetch, no state beyond what the drawing shows open (a
-dialog the screen draws open is shown when its prop says so)."""
+        "lists": {"type": "array", "items": {
+            "type": "object", "additionalProperties": False, "required": ["prop", "rows"],
+            "properties": {
+                "prop": {"type": "string"}, "rows": ids,
+                "where": {"type": "object", "additionalProperties": False, "required": ["field", "equals"],
+                          "properties": {"field": {"type": "string"}, "equals": {"type": "string"}}},
+                "looks": {"type": "object", "additionalProperties": False, "required": ["field", "by"],
+                          "properties": {"field": {"type": "string"}, "by": {"type": "array", "items": {
+                              "type": "object", "additionalProperties": False, "required": ["value", "row"],
+                              "properties": {"value": {"type": "string"}, "row": {"type": "string"}}}}}},
+            }}},
+        "values": {"type": "array", "items": {
+            "type": "object", "additionalProperties": False, "required": ["node", "expr"],
+            "properties": {"node": {"type": "string"}, "expr": {"type": "string"}, "prop": {"type": "string"}}}},
+        "inputs": {"type": "array", "items": {
+            "type": "object", "additionalProperties": False, "required": ["node", "form", "field", "kind"],
+            "properties": {
+                "node": {"type": "string"}, "form": {"type": "string"}, "field": {"type": "string"},
+                "kind": {"type": "string", "enum": ["text", "select", "toggle", "choice"]},
+                "value": {"type": "string"}, "placeholder": {"type": "boolean"},
+                "on_look": {"type": "string"}, "off_look": {"type": "string"},
+            }}},
+        "shows": {"type": "array", "items": {
+            "type": "object", "additionalProperties": False, "required": ["node", "when"],
+            "properties": {"node": {"type": "string"}, "when": {"type": "string"}, "not": {"type": "boolean"}}}},
+    }
+    if children:
+        props["controls"] = ids
+    return {"type": "object", "additionalProperties": False, "required": list(props), "properties": props}
 
 
-def _class_set(code: str) -> set[str]:
-    return set(re.findall(r'className="([^"]*)"', code))
+REPLY_SCHEMA = _schema(False)
+
+SYSTEM = """You say what a drawn screen's example content is, so the screen can be built from data.
+
+The screen is already converted to React markup, and every element is numbered (`12|<div …>`). You do NOT
+write or change markup: you name elements by their number, and code builds the view from the drawing exactly
+as drawn. You answer with:
+
+CONTRACT — what the view is given: `data` (each a `list`, `record`, `form` or `value`, each field with the type
+the drawing shows — a date, money, an enum with the drawn options, a boolean for an on/off) and `actions`.
+What would be different for another record or another day is data — names, numbers, dates, amounts,
+statuses, counts, the rows of a table, the cards of a list, a selected record's details, what an input holds.
+What is the same whatever the data — headings, column headers, labels, helper text, button words, the rules and
+notes the screen states — is not data; leave it as drawn. Names are camelCase; an action's name is `on` + the
+words on it in PascalCase ("New tenant" → `onNewTenant`). `navigate` goes to another screen (give `target`
+when the screen's links say where), `open` opens a dialog, drawer or tab of this one, `submit` sends a form,
+`run` does something to a record. Everything in the contract is used below.
+
+LISTS — rows, cards or chips of one structure repeated as siblings are one list: `{prop, rows}`, `rows` every
+drawn row's number in order (the first is kept as the template). Rows of one shape that each name a different
+thing (settings, entitlements, key/value lines, a checklist) are ONE list with `label` and `value` fields —
+never one field per row. Rows drawn in different looks (a status pill green on one, amber on another; a menu's
+current item) name the field that picks the look: `looks: {field, by: [{value, row}]}`, for each value of an
+enum or boolean field ("true"/"false") a drawn row in that look. Rows under different headings of one list (a
+menu's groups) are one list entry per heading, each with `where: {field, equals}`.
+
+VALUES — `{node, expr}` puts data where the drawing has example content: a text's words, a picture's `src`, or
+one of a shared component's words (`prop`: which). `expr` is `props.<value>`, `props.<record or form>.<field>`,
+or `row.<field>` for an element inside a list's template row (the first of its `rows`).
+
+ACTIONS — every action's `nodes` are the elements pressed for it: a button, a row, a tab, a link, a menu item.
+Pressed inside a list's template row, it is given that row.
+
+INPUTS — what the person sets is a field of a `form`: `{node, form, field, kind}`. `text` and `select`: `node` is
+the text showing the value (it becomes the input; `placeholder: true` when the drawn words are a hint such as
+"Search…", not a value). `toggle`: `node` is the switch. `choice`: `node` is one option (a chip, a radio row,
+a segment) and `value` the option it sets; `on_look` / `off_look` are the numbers of an option drawn selected
+and one drawn not selected, so the selection shows.
+
+SHOWS — `{node, when}`: an element drawn for one state only (a dialog drawn open, a banner, an empty state) is
+shown while `when` — a path as above, `not: true` for its opposite — is true.
+
+The drawing's own content (the sample) is read from the drawing by code: do not write it."""
+
+_SHELL = """
+
+THIS IS THE APPLICATION'S SHELL — the sidebar and top bar every screen is drawn in — not a screen. The sidebar's
+destinations are the list `nav` (fields `label`, `icon` (the drawn picture's src), `href`, `active` (boolean,
+the look of the screen you are on) and `section` (the heading it sits under, "" for none)), pressed for one
+action `onNav`; group headings stay as drawn. `controls`: the numbers of the drawn bell and account avatar —
+the application puts its own there. The top bar's search is a `form` `search` (field `query`, a placeholder);
+its main button is an action."""
 
 
-def check(static: str, code: str, contract: dict, name: str, *, keep: float = KEEP) -> list[str]:
-    """What is wrong with a reply, in words the writer can act on."""
+@dataclass
+class _Plan:
+    """A reply resolved against the markup."""
+    root: M.Node
+    nodes: dict[str, M.Node]
+    slots: dict[str, dict]
+    lists: list[dict] = field(default_factory=list)
+    #: template row id → its list entry.
+    templates: dict[str, dict] = field(default_factory=dict)
+    #: node id → the list whose template it is inside.
+    scope: dict[str, str] = field(default_factory=dict)
+    skip: set[str] = field(default_factory=set)
+    values: dict[str, list[dict]] = field(default_factory=dict)
+    actions: dict[str, dict] = field(default_factory=dict)
+    inputs: dict[str, dict] = field(default_factory=dict)
+    shows: dict[str, dict] = field(default_factory=dict)
+    controls: list[str] = field(default_factory=list)
+    components: set[str] = field(default_factory=set)
+
+    def bound(self) -> set[str]:
+        return set(self.values) | set(self.inputs)
+
+
+def _fields(slot: dict) -> dict[str, dict]:
+    return {str(f.get("name")): f for f in slot.get("fields") or [] if isinstance(f, dict) and f.get("name")}
+
+
+def _path(plan: _Plan, expr: str, at: str, problems: list[str], what: str) -> bool:
+    m = _PATH.match(expr.strip())
+    if not m:
+        problems.append(f"{what}: `{expr}` is not `props.<name>`, `props.<name>.<field>` or `row.<field>`")
+        return False
+    base, name, sub = m.groups()
+    if base == "row":
+        listed = plan.scope.get(at)
+        if listed is None:
+            problems.append(f"{what}: `{expr}` is not inside a list's template row")
+            return False
+        if sub or (name != "id" and name not in _fields(plan.slots[listed])):
+            problems.append(f"{what}: the list `{listed}` has no field `{name}`")
+            return False
+        return True
+    slot = plan.slots.get(name)
+    if slot is None:
+        problems.append(f"{what}: the contract has no `{name}`")
+        return False
+    kind = str(slot.get("kind") or "value")
+    if kind == "list":
+        problems.append(f"{what}: `{name}` is a list — its rows are a `lists` entry, its fields `row.<field>`")
+        return False
+    if kind == "value" and sub:
+        problems.append(f"{what}: `{name}` is a value, read as `props.{name}`")
+        return False
+    if kind in ("record", "form") and (not sub or (sub != "id" and sub not in _fields(slot))):
+        problems.append(f"{what}: `{name}` is a {kind} with no field `{sub or '?'}`")
+        return False
+    return True
+
+
+def _resolve(root: M.Node, reply: dict, *, children: bool) -> tuple[_Plan, list[str]]:
+    contract = reply.get("contract") or {}
+    plan = _Plan(root=root, nodes=M.index(root),
+                 slots={str(s.get("name")): s for s in contract.get("data") or []
+                        if isinstance(s, dict) and s.get("name")})
     problems: list[str] = []
-    drawn = _class_set(static)
-    kept = _class_set(code)
-    # A look chosen by a field (`row.status === "Active" ? "…" : "…"`) keeps its
-    # classes inside an expression: every drawn class string still written
-    # anywhere in the file counts as kept.
-    quoted = set(re.findall(r'"([^"\n]*)"', code)) | set(re.findall(r"'([^'\n]*)'", code))
-    if drawn:
-        lost = sorted(drawn - kept - quoted, key=len)
-        if len(drawn & (kept | quoted)) / len(drawn) < keep:
-            problems.append(f"the drawing's markup was changed: {len(lost)} of its {len(drawn)} distinct classNames "
-                            f"are gone (e.g. {lost[:4]}) — keep every element and class exactly")
-        added = sorted(kept - drawn)
-        if added:
-            problems.append(f"classNames the drawing does not have: {added[:4]} — change content, not looks")
+    nodes = plan.nodes
+
+    def node(i: Any, what: str) -> M.Node | None:
+        n = nodes.get(str(i))
+        if n is None:
+            problems.append(f"{what}: there is no element {i}")
+        elif n is root:
+            problems.append(f"{what}: element {i} is the whole screen")
+            return None
+        return n
+
+    for entry in reply.get("lists") or []:
+        prop = str(entry.get("prop") or "")
+        slot = plan.slots.get(prop)
+        what = f"the list `{prop}`"
+        if slot is None or slot.get("kind") != "list":
+            problems.append(f"{what} is not a `list` in the contract")
+            continue
+        rows = [node(r, what) for r in entry.get("rows") or []]
+        if not rows:
+            problems.append(f"{what} names no rows")
+        if not rows or None in rows:
+            continue
+        if len({id(r.parent) for r in rows}) > 1:
+            problems.append(f"{what}: its rows {[r.id for r in rows]} are not siblings of one element")
+            continue
+        template = rows[0]
+        if any(t in plan.scope for t in (n.id for n in template.walk())) or template.id in plan.skip:
+            problems.append(f"{what}: its rows are already another list's")
+            continue
+        names = _fields(slot)
+        where = entry.get("where") or None
+        if where and str(where.get("field")) not in names:
+            problems.append(f"{what}: `where` names `{where.get('field')}`, not one of its fields")
+            continue
+        looks = entry.get("looks") or None
+        if looks:
+            if str(looks.get("field")) not in names:
+                problems.append(f"{what}: `looks` names `{looks.get('field')}`, not one of its fields")
+                continue
+            bad = False
+            for by in looks.get("by") or []:
+                drawn = node(by.get("row"), what)
+                if drawn is None:
+                    bad = True
+                elif not M.same_shape(template, drawn):
+                    problems.append(f"{what}: row {drawn.id} is not drawn with the same elements as row "
+                                    f"{template.id} — it is no look of it; leave it out of `looks`")
+                    bad = True
+            if bad:
+                continue
+        resolved = {**entry, "prop": prop, "rows": [r.id for r in rows]}
+        plan.lists.append(resolved)
+        plan.templates[template.id] = resolved
+        for n in template.walk():
+            plan.scope[n.id] = prop
+        for r in rows[1:]:
+            plan.skip |= {n.id for n in r.walk()}
+
+    for v in reply.get("values") or []:
+        n = node(v.get("node"), f"the value at {v.get('node')}")
+        if n is None or n.id in plan.skip:
+            continue
+        what = f"the value at {n.id}"
+        if not _path(plan, str(v.get("expr") or ""), n.id, problems, what):
+            continue
+        unit = n.unit()
+        prop = str(v.get("prop") or "")
+        if unit.is_component:
+            words = [k for k, _v in unit.attrs]
+            prop = prop or (words[0] if len(words) == 1 else "")
+            if prop not in words:
+                problems.append(f"{what}: `{unit.tag}` takes {words}; say which in `prop`")
+                continue
+        elif unit.tag == "img":
+            prop = "src"
+        elif n.body is None:
+            problems.append(f"{what}: element {n.id} is not a text, a picture or a shared component")
+            continue
+        plan.values.setdefault(n.id, []).append({"expr": str(v["expr"]).strip(), "prop": prop})
+
+    for a in contract.get("actions") or []:
+        name = str(a.get("name") or "")
+        if not re.match(r"^on[A-Z]\w*$", name):
+            problems.append(f"the action `{name}` is not named `on` + PascalCase")
+            continue
+        scopes = set()
+        for i in a.get("nodes") or []:
+            n = node(i, f"the action `{name}`")
+            if n is None or n.id in plan.skip:
+                continue
+            if n.id in plan.actions:
+                problems.append(f"element {n.id} is pressed for both `{plan.actions[n.id]['name']}` and `{name}`")
+                continue
+            plan.actions[n.id] = a
+            scopes.add(plan.scope.get(n.id))
+        if len(scopes) > 1:
+            problems.append(f"the action `{name}` is pressed both inside and outside a list's rows")
+        elif scopes and None not in scopes:
+            a["on"] = next(iter(scopes))
+        elif str(a.get("on") or "") and (plan.slots.get(str(a["on"])) or {}).get("kind") == "list":
+            a.pop("on")  # pressed outside the rows, it is given none
+
+    for inp in reply.get("inputs") or []:
+        n = node(inp.get("node"), f"the input at {inp.get('node')}")
+        if n is None or n.id in plan.skip:
+            continue
+        what = f"the input at {n.id}"
+        form, name, kind = str(inp.get("form") or ""), str(inp.get("field") or ""), str(inp.get("kind") or "")
+        slot = plan.slots.get(form)
+        if slot is None or slot.get("kind") != "form":
+            problems.append(f"{what}: `{form}` is not a `form` in the contract")
+            continue
+        if name not in _fields(slot):
+            problems.append(f"{what}: the form `{form}` has no field `{name}`")
+            continue
+        if n.id in plan.scope:
+            problems.append(f"{what} is inside a list's rows — a row's control is an action given the row")
+            continue
+        if kind in ("text", "select") and (n.body is None or n.unit() is not n):
+            problems.append(f"{what}: a {kind} input's node is the text showing its value")
+            continue
+        if kind == "choice" and not str(inp.get("value") or ""):
+            problems.append(f"{what}: a choice says the `value` it sets")
+            continue
+        if n.id in plan.actions:
+            problems.append(f"{what}: element {n.id} is pressed for `{plan.actions[n.id]['name']}` too")
+            continue
+        ok = True
+        for key in ("on_look", "off_look"):
+            if inp.get(key):
+                drawn = node(inp[key], what)
+                if drawn is None or not M.same_shape(n, drawn):
+                    problems.append(f"{what}: {key} {inp[key]} is not drawn with the same elements as {n.id}")
+                    ok = False
+        if ok:
+            plan.inputs[n.id] = {**inp, "form": form, "field": name, "kind": kind}
+
+    for s in reply.get("shows") or []:
+        n = node(s.get("node"), f"the condition at {s.get('node')}")
+        if n is None or n.id in plan.skip:
+            continue
+        if _path(plan, str(s.get("when") or ""), n.id, problems, f"the condition at {n.id}"):
+            plan.shows[n.id] = s
+
+    if children:
+        for i in reply.get("controls") or []:
+            n = node(i, "controls")
+            if n is not None and n.id not in plan.skip:
+                plan.controls.append(n.id)
+    return plan, problems
+
+
+def _attrs(attrs: list[tuple[str, str]]) -> str:
+    return "".join(f" {k}={v}" for k, v in attrs)
+
+
+def _with(attrs: list[tuple[str, str]], **extra: str) -> list[tuple[str, str]]:
+    out = [(k, v) for k, v in attrs if k not in extra]
+    return out + [(k, v) for k, v in extra.items() if v]
+
+
+def _cond(expr: str, negate: bool = False) -> str:
+    return f"!{expr}" if negate else expr
+
+
+class _Writer:
+    def __init__(self, plan: _Plan):
+        self.plan = plan
+        self.first_control = True
+
+    def press(self, n: M.Node, row: str | None) -> str:
+        a = self.plan.actions.get(n.id)
+        if a is not None:
+            arg = "row" if row and a.get("on") == row else ""
+            return f"{{() => props.{a['name']}({arg})}}"
+        inp = self.plan.inputs.get(n.id)
+        if inp and inp["kind"] == "choice":
+            return f"{{() => props.{change_handler(inp['form'])}({json.dumps(inp['field'])}, {json.dumps(inp['value'])})}}"
+        if inp and inp["kind"] == "toggle":
+            return f"{{() => props.{change_handler(inp['form'])}({json.dumps(inp['field'])}, " \
+                   f"!props.{inp['form']}.{inp['field']})}}"
+        return ""
+
+    def piece(self, n: M.Node, depth: int, row: str | None, done: frozenset = frozenset(),
+              child: bool = True, key: bool = False) -> list[str]:
+        """``n`` as JSX: a child of an element (``child``) or an expression."""
+        plan, pad = self.plan, "  " * depth
+        if n.id in plan.skip:
+            return []
+        if n.id in plan.controls:
+            first, self.first_control = self.first_control, False
+            return [pad + "{props.controls}"] if first else []
+
+        def wrapped(head: str, inner: list[str], tail: str) -> list[str]:
+            return [pad + ("{" if child else "") + head, *inner, pad + tail + ("}" if child else "")]
+
+        show = plan.shows.get(n.id)
+        listed = plan.templates.get(n.id)
+        # A row's own condition (`row.x`) is asked inside the list, of each row.
+        per_row = bool(show) and str(show["when"]).startswith("row.") and listed is not None
+        if show and (n.id, "show") not in done and not (per_row and (n.id, "list") not in done):
+            inner = self.piece(n, depth + 1, row, done | {(n.id, "show")}, child=False, key=key)
+            return wrapped(f"{_cond(show['when'], bool(show.get('not')))} && (", inner, ")")
+        if listed and (n.id, "list") not in done:
+            source = f"props.{listed['prop']}"
+            where = listed.get("where")
+            if where:
+                source += f".filter((row) => row.{where['field']} === {json.dumps(where['equals'])})"
+            inner = self.looks(n, listed, depth + 1, done | {(n.id, "list")})
+            return wrapped(f"{source}.map((row) => (", inner, "))")
+        inp = plan.inputs.get(n.id)
+        if inp and inp["kind"] in ("choice", "toggle") and (inp.get("on_look") or inp.get("off_look")) \
+                and (n.id, "look") not in done:
+            on = plan.nodes.get(str(inp.get("on_look") or "")) or n
+            off = plan.nodes.get(str(inp.get("off_look") or "")) or n
+            value = f"props.{inp['form']}.{inp['field']}"
+            test = value if inp["kind"] == "toggle" else f"{value} === {json.dumps(inp['value'])}"
+            bound = plan.bound()
+            yes = self.piece(M.relook(n, on, bound), depth + 1, row, done | {(n.id, "look")}, child=False)
+            no = self.piece(M.relook(n, off, bound), depth + 1, row, done | {(n.id, "look")}, child=False)
+            return wrapped(f"{test} ? (", [*yes, pad + ") : (", *no], ")")
+        return self.element(n, depth, row, done, key)
+
+    def looks(self, template: M.Node, listed: dict, depth: int, done: frozenset) -> list[str]:
+        """A list's row: the template, in the look its field picks."""
+        row, pad = listed["prop"], "  " * depth
+        looks = listed.get("looks") or None
+        if not looks or not looks.get("by"):
+            return self.piece(template, depth, row, done, child=False, key=True)
+        by = [b for b in looks["by"] if str(b.get("row")) in self.plan.nodes]
+        f = str(looks["field"])
+        boolean = str(_fields(self.plan.slots[row]).get(f, {}).get("type")) == "boolean"
+        bound = self.plan.bound()
+        out: list[str] = []
+        for i, b in enumerate(by):
+            drawn = self.plan.nodes[str(b["row"])]
+            body = self.piece(M.relook(template, drawn, bound), depth + 1, row, done, child=False, key=True)
+            if i == len(by) - 1:
+                out += [pad + "(", *body, pad + ")"]
+            else:
+                test = (f"row.{f}" if str(b["value"]).lower() == "true" else f"!row.{f}") if boolean \
+                    else f"row.{f} === {json.dumps(str(b['value']))}"
+                out += [pad + f"{test} ? (", *body, pad + ") :"]
+        return out
+
+    def element(self, n: M.Node, depth: int, row: str | None, done: frozenset, key: bool) -> list[str]:
+        plan, pad = self.plan, "  " * depth
+        values = plan.values.get(n.id) or []
+        press = self.press(n, row)
+        extra = {"key": "{row.id}" if key else "", "onClick": press}
+        unit = n.unit()
+        if unit.is_component:
+            plan.components.add(unit.tag)
+            u_attrs = list(unit.attrs)
+            for v in values:
+                u_attrs = [(k, "{" + v["expr"] + "}" if k == v["prop"] else val) for k, val in u_attrs]
+            comp = f"<{unit.tag}{_attrs(u_attrs)} />"
+            if unit is n:
+                if not press and not key:
+                    return [pad + comp]
+                return [pad + f'<div{_attrs(_with([("className", chr(34) + "contents" + chr(34))], **extra))}>'
+                        + comp + "</div>"]
+            return [pad + f"<{n.tag}{_attrs(_with(n.attrs, **extra))}>{comp}</{n.tag}>"]
+        if n.tag == "img":
+            src = next((v["expr"] for v in values if v["prop"] == "src"), None)
+            attrs = _with(n.attrs, **extra, **({"src": "{" + src + "}"} if src else {}))
+            return [pad + f"<img{_attrs(attrs)} />"]
+        inp = plan.inputs.get(n.id)
+        if inp and inp["kind"] in ("text", "select") and n.body is not None:
+            return [pad + self.field(n, inp, extra)]
+        if n.body is not None:
+            body = "{" + values[0]["expr"] + "}" if values else n.body
+            return [pad + f"<{n.tag}{_attrs(_with(n.attrs, **extra))}>{body}</{n.tag}>"]
+        inner = [line for c in n.children for line in self.piece(c, depth + 1, row, done)]
+        head = f"<{n.tag}{_attrs(_with(n.attrs, **extra))}"
+        return [pad + head + ">", *inner, pad + f"</{n.tag}>"] if inner else [pad + head + " />"]
+
+    def field(self, n: M.Node, inp: dict, extra: dict) -> str:
+        """A drawn value as the input that sets it, in the text's own look."""
+        form, name = inp["form"], inp["field"]
+        classes = (n.classes() + " bg-transparent outline-none border-0 p-0 m-0 min-w-0").strip()
+        attrs = [(k, v) for k, v in n.attrs if k not in ("className",)]
+        value = f"{{props.{form}.{name} ?? \"\"}}"
+        change = f"{{(e) => props.{change_handler(form)}({json.dumps(name)}, e.target.value)}}"
+        base = _with([("className", json.dumps(classes)), *attrs], onClick=extra.get("onClick", ""))
+        if inp["kind"] == "select":
+            options = list(dict.fromkeys([*(_fields(self.plan.slots[form])[name].get("options") or []), M.plain(n)]))
+            opts = "".join(f"<option value={json.dumps(o)}>{{{json.dumps(o)}}}</option>" for o in options)
+            return (f"<select{_attrs(base)} value={value} onChange={change}>{opts}</select>")
+        hint = f" placeholder={json.dumps(M.plain(n))}" if inp.get("placeholder") else ""
+        return f"<input{_attrs(base)} value={value}{hint} onChange={change} />"
+
+
+def _sample(plan: _Plan, contract: dict) -> dict[str, Any]:
+    """The drawing's own content, in the contract's shape."""
+    out: dict[str, Any] = {}
+
+    def coerce(slot: dict, name: str, value: Any) -> Any:
+        f = _fields(slot).get(name) or {}
+        if str(f.get("type")) == "boolean":
+            return value if isinstance(value, bool) else str(value).strip().lower() in ("true", "yes", "on", "1")
+        if str(f.get("type")) == "enum" and isinstance(value, str) and value:
+            # The options are the values the drawing shows.
+            options = f.setdefault("options", [])
+            if value not in options:
+                options.append(value)
+        return value
+
+    for listed in plan.lists:
+        slot = plan.slots[listed["prop"]]
+        rows = out.setdefault(listed["prop"], [])
+        template = plan.nodes[listed["rows"][0]]
+        looks = listed.get("looks") or {}
+        drawn_by = [(str(b["value"]), plan.nodes[str(b["row"])]) for b in looks.get("by") or []
+                    if str(b.get("row")) in plan.nodes]
+        for rid in listed["rows"]:
+            drawn = plan.nodes[rid]
+            rec: dict[str, Any] = {"id": str(len(rows) + 1)}
+            for t in template.walk():
+                for v in plan.values.get(t.id) or []:
+                    m = _PATH.match(v["expr"])
+                    if not m or m.group(1) != "row":
+                        continue
+                    there = M.counterpart(template, drawn, t)
+                    if there is not None:
+                        rec[m.group(2)] = M.prop_value(there, v["prop"]) if there.unit().is_component \
+                            else M.plain(there)
+                show = plan.shows.get(t.id)
+                m = _PATH.match(show["when"]) if show else None
+                if m and m.group(1) == "row":
+                    rec[m.group(2)] = not show.get("not")
+            if drawn_by and str(looks.get("field")) not in rec:
+                seen = M.look(drawn)
+                value = next((v for v, d in drawn_by if d.id == rid), None) \
+                    or next((v for v, d in drawn_by if M.look(d) == seen), drawn_by[-1][0])
+                rec[str(looks["field"])] = value
+            if listed.get("where"):
+                rec[str(listed["where"]["field"])] = str(listed["where"]["equals"])
+            for name, f in _fields(slot).items():
+                rec.setdefault(name, False if str(f.get("type")) == "boolean" else "")
+                rec[name] = coerce(slot, name, rec[name])
+            rows.append(rec)
+
+    def put(expr: str, value: Any) -> None:
+        m = _PATH.match(expr)
+        if not m or m.group(1) != "props":
+            return
+        slot = plan.slots[m.group(2)]
+        if m.group(3):
+            rec = out.setdefault(m.group(2), {"id": "1"} if slot.get("kind") == "record" else {})
+            rec[m.group(3)] = coerce(slot, m.group(3), value)
+        else:
+            out[m.group(2)] = value
+
+    for nid, values in plan.values.items():
+        n = plan.nodes[nid]
+        for v in values:
+            put(v["expr"], M.prop_value(n, v["prop"]) if n.unit().is_component else M.plain(n))
+    for nid, inp in plan.inputs.items():
+        n = plan.nodes[nid]
+        path = f"props.{inp['form']}.{inp['field']}"
+        if inp["kind"] in ("text", "select"):
+            put(path, "" if inp.get("placeholder") else M.plain(n))
+        elif inp["kind"] == "choice":
+            on = plan.nodes.get(str(inp.get("on_look") or ""))
+            off = plan.nodes.get(str(inp.get("off_look") or ""))
+            chosen = (M.look(n) == M.look(on)) if on is not None else (off is not None and M.look(n) != M.look(off))
+            if chosen or (on is None and off is None):
+                put(path, str(inp["value"]))
+        else:
+            on = plan.nodes.get(str(inp.get("on_look") or ""))
+            put(path, on is not None and M.look(n) == M.look(on))
+    for nid, show in plan.shows.items():
+        if nid not in plan.scope:
+            put(show["when"], not show.get("not"))
+    for name, slot in plan.slots.items():
+        if slot.get("kind") in ("record", "form"):
+            rec = out.setdefault(name, {"id": "1"} if slot.get("kind") == "record" else {})
+            for f, spec in _fields(slot).items():
+                rec.setdefault(f, False if str(spec.get("type")) == "boolean" else "")
+        elif slot.get("kind") == "list":
+            out.setdefault(name, [])
+    return out
+
+
+def apply(static: str, reply: dict, name: str, *, components: dict[str, list[str]] | None = None,
+          children: bool = False) -> tuple[dict[str, Any] | None, list[str]]:
+    """``({"code", "contract", "sample"}, [])`` for a reply that binds the
+    drawing, else ``(None, problems)`` in words the model can act on."""
+    root = M.parse(static)
+    contract = json.loads(json.dumps(reply.get("contract") or {"data": [], "actions": []}))
+    contract.setdefault("data", [])
+    contract.setdefault("actions", [])
+    plan, problems = _resolve(root, {**reply, "contract": contract}, children=children)
+    if problems:
+        return None, problems
+    writer = _Writer(plan)
+    body = writer.piece(root, 2, None, child=False)
+    imports = "".join(f'import {c} from "./{c}";\n' for c in sorted(plan.components)
+                      if components is None or c in components)
+    code = (f'"use client";\nimport type * as React from "react";\n{imports}\n'
+            f"export default function {name}(props: {name}Props) {{\n  return (\n"
+            + "\n".join(body) + "\n  );\n}\n")
+    for a in contract["actions"]:
+        a.pop("nodes", None)
     missing = unused(code, contract)
     if missing:
-        problems.append("the contract declares props the view never reads: " + ", ".join(missing[:10]))
-    if not re.search(r"export\s+default\s+function\s+" + re.escape(name) + r"\s*\(\s*props\s*:\s*"
-                     + re.escape(name) + r"Props\s*\)", code):
-        problems.append(f"the file must `export default function {name}(props: {name}Props)`")
-    if re.search(r"export\s+type\s+" + re.escape(name) + r"Props\b", code):
-        problems.append(f"do not write `{name}Props` — it is generated from the contract")
-    if re.search(r"\bfetch\(|useEffect\(", code):
-        problems.append("a view loads nothing and runs no effects: its content is its props")
-    for slot in contract.get("data") or []:
-        if slot.get("kind") == "form" and not re.search(r"\bprops\." + change_handler(slot["name"]) + r"\b", code):
-            problems.append(f"the form `{slot['name']}` is never changed — its inputs call "
-                            f"props.{change_handler(slot['name'])}(field, value)")
-    return problems
+        forms = {change_handler(s["name"]): s["name"] for s in contract["data"] if s.get("kind") == "form"}
+        problems.append("the contract declares props nothing reads: " + ", ".join(
+            f"{m} (the form `{forms[m]}` has no `inputs`)" if m in forms else m for m in missing[:10])
+            + " — bind each by number or leave it out")
+        return None, problems
+    # Read before the type is written: an enum's options grow by what is drawn.
+    sample = _sample(plan, contract)
+    return {"code": finish(name, code, contract, children=children), "contract": contract,
+            "sample": sample}, []
 
 
 def user_prompt(name: str, static: str, *, heading: str, links: list[dict], components: dict[str, list[str]],
                 feedback: str = "") -> str:
-    shared = "\n".join(f"- `{n}` from \"./{n}\" — props: {', '.join(keys)}" for n, keys in components.items())
+    shared = "\n".join(f"- `{n}` — its words: {', '.join(keys)}" for n, keys in components.items())
     leads = "\n".join(f"- “{l.get('via') or '?'}” → {l.get('to_name') or l.get('to')} "
                       f"(frame {l.get('to')}, {l.get('kind')})" for l in links)
     out = [f"The screen: “{heading}”. The view is `{name}`.",
-           "The drawn frame is attached. Its markup, as converted:\n```tsx\n" + static + "\n```"]
+           "The drawn frame is attached. Its markup, every element numbered:\n```\n"
+           + M.numbered(M.parse(static)) + "\n```"]
     if shared:
-        out.append("Shared components the markup already uses (keep using them; their props are words — pass "
-                   "a prop expression where the words are data):\n" + shared)
+        out.append("Shared components the markup uses (their words are props — bind one with `prop`):\n" + shared)
     if leads:
         out.append("Where its prototype links lead (the words pressed → the screen):\n" + leads)
     if feedback:
-        out.append("Your previous reply was refused. Fix every one of these and keep what was right:\n" + feedback)
+        out.append("Your previous answer was refused. Fix every one of these and keep what was right:\n" + feedback)
     return "\n\n".join(out)
 
 
@@ -177,14 +670,16 @@ def parameterise(client: Any, name: str, static: str, *, heading: str, image: st
                  links: list[dict], components: dict[str, list[str]],
                  usage: list | None = None, children: bool = False) -> dict[str, Any]:
     """``{"code", "contract", "sample", "rounds"}`` for one screen. Raises
-    ValueError with the last findings when no round comes back right."""
+    ValueError with the last findings when no round comes back right; every
+    round's spend is in ``usage`` either way."""
     import time
 
     feedback = ""
+    system = SYSTEM + (_SHELL if children else "")
     for round_ in range(1, ROUNDS + 1):
         user = user_prompt(name, static, heading=heading, links=links, components=components, feedback=feedback)
         t0 = time.monotonic()
-        kwargs: dict[str, Any] = {"system": SYSTEM, "user": user, "schema": REPLY_SCHEMA}
+        kwargs: dict[str, Any] = {"system": system, "user": user, "schema": _schema(children)}
         if image and getattr(client, "accepts_images", False):
             kwargs["images"] = [image]
         reply = client(**kwargs)
@@ -192,16 +687,14 @@ def parameterise(client: Any, name: str, static: str, *, heading: str, image: st
             usage.append((reply.usage, time.monotonic() - t0))
         try:
             body = json.loads(getattr(reply, "text", reply))
-            sample = json.loads(body.get("sample_json") or "{}")
         except (json.JSONDecodeError, TypeError) as exc:
             feedback = f"- the reply was not valid JSON ({exc})"
             continue
-        code, contract = str(body.get("code") or ""), body.get("contract") or {"data": [], "actions": []}
-        problems = check(static, code, contract, name, keep=SHELL_KEEP if children else KEEP)
-        if not problems:
-            return {"code": finish(name, code, contract, children=children), "contract": contract,
-                    "sample": sample if isinstance(sample, dict) else {}, "rounds": round_}
-        feedback = "\n".join(f"- {p}" for p in problems)
+        out, problems = apply(static, body if isinstance(body, dict) else {}, name,
+                              components=components, children=children)
+        if out is not None:
+            return {**out, "rounds": round_}
+        feedback = "\n".join(f"- {p}" for p in problems[:20])
     raise ValueError(f"{name}: the view did not come back right in {ROUNDS} rounds — {feedback[:600]}")
 
 

@@ -158,41 +158,134 @@ def test_every_contract_is_put_in_front_of_the_steps_that_back_it():
 
 # -- the example content as props ----------------------------------------------
 
-STATIC = ('export default function TenantsView() {\n  return (\n    <div className="flex flex-col">\n'
-          '      <p className="text-[28px]">Tenants</p>\n      <div className="flex flex-row"><p className="text-[14px]">'
-          'MedStaff</p></div>\n    </div>\n  );\n}\n')
-GOOD = ('"use client";\nimport type * as React from "react";\n\nexport default function TenantsView(props: TenantsViewProps) {\n'
-        '  return (<div className="flex flex-col"><p className="text-[28px]">Tenants</p>'
-        '{props.tenants.map((row) => (<div key={row.id} className="flex flex-row" onClick={() => props.onOpen(row)}>'
-        '<p className="text-[14px]">{row.name}</p></div>))}</div>);\n}\n')
-SMALL = {"data": [{"name": "tenants", "kind": "list", "label": "Tenants",
-                   "fields": [{"name": "name", "label": "Name", "type": "string"}]}],
-         "actions": [{"name": "onOpen", "label": "Open", "kind": "navigate", "on": "tenants"}]}
+STATIC = """export default function TenantsView() {
+  return (
+    <div className="flex flex-col">
+      <p className="text-[28px]">Tenants</p>
+      <div className="flex flex-col gap-y-[8px]" data-layer="Rows">
+        <div className="flex flex-row bg-[#ffffff]" data-layer="Row">
+          <p className="text-[14px]">MedStaff</p>
+          <div className="w-[60px] shrink-0"><DhTagSuccess label={"Live"} /></div>
+        </div>
+        <div className="flex flex-row bg-[#ffffff]" data-layer="Row">
+          <p className="text-[14px]">CarePoint</p>
+          <div className="w-[60px] shrink-0"><DhTagWarning label={"Paused"} /></div>
+        </div>
+        <div className="flex flex-row bg-[#ffffff]" data-layer="Row">
+          <p className="text-[14px]">Nile Health</p>
+          <div className="w-[60px] shrink-0"><DhTagSuccess label={"Live"} /></div>
+        </div>
+      </div>
+      <div className="flex flex-row pl-[14px] h-[46px] border-[1px]" data-layer="Input">
+        <p className="flex-1 text-[14px]">GULFNURSE30</p>
+      </div>
+      <div className="flex flex-row gap-x-[8px]" data-layer="Chips">
+        <div className="px-[12px] bg-[#eaf0ff] border-[1px] border-[#0443fa] rounded-full">
+          <p className="text-[12px] text-[#0443fa]">Egypt</p>
+        </div>
+        <div className="px-[12px] bg-[#f7fafb] rounded-full">
+          <p className="text-[12px] text-[#1e1e20]">Jordan</p>
+        </div>
+      </div>
+      <div className="w-[200px] shrink-0 h-[48px]"><DhButtonPrimary label={"Create code"} /></div>
+    </div>
+  );
+}
+"""
+SMALL = {"data": [{"name": "tenants", "kind": "list", "label": "Tenants", "fields": [
+                       {"name": "name", "label": "Name", "type": "string"},
+                       {"name": "status", "label": "Status", "type": "enum", "options": ["Live"]}]},
+                  {"name": "promo", "kind": "form", "label": "New code", "fields": [
+                       {"name": "code", "label": "Code", "type": "string"},
+                       {"name": "market", "label": "Market", "type": "enum", "options": ["Egypt", "Jordan"]}]}],
+         "actions": [{"name": "onOpen", "label": "Open", "kind": "navigate", "nodes": ["4"]},
+                     {"name": "onCreateCode", "label": "Create code", "kind": "submit", "on": "promo", "nodes": ["20"]}]}
+ANSWER = {"contract": SMALL,
+          "lists": [{"prop": "tenants", "rows": ["4", "7", "10"],
+                     "looks": {"field": "status", "by": [{"value": "Live", "row": "4"}, {"value": "Paused", "row": "7"}]}}],
+          "values": [{"node": "5", "expr": "row.name"}, {"node": "6", "expr": "row.status", "prop": "label"}],
+          "inputs": [{"node": "14", "form": "promo", "field": "code", "kind": "text"},
+                     {"node": "16", "form": "promo", "field": "market", "kind": "choice", "value": "Egypt",
+                      "on_look": "16", "off_look": "18"},
+                     {"node": "18", "form": "promo", "field": "market", "kind": "choice", "value": "Jordan",
+                      "on_look": "16", "off_look": "18"}],
+          "shows": []}
 
 
-def test_a_view_that_changes_the_drawing_is_refused():
-    assert P.check(STATIC, GOOD, SMALL, "TenantsView") == []
-    restyled = GOOD.replace('className="text-[14px]"', 'className="text-sm"')
-    assert any("markup was changed" in p for p in P.check(STATIC, restyled, SMALL, "TenantsView"))
-    assert any("classNames the drawing does not have" in p for p in P.check(STATIC, restyled, SMALL, "TenantsView"))
-    assert any("never reads: onOpen" in p for p in P.check(STATIC, GOOD.replace("props.onOpen(row)", "0"), SMALL,
-                                                           "TenantsView"))
+def test_every_element_of_the_drawing_is_numbered_for_the_model():
+    from services.drawn import markup as M
+
+    shown = M.numbered(M.parse(STATIC))
+    assert '5|   <p className="text-[14px]">MedStaff</p>' in shown
+    assert '6|   <div className="w-[60px] shrink-0"><DhTagSuccess label={"Live"} /></div>' in shown
 
 
-def test_a_refused_view_is_asked_again_and_the_type_is_written_for_it():
-    replies = iter([json.dumps({"contract": SMALL, "sample_json": "{}", "code": GOOD.replace("text-[14px]", "text-sm")}),
-                    json.dumps({"contract": SMALL, "sample_json": json.dumps({"tenants": [{"id": "1", "name": "MedStaff"}]}),
-                                "code": GOOD})])
-    asked = []
+def test_a_view_is_built_from_the_drawing_by_number():
+    out, problems = P.apply(STATIC, json.loads(json.dumps(ANSWER)), "TenantsView",
+                            components={"DhTagSuccess": ["label"], "DhTagWarning": ["label"], "DhButtonPrimary": ["label"]})
+    assert problems == [] and out is not None
+    code = out["code"]
+    assert code.count(".map((row) => (") == 1 and "MedStaff" not in code and "CarePoint" not in code
+    assert "{row.name}" in code and "key={row.id}" in code and "onClick={() => props.onOpen(row)}" in code
+    # the look a row is drawn in follows its field: the other row's pill, the template's elements
+    assert 'row.status === "Live" ?' in code and "<DhTagWarning label={row.status} />" in code
+    assert "<input" in code and 'value={props.promo.code ?? ""}' in code
+    assert 'props.onPromoChange("market", "Egypt")' in code and 'props.promo.market === "Egypt" ?' in code
+    assert "onClick={() => props.onCreateCode()}" in code
+    assert 'import DhTagWarning from "./DhTagWarning";' in code and "export type TenantsViewProps" in code
+    # every drawn class is still there and nothing is restyled: the one class
+    # string not drawn is the input, in the look of the text it replaces
+    import re
+    drawn, made = (set(re.findall(r'className="([^"]*)"', x)) for x in (STATIC, code))
+    assert drawn - made == {"flex-1 text-[14px]"}
+    assert [c for c in made - drawn] == ["flex-1 text-[14px] bg-transparent outline-none border-0 p-0 m-0 min-w-0"]
+    assert out["contract"]["actions"][0]["on"] == "tenants" and "nodes" not in out["contract"]["actions"][0]
+
+
+def test_the_sample_is_read_from_the_drawing():
+    out, _ = P.apply(STATIC, json.loads(json.dumps(ANSWER)), "TenantsView")
+    assert out["sample"]["tenants"] == [{"id": "1", "name": "MedStaff", "status": "Live"},
+                                        {"id": "2", "name": "CarePoint", "status": "Paused"},
+                                        {"id": "3", "name": "Nile Health", "status": "Live"}]
+    assert out["sample"]["promo"] == {"code": "GULFNURSE30", "market": "Egypt"}
+    # an enum's options are the values the drawing shows
+    status = out["contract"]["data"][0]["fields"][1]
+    assert status["options"] == ["Live", "Paused"] and '"Live" | "Paused"' in out["code"]
+
+
+def test_an_answer_that_names_what_is_not_there_is_asked_again():
+    wrong = json.loads(json.dumps(ANSWER))
+    wrong["values"][0] = {"node": "99", "expr": "row.name"}
+    wrong["contract"]["data"].append({"name": "owner", "kind": "value", "label": "Owner", "fields": []})
+    replies = iter([json.dumps(wrong), json.dumps(ANSWER)])
+    asked, spent = [], []
+
+    class Reply:
+        def __init__(self, text):
+            self.text, self.usage = text, object()
 
     def client(*, system, user, schema, **_kw):
         asked.append(user)
-        return next(replies)
+        assert "controls" not in schema["properties"]
+        return Reply(next(replies))
 
-    out = P.parameterise(client, "TenantsView", STATIC, heading="Tenants", image=None, links=[], components={})
-    assert out["rounds"] == 2 and "markup was changed" in asked[1]
-    assert "export type TenantsViewProps" in out["code"] and out["code"].startswith('"use client";')
-    assert out["sample"]["tenants"][0]["name"] == "MedStaff"
+    out = P.parameterise(client, "TenantsView", STATIC, heading="Tenants", image=None, links=[], components={},
+                         usage=spent)
+    assert out["rounds"] == 2 and len(spent) == 2
+    assert "there is no element 99" in asked[1]
+    assert out["code"].startswith('"use client";')
+
+
+def test_a_refused_screen_still_reports_what_it_spent():
+    spent = []
+
+    class Reply:
+        text, usage = json.dumps({"contract": SMALL, "lists": [], "values": [], "inputs": [], "shows": []}), object()
+
+    with pytest.raises(ValueError, match="nothing reads"):
+        P.parameterise(lambda **_kw: Reply(), "TenantsView", STATIC, heading="T", image=None, links=[],
+                       components={}, usage=spent)
+    assert len(spent) == P.ROUNDS
 
 
 # -- 2. the journey, written down ------------------------------------------------
