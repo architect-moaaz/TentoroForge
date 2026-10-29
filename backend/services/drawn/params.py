@@ -328,7 +328,22 @@ def _resolve(root: M.Node, reply: dict, *, children: bool) -> tuple[_Plan, list[
                     problems.append(f"{what}: a look's row {b.get('row')} is not an element")
                     bad = True
                     continue
-                there = drawn if at == template.id else M.counterpart(template, drawn, nodes[at])
+                if at == template.id:
+                    there = drawn
+                elif any(drawn is r for r in rows):
+                    there = M.counterpart(template, drawn, nodes[at])
+                else:
+                    # NAMED BY AN ELEMENT, NOT ITS ROW: the look is that element
+                    # as drawn, or the one at the element's place in the row it
+                    # sits in (DITANS wzml1sa6, 2026-10-30: "row 14 draws
+                    # nothing where element 14 is").
+                    holder = next((r for r in rows if any(n is drawn for n in r.walk())), None)
+                    if M.same_kind(nodes[at], drawn):
+                        there = drawn
+                    elif holder is not None:
+                        there = M.counterpart(template, holder, nodes[at])
+                    else:
+                        there = None
                 if there is None:
                     problems.append(f"{what}: row {drawn.id} draws nothing where element {at} is")
                     bad = True

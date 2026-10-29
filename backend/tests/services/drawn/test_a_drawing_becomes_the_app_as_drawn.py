@@ -510,6 +510,11 @@ def test_what_an_answer_forgot_to_declare_or_left_unpressed_is_settled_by_constr
     out, problems = P.apply(STATIC, other, "TenantsView")
     assert problems == [], problems
     assert 'row.status === "Live" ?' in out["code"] and "onPickEgypt" not in out["code"]
+    # a look's "row" named by the element itself is that element as drawn
+    by_element = json.loads(json.dumps(ANSWER))
+    by_element["lists"][0]["looks"][0]["by"] = [{"value": "Live", "row": "6"}, {"value": "Paused", "row": "9"}]
+    out, problems = P.apply(STATIC, by_element, "TenantsView")
+    assert problems == [] and "<DhTagWarning label={row.status} />" in out["code"]
     # a value on the whole screen binds nothing and is left out
     root_value = json.loads(json.dumps(ANSWER))
     root_value["values"].append({"node": "1", "expr": "props.extra"})
