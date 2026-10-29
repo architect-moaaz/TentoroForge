@@ -193,8 +193,8 @@ def prop_value(node: Node, prop: str) -> str:
 
 
 def look(node: Node) -> tuple:
-    """What a node looks like, without its words."""
-    return (node.tag, node.attr("className"), node.attr("style"),
+    """What a node looks like, without its words: its pictures are part of it."""
+    return (node.tag, node.attr("className"), node.attr("style"), node.attr("src") if node.tag == "img" else None,
             tuple(look(c) for c in node.children))
 
 
@@ -215,39 +215,67 @@ def counterpart(root: Node, other: Node, node: Node) -> Node | None:
     return out
 
 
-def relook(content: Node, look_of: Node, bound: set[str]) -> Node:
-    """``content`` drawn as ``look_of`` is: ``look_of``'s elements and looks,
-    with what is bound in ``content`` (`bound`, by node id — a value, an
-    input, an action, a condition) kept where ``look_of`` has an element of
-    its kind at the same place. Everything else — classes, a component, an
-    unbound text or icon, an element only this look draws — is
-    ``look_of``'s, the way the drawing draws it.
+def relook(content: Node, look_of: Node, valued: set[str], *, own_pictures: bool = False) -> Node:
+    """``content`` in ``look_of``'s look: where ``look_of`` draws an element
+    of the same kind at the same place, ``content``'s element with
+    ``look_of``'s classes, style and component; an element only ``look_of``
+    draws is drawn as it is there; one only ``content`` draws is left out.
+    Elements are paired in order by kind, so a selected tab drawn with a tick
+    before its label still pairs label with label.
+
+    THE WORDS ARE THE ELEMENT'S OWN. "Pro" drawn unselected beside "Premium"
+    selected is still "Pro" when selected; taken with the look, every option
+    of a group read as the one it was given the look of (Pro, Pro, Pro;
+    DITANS A-12, 2026-10-29). A picture is the look's — a rule's tick or
+    cross is its look — unless its src is a value (``valued``), or
+    ``own_pictures`` (an option's icon is the option's).
 
     THE SAME ROW, NOT THE SAME ELEMENTS. An expired promo code is drawn with
     an Extend button beside its pill; refused as no look of the active row,
     the screen failed three rounds (DITANS A-11, 2026-10-29)."""
-    out = _relook(content, look_of, bound)
+    out = _relook(content, look_of, valued, own_pictures)
     # It stands where ``content`` stands, whichever element it is drawn from.
     out.id, out.parent = content.id, content.parent
     return out
 
 
-def _relook(content: Node, look_of: Node, bound: set[str]) -> Node:
-    kind_matches = content.is_component == look_of.is_component and \
-        (content.is_component or content.tag == look_of.tag) and (content.body is None) == (look_of.body is None)
-    if content.id in bound and kind_matches:
+def same_kind(a: Node, b: Node) -> bool:
+    return a.is_component == b.is_component and (a.is_component or a.tag == b.tag) \
+        and (a.body is None) == (b.body is None) and (a.unit() is a) == (b.unit() is b)
+
+
+def _relook(content: Node, look_of: Node, valued: set[str], own_pictures: bool) -> Node:
+    if content is not look_of and same_kind(content, look_of):
         out = copy.copy(content)
-        attrs = dict(content.attrs)
-        for k, v in look_of.attrs:
-            if k in ("className", "style"):
-                attrs[k] = v
-        out.attrs = list(attrs.items())
-        if look_of.is_component:
+        taken = {"className", "style"}
+        if content.tag == "img" and content.id not in valued and not own_pictures:
+            taken.add("src")
+        if look_of.is_component and look_of.tag != content.tag:
+            # ANOTHER COMPONENT TAKES ITS OWN PROPS: the look's, with this
+            # element's words where the two name the same one. A selected tab
+            # drawn as a component with a tick lost the tick prop and did not
+            # type-check (DITANS A-PB1, 2026-10-29).
+            mine = dict(content.attrs)
+            out.attrs = [(k, mine.get(k, v)) for k, v in look_of.attrs]
             out.tag = look_of.tag
+        else:
+            attrs = dict(content.attrs)
+            for k, v in look_of.attrs:
+                if k in taken:
+                    attrs[k] = v
+            out.attrs = list(attrs.items())
+        kids, at = [], 0
+        for c in look_of.children:
+            k = next((i for i in range(at, len(content.children)) if same_kind(content.children[i], c)), None)
+            if k is None:
+                kids.append(_relook(c, c, valued, own_pictures))
+            else:
+                kids.append(_relook(content.children[k], c, valued, own_pictures))
+                at = k + 1
     else:
         out = copy.copy(look_of)
-    out.children = [_relook(content.children[i] if i < len(content.children) else c, c, bound)
-                    for i, c in enumerate(look_of.children)]
+        kids = [_relook(c, c, valued, own_pictures) for c in look_of.children]
+    out.children = kids
     for c in out.children:
         c.parent = out
     return out

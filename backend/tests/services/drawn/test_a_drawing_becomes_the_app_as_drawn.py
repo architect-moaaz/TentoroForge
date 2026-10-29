@@ -202,7 +202,8 @@ SMALL = {"data": [{"name": "tenants", "kind": "list", "label": "Tenants", "field
                      {"name": "onCreateCode", "label": "Create code", "kind": "submit", "on": "promo", "nodes": ["20"]}]}
 ANSWER = {"contract": SMALL,
           "lists": [{"prop": "tenants", "rows": ["4", "7", "10"],
-                     "looks": {"field": "status", "by": [{"value": "Live", "row": "4"}, {"value": "Paused", "row": "7"}]}}],
+                     "looks": [{"node": "6", "field": "status", "by": [{"value": "Live", "row": "4"},
+                                                                       {"value": "Paused", "row": "7"}]}]}],
           "values": [{"node": "5", "expr": "row.name"}, {"node": "6", "expr": "row.status", "prop": "label"}],
           "inputs": [{"node": "14", "form": "promo", "field": "code", "kind": "text"},
                      {"node": "16", "form": "promo", "field": "market", "kind": "choice", "value": "Egypt",
@@ -231,6 +232,8 @@ def test_a_view_is_built_from_the_drawing_by_number():
     assert 'row.status === "Live" ?' in code and "<DhTagWarning label={row.status} />" in code
     assert "<input" in code and 'value={props.promo.code ?? ""}' in code
     assert 'props.onPromoChange("market", "Egypt")' in code and 'props.promo.market === "Egypt" ?' in code
+    # an option keeps its own words in either look: Jordan is never drawn as Egypt
+    assert code.count(">Jordan</p>") == 2 and code.count(">Egypt</p>") == 2
     assert "onClick={() => props.onCreateCode()}" in code
     assert 'import DhTagWarning from "./DhTagWarning";' in code and "export type TenantsViewProps" in code
     # every drawn class is still there and nothing is restyled: the one class
@@ -238,7 +241,7 @@ def test_a_view_is_built_from_the_drawing_by_number():
     import re
     drawn, made = (set(re.findall(r'className="([^"]*)"', x)) for x in (STATIC, code))
     assert drawn - made == {"flex-1 text-[14px]"}
-    assert [c for c in made - drawn] == ["flex-1 text-[14px] bg-transparent outline-none border-0 p-0 m-0 min-w-0"]
+    assert [c for c in made - drawn] == ["flex-1 text-[14px] w-full bg-transparent outline-none border-0 p-0 m-0 min-w-0 appearance-none"]
     assert out["contract"]["actions"][0]["on"] == "tenants" and "nodes" not in out["contract"]["actions"][0]
 
 
@@ -276,8 +279,8 @@ def test_a_look_drawn_with_more_than_the_template_keeps_what_it_draws():
                   {"name": "code", "label": "Code", "type": "string"},
                   {"name": "status", "label": "Status", "type": "enum", "options": ["Active", "Expired"]}]}],
                   "actions": [{"name": "onExtend", "label": "Extend", "kind": "run", "nodes": ["8"]}]},
-              "lists": [{"prop": "codes", "rows": ["2", "5"], "looks": {"field": "status", "by": [
-                  {"value": "Active", "row": "2"}, {"value": "Expired", "row": "5"}]}}],
+              "lists": [{"prop": "codes", "rows": ["2", "5"], "looks": [{"field": "status", "by": [
+                  {"value": "Active", "row": "2"}, {"value": "Expired", "row": "5"}]}]}],
               "values": [{"node": "3", "expr": "row.code"}, {"node": "4", "expr": "row.status"}],
               "inputs": [], "shows": []}
     out, problems = P.apply(CODES, answer, "PromoCodesView")
@@ -287,6 +290,203 @@ def test_a_look_drawn_with_more_than_the_template_keeps_what_it_draws():
     assert "opacity-[0.6]" in expired and "{row.code}" in expired and "<DhTagNeutral label={row.status} />" in expired
     assert "onClick={() => props.onExtend(row)}><DhButtonLink" in expired
     assert out["sample"]["codes"][1] == {"id": "2", "code": "NURSEWEEK50", "status": "Expired"}
+
+
+QUEUE = """export default function QueueView() {
+  return (
+    <div className="flex flex-col">
+      <div className="flex flex-col" data-layer="Rows">
+        <div className="flex flex-row bg-[#eaf0ff]" data-layer="Row">
+          <p className="text-[14px]">GULFNURSE30</p>
+          <div className="shrink-0"><DhTagSuccess label={"Active"} /></div>
+        </div>
+        <div className="flex flex-row bg-[#ffffff]" data-layer="Row">
+          <p className="text-[14px]">DHAEXPO25</p>
+          <div className="shrink-0"><DhTagSuccess label={"Active"} /></div>
+        </div>
+        <div className="flex flex-row bg-[#ffffff]" data-layer="Row">
+          <p className="text-[14px]">NURSEWEEK50</p>
+          <div className="shrink-0"><DhTagNeutral label={"Expired"} /></div>
+        </div>
+      </div>
+    </div>
+  );
+}
+"""
+
+
+def test_the_selected_rows_highlight_and_its_pill_follow_fields_of_their_own():
+    answer = {"contract": {"data": [{"name": "codes", "kind": "list", "label": "Codes", "fields": [
+                  {"name": "code", "label": "Code", "type": "string"},
+                  {"name": "selected", "label": "Selected", "type": "boolean"},
+                  {"name": "status", "label": "Status", "type": "enum", "options": ["Active", "Expired"]}]}],
+                  "actions": [{"name": "onSelect", "label": "Select", "kind": "open", "nodes": ["3"]}]},
+              "lists": [{"prop": "codes", "rows": ["3", "6", "9"], "looks": [
+                  {"field": "selected", "by": [{"value": "true", "row": "3"}, {"value": "false", "row": "6"}]},
+                  {"node": "5", "field": "status", "by": [{"value": "Active", "row": "3"}, {"value": "Expired", "row": "9"}]}]}],
+              "values": [{"node": "4", "expr": "row.code"}, {"node": "5", "expr": "row.status"}],
+              "inputs": [], "shows": []}
+    out, problems = P.apply(QUEUE, answer, "QueueView")
+    assert problems == [], problems
+    code = out["code"]
+    assert "row.selected ? (" in code and 'row.status === "Active" ? (' in code
+    assert code.count("bg-[#eaf0ff]") == 1, "only the selected look is highlighted"
+    assert [(r["selected"], r["status"]) for r in out["sample"]["codes"]] == \
+        [(True, "Active"), (False, "Active"), (False, "Expired")]
+    # a look declares its field: `selected` left out of the contract is added, on/off
+    undeclared = json.loads(json.dumps(answer))
+    undeclared["contract"]["data"][0]["fields"] = [f for f in undeclared["contract"]["data"][0]["fields"]
+                                                   if f["name"] != "selected"]
+    out, problems = P.apply(QUEUE, undeclared, "QueueView")
+    assert problems == [] and "selected: boolean" in out["code"]
+    # without the selected look, every row would be tinted as the first is
+    answer["lists"][0]["looks"] = answer["lists"][0]["looks"][1:]
+    out, problems = P.apply(QUEUE, answer, "QueueView")
+    assert out is None and "element 3 is drawn in other colours on row 6 (bg-[#ffffff])" in problems[0]
+
+
+TABLE = """export default function PlansView() {
+  return (
+    <div className="flex flex-row" data-layer="Table">
+      <div className="flex flex-col w-[120px]" data-layer="Plan">
+        <p className="font-[600]">Free</p>
+        <p className="font-[600]">Solo</p>
+      </div>
+      <div className="flex flex-col w-[120px]" data-layer="Monthly">
+        <p className="text-[13px]">USD 0</p>
+        <p className="text-[13px]">USD 89</p>
+      </div>
+    </div>
+  );
+}
+"""
+
+
+def test_a_table_drawn_column_by_column_is_one_list():
+    answer = {"contract": {"data": [{"name": "plans", "kind": "list", "label": "Plans", "fields": [
+                  {"name": "name", "label": "Plan", "type": "string"},
+                  {"name": "monthly", "label": "Monthly", "type": "money"}]}], "actions": []},
+              "lists": [{"prop": "plans", "rows": ["3", "4"]}, {"prop": "plans", "rows": ["6", "7"]}],
+              "values": [{"node": "3", "expr": "row.name"}, {"node": "6", "expr": "row.monthly"}],
+              "inputs": [], "shows": []}
+    out, problems = P.apply(TABLE, answer, "PlansView")
+    assert problems == [], problems
+    assert out["code"].count("props.plans.map((row) => (") == 2 and "USD 89" not in out["code"]
+    assert out["sample"]["plans"] == [{"id": "1", "name": "Free", "monthly": "USD 0"},
+                                      {"id": "2", "name": "Solo", "monthly": "USD 89"}]
+
+
+RULES = """export default function RulesView() {
+  return (
+    <div className="flex flex-col" data-layer="Rules">
+      <div className="flex flex-row gap-x-[8px]" data-layer="R">
+        <img src="/drawn/tick.svg" alt="" className="w-[15px] h-[15px]" />
+        <p className="text-[12px]">Discounts DITANS fees only</p>
+      </div>
+      <div className="flex flex-row gap-x-[8px]" data-layer="R">
+        <img src="/drawn/cross.svg" alt="" className="w-[15px] h-[15px]" />
+        <p className="text-[12px]">Never discounts exam fees</p>
+      </div>
+      <div className="flex flex-row gap-x-[8px]" data-layer="R">
+        <img src="/drawn/tick.svg" alt="" className="w-[15px] h-[15px]" />
+        <p className="text-[12px]">Every redemption is logged</p>
+      </div>
+    </div>
+  );
+}
+"""
+RULES_ANSWER = {"contract": {"data": [{"name": "rules", "kind": "list", "label": "Rules", "fields": [
+                    {"name": "text", "label": "Rule", "type": "string"},
+                    {"name": "allowed", "label": "Allowed", "type": "boolean"}]}], "actions": []},
+                "lists": [{"prop": "rules", "rows": ["2", "5", "8"]}],
+                "values": [{"node": "4", "expr": "row.text"}], "inputs": [], "shows": []}
+
+
+def test_a_list_that_would_lose_what_its_rows_draw_differently_is_refused():
+    out, problems = P.apply(RULES, json.loads(json.dumps(RULES_ANSWER)), "RulesView")
+    assert out is None and "element 3 is a different picture on row 5" in problems[0]
+    answer = json.loads(json.dumps(RULES_ANSWER))
+    answer["lists"][0]["looks"] = [{"node": "3", "field": "allowed", "by": [{"value": "true", "row": "2"},
+                                                                          {"value": "false", "row": "5"}]}]
+    out, problems = P.apply(RULES, answer, "RulesView")
+    assert problems == [] and "row.allowed ? (" in out["code"]
+    # the cross is the look's picture, drawn where the field says
+    assert out["code"].index("tick.svg") < out["code"].index("cross.svg")
+    assert [r["allowed"] for r in out["sample"]["rules"]] == [True, False, True]
+
+
+TABS = """export default function TabsView() {
+  return (
+    <div className="flex flex-row gap-x-[8px]" data-layer="Tabs">
+      <div className="px-[12px] border-[1px]" data-layer="Tab">
+        <p className="text-[13px]">Candidate</p>
+      </div>
+      <div className="px-[12px] bg-[#eaf0ff] border-[#0443fa]" data-layer="Tab">
+        <img src="/drawn/check.svg" alt="" className="w-[12px] h-[12px]" />
+        <p className="text-[13px] text-[#0443fa]">Employer</p>
+      </div>
+      <div className="px-[12px] border-[1px]" data-layer="Tab">
+        <p className="text-[13px]">Agency</p>
+      </div>
+    </div>
+  );
+}
+"""
+
+
+def test_a_look_drawn_with_an_icon_before_its_words_keeps_the_rows_words():
+    answer = {"contract": {"data": [{"name": "tabs", "kind": "list", "label": "Tabs", "fields": [
+                  {"name": "label", "label": "Tab", "type": "string"},
+                  {"name": "selected", "label": "Selected", "type": "boolean"}]}], "actions": []},
+              "lists": [{"prop": "tabs", "rows": ["2", "4", "7"], "looks": [
+                  {"field": "selected", "by": [{"value": "true", "row": "4"}, {"value": "false", "row": "2"}]}]}],
+              "values": [{"node": "3", "expr": "row.label"}], "inputs": [], "shows": []}
+    out, problems = P.apply(TABS, answer, "TabsView")
+    assert problems == [], problems
+    selected = out["code"][out["code"].index("row.selected ? ("):out["code"].index(") :")]
+    assert "check.svg" in selected and "{row.label}" in selected and "Employer" not in selected
+    assert [r["selected"] for r in out["sample"]["tabs"]] == [False, True, False]
+
+
+PILLS = """export default function PillsView() {
+  return (
+    <div className="flex flex-col" data-layer="Rows">
+      <div className="flex flex-row bg-[#ffffff]" data-layer="Row">
+        <div className="shrink-0"><DhTab label={"Candidate"} /></div>
+      </div>
+      <div className="flex flex-row bg-[#f2f2f2]" data-layer="Row">
+        <div className="shrink-0"><DhTabSelected check={"\u2713"} label={"Employer"} /></div>
+      </div>
+    </div>
+  );
+}
+"""
+
+
+def test_a_look_drawn_as_another_component_takes_its_props_and_a_decided_field_is_not_asked_again():
+    answer = {"contract": {"data": [{"name": "tabs", "kind": "list", "label": "Tabs", "fields": [
+                  {"name": "label", "label": "Tab", "type": "string"},
+                  {"name": "status", "label": "Status", "type": "enum", "options": ["Open", "Chosen"]}]}],
+                  "actions": []},
+              "lists": [{"prop": "tabs", "rows": ["2", "4"], "looks": [
+                  {"field": "status", "by": [{"value": "Open", "row": "2"}, {"value": "Chosen", "row": "4"}]},
+                  {"node": "3", "field": "status", "by": [{"value": "Open", "row": "2"}, {"value": "Chosen", "row": "4"}]}]}],
+              "values": [{"node": "3", "expr": "row.label", "prop": "label"}], "inputs": [], "shows": []}
+    out, problems = P.apply(PILLS, answer, "PillsView")
+    assert problems == [], problems
+    code = out["code"]
+    assert '<DhTabSelected check={"\u2713"} label={row.label} />' in code
+    assert code.count('row.status === "Open"') == 1, "inside the row's branch the pill's look is already known"
+
+
+def test_a_field_shown_as_words_is_words():
+    answer = json.loads(json.dumps(ANSWER))
+    answer["contract"]["data"].append({"name": "terms", "kind": "record", "label": "Terms", "fields": [
+        {"name": "newAccountsOnly", "label": "New accounts only", "type": "boolean"}]})
+    answer["values"].append({"node": "2", "expr": "props.terms.newAccountsOnly"})
+    out, problems = P.apply(STATIC, answer, "TenantsView")
+    assert problems == [] and "newAccountsOnly: string" in out["code"]
+    assert out["sample"]["terms"]["newAccountsOnly"] == "Tenants"
 
 
 def test_an_answer_that_names_what_is_not_there_is_asked_again():

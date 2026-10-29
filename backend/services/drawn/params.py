@@ -86,10 +86,12 @@ def _schema(children: bool) -> dict[str, Any]:
                 "prop": {"type": "string"}, "rows": ids,
                 "where": {"type": "object", "additionalProperties": False, "required": ["field", "equals"],
                           "properties": {"field": {"type": "string"}, "equals": {"type": "string"}}},
-                "looks": {"type": "object", "additionalProperties": False, "required": ["field", "by"],
-                          "properties": {"field": {"type": "string"}, "by": {"type": "array", "items": {
-                              "type": "object", "additionalProperties": False, "required": ["value", "row"],
-                              "properties": {"value": {"type": "string"}, "row": {"type": "string"}}}}}},
+                "looks": {"type": "array", "items": {
+                    "type": "object", "additionalProperties": False, "required": ["field", "by"],
+                    "properties": {"node": {"type": "string"}, "field": {"type": "string"},
+                                   "by": {"type": "array", "items": {
+                                       "type": "object", "additionalProperties": False, "required": ["value", "row"],
+                                       "properties": {"value": {"type": "string"}, "row": {"type": "string"}}}}}}},
             }}},
         "values": {"type": "array", "items": {
             "type": "object", "additionalProperties": False, "required": ["node", "expr"],
@@ -132,10 +134,14 @@ when the screen's links say where), `open` opens a dialog, drawer or tab of this
 LISTS — rows, cards or chips of one structure repeated as siblings are one list: `{prop, rows}`, `rows` every
 drawn row's number in order (the first is kept as the template). Rows of one shape that each name a different
 thing (settings, entitlements, key/value lines, a checklist) are ONE list with `label` and `value` fields —
-never one field per row. Rows drawn in different looks (a status pill green on one, amber on another; a menu's
-current item) name the field that picks the look: `looks: {field, by: [{value, row}]}`, for each value of an
-enum or boolean field ("true"/"false") a drawn row in that look. Rows under different headings of one list (a
-menu's groups) are one list entry per heading, each with `where: {field, equals}`.
+never one field per row. Where the rows are drawn in different looks, each element whose look differs names
+the field that picks it: `looks: [{node, field, by: [{value, row}]}]` — `node` the element in the template row
+(leave it out for the whole row), and for each value of an enum or boolean field ("true"/"false") a drawn row
+where that element has that look. One row can have several: the selected row's highlight follows `selected`
+while its status pill follows `status` — give them as two looks, never one. Rows under different headings of
+one list (a menu's groups) are one entry per heading, each with `where: {field, equals}`. A table drawn column
+by column (each column a stack of cells, not each row a line of them) is one list given once per column: an
+entry per column with the same `prop`, its `rows` that column's cells top to bottom.
 
 VALUES — `{node, expr}` puts data where the drawing has example content: a text's words, a picture's `src`, or
 one of a shared component's words (`prop`: which). `expr` is `props.<value>`, `props.<record or form>.<field>`,
@@ -182,10 +188,10 @@ class _Plan:
     inputs: dict[str, dict] = field(default_factory=dict)
     shows: dict[str, dict] = field(default_factory=dict)
     controls: list[str] = field(default_factory=list)
+    #: node id → the field that picks its look and, by value, the element drawn in it.
+    looks: dict[str, dict] = field(default_factory=dict)
     components: set[str] = field(default_factory=set)
 
-    def bound(self) -> set[str]:
-        return set(self.values) | set(self.inputs) | set(self.actions) | set(self.shows)
 
 
 def _fields(slot: dict) -> dict[str, dict]:
@@ -265,14 +271,49 @@ def _resolve(root: M.Node, reply: dict, *, children: bool) -> tuple[_Plan, list[
         if where and str(where.get("field")) not in names:
             problems.append(f"{what}: `where` names `{where.get('field')}`, not one of its fields")
             continue
-        looks = entry.get("looks") or None
-        if looks:
-            if str(looks.get("field")) not in names:
-                problems.append(f"{what}: `looks` names `{looks.get('field')}`, not one of its fields")
+        looks, bad = [], False
+        inside = {n.id for n in template.walk()}
+        for lk in entry.get("looks") or []:
+            at = str(lk.get("node") or template.id)
+            if at not in inside:
+                problems.append(f"{what}: a look's node {at} is not in its template row {template.id}")
+                bad = True
                 continue
-            if any(node(by.get("row"), what) is None for by in looks.get("by") or []):
+            f = str(lk.get("field") or "")
+            if not re.match(r"^[A-Za-z_]\w*$", f):
+                problems.append(f"{what}: a look names `{f}`, not a field name")
+                bad = True
                 continue
-        resolved = {**entry, "prop": prop, "rows": [r.id for r in rows]}
+            if f not in names:
+                # A LOOK DECLARES ITS FIELD. Asked for the selected row's look,
+                # the model named `selected` and forgot the field; three rounds
+                # were refused for it (DITANS A-11, 2026-10-29). Its values say
+                # what it is: on/off, or the drawn options.
+                values = [str(b.get("value")) for b in lk.get("by") or []]
+                spec = {"name": f, "label": f, "type": "boolean"} if set(v.lower() for v in values) <= {"true", "false"} \
+                    else {"name": f, "label": f, "type": "enum", "options": list(dict.fromkeys(values))}
+                slot.setdefault("fields", []).append(spec)
+                names = _fields(slot)
+            by = []
+            for b in lk.get("by") or []:
+                drawn = nodes.get(str(b.get("row")))
+                if drawn is None or drawn not in rows:
+                    problems.append(f"{what}: a look's row {b.get('row')} is not one of its rows {[r.id for r in rows]}")
+                    bad = True
+                    continue
+                there = drawn if at == template.id else M.counterpart(template, drawn, nodes[at])
+                if there is None:
+                    problems.append(f"{what}: row {drawn.id} draws nothing where element {at} is")
+                    bad = True
+                    continue
+                by.append((str(b.get("value")), there))
+            if by:
+                looks.append({"node": at, "field": str(lk["field"]), "by": by, "list": prop})
+        if bad:
+            continue
+        for lk in looks:
+            plan.looks[lk["node"]] = lk
+        resolved = {**entry, "prop": prop, "rows": [r.id for r in rows], "looks": looks}
         plan.lists.append(resolved)
         plan.templates[template.id] = resolved
         # Every row is the list's: a look drawn only on one (an Extend button
@@ -309,7 +350,7 @@ def _resolve(root: M.Node, reply: dict, *, children: bool) -> tuple[_Plan, list[
         if not re.match(r"^on[A-Z]\w*$", name):
             problems.append(f"the action `{name}` is not named `on` + PascalCase")
             continue
-        scopes = set()
+        scopes: dict[str | None, list[str]] = {}
         for i in a.get("nodes") or []:
             n = node(i, f"the action `{name}`")
             if n is None or n.id in plan.skip:
@@ -318,9 +359,16 @@ def _resolve(root: M.Node, reply: dict, *, children: bool) -> tuple[_Plan, list[
                 problems.append(f"element {n.id} is pressed for both `{plan.actions[n.id]['name']}` and `{name}`")
                 continue
             plan.actions[n.id] = a
-            scopes.add(plan.scope.get(n.id))
+            scopes.setdefault(plan.scope.get(n.id), []).append(n.id)
         if len(scopes) > 1:
-            problems.append(f"the action `{name}` is pressed both inside and outside a list's rows")
+            # Pressed on a row it is done to that row; pressed outside, to none —
+            # two things, as an "Extend" on a summary card and one on an
+            # expired code's row are (DITANS A-11, 2026-10-29).
+            where = "; ".join(f"in the rows of `{k}`: {v}" if k else f"outside any list's rows: {v}"
+                              for k, v in scopes.items())
+            problems.append(f"the action `{name}` is pressed {where} — pressed in a row it is done to that row, "
+                            "so the elements in the rows are a second action of their own (its name says it acts "
+                            "on one), with only those elements in its `nodes`")
         elif scopes and None not in scopes:
             a["on"] = next(iter(scopes))
         elif str(a.get("on") or "") and (plan.slots.get(str(a["on"])) or {}).get("kind") == "list":
@@ -366,7 +414,94 @@ def _resolve(root: M.Node, reply: dict, *, children: bool) -> tuple[_Plan, list[
             n = node(i, "controls")
             if n is not None and n.id not in plan.skip:
                 plan.controls.append(n.id)
+    if not problems:
+        problems += _lost(plan)
     return plan, problems
+
+
+_COLOUR = re.compile(r"^(?:text|bg|border|fill|stroke)-\[(?:#|rgba?\()")
+
+
+def _colours(node: M.Node) -> set[str]:
+    return {c for c in node.classes().split() if _COLOUR.match(c)}
+
+
+def _lost(plan: _Plan) -> list[str]:
+    """What a list would lose of its drawn rows: words, pictures, parts or
+    colours that differ from row to row where nothing is bound and no look
+    is given — each row is drawn as the template, so a ✗ drawn on two rules
+    came out ✓ on every one, and a selected first row lit up all of them
+    (DITANS A-11, A-12, 2026-10-29)."""
+    out: list[str] = []
+    for listed in plan.lists:
+        rows = [plan.nodes[r] for r in listed["rows"]]
+        template, others = rows[0], rows[1:]
+        if not others:
+            continue
+        looked = {lk["node"] for lk in listed.get("looks") or []}
+
+        def covered(t: M.Node) -> bool:
+            at: M.Node | None = t
+            while at is not None:
+                if at.id in looked:
+                    return True
+                if at is template:
+                    return False
+                at = at.parent
+            return False
+
+        found: list[str] = []
+        for t in template.walk():
+            if t.id in plan.values or t.id in plan.inputs or covered(t):
+                continue
+            unit = t.unit()
+            for r in others:
+                there = M.counterpart(template, r, t)
+                if there is None or not M.same_kind(t, there):
+                    continue
+                if unit.is_component and (there.unit().tag != unit.tag or M.plain(there) != M.plain(t)):
+                    found.append(f"element {t.id} is drawn as `{there.unit().tag}` “{M.plain(there)}” on row {r.id}")
+                elif t.tag == "img" and t.attr("src") != there.attr("src"):
+                    found.append(f"element {t.id} is a different picture on row {r.id}")
+                elif t.body is not None and not unit.is_component and M.plain(t) != M.plain(there):
+                    found.append(f"element {t.id} reads “{M.plain(t)[:30]}” but “{M.plain(there)[:30]}” on row {r.id}")
+                elif _colours(t) != _colours(there):
+                    # A COLOUR IS A MEANING: the selected row's tint, a figure
+                    # drawn green for good. A border or a gap that differs on
+                    # the last row is not, and is left as the template draws it.
+                    found.append(f"element {t.id} is drawn in other colours on row {r.id} "
+                                 f"({' '.join(sorted(_colours(there) - _colours(t))) or 'none of its own'})")
+                else:
+                    continue
+                break
+        if found:
+            out.append(f"the list `{listed['prop']}` would draw every row as row {template.id}, losing what the "
+                       "rows draw differently: " + "; ".join(found[:4])
+                       + " — bind what is data (a value `row.<field>`), give what is a look a `looks` entry")
+    return out
+
+
+def _shown_as_words(plan: _Plan) -> None:
+    """A field the view shows as words is words. "New accounts only: Yes"
+    typed `boolean` rendered nothing where the drawing says Yes (DITANS A-11,
+    2026-10-29); a field that picks a look, a condition or a switch stays one."""
+    deciding = {(lk["list"], lk["field"]) for lk in plan.looks.values()}
+    for s in plan.shows.values():
+        m = _PATH.match(str(s["when"]))
+        if m:
+            deciding.add((m.group(2), m.group(3)) if m.group(1) == "props" else (plan.scope.get(s["node"]), m.group(2)))
+    deciding |= {(i["form"], i["field"]) for i in plan.inputs.values()}
+    for nid, values in plan.values.items():
+        if plan.nodes[nid].tag == "img":
+            continue
+        for v in values:
+            m = _PATH.match(v["expr"])
+            if not m:
+                continue
+            slot, name = (plan.scope.get(nid), m.group(2)) if m.group(1) == "row" else (m.group(2), m.group(3))
+            f = _fields(plan.slots.get(slot or "") or {}).get(name or "")
+            if f is not None and str(f.get("type")) == "boolean" and (slot, name) not in deciding:
+                f["type"] = "string"
 
 
 def _attrs(attrs: list[tuple[str, str]]) -> str:
@@ -425,7 +560,7 @@ class _Writer:
             where = listed.get("where")
             if where:
                 source += f".filter((row) => row.{where['field']} === {json.dumps(where['equals'])})"
-            inner = self.looks(n, listed, depth + 1, done | {(n.id, "list")})
+            inner = self.piece(n, depth + 1, listed["prop"], done | {(n.id, "list")}, child=False, key=True)
             return wrapped(f"{source}.map((row) => (", inner, "))")
         inp = plan.inputs.get(n.id)
         if inp and inp["kind"] in ("choice", "toggle") and (inp.get("on_look") or inp.get("off_look")) \
@@ -434,31 +569,37 @@ class _Writer:
             off = plan.nodes.get(str(inp.get("off_look") or "")) or n
             value = f"props.{inp['form']}.{inp['field']}"
             test = value if inp["kind"] == "toggle" else f"{value} === {json.dumps(inp['value'])}"
-            bound = plan.bound()
-            yes = self.piece(M.relook(n, on, bound), depth + 1, row, done | {(n.id, "look")}, child=False)
-            no = self.piece(M.relook(n, off, bound), depth + 1, row, done | {(n.id, "look")}, child=False)
+            yes = self.piece(M.relook(n, on, set(plan.values), own_pictures=True), depth + 1, row, done | {(n.id, "look")},
+                             child=False)
+            no = self.piece(M.relook(n, off, set(plan.values), own_pictures=True), depth + 1, row, done | {(n.id, "look")},
+                            child=False)
             return wrapped(f"{test} ? (", [*yes, pad + ") : (", *no], ")")
+        lk = plan.looks.get(n.id)
+        if lk and (n.id, "look") not in done:
+            return wrapped("", self.looks(n, lk, depth + 1, row, done | {(n.id, "look")}, key), "")
         return self.element(n, depth, row, done, key)
 
-    def looks(self, template: M.Node, listed: dict, depth: int, done: frozenset) -> list[str]:
-        """A list's row: the template, in the look its field picks."""
-        row, pad = listed["prop"], "  " * depth
-        looks = listed.get("looks") or None
-        if not looks or not looks.get("by"):
-            return self.piece(template, depth, row, done, child=False, key=True)
-        by = [b for b in looks["by"] if str(b.get("row")) in self.plan.nodes]
-        f = str(looks["field"])
-        boolean = str(_fields(self.plan.slots[row]).get(f, {}).get("type")) == "boolean"
-        bound = self.plan.bound()
+    def looks(self, n: M.Node, lk: dict, depth: int, row: str | None, done: frozenset, key: bool) -> list[str]:
+        """``n`` in the look its field picks: a chain of the drawn looks."""
+        pad = "  " * depth
+        f = lk["field"]
+        boolean = str(_fields(self.plan.slots[lk["list"]]).get(f, {}).get("type")) == "boolean"
+        # A FIELD ALREADY ASKED IS NOT ASKED AGAIN. A row and its pill both
+        # drawn by `status`: inside the row's "Expired" branch the pill is the
+        # Expired look, and comparing again does not type-check (DITANS A-11).
+        decided = next((d[2] for d in done if len(d) == 3 and d[0] == "field" and d[1] == f), None)
+        if decided is not None:
+            value, drawn = next(((v, d) for v, d in lk["by"] if v == decided), lk["by"][-1])
+            return self.piece(M.relook(n, drawn, set(self.plan.values)), depth, row, done, child=False, key=key)
         out: list[str] = []
-        for i, b in enumerate(by):
-            drawn = self.plan.nodes[str(b["row"])]
-            body = self.piece(M.relook(template, drawn, bound), depth + 1, row, done, child=False, key=True)
-            if i == len(by) - 1:
+        for i, (value, drawn) in enumerate(lk["by"]):
+            body = self.piece(M.relook(n, drawn, set(self.plan.values)), depth + 1, row,
+                              done | {("field", f, value)}, child=False, key=key)
+            if i == len(lk["by"]) - 1:
                 out += [pad + "(", *body, pad + ")"]
             else:
-                test = (f"row.{f}" if str(b["value"]).lower() == "true" else f"!row.{f}") if boolean \
-                    else f"row.{f} === {json.dumps(str(b['value']))}"
+                test = (f"row.{f}" if value.lower() == "true" else f"!row.{f}") if boolean \
+                    else f"row.{f} === {json.dumps(value)}"
                 out += [pad + f"{test} ? (", *body, pad + ") :"]
         return out
 
@@ -497,16 +638,19 @@ class _Writer:
     def field(self, n: M.Node, inp: dict, extra: dict) -> str:
         """A drawn value as the input that sets it, in the text's own look."""
         form, name = inp["form"], inp["field"]
-        classes = (n.classes() + " bg-transparent outline-none border-0 p-0 m-0 min-w-0").strip()
+        # Full width of where the text was, and no control of the browser's own
+        # drawn over the drawing's (a select's arrow beside the drawn chevron).
+        classes = (n.classes() + " w-full bg-transparent outline-none border-0 p-0 m-0 min-w-0 appearance-none").strip()
         attrs = [(k, v) for k, v in n.attrs if k not in ("className",)]
         value = f"{{props.{form}.{name} ?? \"\"}}"
         change = f"{{(e) => props.{change_handler(form)}({json.dumps(name)}, e.target.value)}}"
         base = _with([("className", json.dumps(classes)), *attrs], onClick=extra.get("onClick", ""))
         if inp["kind"] == "select":
             options = list(dict.fromkeys([*(_fields(self.plan.slots[form])[name].get("options") or []), M.plain(n)]))
-            opts = "".join(f"<option value={json.dumps(o)}>{{{json.dumps(o)}}}</option>" for o in options)
+            opts = "".join(f"<option value={{{json.dumps(o)}}}>{{{json.dumps(o)}}}</option>" for o in options)
             return (f"<select{_attrs(base)} value={value} onChange={change}>{opts}</select>")
-        hint = f" placeholder={json.dumps(M.plain(n))}" if inp.get("placeholder") else ""
+        # As an expression: a JSX attribute string does not read `\u2026`.
+        hint = f" placeholder={{{json.dumps(M.plain(n))}}}" if inp.get("placeholder") else ""
         return f"<input{_attrs(base)} value={value}{hint} onChange={change} />"
 
 
@@ -525,40 +669,62 @@ def _sample(plan: _Plan, contract: dict) -> dict[str, Any]:
                 options.append(value)
         return value
 
+    def alike(a: M.Node, b: M.Node) -> int:
+        return sum(x.attr("className") == y.attr("className") and x.tag == y.tag for x, y in zip(a.walk(), b.walk()))
+
+    def read(rec: dict, listed: dict, rid: str) -> None:
+        """One drawn row's content, through its list entry's template."""
+        template, drawn = plan.nodes[listed["rows"][0]], plan.nodes[rid]
+        for t in template.walk():
+            for v in plan.values.get(t.id) or []:
+                m = _PATH.match(v["expr"])
+                if not m or m.group(1) != "row":
+                    continue
+                there = M.counterpart(template, drawn, t)
+                if there is not None:
+                    rec[m.group(2)] = M.prop_value(there, v["prop"]) if there.unit().is_component else M.plain(there)
+            show = plan.shows.get(t.id)
+            m = _PATH.match(show["when"]) if show else None
+            if m and m.group(1) == "row":
+                rec[m.group(2)] = not show.get("not")
+        for lk in listed.get("looks") or []:
+            if lk["field"] in rec:
+                continue
+            here = drawn if lk["node"] == template.id else M.counterpart(template, drawn, plan.nodes[lk["node"]])
+            if here is None:
+                continue
+            # The value whose drawn look this row's element has.
+            exact = [v for v, d in lk["by"] if d is here or M.look(d) == M.look(here)]
+            rec[lk["field"]] = exact[0] if exact else max(lk["by"], key=lambda vd: alike(vd[1], here))[0]
+
+    by_prop: dict[str, list[dict]] = {}
     for listed in plan.lists:
-        slot = plan.slots[listed["prop"]]
-        rows = out.setdefault(listed["prop"], [])
-        template = plan.nodes[listed["rows"][0]]
-        looks = listed.get("looks") or {}
-        drawn_by = [(str(b["value"]), plan.nodes[str(b["row"])]) for b in looks.get("by") or []
-                    if str(b.get("row")) in plan.nodes]
-        for rid in listed["rows"]:
-            drawn = plan.nodes[rid]
-            rec: dict[str, Any] = {"id": str(len(rows) + 1)}
-            for t in template.walk():
-                for v in plan.values.get(t.id) or []:
-                    m = _PATH.match(v["expr"])
-                    if not m or m.group(1) != "row":
-                        continue
-                    there = M.counterpart(template, drawn, t)
-                    if there is not None:
-                        rec[m.group(2)] = M.prop_value(there, v["prop"]) if there.unit().is_component \
-                            else M.plain(there)
-                show = plan.shows.get(t.id)
-                m = _PATH.match(show["when"]) if show else None
-                if m and m.group(1) == "row":
-                    rec[m.group(2)] = not show.get("not")
-            if drawn_by and str(looks.get("field")) not in rec:
-                seen = M.look(drawn)
-                value = next((v for v, d in drawn_by if d.id == rid), None) \
-                    or next((v for v, d in drawn_by if M.look(d) == seen), drawn_by[-1][0])
-                rec[str(looks["field"])] = value
-            if listed.get("where"):
-                rec[str(listed["where"]["field"])] = str(listed["where"]["equals"])
+        by_prop.setdefault(listed["prop"], []).append(listed)
+    for prop, entries in by_prop.items():
+        slot = plan.slots[prop]
+        rows: list[dict] = []
+        # A TABLE DRAWN BY COLUMN is one entry per column: the n-th cell of
+        # each is the n-th row.
+        columns = [e for e in entries if not e.get("where")]
+        for i in range(max((len(e["rows"]) for e in columns), default=0)):
+            rec: dict[str, Any] = {"id": str(i + 1)}
+            for e in columns:
+                if i < len(e["rows"]):
+                    read(rec, e, e["rows"][i])
+            rows.append(rec)
+        # …and a menu drawn under headings, one entry per heading.
+        for e in entries:
+            if e.get("where"):
+                for rid in e["rows"]:
+                    rec = {"id": str(len(rows) + 1)}
+                    read(rec, e, rid)
+                    rec[str(e["where"]["field"])] = str(e["where"]["equals"])
+                    rows.append(rec)
+        for rec in rows:
             for name, f in _fields(slot).items():
                 rec.setdefault(name, False if str(f.get("type")) == "boolean" else "")
                 rec[name] = coerce(slot, name, rec[name])
-            rows.append(rec)
+        out[prop] = rows
 
     def put(expr: str, value: Any) -> None:
         m = _PATH.match(expr)
@@ -613,6 +779,7 @@ def apply(static: str, reply: dict, name: str, *, components: dict[str, list[str
     plan, problems = _resolve(root, {**reply, "contract": contract}, children=children)
     if problems:
         return None, problems
+    _shown_as_words(plan)
     writer = _Writer(plan)
     body = writer.piece(root, 2, None, child=False)
     imports = "".join(f'import {c} from "./{c}";\n' for c in sorted(plan.components)
