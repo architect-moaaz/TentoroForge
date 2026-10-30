@@ -1453,6 +1453,13 @@ export const DrawnView = z.object({
   /** The drawing's own example content, in the contract's shape: what the
    *  view renders with before there is data, and the app's first sample rows. */
   sample: z.record(z.string(), z.unknown()).default({}),
+  /** A shell's own read, written like a page's `load.ts`: `export async
+   *  function load(ctx: PageContext)` returning the shell's records and values
+   *  for the signed-in person (`{ user: {...}, organization: {...} }`). A slot
+   *  it returns shows that; a slot it leaves out shows the drawing's sample.
+   *  Without one, every visitor saw the design's sample person and
+   *  organisation in the sidebar (wzml1sa6, 2026-10-30). */
+  load: z.string().optional(),
   /** A hash of the deterministic conversion the view was made from, so a
    *  frame changed in Figma is seen as changed. */
   source: z.string().optional(),

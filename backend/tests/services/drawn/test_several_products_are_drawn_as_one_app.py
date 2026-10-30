@@ -312,4 +312,43 @@ def test_a_menu_entry_is_offered_only_to_the_roles_that_may_open_its_page(tmp_pa
     project_drawn(doc, tmp_path, tmp_path / "app")
     wrapper = (tmp_path / "app/src/components/DrawnShell.tsx").read_text()
     assert "all.filter((n) => !role || !n.roles?.length || n.roles.includes(role))" in wrapper
-    assert "useNav(NAV1, props.role)" in wrapper and "<Frame controls={props.controls} role={props.role}>" in wrapper
+    assert "useNav(NAV1, props.role)" in wrapper and "<Frame controls={props.controls} role={props.role}" in wrapper
+
+
+def test_a_shell_shows_the_signed_in_person_its_own_read_finds(tmp_path):
+    from services.drawn.project import DEFAULT_SHELL_LOAD, project_drawn
+
+    doc = _portals_doc()
+    project_drawn(doc, tmp_path, tmp_path / "app")
+    app = tmp_path / "app/src/components"
+    assert (app / "DrawnShellLoad.ts").read_text() == DEFAULT_SHELL_LOAD, "no shell reads: each shows its drawing"
+    candidate = doc["drawnViews"][2]
+    candidate["contract"]["data"].append({"name": "user", "kind": "record", "fields": [{"name": "name"}]})
+    candidate["sample"]["user"] = {"id": "1", "initials": "SA", "name": "Sara Ahmed"}
+    candidate["load"] = "export async function load(ctx) { return { user: { name: ctx.user?.name } }; }"
+    out = project_drawn(doc, tmp_path, tmp_path / "app")
+    assert out["reads"] == 1
+    assert (app / "drawn/CandidateWebShell.load.ts").read_text() == candidate["load"]
+    loader = (app / "DrawnShellLoad.ts").read_text()
+    assert 'import { load as read0 } from "./drawn/CandidateWebShell.load";' in loader
+    assert '["shell:Candidate web", read0],' in loader and "if (!user) return {};" in loader
+    wrapper = (app / "DrawnShell.tsx").read_text()
+    # the read's value where it gave one, the drawing's sample where it did not
+    assert 'user={live(props.data, "user", {"id": "1", "initials": "SA", "name": "Sara Ahmed"})}' in wrapper
+    assert "data={props.data?.[key]}" in wrapper
+    del candidate["load"]
+    project_drawn(doc, tmp_path, tmp_path / "app")
+    assert not (app / "drawn/CandidateWebShell.load.ts").exists() and (app / "DrawnShellLoad.ts").read_text() == DEFAULT_SHELL_LOAD
+
+
+def test_the_layout_hands_each_shell_what_its_read_found():
+    from pathlib import Path
+
+    from services.drawn.project import DEFAULT_SHELL_LOAD, DEFAULT_WRAPPER
+
+    root = Path(__file__).resolve().parents[3] / "templates/app-foundation/src"
+    layout = (root / "app/(dashboard)/layout.tsx").read_text()
+    assert 'import { loadShell } from "@/components/DrawnShellLoad";' in layout
+    assert "<DrawnShell controls={cluster} role={role} data={shellData}>" in layout
+    assert (root / "components/DrawnShellLoad.ts").read_text() == DEFAULT_SHELL_LOAD
+    assert (root / "components/DrawnShell.tsx").read_text() == DEFAULT_WRAPPER
