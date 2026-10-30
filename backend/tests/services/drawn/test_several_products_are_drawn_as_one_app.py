@@ -299,3 +299,17 @@ def test_a_menu_entry_opens_its_own_products_page_or_the_one_it_was_bound_to():
     assert got[1] == "#", "the candidate's Jobs is not the recruiter's"
     assert got[2] == "/command-centre", "bound by hand"
     assert got[3] == "#", "a binding to no page leads nowhere"
+
+
+def test_a_menu_entry_is_offered_only_to_the_roles_that_may_open_its_page(tmp_path):
+    from services.drawn.project import nav_routes, project_drawn
+
+    doc = _portals_doc()
+    doc["pages"][1]["access"] = "role_restricted"
+    recruiter = doc["drawnViews"][1]
+    assert nav_routes(doc, recruiter)[0]["roles"] == ["Recruiter"]
+    assert "roles" not in nav_routes(doc, doc["drawnViews"][2])[0], "an open page names nobody"
+    project_drawn(doc, tmp_path, tmp_path / "app")
+    wrapper = (tmp_path / "app/src/components/DrawnShell.tsx").read_text()
+    assert "all.filter((n) => !role || !n.roles?.length || n.roles.includes(role))" in wrapper
+    assert "useNav(NAV1, props.role)" in wrapper and "<Frame controls={props.controls} role={props.role}>" in wrapper

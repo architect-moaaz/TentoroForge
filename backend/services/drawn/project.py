@@ -132,6 +132,12 @@ def nav_routes(doc: dict, shell: dict) -> list[dict]:
     by_name = {str(p.get("name") or "").strip().lower(): str(p.get("route")) for p in _live_pages(doc)
                if not own or str(p.get("route")) in own}
     live = {str(p["route"]) for p in _live_pages(doc)}
+    # WHO MAY OPEN IT, as the app's own menu says: DITANS Operations was shown
+    # Taxonomy, Identity and Moderation, whose pages are other staff roles', and
+    # each sent it away (wzml1sa6, 2026-10-30).
+    from services.blueprint.projection import restricted_roles
+    roles_of = {str(p["route"]): restricted_roles(doc, p) for p in _live_pages(doc)
+                if str(p.get("access") or "") == "role_restricted"}
     out = []
     for row in (shell.get("sample") or {}).get("nav") or []:
         if not isinstance(row, dict):
@@ -142,7 +148,10 @@ def nav_routes(doc: dict, shell: dict) -> list[dict]:
         bound = str(row.get("href") or "")
         href = (bound if bound in live else "") or by_frame.get(target or "", "") \
             or by_name.get(label.strip().lower(), "")
-        out.append({**{k: v for k, v in row.items() if k not in ("id", "active")}, "href": href or "#"})
+        entry = {**{k: v for k, v in row.items() if k not in ("id", "active", "roles")}, "href": href or "#"}
+        if roles_of.get(href):
+            entry["roles"] = roles_of[href]
+        out.append(entry)
     return out
 
 
@@ -179,9 +188,9 @@ def _wrapper(shells: list[tuple[dict, list[dict]]], routes: list[list[str]], rol
     for i, (shell, nav) in enumerate(shells):
         imports.append(f'import ShellView{i} from "./drawn/{shell["name"]}";')
         frames.append(
-            f"function Frame{i}(props: {{ children?: React.ReactNode; controls?: React.ReactNode }}) {{\n"
+            f"function Frame{i}(props: {{ children?: React.ReactNode; controls?: React.ReactNode; role?: string }}) {{\n"
             "  const router = useRouter();\n"
-            f"  const nav = useNav(NAV{i});\n"
+            f"  const nav = useNav(NAV{i}, props.role);\n"
             f"  return <ShellView{i} nav={{nav as any}} controls={{props.controls}} {_props(shell)}>"
             "{props.children}</ShellView" + str(i) + ">;\n"
             "}\n")
@@ -196,15 +205,17 @@ def _wrapper(shells: list[tuple[dict, list[dict]]], routes: list[list[str]], rol
         'import { useIsPhone } from "@/components/DrawnResponsive";\n'
         + "\n".join(imports) + "\n\n"
         "export const DRAWN_SHELL = true;\n\n"
-        "type Entry = { href: string; [key: string]: unknown };\n\n"
-        "function useNav(entries: Entry[]) {\n"
+        "type Entry = { href: string; roles?: string[]; [key: string]: unknown };\n\n"
+        "// An entry whose page the signed-in role may not open is not offered.\n"
+        "function useNav(all: Entry[], role?: string) {\n"
         "  const path = usePathname() || \"/\";\n"
+        "  const entries = all.filter((n) => !role || !n.roles?.length || n.roles.includes(role));\n"
         "  const best = entries.map((n) => n.href).filter((h) => h !== \"#\" && (path === h || path.startsWith(h + \"/\")))\n"
         "    .sort((a, b) => b.length - a.length)[0];\n"
         "  return entries.map((n, i) => ({ ...n, id: String(i), active: n.href === best }));\n"
         "}\n\n"
         + "\n".join(frames) + "\n"
-        "const FRAMES: Record<string, (props: { children?: React.ReactNode; controls?: React.ReactNode }) => React.ReactElement> = {\n"
+        "const FRAMES: Record<string, (props: { children?: React.ReactNode; controls?: React.ReactNode; role?: string }) => React.ReactElement> = {\n"
         + "\n".join(table) + "\n};\n"
         f"const FIRST = {json.dumps(str(shells[0][0]['key']))};\n"
         f"const ROUTES: [string, string][] = {json.dumps(routes, indent=2)};\n"
@@ -220,7 +231,7 @@ def _wrapper(shells: list[tuple[dict, list[dict]]], routes: list[list[str]], rol
         "  if (phone && PHONE.some((r) => matches(r, path))) return <>{props.children}</>;\n"
         "  const drawn = ROUTES.find(([r]) => matches(r, path));\n"
         "  const Frame = FRAMES[drawn ? drawn[1] : ROLES[props.role ?? \"\"] ?? FIRST] ?? FRAMES[FIRST];\n"
-        "  return <Frame controls={props.controls}>{props.children}</Frame>;\n"
+        "  return <Frame controls={props.controls} role={props.role}>{props.children}</Frame>;\n"
         "}\n"
     )
 
