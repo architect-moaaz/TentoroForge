@@ -434,7 +434,8 @@ export function withReader(
 ): Record<string, any> {
   const out: Record<string, any> = {};
   for (const [k, v] of Object.entries(filter || {})) {
-    const value = v === "$user.id" ? (ctx?.user?.id ?? NO_READER) : v;
+    const value = v === "$user.id" ? (ctx?.user?.id ?? NO_READER)
+      : v === "$user.email" ? ((ctx?.user as { email?: string } | undefined)?.email ?? NO_READER) : v;
     out[k] = table ? asColumnValue(table[k], value) : value;
   }
   return out;

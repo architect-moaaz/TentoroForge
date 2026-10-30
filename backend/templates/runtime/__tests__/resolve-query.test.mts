@@ -222,6 +222,11 @@ console.log("$user.id in a filter is the person reading");
   eqJson(engine.withReader({ ownerId: "$user.id", status: "PAID" }, {}),
          { ownerId: "00000000-0000-0000-0000-000000000000", status: "PAID" },
          "with nobody signed in it matches nothing, never everything");
+  // A staff member's own membership is found by their email (DITANS, 2026-10-30).
+  eqJson(engine.withReader({ email: "$user.email" }, { user: { id: "u-1", email: "rana@alnoor.ae" } } as any),
+         { email: "rana@alnoor.ae" }, "$user.email is the reader's email");
+  eqJson(engine.withReader({ email: "$user.email" }, {}),
+         { email: "00000000-0000-0000-0000-000000000000" }, "and with nobody signed in it matches nothing");
 }
 
 console.log("a metric: no dimension, one row, one number");
