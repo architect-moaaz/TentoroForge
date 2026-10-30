@@ -12,6 +12,12 @@ notifications and account menu where the drawing puts its bell.
 Without a drawn shell the wrapper is the template's: it says `DRAWN_SHELL =
 false`, and the layout draws its own frame as before.
 
+WHO IS SIGNED IN is the shell's own read (`DrawnView.load`, written beside it
+as `<Shell>.load.ts`): the layout runs every shell's read on the server
+(`DrawnShellLoad.ts`) and the frame shows what it returned for a slot — the
+person's card, their organisation — and the drawing's sample for any slot it
+left out.
+
 A DESIGN OF SEVERAL PRODUCTS HAS A FRAME FOR EACH (`convert.portals`): the
 candidate's, the recruiter's, the administrator's. The wrapper draws the one
 the page you are on was drawn in; a page no portal drew (signing in, a page
@@ -27,6 +33,7 @@ from pathlib import Path
 from typing import Any
 
 WRAPPER = Path("src/components/DrawnShell.tsx")
+SHELL_LOAD = Path("src/components/DrawnShellLoad.ts")
 DRAWN_DIR = Path("src/components/drawn")
 
 DEFAULT_WRAPPER = '''"use client";
@@ -35,8 +42,17 @@ import * as React from "react";
 
 export const DRAWN_SHELL = false;
 
-export default function DrawnShell(props: { children?: React.ReactNode; controls?: React.ReactNode; role?: string }) {
+export default function DrawnShell(props: { children?: React.ReactNode; controls?: React.ReactNode; role?: string;
+                                           data?: Record<string, Record<string, unknown>> }) {
   return <>{props.children}</>;
+}
+'''
+
+# WHAT THE SHELLS SHOW OF THE SIGNED-IN PERSON, read on the server by the
+# layout and handed to the wrapper: `{shell key: {slot: value}}`.
+DEFAULT_SHELL_LOAD = '''// No drawn shell reads anything: each shows its drawing as drawn.
+export async function loadShell(): Promise<Record<string, Record<string, unknown>>> {
+  return {};
 }
 '''
 
@@ -176,8 +192,10 @@ def _props(shell: dict) -> str:
             forms.append(f"{slot['name']}={{{json.dumps(fields)}}} {change_handler(slot['name'])}={{() => {{}}}}")
     others = [s for s in contract.get("data") or [] if s.get("kind") not in ("form",) and s.get("name") != "nav"]
     sample = shell.get("sample") or {}
-    rest = " ".join(f"{s['name']}={{{json.dumps(sample.get(s['name']))}}}" for s in others
-                    if sample.get(s["name"]) is not None)
+    # WHAT THE SHELL'S OWN READ RETURNS, else the drawing's sample: the
+    # candidate's sidebar said "Sara Ahmed" to every candidate (wzml1sa6).
+    rest = " ".join(f"{s['name']}={{live(props.data, {json.dumps(s['name'])}, {json.dumps(sample.get(s['name']))})}}"
+                    for s in others if sample.get(s["name"]) is not None)
     return " ".join(x for x in (" ".join(handlers), " ".join(forms), rest) if x)
 
 
@@ -188,7 +206,7 @@ def _wrapper(shells: list[tuple[dict, list[dict]]], routes: list[list[str]], rol
     for i, (shell, nav) in enumerate(shells):
         imports.append(f'import ShellView{i} from "./drawn/{shell["name"]}";')
         frames.append(
-            f"function Frame{i}(props: {{ children?: React.ReactNode; controls?: React.ReactNode; role?: string }}) {{\n"
+            f"function Frame{i}(props: FrameProps) {{\n"
             "  const router = useRouter();\n"
             f"  const nav = useNav(NAV{i}, props.role);\n"
             f"  return <ShellView{i} nav={{nav as any}} controls={{props.controls}} {_props(shell)}>"
@@ -205,7 +223,12 @@ def _wrapper(shells: list[tuple[dict, list[dict]]], routes: list[list[str]], rol
         'import { useIsPhone } from "@/components/DrawnResponsive";\n'
         + "\n".join(imports) + "\n\n"
         "export const DRAWN_SHELL = true;\n\n"
-        "type Entry = { href: string; roles?: string[]; [key: string]: unknown };\n\n"
+        "type Entry = { href: string; roles?: string[]; [key: string]: unknown };\n"
+        "type FrameProps = { children?: React.ReactNode; controls?: React.ReactNode; role?: string; data?: Record<string, unknown> };\n\n"
+        "// What the shell's own read returned for this slot, else the drawing's sample.\n"
+        "function live<T>(data: Record<string, unknown> | undefined, slot: string, drawn: T): T {\n"
+        "  return data && slot in data ? (data[slot] as T) : drawn;\n"
+        "}\n\n"
         "// An entry whose page the signed-in role may not open is not offered.\n"
         "function useNav(all: Entry[], role?: string) {\n"
         "  const path = usePathname() || \"/\";\n"
@@ -215,7 +238,7 @@ def _wrapper(shells: list[tuple[dict, list[dict]]], routes: list[list[str]], rol
         "  return entries.map((n, i) => ({ ...n, id: String(i), active: n.href === best }));\n"
         "}\n\n"
         + "\n".join(frames) + "\n"
-        "const FRAMES: Record<string, (props: { children?: React.ReactNode; controls?: React.ReactNode; role?: string }) => React.ReactElement> = {\n"
+        "const FRAMES: Record<string, (props: FrameProps) => React.ReactElement> = {\n"
         + "\n".join(table) + "\n};\n"
         f"const FIRST = {json.dumps(str(shells[0][0]['key']))};\n"
         f"const ROUTES: [string, string][] = {json.dumps(routes, indent=2)};\n"
@@ -225,13 +248,16 @@ def _wrapper(shells: list[tuple[dict, list[dict]]], routes: list[list[str]], rol
         "  const pattern = \"^\" + route.replace(/\\[\\.\\.\\.[^\\]]+\\]/g, \".+\").replace(/\\[[^\\]]+\\]/g, \"[^/]+\") + \"/?$\";\n"
         "  return new RegExp(pattern).test(path);\n"
         "}\n\n"
-        "export default function DrawnShell(props: { children?: React.ReactNode; controls?: React.ReactNode; role?: string }) {\n"
+        "export default function DrawnShell(props: { children?: React.ReactNode; controls?: React.ReactNode; role?: string;\n"
+        "                                            data?: Record<string, Record<string, unknown>> }) {\n"
         "  const path = usePathname() || \"/\";\n"
         "  const phone = useIsPhone();\n"
         "  if (phone && PHONE.some((r) => matches(r, path))) return <>{props.children}</>;\n"
         "  const drawn = ROUTES.find(([r]) => matches(r, path));\n"
-        "  const Frame = FRAMES[drawn ? drawn[1] : ROLES[props.role ?? \"\"] ?? FIRST] ?? FRAMES[FIRST];\n"
-        "  return <Frame controls={props.controls} role={props.role}>{props.children}</Frame>;\n"
+        "  const wanted = drawn ? drawn[1] : ROLES[props.role ?? \"\"] ?? FIRST;\n"
+        "  const key = FRAMES[wanted] ? wanted : FIRST;\n"
+        "  const Frame = FRAMES[key];\n"
+        "  return <Frame controls={props.controls} role={props.role} data={props.data?.[key]}>{props.children}</Frame>;\n"
         "}\n"
     )
 
@@ -248,6 +274,7 @@ def project_drawn(doc: dict, output_dir: str | Path, app_root: str | Path) -> di
     if not shells:
         if not wrapper.is_file() or "DRAWN_SHELL = true" in wrapper.read_text("utf-8"):
             wrapper.write_text(DEFAULT_WRAPPER, encoding="utf-8")
+        (root / SHELL_LOAD).write_text(DEFAULT_SHELL_LOAD, encoding="utf-8")
         return {"assets": copied, "shell": False}
     drawn = root / DRAWN_DIR
     drawn.mkdir(parents=True, exist_ok=True)
@@ -263,5 +290,51 @@ def project_drawn(doc: dict, output_dir: str | Path, app_root: str | Path) -> di
     routes = portal_routes(doc, shells)
     roles = role_portals(doc, routes)
     wrapper.write_text(_wrapper(bound, routes, roles, phone_routes(doc)), encoding="utf-8")
+    reads = _shell_loads(shells, drawn)
+    (root / SHELL_LOAD).write_text(_shell_loader(reads), encoding="utf-8")
     return {"assets": copied, "shell": True, "shells": len(shells), "nav": sum(len(n) for _s, n in bound),
-            "phone": len(phone_routes(doc))}
+            "phone": len(phone_routes(doc)), "reads": len(reads)}
+
+
+def _shell_loads(shells: list[dict], drawn: Path) -> list[tuple[str, str]]:
+    """Write each shell's own read beside it: ``[(shell key, module name)]``."""
+    out = []
+    for shell in shells:
+        name = f"{shell['name']}.load"
+        path = drawn / f"{name}.ts"
+        if str(shell.get("load") or "").strip():
+            path.write_text(str(shell["load"]), encoding="utf-8")
+            out.append((str(shell["key"]), name))
+        elif path.is_file():
+            path.unlink()
+    return out
+
+
+def _shell_loader(reads: list[tuple[str, str]]) -> str:
+    """The layout's one call: every shell's read for the signed-in person,
+    run on the server. A read that fails leaves its shell as drawn."""
+    if not reads:
+        return DEFAULT_SHELL_LOAD
+    imports = "\n".join(f'import {{ load as read{i} }} from "./drawn/{name}";' for i, (_k, name) in enumerate(reads))
+    table = "\n".join(f"  [{json.dumps(key, ensure_ascii=False)}, read{i}]," for i, (key, _n) in enumerate(reads))
+    return (
+        "// What each drawn shell shows of the signed-in person: its own read (the shell's `load`).\n"
+        'import { currentUser, type PageContext } from "@/sdk/server";\n'
+        + imports + "\n\n"
+        "const READS: [string, (ctx: PageContext) => Promise<unknown>][] = [\n" + table + "\n];\n\n"
+        "export async function loadShell(): Promise<Record<string, Record<string, unknown>>> {\n"
+        "  const user = await currentUser();\n"
+        "  if (!user) return {};\n"
+        "  const ctx: PageContext = { params: {}, searchParams: {}, user };\n"
+        "  const out: Record<string, Record<string, unknown>> = {};\n"
+        "  await Promise.all(READS.map(async ([key, read]) => {\n"
+        "    try {\n"
+        "      const value = await read(ctx);\n"
+        "      if (value && typeof value === \"object\") out[key] = value as Record<string, unknown>;\n"
+        "    } catch (err) {\n"
+        "      console.warn(`[shell] ${key} could not be read:`, err);\n"
+        "    }\n"
+        "  }));\n"
+        "  return out;\n"
+        "}\n"
+    )

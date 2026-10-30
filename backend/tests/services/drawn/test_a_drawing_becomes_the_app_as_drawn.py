@@ -822,7 +822,7 @@ def test_the_drawn_frame_is_the_apps_frame_with_its_menu_led_to_the_pages(tmp_pa
 def test_the_layout_shows_the_drawn_frame_when_there_is_one():
     layout = (Path(__file__).resolve().parents[3] / "templates/app-foundation/src/app/(dashboard)/layout.tsx").read_text()
     assert 'import DrawnShell, { DRAWN_SHELL } from "@/components/DrawnShell";' in layout
-    assert "<DrawnShell controls={cluster} role={role}>{children}</DrawnShell>" in layout
+    assert "<DrawnShell controls={cluster} role={role} data={shellData}>{children}</DrawnShell>" in layout
     default = Path(__file__).resolve().parents[3] / "templates/app-foundation/src/components/DrawnShell.tsx"
     assert "DRAWN_SHELL = false" in default.read_text()
 

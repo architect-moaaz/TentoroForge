@@ -4443,6 +4443,9 @@
             "additionalProperties": {},
             "default": {}
           },
+          "load": {
+            "type": "string"
+          },
           "source": {
             "type": "string"
           },
