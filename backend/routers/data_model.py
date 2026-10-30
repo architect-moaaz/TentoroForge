@@ -60,22 +60,25 @@ async def get_app_model(
         out / "app" / "src" / "contracts" / "app-model.json",
         out / "app" / "app-model.json",
     ]
+    # §76: A BLUEPRINT APP'S MODEL IS ITS BLUEPRINT. The blueprint engine
+    # never writes an on-disk index, so one found here was written by the
+    # Indexer — a model's summary of the code. The tab asks for one when it
+    # finds none, and DITANS's (2026-10-30) listed 33 of its 100 records, 22
+    # without columns: the tab crashed on it, and it would have shadowed the
+    # Blueprint for good. Same approach as /rules and /pages
+    # (rules_from_blueprint / pages_from_blueprint).
+    try:
+        from services.blueprint.service import BlueprintService
+        from services.blueprint_to_editor import app_model_from_blueprint
+        svc = BlueprintService.load(output_dir=str(project.output_dir))
+        if svc.doc and (svc.doc.get("data", {}) or {}).get("entities"):
+            return app_model_from_blueprint(svc.doc, project.id, project.output_dir)
+    except FileNotFoundError:
+        pass
+    except Exception as e:  # noqa: BLE001
+        logger.warning("app-model from the blueprint failed for %s: %s", project_id, e)
     model_path = next((p for p in candidates if p.exists()), None)
     if model_path is None:
-        # §76: no on-disk index (the blueprint engine never writes one) — derive
-        # the model straight from the Blueprint so the Data Model / Workflows /
-        # Rules editor tabs work instead of 404'ing forever. Same approach as
-        # /rules and /pages (rules_from_blueprint / pages_from_blueprint).
-        try:
-            from services.blueprint.service import BlueprintService
-            from services.blueprint_to_editor import app_model_from_blueprint
-            svc = BlueprintService.load(output_dir=str(project.output_dir))
-            if svc.doc and (svc.doc.get("data", {}) or {}).get("entities"):
-                return app_model_from_blueprint(svc.doc, project.id, project.output_dir)
-        except FileNotFoundError:
-            pass
-        except Exception as e:  # noqa: BLE001
-            logger.warning("app-model blueprint fallback failed for %s: %s", project_id, e)
         raise HTTPException(status_code=404, detail="app-model.json not found — run indexer first")
 
     try:
