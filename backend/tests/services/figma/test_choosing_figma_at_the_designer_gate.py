@@ -252,3 +252,16 @@ def test_the_figma_request_says_a_design_must_already_exist_and_which_link_to_pa
     assert "design you have already made in Figma" in text and "I do not create one" in text
     assert "choose Forge or UX Pilot instead" in text
     assert "single frame reads only that one screen" in text, "a node link reads one frame"
+
+
+def test_a_design_held_as_the_specification_has_answered_who_designs_and_needs_no_check(svc, tmp_path):
+    """DITANS (2026-10-30): 589 drawn screens, connected as the specification and
+    converted, and the build stopped to ask who designs the screens — then to
+    check the design against requirements written from it, by connecting it
+    again as evidence."""
+    svc.doc["designSources"] = [{"id": "FIGMA-001", "type": "figma", "fileKey": "abc123", "url": URL,
+                                 "name": "Leave", "treatAs": "specification", "frames": []}]
+    assert ud.chosen(svc.doc) == ud.FIGMA and not ud.undecided(svc.doc)
+    assert ud.gate(svc.doc, tmp_path) is None
+    svc.doc["designSources"][0]["treatAs"] = "evidence"     # evidence still asks
+    assert ud.chosen(svc.doc) == "" and ud.gate(svc.doc, tmp_path) is not None

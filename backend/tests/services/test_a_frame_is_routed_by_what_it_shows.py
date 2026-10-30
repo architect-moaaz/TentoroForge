@@ -89,6 +89,17 @@ def test_a_frame_without_a_heading_keeps_its_layer_name():
     assert slots[0]["name"] == "Login" and "shows" not in slots[0]
 
 
+def test_a_heading_three_frames_share_is_not_what_any_of_them_is():
+    """DITANS (2026-10-30): six products in one file, so no logo reached half
+    the frames; 81 screens were named "DITANS" or "Ditans Health" and left on
+    no page, the writer unable to tell them apart."""
+    frames = [{"nodeId": f"{i}:1", "name": f"HT-{i} · Screen {i}", "shows": "DITANS"} for i in range(3)]
+    frames += [{"nodeId": f"{i}:1", "name": f"Layer {i}", "shows": f"Heading {i}"} for i in range(3, 10)]
+    slots = frame_slots(frames)
+    assert [s["name"] for s in slots[:3]] == ["HT-0 · Screen 0", "HT-1 · Screen 1", "HT-2 · Screen 2"]
+    assert slots[3]["name"] == "Heading 3" and "The designer named the frame “Layer 3”" in slots[3]["prompt"]
+
+
 def test_the_prompts_forbid_routing_by_position():
     doc = {"application": {"description": "d"}, "data": {"entities": []},
            "designSources": [{"id": "FIGMA-001", "treatAs": "specification",

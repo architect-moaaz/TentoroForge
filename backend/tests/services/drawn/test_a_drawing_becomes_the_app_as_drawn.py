@@ -995,3 +995,18 @@ def test_a_type_is_not_markup_and_a_drawn_action_must_do_something():
     assert any("`onPause`" in p and "does nothing" in p for p in binder.check(lazy, page, doc))
     styled = view.replace("<div>", '<div className="p-4">')
     assert any("draws markup of its own (<div>)" in p for p in binder.check(styled, page, doc))
+
+
+def test_a_page_is_first_bound_at_medium_and_asked_again_at_its_own_effort():
+    import dataclasses
+
+    from services.drawn.binder import at_medium
+
+    @dataclasses.dataclass
+    class Client:
+        effort: str
+
+    assert at_medium(Client("high")).effort == "medium"
+    assert at_medium(Client("low")).effort == "low"
+    fake = object()
+    assert at_medium(fake) is fake
