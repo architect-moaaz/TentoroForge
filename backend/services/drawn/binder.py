@@ -217,7 +217,8 @@ def bind(doc: dict, page: dict, app_root: Path, client: Any, *, feedback: str = 
     seed: dict = {}
     for _round in range(ROUNDS):
         t0 = time.monotonic()
-        reply = client(system=system, user=user_prompt(doc, page, feedback=note), schema=BIND_SCHEMA)
+        asked = client if _round else at_medium(client)
+        reply = asked(system=system, user=user_prompt(doc, page, feedback=note), schema=BIND_SCHEMA)
         if getattr(reply, "usage", None) is not None:
             spent.append((reply.usage, time.monotonic() - t0))
         try:
@@ -249,6 +250,21 @@ def bind(doc: dict, page: dict, app_root: Path, client: Any, *, feedback: str = 
         note = ("The TypeScript compiler (strict) and the page rules refused it:\n"
                 + "\n".join(f"- {e}" for e in errors[:40]))
     raise ui_engineer.CompileError(f"{pid}: the drawn page did not bind after {ROUNDS} rounds — {note[:600]}")
+
+
+def at_medium(client: Any) -> Any:
+    """The first round's client: at `medium` when it runs above it.
+
+    Binding is reading — which record feeds which drawn prop — against a
+    contract the views already declare, like converting the drawing. The
+    D6 pilot's binds wrote 14-64k output tokens a page at `high`, mostly
+    thinking (2026-10-29). A round the compiler refuses is asked again at
+    the client's own effort."""
+    import dataclasses
+
+    if not dataclasses.is_dataclass(client) or str(getattr(client, "effort", "")) not in ("high", "xhigh", "max"):
+        return client
+    return dataclasses.replace(client, effort="medium")
 
 
 def check(view: str, page: dict, doc: dict) -> list[str]:
