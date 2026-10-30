@@ -1560,6 +1560,54 @@ def check_design_modules(result: "AgentResult", doc: dict | None = None) -> None
         raise InvalidDesignModules(_all_of(problems))
 
 
+class RouteParamsClash(AuthorRefusal):
+    """Two routes name the same dynamic segment differently."""
+
+
+def check_route_params(result: "AgentResult", doc: dict | None = None) -> None:
+    """One path, one name for its dynamic segment.
+
+    Next refuses to start when `/interviews/[applicationId]/plan` and
+    `/interviews/[interviewId]/debrief` sit side by side ("You cannot use
+    different slug names for the same dynamic path"): DITANS's whole build
+    reached assembly and failed to boot on that one page (2026-10-30). A
+    proposed route is held to the names the other live pages already use."""
+    from services.blueprint.ids import page_key
+
+    def slots(route: str) -> list[tuple[str, str]]:
+        segs = route.strip("/").split("/")
+        out = []
+        for i, seg in enumerate(segs):
+            m = re.fullmatch(r"\[(?:\.\.\.)?(\w+)\]", seg)
+            if m:
+                out.append(("/" + "/".join(segs[:i]), m.group(1)))
+        return out
+
+    bodies = [p.body for p in result.proposals
+              if p.section == "pages" and isinstance(p.body, dict) and p.body.get("route")]
+    if not bodies:
+        return
+    restated = {page_key(str(b["route"])) for b in bodies}
+    named: dict[str, tuple[str, str]] = {}
+    for page in (doc or {}).get("pages") or []:
+        if isinstance(page, dict) and page.get("status") != "DEPRECATED" and page.get("route") \
+                and page_key(str(page["route"])) not in restated:
+            for prefix, name in slots(str(page["route"])):
+                named.setdefault(prefix, (name, str(page["route"])))
+    problems = []
+    for body in bodies:
+        route = str(body["route"])
+        for prefix, name in slots(route):
+            held = named.get(prefix)
+            if held and held[0] != name:
+                problems.append(f"pages: {route} names the segment after {prefix} `[{name}]`, but {held[1]} names it "
+                                f"`[{held[0]}]` — one path has one name for it: use `[{held[0]}]`, or another path")
+            else:
+                named.setdefault(prefix, (name, route))
+    if problems:
+        raise RouteParamsClash(_all_of(problems))
+
+
 class DrawnScreensShareARoute(AuthorRefusal):
     """Two drawn screens given one route."""
 
@@ -2968,7 +3016,7 @@ def apply_agent_result(
                   check_mobile, check_requirements, check_business_rules, check_entity_fields,
                   check_page_content, check_page_access, check_role_doors, check_navigation,
                   check_analytics, check_flows, check_security, check_design_modules,
-                  check_drawn_routes, check_frame_placement):
+                  check_drawn_routes, check_frame_placement, check_route_params):
         run(check, result, svc.doc)
     if refusals:
         raise refusals[0] if len(refusals) == 1 else SeveralRefusals(refusals)
