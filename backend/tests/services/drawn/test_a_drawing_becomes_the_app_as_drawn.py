@@ -1023,3 +1023,18 @@ def test_a_layer_named_with_a_quote_still_compiles():
     out = Emitter(trace=True).element(node, None)
     label = re.search(r'data-layer="([^"]*)"', out)
     assert label and label.group(1) == "Badge 'Pending' — v2" and "\\" not in out
+
+
+def test_a_list_drawn_inside_a_record_is_typed_as_its_field():
+    """4 DITANS screens declared `selectedAgency.checks` and read
+    `props.selectedAgency.checks`: a prop of that dotted name is no TypeScript
+    (2026-10-30)."""
+    contract = {"data": [{"name": "selectedAgency", "kind": "record", "fields": [{"name": "header", "type": "string"}]},
+                         {"name": "selectedAgency.checks", "kind": "list", "fields": [{"name": "label", "type": "string"}]},
+                         {"name": "dispute.timeline", "kind": "list", "fields": [{"name": "at", "type": "string"}]}],
+                "actions": [{"name": "onOpenCheck", "on": "selectedAgency.checks"}]}
+    typed = C.props_type("XView", contract)
+    assert typed.startswith("export type XViewProps = {") and "selectedAgency.checks" not in typed
+    assert "selectedAgency: { id: string; header: string; checks: Array<{ id: string; label: string }> };" in typed
+    assert "dispute: { timeline: Array<{ id: string; at: string }> };" in typed
+    assert "onOpenCheck(row: { id: string; label: string }): void;" in typed

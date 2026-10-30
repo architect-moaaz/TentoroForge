@@ -50,6 +50,24 @@ def props_type(name: str, contract: dict, *, children: bool = False) -> str:
     """``export type <Name>Props = {...}`` from the contract."""
     lines: list[str] = []
     slots = {str(s.get("name")): s for s in contract.get("data") or [] if isinstance(s, dict) and s.get("name")}
+    # A LIST DRAWN INSIDE A RECORD IS ONE OF ITS FIELDS. A list declared as
+    # `selectedAgency.checks` is read by the view as
+    # `props.selectedAgency.checks`; typed as a prop of that dotted name, it is
+    # no TypeScript, and 4 DITANS screens did not compile (2026-10-30).
+    inner: dict[str, list[str]] = {}
+    every = dict(slots)
+    for key, slot in list(slots.items()):
+        if "." not in key:
+            continue
+        parent, child = key.split(".", 1)
+        kind = str(slot.get("kind") or "value")
+        typed = (f"Array<{_row(slot)}>" if kind == "list" else _row(slot) if kind == "record"
+                 else _ts_field({"type": slot.get("type") or "string", "options": slot.get("options")}))
+        inner.setdefault(parent, []).append(f"{child}: {typed}")
+        del slots[key]
+    for parent in inner:
+        if parent not in slots:
+            lines.append(f"  {parent}: {{ {'; '.join(inner[parent])} }};")
     for slot in slots.values():
         kind = str(slot.get("kind") or "value")
         if kind == "list":
@@ -60,7 +78,10 @@ def props_type(name: str, contract: dict, *, children: bool = False) -> str:
             # as drawn; typed optional, the page fed `undefined` until one was
             # chosen and the drawn page crashed the moment it had rows
             # (d6drawn, 2026-10-28). Required, the page must give it one.
-            lines.append(f"  {slot['name']}: {_row(slot)};")
+            row = _row(slot)
+            if inner.get(slot["name"]):
+                row = row.rstrip()[:-1].rstrip() + "; " + "; ".join(inner[slot["name"]]) + " }"
+            lines.append(f"  {slot['name']}: {row};")
         elif kind == "form":
             lines.append(f"  {slot['name']}: {_ts_object(slot.get('fields') or [], with_id=False)};")
             lines.append(f"  {change_handler(slot['name'])}(field: string, value: string | boolean): void;")
@@ -69,7 +90,7 @@ def props_type(name: str, contract: dict, *, children: bool = False) -> str:
     for action in contract.get("actions") or []:
         if not isinstance(action, dict) or not action.get("name"):
             continue
-        target = slots.get(str(action.get("on") or ""))
+        target = every.get(str(action.get("on") or ""))
         arg = ""
         if target is not None and str(target.get("kind")) == "list":
             arg = f"row: {_row(target)}"
