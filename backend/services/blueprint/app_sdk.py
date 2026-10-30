@@ -282,6 +282,11 @@ def input_type(doc: dict, wf: dict, inp: dict) -> str:
     is the record's id."""
     if inp.get("kind") == "record":
         return "string"
+    # AN INPUT'S OWN VALUES WIN: a decision's choices are the workflow's, not
+    # those of whatever column happens to share its name.
+    own = inp.get("options") or inp.get("enumValues")
+    if own:
+        return ts_type({"type": "string", "enumValues": own})
     name = str(inp.get("name") or "")
     for e in _step_entities(doc, wf):
         col = next((f for f in e.get("fields") or [] if f.get("name") == name), None)
