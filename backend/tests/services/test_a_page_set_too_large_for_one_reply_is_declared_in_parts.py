@@ -141,6 +141,34 @@ def test_the_shared_prefix_is_small_and_stays_the_same_as_parts_land(tmp_path):
     assert '"nodeId"' not in details and "Amina" not in details and '"holder"' in details
 
 
+def test_a_part_that_places_no_frames_is_asked_again(tmp_path):
+    """Fifteen DITANS parts answered with pages and no frames: 81 drawn
+    screens on no page, 58 pages to be written anew instead of as drawn."""
+    svc = _svc(tmp_path)
+    told: dict[str, list[str]] = {}
+
+    def author(spec):
+        told.setdefault(spec.subject, []).append(spec.feedback or "")
+        proposals = _pages_for(svc, spec.subject)
+        if spec.subject == "screens:MODULE-001~1" and len(told[spec.subject]) == 1:
+            for p in proposals:
+                p.body = {k: v for k, v in p.body.items() if k != "figmaFrame"}
+        issues = []
+        if spec.subject == "screens:MODULE-001~2":
+            email = page_set_parts(svc.doc)[spec.subject][0]
+            issues = [f"{email['shows']} is an email, not a screen"]
+            proposals = [p for p in proposals if p.body.get("figmaFrame") != email["figmaFrame"]]
+        return AgentResult(task_id=spec.task_id, agent=spec.agent, confidence=0.9,
+                           proposals=proposals, issues=issues)
+
+    report = run(svc, author, plan=["page_contracts"])
+    assert "page_contracts" in report.completed, report.failed_because
+    asked = told["screens:MODULE-001~1"]
+    assert len(asked) == 2 and "has no `figmaFrame`" in asked[1] and "frame 0:1 (“Screen 0”) is on no page" in asked[1]
+    assert len(told["screens:MODULE-001~2"]) == 1          # a frame set aside by name is answered
+    assert all(p.get("figmaFrame") for p in svc.doc["pages"]) and len(svc.doc["pages"]) == 499
+
+
 def test_a_run_declares_every_part_and_each_is_judged_on_its_own_pages(tmp_path):
     svc = _svc(tmp_path, treat="evidence")
     asked: list[str] = []
