@@ -64,3 +64,30 @@ def test_superseded_entities_dropped(tmp_path):
 def test_empty_blueprint_is_safe(tmp_path):
     m = app_model_from_blueprint({}, "pid", str(tmp_path))
     assert m["database"]["tables"] == [] and m["database"]["enums"] == []
+
+
+def test_a_blueprint_app_is_served_its_blueprint_over_an_index_on_disk(tmp_path, monkeypatch):
+    """DITANS (2026-10-30): the Data Model tab, finding no index, asked the
+    Indexer for one; its summary listed 33 of 100 records, 22 without columns,
+    and the tab crashed on it every time after."""
+    import asyncio
+    import json
+    import uuid
+    from types import SimpleNamespace
+
+    from routers import data_model
+    from services.blueprint.service import BlueprintService
+
+    s = BlueprintService.create(output_dir=tmp_path, app_id="d", name="Ditans", domain="health")
+    s.doc["data"] = {"entities": [{"id": "ENTITY-001", "name": "Candidate", "table": "candidates", "status": "PROPOSED",
+                                   "fields": [{"name": "id", "type": "uuid", "primaryKey": True}]}]}
+    s.save()
+    (tmp_path / "app-model.json").write_text(json.dumps({"database": {"tables": [{"name": "career_items"}]}}))
+
+    async def project(*_a, **_k):
+        return SimpleNamespace(id="d", output_dir=str(tmp_path))
+
+    monkeypatch.setattr(data_model, "get_project_with_auth", project)
+    model = asyncio.run(data_model.get_app_model(uuid.uuid4(), user=None, db=None))
+    assert [t["name"] for t in model["database"]["tables"]] == ["candidates"]
+    assert model["database"]["tables"][0]["columns"]
