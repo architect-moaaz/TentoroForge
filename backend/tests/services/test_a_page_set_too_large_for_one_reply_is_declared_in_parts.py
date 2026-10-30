@@ -116,6 +116,31 @@ def test_two_drawn_screens_never_share_a_route(tmp_path):
                               {"name": "Screen 1", "route": "/area-0/home", "figmaFrame": "1:1"}), svc.doc)
 
 
+def test_the_shared_prefix_is_small_and_stays_the_same_as_parts_land(tmp_path):
+    """DITANS's 74 parts each wrote a 520k-token prefix to the cache — every
+    frame, every sample value, every page declared so far — for $230."""
+    svc = _svc(tmp_path, treat="evidence")
+    svc.doc["data"]["entities"][0]["fields"].append(
+        {"name": "holder", "type": "string", "examples": ["Amina El-Sayed"], "mask": "full"})
+    before = build_prompt(svc.doc, "page_contracts", subject="screens:MODULE-001~1")[1].partition(CACHE_BREAK)[0]
+    assert '"nodeId"' not in before and "Amina" not in before   # frames are the slots; samples are no page's
+    assert '"holder"' in before                                    # a record's fields by name
+
+    def author(spec):
+        return AgentResult(task_id=spec.task_id, agent=spec.agent, confidence=0.9,
+                           proposals=_pages_for(svc, spec.subject))
+
+    run(svc, author, plan=["page_contracts"])
+    head, _, tail = build_prompt(svc.doc, "page_contracts", subject="screens:MODULE-001~1")[1].partition(CACHE_BREAK)
+    assert head == before                     # a landed part changes nothing a sibling or a repair reads first
+    assert "The pages this part declared before" in tail
+    assert '"route": "/area-0/0-1"' in tail and '"route": "/area-1/1-1"' not in tail
+    # the contracts of those pages are written from the same lean slice
+    feature = subjects_for(DAG["page_details"], svc.doc)[0]
+    details = build_prompt(svc.doc, "page_details", subject=feature)[1].partition(CACHE_BREAK)[0]
+    assert '"nodeId"' not in details and "Amina" not in details and '"holder"' in details
+
+
 def test_a_run_declares_every_part_and_each_is_judged_on_its_own_pages(tmp_path):
     svc = _svc(tmp_path, treat="evidence")
     asked: list[str] = []

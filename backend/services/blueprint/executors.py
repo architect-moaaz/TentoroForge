@@ -1167,6 +1167,82 @@ def context_for(doc: dict, agent: str) -> dict:
 PROVENANCE_FIELDS = frozenset({"evidence", "syncNote"})
 
 
+#: What a page names of a record: its id (`sections[].entity`,
+#: `data.primaryEntity`); its fields' names say which record a screen draws.
+#: Kinds, sample values, bounds and masks are the data model's, never a page's.
+_PAGE_ENTITY_KEYS = ("id", "name", "description", "table", "labelField", "account", "status")
+
+
+def page_part_context(doc: dict, agent: str) -> dict:
+    """The Blueprint every part of a page set shares: :func:`context_for`
+    without what changes while the parts land or what one part cannot use.
+
+    DITANS (2026-10-30) sent every one of 74 parts the whole slice — every
+    drawn frame of the design (30%), every record with its sample values
+    (36%) and every page already declared (21%), 520k tokens — and paid $230
+    in 18 minutes. Each part wrote it to the cache afresh: a 520k prefill
+    outlasts the fan-out's warm-up wait, and each part that landed changed
+    `pages`, so no later call or repair matched. A part's own frames are its
+    slots, its own pages follow the break (:func:`page_part_own`), and a page
+    names a record by its id."""
+    ctx = without_frames_or_samples(context_for(doc, agent))
+    ctx.pop("pages", None)
+    data = ctx.get("data")
+    if isinstance(data, dict):
+        ctx["data"] = {
+            "entities": [
+                {**{k: e[k] for k in _PAGE_ENTITY_KEYS if k in e},
+                 "fields": [str(f.get("name")) for f in e.get("fields") or []
+                            if isinstance(f, dict) and f.get("name")]}
+                for e in data.get("entities") or [] if isinstance(e, dict)
+            ],
+            "relationships": data.get("relationships") or [],
+        }
+    return ctx
+
+
+def without_frames_or_samples(ctx: dict) -> dict:
+    """A page author's slice without the design's frames or the records'
+    sample values. A page is bound to its frames by `figmaFrame` and
+    `frames`, which it carries; the frame list is the design's, every drawn
+    frame of it (30% of DITANS's slice), and the samples are the seed's. A
+    field's flags that are false say nothing an absent flag does not."""
+    if isinstance(ctx.get("designSources"), list):
+        ctx["designSources"] = [{k: v for k, v in s.items() if k not in ("frames", "gaps")}
+                                for s in ctx["designSources"] if isinstance(s, dict)]
+    data = ctx.get("data")
+    if isinstance(data, dict) and isinstance(data.get("entities"), list):
+        ctx["data"] = {**data, "entities": [
+            {**e, "fields": [{k: v for k, v in f.items() if k != "examples" and v is not False}
+                             if isinstance(f, dict) else f for f in e.get("fields") or []]}
+            if isinstance(e, dict) else e
+            for e in data["entities"]]}
+    return ctx
+
+
+def page_part_own(doc: dict, subject: str, slots: list[dict]) -> str:
+    """After the break, what is this part's alone: the pages it declared
+    before (a repair edits them) and the frames its slots link to elsewhere.
+    Not the other parts' routes: each keeps to its module's own address
+    (:func:`~services.blueprint.page_planner.drawn_address`)."""
+    from services.blueprint.page_planner import page_set_pages
+
+    mine = page_set_pages(doc, subject)
+    placed = {str(s.get("figmaFrame")) for s in slots}
+    linked = {str(l.get("to")) for s in slots for l in s.get("links") or [] if isinstance(l, dict)} - placed
+    names = {str(f.get("nodeId")): str(f.get("name") or f.get("shows") or "")
+             for source in doc.get("designSources") or [] for f in source.get("frames") or []
+             if str(f.get("nodeId")) in linked}
+    out = ""
+    if mine:
+        out += ("\n\nThe pages this part declared before:\n\n```json\n"
+                + json.dumps(mine, indent=2, sort_keys=True) + "\n```")
+    if names:
+        out += ("\n\nFrames these slots link to, placed by other parts:\n"
+                + "\n".join(f"{k}: {v}" for k, v in sorted(names.items())))
+    return out
+
+
 def _without_provenance(value: Any) -> Any:
     """Strip provenance from a section an agent reads but does not own."""
     if isinstance(value, list):
@@ -2755,14 +2831,16 @@ def _build_prompt(
 
         if subject and is_page_set_part(subject):
             # ONE PART OF A PAGE SET TOO LARGE FOR ONE REPLY. What every part
-            # shares — the Blueprint — first, so the parts read it from the
-            # cache; this part's question and slots after the break.
+            # shares first, so the parts read it from the cache; this part's
+            # question, slots and own pages after the break.
+            slots = page_set_parts(doc).get(subject, [])
             user = (
                 "Here is the Blueprint the page set is derived from.\n\n```json\n"
-                + json.dumps(context_for(doc, agent), indent=2, sort_keys=True)
+                + json.dumps(page_part_context(doc, agent), indent=2, sort_keys=True)
                 + "\n```" + CACHE_BREAK
                 + page_set_part_prompt(doc, subject) + "\n\n```json\n"
-                + json.dumps(page_set_parts(doc).get(subject, []), indent=2) + "\n```"
+                + json.dumps(slots, indent=2) + "\n```"
+                + page_part_own(doc, subject, slots)
             )
             if subject != FEATURES_PART:
                 user += ("\n\nEVERY page you author carries `figmaFrame`, set to the "
@@ -3569,7 +3647,7 @@ def _page_details_prompt(doc: dict, system: str, subject: str,
         for p in doc.get("pages") or []
         if isinstance(p, dict) and p.get("status") != "DEPRECATED"
     ]
-    context = context_for(doc, "page_design")
+    context = without_frames_or_samples(context_for(doc, "page_design"))
     context["pages"] = index
     keys = {
         str(p.get("id")): _declared_key(output_dir, str(p.get("id")))
