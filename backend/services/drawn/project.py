@@ -125,15 +125,23 @@ def nav_routes(doc: dict, shell: dict) -> list[dict]:
                 for link in f.get("links") or []:
                     if link.get("via") and link.get("to"):
                         links.setdefault(str(link["via"]).strip().lower(), str(link["to"]))
-    by_name = {str(p.get("name") or "").strip().lower(): str(p.get("route")) for p in doc.get("pages") or []
-               if isinstance(p, dict) and p.get("route")}
+    # A NAME IS MATCHED AMONG THIS FRAME'S OWN PAGES. Matched across the app,
+    # the agency's, the enterprise's and the recruiter's "Home" and "Messages"
+    # all opened the candidate's (wzml1sa6, 2026-10-30).
+    own = {route for route, _key in portal_routes(doc, [shell])}
+    by_name = {str(p.get("name") or "").strip().lower(): str(p.get("route")) for p in _live_pages(doc)
+               if not own or str(p.get("route")) in own}
+    live = {str(p["route"]) for p in _live_pages(doc)}
     out = []
     for row in (shell.get("sample") or {}).get("nav") or []:
         if not isinstance(row, dict):
             continue
         label = str(row.get("label") or "")
         target = links.get(label.strip().lower())
-        href = by_frame.get(target or "", "") or by_name.get(label.strip().lower(), "") or str(row.get("href") or "")
+        # An entry bound to a page by hand (`href`, a live route) keeps it.
+        bound = str(row.get("href") or "")
+        href = (bound if bound in live else "") or by_frame.get(target or "", "") \
+            or by_name.get(label.strip().lower(), "")
         out.append({**{k: v for k, v in row.items() if k not in ("id", "active")}, "href": href or "#"})
     return out
 
