@@ -678,6 +678,10 @@ export function _resolveRef(ref: unknown, ctx: WorkflowExecutionContext): unknow
   // timestamp column still gets a Date from it (`_coerceValue`).
   if (ref === "$today") return _calendarDate(new Date());
   if (ref === "$user.id") return (ctx as any)?.user?.id ?? ctx.variables?.__user?.id ?? ctx.variables?.user?.id ?? null;
+  // THE SIGNED-IN PERSON'S EMAIL: how a staff member's own membership row is
+  // found. A login is not a membership; matched by id, DITANS's 66 staff
+  // workflows found no member and refused every run (2026-10-30).
+  if (ref === "$user.email") return (ctx as any)?.user?.email ?? ctx.variables?.__user?.email ?? ctx.variables?.user?.email ?? null;
   // A signed-out visitor's guest token (the `forge-guest` cookie the execute
   // route hands over): what finds the cart a guest already started.
   if (ref === "$guest") return guestOf(ctx);
