@@ -2196,7 +2196,13 @@ def frame_slots(frames: list[dict], *, sole: bool = True, doc: dict | None = Non
     # on all of them, and three screens would have been routed as one name.
     from collections import Counter
     shared = Counter(str(f.get("shows") or "").strip() for f in frames)
-    chrome = {h for h, n in shared.items() if h and n >= 2 and n >= len(frames) * 0.5}
+    # Nor one three frames share: DITANS's 589 frames drew six products, so
+    # no logo reached half of them, and 81 screens whose heading read
+    # "DITANS" or "Ditans Health" were told that was what they were — the
+    # writer could not tell them apart and left them on no page (2026-10-30).
+    # A screen and one state of it may share a heading; three screens are
+    # not named by it.
+    chrome = {h for h, n in shared.items() if h and (n >= 3 or (n >= 2 and n >= len(frames) * 0.5))}
     products = sorted({str(f.get("portal") or "") for f in frames} - {""})
     slots: list[dict] = []
     for frame in frames:
@@ -2222,7 +2228,9 @@ def frame_slots(frames: list[dict], *, sole: bool = True, doc: dict | None = Non
                        "prompt": ("The screen whose heading reads \u201c%s\u201d." % shows
                                   if shows else "The screen drawn as \u201c%s\u201d." % name)}],
             "prompt": why + (" Its heading reads \u201c%s\u201d: that is what it "
-                             "is, so its route and name say that." % shows if shows else ""),
+                             "is, so its route and name say that." % shows if shows else "")
+                      + (" The designer named the frame \u201c%s\u201d." % name
+                         if shows and name != node_id and name.lower() != shows.lower() else ""),
         }
         if shows:
             slot["shows"] = shows
