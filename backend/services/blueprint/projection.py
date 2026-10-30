@@ -364,6 +364,16 @@ def _sealed_fields(entity: dict, doc: dict) -> set[str]:
             found_by |= {str(rule.get(k)) for k in ("column", "guestColumn") if rule.get(k)}
     if platform_table(str(entity.get("table") or to_snake(str(entity.get("name") or "")))):
         found_by |= {f for f in fields if re.sub(r"[^a-z]", "", f.lower()) in ("email", "password", "passwordhash")}
+    # AND EVERY COLUMN A WORKFLOW FINDS ROWS BY. DITANS's staff steps look the
+    # signed-in member up by `email = $user.email`; the member's email was
+    # sealed, its plain column empty, and all 66 lookups matched nobody
+    # (wzml1sa6, 2026-10-30).
+    table = str(entity.get("table") or to_snake(str(entity.get("name") or "")))
+    for wf in doc.get("workflows") or []:
+        for step in (wf.get("steps") or []) if isinstance(wf, dict) else []:
+            config = (step.get("config") or {}) if isinstance(step, dict) else {}
+            if str(config.get("table") or "") == table and isinstance(config.get("where"), dict):
+                found_by |= set(config["where"]) & fields
     return fields - found_by
 
 
