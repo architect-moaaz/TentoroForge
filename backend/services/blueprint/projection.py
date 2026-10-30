@@ -3102,6 +3102,15 @@ def project_integrations(doc: dict, app_root: str | Path) -> dict[str, Any]:
     return {"files": [CONNECTED_SERVICES_FILE], "services": len(entries)}
 
 
+#: A page's server reads, by entity name: `list("Candidate", …)`, `count("Job")`.
+_SDK_READ = re.compile(r"""\b(?:list|listPage|record|recordsById|count|total|series|query|near|similar)\(\s*["'](\w+)["']""")
+
+
+def _sdk_reads(load: str) -> set[str]:
+    """The entities a page's load.ts reads through the SDK."""
+    return set(_SDK_READ.findall(load or ""))
+
+
 def entity_access(doc: dict) -> dict[str, dict[str, list[str]]]:
     """Each entity slug -> the roles that may read it and the roles that may
     write it, from the pages that use it.
@@ -3117,6 +3126,7 @@ def entity_access(doc: dict) -> dict[str, dict[str, list[str]]]:
     by_name = {e.get("name"): eid for eid, e in entities.items()}
     slug_of = {eid: str(e.get("table") or str(e.get("name")).lower()) for eid, e in entities.items()}
     layouts = {l.get("page"): l for l in _live(doc.get("pageLayouts"))}
+    codes = {str(r.get("page")): str(r.get("load") or "") for r in doc.get("pageCode") or [] if isinstance(r, dict)}
     readers: dict[str, set[str]] = {eid: set() for eid in entities}
     writers: dict[str, set[str]] = {eid: set() for eid in entities}
     for pg in _live(doc.get("pages")):
@@ -3134,6 +3144,19 @@ def entity_access(doc: dict) -> dict[str, dict[str, list[str]]]:
         for eid in (pg.get("data") or {}).get("supportingEntities") or []:
             if eid in entities:
                 readers[eid] |= roles
+        # WHAT THE PAGE SHOWS AND WHAT ITS CODE READS. A screen's sections
+        # name their records, and a page's load.ts reads through the SDK by
+        # entity name; neither was counted, so DITANS's Enterprise screens
+        # read Candidate, Facility and CredentialHold as nothing — readable by
+        # the Recruiter alone, whose pages declared them (2026-10-30).
+        for section in pg.get("sections") or []:
+            if isinstance(section, dict):
+                eid = by_name.get(section.get("entity"), section.get("entity"))
+                if eid in entities:
+                    readers[eid] |= roles
+        for name in _sdk_reads(codes.get(str(pg.get("id")), "")):
+            if by_name.get(name) in entities:
+                readers[by_name[name]] |= roles
     # Ownership rules are dicts beside prose notes.
     for rule in ((doc.get("security") or {}).get("ownershipRules") or []):
         if isinstance(rule, dict) and rule.get("status") != "DEPRECATED" and by_name.get(rule.get("entity")) in entities:
