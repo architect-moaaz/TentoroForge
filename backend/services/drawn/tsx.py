@@ -326,7 +326,11 @@ class Emitter:
             parts.append(f'data-node="{node["id"]}"')
         name = str(node.get("name") or "").strip()
         if self.trace and name and not re.match(r"^(Frame|Group|Rectangle|Vector|Ellipse|Line)\b", name):
-            parts.append(f"data-layer={json.dumps(name[:60])}")
+            # A JSX ATTRIBUTE STRING TAKES NO BACKSLASH ESCAPES: a layer named
+            # with a double quote wrote `\"`, which ends the string, and 12
+            # DITANS screens did not compile (2026-10-30). The name is a label.
+            label = name[:60].replace("\\", "/").replace('"', "'")
+            parts.append(f"data-layer={json.dumps(label, ensure_ascii=False)}")
         return " ".join(parts)
 
     def element(self, node: dict, parent: dict | None = None, depth: int = 0, *, own_size: bool = False) -> str:
