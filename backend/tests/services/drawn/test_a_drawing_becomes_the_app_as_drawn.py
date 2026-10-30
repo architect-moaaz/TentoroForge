@@ -1010,3 +1010,16 @@ def test_a_page_is_first_bound_at_medium_and_asked_again_at_its_own_effort():
     assert at_medium(Client("low")).effort == "low"
     fake = object()
     assert at_medium(fake) is fake
+
+
+def test_a_layer_named_with_a_quote_still_compiles():
+    """12 DITANS screens wrote `data-layer="Badge \\"Pending\\""`: a JSX string
+    takes no backslash escapes, so the quote ended it and the view did not
+    compile (2026-10-30)."""
+    import re
+
+    node = {"id": "9:1", "type": "FRAME", "name": 'Badge "Pending" — v2', "children": [],
+            "absoluteBoundingBox": {"x": 0, "y": 0, "width": 10, "height": 10}}
+    out = Emitter(trace=True).element(node, None)
+    label = re.search(r'data-layer="([^"]*)"', out)
+    assert label and label.group(1) == "Badge 'Pending' — v2" and "\\" not in out
