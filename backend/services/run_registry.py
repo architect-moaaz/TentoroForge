@@ -403,11 +403,21 @@ def stopped_line(run: dict[str, Any]) -> str:
 
 def _process_started(pid: int) -> float | None:
     """When process `pid` began (epoch seconds), or None when there is no
-    such process or it cannot be read (outside Linux)."""
+    such process or it cannot be read."""
     try:
         ticks = int(open(f"/proc/{pid}/stat").read().rsplit(")", 1)[1].split()[19])
         boot = next(int(line.split()[1]) for line in open("/proc/stat") if line.startswith("btime "))
         return boot + ticks / os.sysconf("SC_CLK_TCK")
+    except Exception:  # noqa: BLE001
+        pass
+    # NOT LINUX: NO /proc. On a Mac every running build read as dead, and a
+    # backend restart closed DITANS's live D4 build as "lost", telling its
+    # owner to press Build — a second build beside the first (2026-10-30).
+    try:
+        import subprocess
+        out = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True,
+                             timeout=5, env={**os.environ, "LC_ALL": "C"}).stdout.strip()
+        return time.mktime(time.strptime(out, "%a %b %d %H:%M:%S %Y")) if out else None
     except Exception:  # noqa: BLE001
         return None
 

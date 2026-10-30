@@ -52,3 +52,21 @@ def test_this_process_never_counts_as_the_writer(tmp_path, monkeypatch):
     path = _ledger(tmp_path, "pf", os.getpid(), at)
     run_registry.close_orphaned_ledgers(tmp_path)
     assert _ended(path)
+
+
+def test_a_live_build_in_its_own_process_is_left_open_on_any_platform(tmp_path):
+    """No /proc on a Mac: every live run read as dead, and a backend restart
+    closed DITANS's running D4 build as lost (2026-10-30). A real process,
+    begun before its run, is read as alive wherever it runs."""
+    import subprocess
+
+    child = subprocess.Popen(["sleep", "30"])
+    try:
+        time.sleep(1.2)
+        at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        path = _ledger(tmp_path, "ditans", child.pid, at)
+        assert abs(run_registry._process_started(child.pid) - time.time()) < 10
+        run_registry.close_orphaned_ledgers(tmp_path)
+        assert not _ended(path)
+    finally:
+        child.kill()
