@@ -203,3 +203,19 @@ def test_a_resumed_build_declares_only_the_parts_still_missing(tmp_path):
                          for s in parts[3:] for i, p in enumerate(_pages_for(svc, s))]
     assert pending_subjects(node, svc.doc) == []
     assert "page_contracts" in completed_nodes(svc.doc)
+
+
+def test_one_path_has_one_name_for_its_dynamic_segment():
+    """DITANS (2026-10-30) reached assembly and failed to boot: Next refused
+    /interviews/[applicationId]/plan beside /interviews/[interviewId]/debrief."""
+    from services.blueprint.agent_contract import RouteParamsClash, check_route_params
+
+    doc = {"pages": [{"id": "PAGE-001", "route": "/interviews/[interviewId]/debrief", "status": "PROPOSED"}]}
+    clash = AgentResult(task_id="T", agent="page_design", proposals=[ArtifactProposal(
+        section="pages", natural_key="/interviews/[applicationId]/plan",
+        body={"route": "/interviews/[applicationId]/plan"})])
+    with pytest.raises(RouteParamsClash, match=r"use `\[interviewId\]`"):
+        check_route_params(clash, doc)
+    fine = AgentResult(task_id="T", agent="page_design", proposals=[ArtifactProposal(
+        section="pages", natural_key="/plan/[applicationId]", body={"route": "/plan/[applicationId]"})])
+    check_route_params(fine, doc)
