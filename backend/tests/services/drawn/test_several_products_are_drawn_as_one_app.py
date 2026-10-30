@@ -283,3 +283,19 @@ def test_pairing_asks_a_batch_of_phone_drawings_at_a_time_and_holds_nothing_back
     assert len(found) == 65 and all(p["wide"] == p["phone"].replace(":1", ":2") for p in found)
     assert left, "a drawing named twice across batches is kept once"
     assert DAG["drawn_pairs"].optional
+
+
+def test_a_menu_entry_opens_its_own_products_page_or_the_one_it_was_bound_to():
+    from services.drawn.project import nav_routes
+
+    doc = _portals_doc()
+    doc["pages"] += [{"id": "PAGE-006", "name": "Home", "route": "/candidate-home", "figmaFrame": "3:1"},
+                     {"id": "PAGE-007", "name": "Home", "route": "/recruiter-home", "figmaFrame": "2:1"}]
+    recruiter = doc["drawnViews"][1]
+    recruiter["sample"]["nav"] = [{"label": "Home"}, {"label": "Jobs"}, {"label": "Team", "href": "/command-centre"},
+                                  {"label": "Gone", "href": "/nowhere"}]
+    got = [row["href"] for row in nav_routes(doc, recruiter)]
+    assert got[0] == "/recruiter-home", "the recruiter's Home, not the candidate's"
+    assert got[1] == "#", "the candidate's Jobs is not the recruiter's"
+    assert got[2] == "/command-centre", "bound by hand"
+    assert got[3] == "#", "a binding to no page leads nowhere"
