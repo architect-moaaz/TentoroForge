@@ -397,6 +397,10 @@ def _fill_hex(node: dict, *, solid_only: bool = True) -> str | None:
     return _paint_hex(node.get("fills"), node, solid_only=solid_only)
 
 
+#: The node types whose stroke is an outline; a VECTOR's stroke draws a shape.
+_BOX_TYPES = frozenset({"FRAME", "RECTANGLE", "INSTANCE", "COMPONENT", "COMPONENT_SET", "SECTION"})
+
+
 def _document_to_pseudocode(document: dict) -> str:
     """A Figma node document as the nested tags `_surfaces`/`from_code` parse."""
     parts: list[str] = []
@@ -412,7 +416,11 @@ def _document_to_pseudocode(document: dict) -> str:
         fill = _fill_hex(node, solid_only=not is_text)
         if fill:
             classes.append(f"text-[{fill}]" if is_text else f"bg-[{fill}]")
-        stroke = None if is_text else _paint_hex(node.get("strokes"), node, solid_only=True)
+        # A BORDER IS A BOX'S OUTLINE. An icon is drawn in 2px strokes, and on a
+        # file of Lucide icons those strokes outnumbered every card border:
+        # the scheme's border came out near-black (D3, 2026-10-28).
+        boxed = str(node.get("type") or "").upper() in _BOX_TYPES
+        stroke = _paint_hex(node.get("strokes"), node, solid_only=True) if boxed and not is_text else None
         if stroke:
             classes.append(f"border-[{stroke}]")
         try:

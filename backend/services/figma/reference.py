@@ -863,6 +863,7 @@ def _attach_structure(ref: DesignReference, screen: ScreenRef, blocks) -> None:
     ref.screens[index] = _replace(
         screen, structure={"source": "rest_node_document", "document": payload,
                            "labels": labels_from_document(payload),
+                           "links": screen_links(payload),
                            "boxes": boxes})
     _harvest(ref, payload)
 
@@ -949,6 +950,66 @@ def labels_from_document(document: Any, limit: int = 200) -> list[str]:
         if text not in labels:
             labels.append(text)
     return labels[:limit]
+
+
+#: How a prototype link leaves a screen, in the words the page set reads.
+#: OVERLAY opens the destination over this screen (a dialog, a drawer, a
+#: menu); SWAP replaces the overlay that is open; NAVIGATE goes to another
+#: screen; CHANGE_TO switches a component's variant (a state of the same
+#: screen); SCROLL_TO moves within it.
+LINK_KINDS = {"NAVIGATE": "navigate", "OVERLAY": "overlay", "SWAP": "swap",
+              "SWAP_STATE": "state", "CHANGE_TO": "state", "SCROLL_TO": "scroll"}
+
+
+def _pressed_label(node: dict) -> str:
+    """The words on the element a link hangs from: its own text, else its
+    first text descendant's, else its layer name."""
+    if str(node.get("type") or "").upper() == "TEXT":
+        return re.sub(r"\s+", " ", str(node.get("characters") or "")).strip()[:60]
+    stack = list(node.get("children") or [])
+    while stack:
+        child = stack.pop(0)
+        if not isinstance(child, dict) or child.get("visible") is False:
+            continue
+        if str(child.get("type") or "").upper() == "TEXT" and str(child.get("characters") or "").strip():
+            return re.sub(r"\s+", " ", str(child["characters"])).strip()[:60]
+        stack.extend(child.get("children") or [])
+    return str(node.get("name") or "").strip()[:60]
+
+
+def screen_links(document: Any) -> list[dict[str, str]]:
+    """Where one screen's prototype links lead: ``[{to, kind, via}]``.
+
+    THE DESIGNER WIRED WHICH FRAME IS A DIALOG. A frame opened as an overlay
+    from a button on another frame is that screen's dialog or drawer, not a
+    page; a swap is a state of it; a navigation is a different page. The
+    names on a hundred frames can suggest that, but the prototype states it,
+    and the page set groups frames into pages by it (`page_planner`). Only a
+    REST node tree carries interactions — generated code has none."""
+    out: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for _canvas, node in _walk_nodes(document):
+        if node.get("visible") is False:
+            continue
+        for interaction in node.get("interactions") or []:
+            for action in (interaction or {}).get("actions") or []:
+                if not isinstance(action, dict):
+                    continue
+                to = str(action.get("destinationId") or "")
+                kind = LINK_KINDS.get(str(action.get("navigation") or "").upper(), "")
+                if not to or not kind:
+                    continue
+                via = _pressed_label(node)
+                key = (to, kind, via)
+                if key not in seen:
+                    seen.add(key)
+                    out.append({"to": to, "kind": kind, **({"via": via} if via else {})})
+        if node.get("transitionNodeID"):
+            key = (str(node["transitionNodeID"]), "navigate", _pressed_label(node))
+            if key not in seen:
+                seen.add(key)
+                out.append({"to": key[0], "kind": "navigate", **({"via": key[2]} if key[2] else {})})
+    return out
 
 
 def _interactions_of(node: dict) -> list[InteractionRef]:

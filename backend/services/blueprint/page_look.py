@@ -35,6 +35,29 @@ logger = logging.getLogger(__name__)
 
 #: Looks per page: one at the compiled page, one at its rewrite.
 LOOKS = 2
+#: Looks for a page that reproduces a drawing: closing the distance to a
+#: picture takes more rounds than passing a taste bar.
+EXACT_LOOKS = 3
+
+
+def looks_for(reference: dict | None) -> int:
+    """How many looks a page gets: more when it must match a drawing."""
+    return EXACT_LOOKS if (reference or {}).get("exact") and (reference or {}).get("images") else LOOKS
+
+
+def drawing_viewports(reference: dict | None) -> dict[str, tuple[int, int]]:
+    """The viewports a page is shot at: the desk at the drawing's own width
+    when it reproduces one — compared at 1280 against a 1440 frame, every
+    column would be "too narrow" — and the phone as always."""
+    size = (reference or {}).get("size") or []
+    if (reference or {}).get("exact") and len(size) == 2 and size[0]:
+        # AT THE WIDTH THE PAGE HAS IN THE DRAWING: the frame less its drawn
+        # sidebar, since the page is rendered without the shell.
+        content = (reference or {}).get("content") or {}
+        width = max(768, min(1920, int(size[0] * float(content.get("w") or 1))))
+        height = max(700, min(1400, int((size[1] or 900) * float(content.get("h") or 1))))
+        return {"desktop": (width, height), "mobile": VIEWPORTS["mobile"]}
+    return dict(VIEWPORTS)
 #: Viewports the reviewer is shown — a desk and a phone.
 VIEWPORTS: dict[str, tuple[int, int]] = {"desktop": (1280, 900), "mobile": (390, 844)}
 #: The tallest screenshot sent to the reviewer, in pixels (scale factor 1).
@@ -63,7 +86,8 @@ def frame_html(css: str, vendor_js: str, page_js: str) -> str:
 
 
 def render(doc: dict, page: dict, app_root: Path, load: str, view: str, out_dir: Path,
-           parts: dict[str, str] | None = None) -> dict[str, Any]:
+           parts: dict[str, str] | None = None,
+           viewports: dict[str, tuple[int, int]] | None = None) -> dict[str, Any]:
     """Bundle the candidate and screenshot it at every viewport.
 
     ``{"shots": {name: path}, "errors": [...]}`` — the errors are what the
@@ -125,7 +149,7 @@ def render(doc: dict, page: dict, app_root: Path, load: str, view: str, out_dir:
             with sync_playwright() as pw:
                 browser = pw.chromium.launch(headless=True)
                 try:
-                    for name, (w, h) in VIEWPORTS.items():
+                    for name, (w, h) in (viewports or VIEWPORTS).items():
                         tab = browser.new_page(viewport={"width": w, "height": h}, device_scale_factor=1)
                         tab.on("pageerror", lambda e: errors.append(f"view.tsx: {e}"))
                         tab.on("console", lambda m: errors.append(f"console: {m.text}")
@@ -153,7 +177,7 @@ def render(doc: dict, page: dict, app_root: Path, load: str, view: str, out_dir:
     for e in errors:
         if e not in seen:
             seen.append(e)
-    return {"shots": shots, "errors": seen[:12]}
+    return {"shots": shots, "errors": seen[:12], "viewports": dict(viewports or VIEWPORTS)}
 
 
 def change_review_schema() -> dict[str, Any]:
@@ -179,8 +203,95 @@ def caused_by_change(verdict: dict) -> list[dict]:
             if i.get("fromChange") and i.get("severity") in ("high", "medium")]
 
 
+#: What the reviewer is told when the page reproduces a drawing.
+DRAWING_RULE = (
+    "\n\nTHIS PAGE REPRODUCES A DRAWING. The FIRST image is one picture of both: the drawing on "
+    "the LEFT under a black \u201cDRAWN\u201d banner, this page as built on the RIGHT under a blue "
+    "\u201cBUILT\u201d banner, both cut to the page (the application's sidebar and top bar are left "
+    "out of both). Then the phone screenshot, then {n} more drawn frame(s) of this page ({parts}). "
+    "Measured: {pixel}% of the page's colour blocks match the drawing's. Judge one "
+    "thing: how close the desk screenshot is to the drawing. List every visible difference \u2014 "
+    "an element missing or added, a different order or alignment, a size, a gap or padding, a "
+    "colour, a font size, weight or line height, a radius, a border, a word of copy, an icon \u2014 "
+    "each with `where`, the `problem` stated as drawn vs built (\u201cdrawn 24px padding, built 16px\u201d) "
+    "and the `fix` in the page's own terms. Real data in place of the drawing's examples is not a "
+    "difference; its layout is. The score is the likeness: 10 is indistinguishable inside the "
+    "shell, 8 is a close match with small slips, 5 is the same parts arranged differently. The "
+    "phone screenshot only has to work: nothing cut off, nothing overlapping."
+)
+
+
+#: The share of the page's colour blocks that must match the drawing's for a
+#: reproduced page to pass, whatever the reviewer says.
+PIXEL_PASS = 0.85
+#: The comparison grid: both pictures at this width, in blocks this big.
+_GRID_WIDTH, _CELL = 200, 8
+
+
+def _drawn_crop(drawing: dict) -> Any:
+    """The drawing's main frame, cut to the page (the shell it draws left out)."""
+    from PIL import Image
+
+    image = Image.open(drawing["images"][0]).convert("RGB")
+    box = drawing.get("content") or {}
+    if box:
+        image = image.crop((int(float(box.get("x") or 0) * image.width), int(float(box.get("y") or 0) * image.height),
+                            image.width, image.height))
+    return image
+
+
+def pixel_likeness(drawn: Any, built: Any) -> float:
+    """The share of 8-pixel blocks whose colour matches, over the height both
+    pictures have, at one width. Not a judgement: a page painted in the wrong
+    colour, laid out in other columns or missing a section scores lower
+    however it is described."""
+    from PIL import Image
+
+    def grid(image: Any) -> Any:
+        w = _GRID_WIDTH
+        h = max(_CELL, int(image.height * w / image.width))
+        return image.resize((w // _CELL, h // _CELL), Image.BOX)
+
+    a, b = grid(drawn), grid(built)
+    rows = min(a.height, b.height)
+    pa, pb = a.load(), b.load()
+    hit = total = 0
+    for y in range(rows):
+        for x in range(a.width):
+            total += 1
+            hit += sum(abs(c - d) for c, d in zip(pa[x, y], pb[x, y])) / 3 <= 12
+    return round(hit / total, 3) if total else 0.0
+
+
+def side_by_side(drawn: Any, built: Any, out: Path) -> Path:
+    """One picture: the drawing on the left under a dark DRAWN banner, the
+    built page on the right under a blue BUILT banner. Shown as two images,
+    the reviewer named the drawing's colours as the build's and the build's
+    charts as the drawing's (D3, 2026-10-28)."""
+    from PIL import Image, ImageDraw, ImageFont
+
+    width = 900
+    a = drawn.resize((width, int(drawn.height * width / drawn.width)))
+    b = built.resize((width, int(built.height * width / built.width)))
+    height = min(max(a.height, b.height), MAX_SHOT_PX - 80)
+    canvas = Image.new("RGB", (width * 2 + 24, height + 64), "#ffffff")
+    canvas.paste(a.crop((0, 0, width, min(a.height, height))), (0, 64))
+    canvas.paste(b.crop((0, 0, width, min(b.height, height))), (width + 24, 64))
+    draw = ImageDraw.Draw(canvas)
+    try:
+        font = ImageFont.load_default(size=30)
+    except TypeError:                       # an older Pillow has one size
+        font = ImageFont.load_default()
+    draw.rectangle((0, 0, width, 56), fill="#111111")
+    draw.text((16, 12), "DRAWN — the design", fill="#ffffff", font=font)
+    draw.rectangle((width + 24, 0, width * 2 + 24, 56), fill="#1d4ed8")
+    draw.text((width + 40, 12), "BUILT — this page", fill="#ffffff", font=font)
+    canvas.save(out)
+    return out
+
+
 def judge(doc: dict, page: dict, look: dict, client: Any, *, references: list[Path] = (),
-          change: str = "") -> tuple[dict, Any]:
+          change: str = "", drawing: dict | None = None) -> tuple[dict, Any]:
     """The reviewer's verdict on the screenshots. Returns the verdict and
     what the call cost, as `(usage, elapsed)`.
 
@@ -196,11 +307,12 @@ def judge(doc: dict, page: dict, look: dict, client: Any, *, references: list[Pa
 
     proved = "\n".join(f"- {e}" for e in look.get("errors") or []) or "(none)"
     names = list(look.get("shots") or {})
+    widths = look.get("viewports") or VIEWPORTS
     user = ("The page's contract:\n```json\n" + json.dumps(_page_brief(doc, page), indent=1)
             + "\n```\nIt is rendered with sample data in place of the database — judge the design, "
             "the hierarchy and the behaviour it implies, not the rows.\n\n"
             f"What the browser proved broken:\n{proved}\n\n"
-            + "The screenshots, in order: " + ", ".join(f"{n} ({VIEWPORTS[n][0]}px wide)" for n in names)
+            + "The screenshots, in order: " + ", ".join(f"{n} ({widths[n][0]}px wide)" for n in names)
             + ". Judge both: a page that is right at a desk and broken on a phone does not pass.")
     if change:
         user += ("\n\nTHIS PAGE ALREADY EXISTED AND WAS JUST CHANGED. What was asked:\n"
@@ -213,6 +325,20 @@ def judge(doc: dict, page: dict, look: dict, client: Any, *, references: list[Pa
                  "and doing what was asked is not an issue. Judge how well it was done, never "
                  "whether it should have been.")
     images = [look["shots"][n] for n in names]
+    drawn = [str(x) for x in (drawing or {}).get("images") or [] if x] if (drawing or {}).get("exact") else []
+    pixel = None
+    if drawn and not change:
+        from PIL import Image
+
+        parts = ", ".join(f"{p.get('as')} \u201c{p.get('label')}\u201d" for p in (drawing or {}).get("parts") or []
+                          if isinstance(p, dict)) or "none"
+        crop = _drawn_crop(drawing)
+        built = Image.open(look["shots"]["desktop"]).convert("RGB")
+        pixel = pixel_likeness(crop, built)
+        pair = side_by_side(crop, built, Path(look["shots"]["desktop"]).with_name("side-by-side.png"))
+        user += DRAWING_RULE.format(n=len(drawn) - 1, parts=parts, pixel=round(pixel * 100))
+        images = [str(pair)] + [look["shots"][n] for n in names if n != "desktop"] + drawn[1:]
+        references = []                     # the drawing is the bar, not the user's mood board
     if references:
         user += (f"\n\nThe last {len(references)} image(s) are what the user showed as the standard "
                  f"they want: {READ_FOR['page_look']}")
@@ -222,6 +348,13 @@ def judge(doc: dict, page: dict, look: dict, client: Any, *, references: list[Pa
                    schema=change_review_schema() if change else REVIEW_SCHEMA, images=images)
     body = json.loads(getattr(reply, "text", reply))
     body["broken"] = list(look.get("errors") or [])
+    if pixel is not None:
+        # THE LIKENESS IS MEASURED AS WELL AS JUDGED. Ranked by both, and a
+        # page whose blocks do not match does not pass however it reads.
+        body["pixel"] = pixel
+        body["likeness"] = round((pixel * 10 + int(body.get("score") or 0)) / 2, 1)
+        if pixel < PIXEL_PASS:
+            body["verdict"] = "revise"
     if body["broken"] or any(i.get("severity") == "high" for i in body.get("issues") or []) \
             or int(body.get("score") or 0) < PASS_SCORE:
         body["verdict"] = "revise"
@@ -238,6 +371,10 @@ def look_brief(verdict: dict, *, change_only: bool = False) -> str:
                  "works and fix what the change broke or left undone:"]
     for s in verdict.get("strengths") or []:
         lines.append(f"  + {s}")
+    if verdict.get("pixel") is not None:
+        lines.append(f"MEASURED: {round(float(verdict['pixel']) * 100)}% of the page's colour blocks match the "
+                     f"drawing's; {round(PIXEL_PASS * 100)}% is the bar. Close the gap where the drawing and the "
+                     "page differ most — colours, the order and width of columns, missing sections.")
     if verdict.get("broken"):
         lines.append("BROKEN — proved in the browser, fix every one first:")
         lines += [f"  ! {b}" for b in verdict["broken"]]
@@ -248,19 +385,26 @@ def look_brief(verdict: dict, *, change_only: bool = False) -> str:
 
 def rank(verdict: dict) -> tuple[int, int]:
     """Nothing proven broken first, then the score — the order `page_review`
-    keeps the best version by."""
+    keeps the best version by. A reproduced page by its likeness, judged and
+    measured."""
+    if "likeness" in verdict:
+        return (0 if verdict.get("broken") else 1, int(float(verdict["likeness"]) * 10))
     return (0 if verdict.get("broken") else 1, int(verdict.get("score") or 0))
 
 
 def look_at(doc: dict, page: dict, app_root: Path, load: str, view: str, client: Any, *,
-            attempt: int = 1, change: str = "", parts: dict[str, str] | None = None) -> tuple[dict, Any]:
-    """Render, then judge. Raises LookUnavailable when this machine cannot."""
+            attempt: int = 1, change: str = "", parts: dict[str, str] | None = None,
+            drawing: dict | None = None) -> tuple[dict, Any]:
+    """Render, then judge. Raises LookUnavailable when this machine cannot.
+    With ``drawing`` (a reproduced frame, `react_reference`) the page is shot
+    at the drawing's width and judged on its likeness to it."""
     from services.blueprint import references
 
     out_dir = Path(app_root).parent / ".forge" / "look" / str(page.get("id")) / f"look-{attempt}"
-    look = render(doc, page, Path(app_root), load, view, out_dir, parts=parts)
+    look = render(doc, page, Path(app_root), load, view, out_dir, parts=parts,
+                  viewports=drawing_viewports(drawing))
     shown = references.paths(app_root.parent) if getattr(client, "accepts_images", True) else []
-    verdict, spent = judge(doc, page, look, client, references=shown, change=change)
+    verdict, spent = judge(doc, page, look, client, references=shown, change=change, drawing=drawing)
     verdict["shots"] = look["shots"]
     verdict["attempt"] = attempt
     # WHAT WAS LOOKED AT AND WHAT WAS SAID, KEPT BESIDE THE SCREENSHOTS. The

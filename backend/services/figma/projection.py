@@ -104,6 +104,33 @@ def design_system_from(ref: DesignReference) -> dict[str, Any]:
             out["typography"] = dict(derived["typography"])
         if derived.get("evidence") and len(out) > 1:
             out["paletteEvidence"] = dict(derived["evidence"])
+
+    # …AND THE CORNERS, THE SPACING AND THE BODY TEXT. A page held to the
+    # drawing was written against the scaffold's radius and the Tailwind
+    # scale, because nothing said what the frames use (`styles.scales`). A
+    # published variable still wins, bucket by bucket.
+    from services.figma import styles as _styles
+
+    # THE PRIMARY IS WHAT ACTIONS ARE PAINTED IN, when the frames' buttons
+    # agree on one (`styles.action_colours`) and the file published no colours.
+    if "colors" in out and not ref.tokens.colors:
+        actions = _styles.action_colours(_styles._documents(ref.screens))
+        if actions and actions.most_common(1)[0][1] >= _styles.MIN_USES:
+            primary = actions.most_common(1)[0][0]
+            colors = dict(out["colors"])
+            if colors.get("primary") != primary:
+                if colors.get("accent") == primary or not colors.get("accent"):
+                    colors["accent"] = colors.get("primary") or primary
+                colors["primary"] = primary
+                out["colors"] = colors
+                # Evidence is a count (the contract's type): pressable elements filled with it.
+                out.setdefault("paletteEvidence", {})["primary"] = actions[primary]
+    drawn = _styles.drawn_system(ref.screens)
+    for key in ("radius", "spacing"):
+        if drawn.get(key) and key not in out:
+            out[key] = dict(drawn[key])
+    if drawn.get("typography"):
+        out["typography"] = {**drawn["typography"], **(out.get("typography") or {})}
     return out
 
 

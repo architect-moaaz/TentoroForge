@@ -2135,6 +2135,10 @@ def reference_frames(doc: dict) -> list[dict]:
     return _screen_frames(doc, specification=False)
 
 
+#: The frames that lead to a frame, shown on its slot; past this, a count.
+REACHED_SHOWN = 4
+
+
 def frame_slots(frames: list[dict], *, sole: bool = True, doc: dict | None = None) -> list[dict]:
     """One slot per designed screen: the design IS the answer space.
 
@@ -2149,8 +2153,9 @@ def frame_slots(frames: list[dict], *, sole: bool = True, doc: dict | None = Non
     from entities — it replaces the question. `page_contracts` is asked which
     route each frame is, rather than which of thirty entity features to keep.
     """
-    why = ("Give this frame a route and a pattern. It is a screen the user "
-           "drew, so it is not declinable.")
+    why = ("Place this frame: a page of its own, or part of another drawn "
+           "frame's page (`frames`). It is a screen the user drew, so it is "
+           "not declinable.")
     if not sole:
         why += (" The entity features below are built around it, not instead "
                 "of it.")
@@ -2158,6 +2163,27 @@ def frame_slots(frames: list[dict], *, sole: bool = True, doc: dict | None = Non
     from services.figma.store import frame_ref
 
     modules = design_group_modules(doc) if doc is not None else {}
+    # WHAT OPENS OVER WHAT, AS THE DESIGNER WIRED IT. A frame's own links say
+    # where it goes; the frames that open IT as an overlay, a swap or a state
+    # are the strongest evidence of which page it belongs to, so each slot
+    # carries both directions (`designSources[].frames[].links`).
+    opened: dict[str, list[dict]] = {}
+    # …AND WHAT LEADS HERE. A file may wire every link as a navigation — one
+    # real file's 568 links were all `navigate` — so the frames that lead to a
+    # frame, with the words on what they press, are its evidence too: "Pause"
+    # on the job page leading to a "Pause a live job" frame.
+    reached: dict[str, list[dict]] = {}
+    for frame in frames:
+        here = frame_ref(str(frame.get("source") or ""), frame["nodeId"])
+        for link in frame.get("links") or []:
+            to = frame_ref(str(frame.get("source") or ""), str(link.get("to") or ""))
+            entry = {"from": here, "kind": link.get("kind"), **({"via": link["via"]} if link.get("via") else {})}
+            if link.get("kind") in ("overlay", "swap", "state"):
+                opened.setdefault(to, []).append(entry)
+            elif link.get("kind") == "navigate" and to != here:
+                entry.pop("kind")
+                if entry not in reached.setdefault(to, []):
+                    reached[to].append(entry)
     slots: list[dict] = []
     for frame in frames:
         # A SECOND DESIGN'S FRAME NAMES ITS DESIGN. Node ids repeat across
@@ -2184,6 +2210,19 @@ def frame_slots(frames: list[dict], *, sole: bool = True, doc: dict | None = Non
         }
         if shows:
             slot["shows"] = shows
+        links = [{"to": frame_ref(str(frame.get("source") or ""), str(link.get("to") or "")),
+                  "kind": link.get("kind"), **({"via": link["via"]} if link.get("via") else {})}
+                 for link in frame.get("links") or [] if link.get("to") and link.get("kind")]
+        if links:
+            slot["links"] = links
+        if opened.get(node_id):
+            slot["openedFrom"] = opened[node_id]
+        if reached.get(node_id):
+            # Every frame reaching a hub (Home, the job list) says little; a
+            # frame reached from one or two places by a named control says much.
+            slot["reachedFrom"] = reached[node_id][:REACHED_SHOWN]
+            if len(reached[node_id]) > REACHED_SHOWN:
+                slot["reachedFromCount"] = len(reached[node_id])
         # THE DESIGNER'S GROUP IS THE MODULE. A frame drawn in the Billing
         # section is a Billing screen; the architect made one module per
         # group (`modules[].designGroup`), and the page goes in it — which is
@@ -2242,6 +2281,40 @@ def _slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", str(text or "").lower()).strip("-")
 
 
+#: How a drawn frame is placed, said once for every prompt that asks it.
+#:
+#: ONE PAGE PER FRAME WAS THE WRONG SHAPE. A designer draws a screen several
+#: times — with its dialog open, on each tab, at every step of its wizard,
+#: empty and blocked — and D3 of one real file drew about sixty pages as 145
+#: frames. Asked for a page per frame, the job's "Pause" dialog became a page.
+PLACING_FRAMES = (
+    "PLACE EVERY DRAWN FRAME. A designer draws one screen several times — with a "
+    "dialog open, on each tab, at each step of a wizard, empty or blocked — so a "
+    "frame is EITHER a page of its own (the page's `figmaFrame`) OR part of another "
+    "drawn frame's page, listed in that page's `frames` as `{frame, as, label, "
+    "section}`: `as` is `tab`, `panel`, `drawer`, `dialog`, `step` (of a wizard) or "
+    "`state` (the same screen empty, blocked, waiting, with something chosen); `label` "
+    "is what a person calls it; `section` is the key of the page's section it draws, "
+    "when it draws one.\n\n"
+    "READ THE PROTOTYPE FIRST. A slot's `openedFrom` lists the frames that open it as "
+    "an `overlay` (a dialog or drawer over that frame), a `swap` (replacing an open "
+    "overlay) or a `state` (a variant of that frame), with the words on what is "
+    "pressed (`via`): the designer wired it, so it is part of THAT frame's page. Its "
+    "`reachedFrom` lists the frames whose pressed control (`via`) leads to it by "
+    "navigation: a frame reached from one screen by a control that acts there — "
+    "\u201cPause\u201d, \u201cInvite\u201d, \u201cCompare\u201d, \u201cNext\u201d — is "
+    "usually that screen's dialog, drawer or next step, and a frame reached from many "
+    "(`reachedFromCount`) is a page of its own. Its `links` say where it goes. Then "
+    "read the frames: a shared id prefix (`JB-0`…`JB-7`), a "
+    "name saying dialog, drawer, tab, step or state, the same heading drawn again "
+    "with one thing changed.\n\n"
+    "A page earns its route when it is a different job, not a different moment of "
+    "one. Never place a frame twice. Set a frame aside only when it is not a screen "
+    "of the application at all — an email, a journey map, a rules sheet, a fragment "
+    "drawn to slot into another screen — and name it with the reason in `issues`.\n\n"
+)
+
+
 def _even(items: list, size: int) -> list[list]:
     """``items`` in parts of at most ``size``, as even as they go."""
     n = -(-len(items) // size)
@@ -2270,7 +2343,7 @@ def page_set_parts(doc: dict) -> dict[str, list[dict]]:
         groups.setdefault(key, []).append(slot)
     out: dict[str, list[dict]] = {}
     for key, mine in groups.items():
-        parts = _even(mine, SCREENS_PER_CALL)
+        parts = _packed(mine, SCREENS_PER_CALL)
         if len(parts) == 1:
             out[DRAWN_PART + key] = parts[0]
         else:
@@ -2280,6 +2353,53 @@ def page_set_parts(doc: dict) -> dict[str, list[dict]]:
     if rest:
         out[FEATURES_PART] = rest
     return out
+
+
+def _packed(slots: list[dict], size: int) -> list[list[dict]]:
+    """``slots`` in parts of at most ``size``, frames the prototype ties
+    together kept in one part.
+
+    A dialog is placed in its host's `frames`, so a dialog declared in one
+    part and its host in another would be a frame nobody places, or placed
+    twice. The prototype's overlay, swap and state links tie frames into
+    groups; whole groups are packed into parts in drawing order, and only a
+    group larger than a part is cut."""
+    index = {str(s.get("figmaFrame")): i for i, s in enumerate(slots)}
+    parent = list(range(len(slots)))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for i, slot in enumerate(slots):
+        for link in slot.get("links") or []:
+            j = index.get(str(link.get("to") or ""))
+            if j is not None and link.get("kind") in ("overlay", "swap", "state"):
+                parent[find(i)] = find(j)
+    groups: dict[int, list[dict]] = {}
+    for i, slot in enumerate(slots):
+        groups.setdefault(find(i), []).append(slot)
+    # As even as they go (two parts of 25, not 40 and 10), a part growing
+    # past the even share only to keep a group whole, never past ``size``.
+    share = -(-len(slots) // -(-len(slots) // size)) if slots else size
+    parts: list[list[dict]] = []
+    current: list[dict] = []
+    for group in groups.values():
+        if len(group) > size:
+            if current:
+                parts.append(current)
+                current = []
+            parts.extend(_even(group, size))
+            continue
+        if current and (len(current) >= share or len(current) + len(group) > size):
+            parts.append(current)
+            current = []
+        current += group
+    if current:
+        parts.append(current)
+    return parts
 
 
 def is_page_set_part(subject: str) -> bool:
@@ -2311,17 +2431,22 @@ def page_set_pages(doc: dict, subject: str) -> list[dict]:
     if subject == FEATURES_PART:
         return [p for p in pages if not p.get("figmaFrame")]
     frames = {str(s.get("figmaFrame")) for s in page_set_parts(doc).get(subject, [])}
-    return [p for p in pages if str(p.get("figmaFrame") or "") in frames]
+    return [p for p in pages if page_frames(p) & frames]
+
+
+def page_frames(page: dict) -> set[str]:
+    """Every drawn frame a page is built from: its main frame and the frames
+    of its tabs, panels, dialogs, steps and states (`pages[].frames`)."""
+    out = {str(f.get("frame")) for f in page.get("frames") or [] if isinstance(f, dict) and f.get("frame")}
+    if page.get("figmaFrame"):
+        out.add(str(page["figmaFrame"]))
+    return out
 
 
 def page_set_part_present(doc: dict, subject: str) -> bool:
-    """A page-set subject is declared once its pages are: every frame of a
-    drawn part has its page; the features part, and the whole set, have
-    any."""
-    if subject.startswith(DRAWN_PART):
-        frames = {str(s.get("figmaFrame")) for s in page_set_parts(doc).get(subject, [])}
-        have = {str(p.get("figmaFrame")) for p in page_set_pages(doc, subject)}
-        return bool(frames) and frames <= have
+    """A page-set subject is declared once it has its pages. A drawn part may
+    set a frame aside (an email, a journey map), so having every frame placed
+    is not the test; having declared at all is."""
     return bool(page_set_pages(doc, subject))
 
 
@@ -2354,11 +2479,11 @@ def page_set_part_prompt(doc: dict, subject: str) -> str:
             f"reply, so they are declared a module at a time, side by side. This call "
             f"declares {len(mine)} of them: {whose} screens"
             + (f" (part {part} of {of})" if part else "") + ", in the slots below.\n\n"
-            "One page per slot: no more, and none declined. Every other screen of the "
-            "design is declared by another call, so a screen you think is missing here "
-            "is most likely theirs — if this part genuinely cannot work without one, "
-            "say so in `issues`.\n\n"
-            "For each slot decide only what the screen IS — its route and its pattern. "
+            + PLACING_FRAMES +
+            "Every other screen of the design is declared by another call, so a screen you "
+            "think is missing here is most likely theirs — if this part genuinely cannot "
+            "work without one, say so in `issues`.\n\n"
+            "For each page decide what the screen IS — its route and its pattern. "
             "A slot's `shows` is the heading read off the frame: route it as THAT, never "
             "by its position in the list. Set `figmaFrame` to the slot's `figmaFrame`, "
             "exactly, and where a slot carries a `module` the page's `module` is that one."
@@ -2387,8 +2512,8 @@ def page_set_part_prompt(doc: dict, subject: str) -> str:
                      + f": {len(shown)} screens — " + "; ".join(shown))
     return (
         f"A DESIGN IS CONNECTED, AND ITS {len(drawn)} DRAWN SCREENS ARE DECLARED BY OTHER "
-        "CALLS, a module at a time. Every one of them will be a page, built from its "
-        "frame. They are:\n\n" + "\n".join(lines) + "\n\n"
+        "CALLS, a module at a time. Every one of them will be built from its frame, as a "
+        "page or part of one. They are:\n\n" + "\n".join(lines) + "\n\n"
         "This call declares the rest of the application around them, from the slots "
         "below. Declare no page for a drawn screen, and keep out of the drawn modules' "
         "routes. Where a feature below would BE one of the drawn screens, decline it "
@@ -2523,9 +2648,10 @@ _DRAWN_PREAMBLE = (
     "SOME OF THESE SCREENS WERE DRAWN. A design is connected as a reference, "
     "and the slots at the top of the list are its frames, each carrying the "
     "`figmaFrame` it must be built from. They are not declinable and they are "
-    "not candidates: every one of them is a page, and every one keeps the "
-    "`figmaFrame` its slot carries \u2014 that is how a screen gets built from "
-    "the drawing rather than composed from components. A drawn slot's `shows` "
+    "not candidates: every one of them is built, as a page (its `figmaFrame`) or "
+    "as part of another drawn frame's page (that page's `frames`) \u2014 that is "
+    "how a screen gets built from the drawing rather than composed from "
+    "components. " + PLACING_FRAMES + "A drawn slot's `shows` "
     "is the heading read off the frame: route it as that, never by its "
     "position \u2014 fifteen frames with one layer name once got fourteen "
     "wrong routes.\n\n"
@@ -2570,15 +2696,17 @@ def page_slot_prompt(doc: dict, *, drawn_elsewhere: bool = False) -> str:
     if designed:
         return (
             "This application's screens are the frames of a connected design, "
-            "and they are the whole page set. One page per frame: no more, and "
-            "none declined.\n\n"
-            "For each frame decide only what it IS — its route and its pattern. "
+            "and they are the whole page set: every page is built from them, and "
+            "none is declined.\n\n"
+            + PLACING_FRAMES +
+            "For each page decide what it IS — its route and its pattern. "
             "A slot's `shows` is the heading read off the frame itself: route "
             "the frame as THAT, never by its position in the list — one real "
             "file had fifteen frames with one layer name and got fourteen wrong "
             "routes. "
-            "Set `figmaFrame` to the `figmaFrame` the slot carries, exactly: "
-            "it is how the screen gets built from the drawing rather "
+            "Set a page's `figmaFrame` to the `figmaFrame` of the slot that is "
+            "its main frame, exactly, and each of its `frames` to a slot's: "
+            "that is how the screen gets built from the drawing rather "
             "than composed from components. Where a slot carries a `module`, "
             "the page's `module` is that one — the designer drew it in that "
             "group.\n\n"

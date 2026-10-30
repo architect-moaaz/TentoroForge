@@ -184,6 +184,212 @@ def _source_tokens(doc: dict, output_dir: str | Path, source_id: str) -> Any:
     return getattr(ref, "tokens", None) if ref is not None else None
 
 
+#: The most frames whose pictures go to the writer for one page: its main
+#: frame first, then its tabs, dialogs, steps and states in the order listed.
+MAX_FRAME_IMAGES = 6
+#: Each part frame's outline is cut shorter than the main frame's.
+PART_OUTLINE_CHARS = 3500
+
+
+def _walk(node: Any):
+    if not isinstance(node, dict) or node.get("visible") is False:
+        return
+    yield node
+    for child in node.get("children") or []:
+        yield from _walk(child)
+
+
+def exact_values(documents: list[dict]) -> str:
+    """The values the frames are drawn with, counted: every fill, text
+    colour, type style, corner radius, gap and padding, most used first.
+
+    WHAT "THE SAME DESIGN" IS MEASURED IN. The outline says where things are;
+    this says what they are made of, as numbers a page can be written in —
+    `#0f766e`, 14/500/20, r10, gap16 — so reproducing the frame is copying
+    values, not guessing at the nearest token."""
+    from collections import Counter
+
+    fills: Counter = Counter()
+    texts: Counter = Counter()
+    strokes: Counter = Counter()
+    type_styles: Counter = Counter()
+    radii: Counter = Counter()
+    spacing: Counter = Counter()
+    for document in documents:
+        for node in _walk(document):
+            kind = str(node.get("type") or "")
+            colour = _fill(node)
+            if kind == "TEXT":
+                if colour:
+                    texts[colour] += 1
+                style = node.get("style") if isinstance(node.get("style"), dict) else {}
+                if style.get("fontSize"):
+                    line = style.get("lineHeightPx")
+                    type_styles[" ".join(x for x in (
+                        str(style.get("fontFamily") or ""),
+                        f"{int(round(float(style['fontSize'])))}px",
+                        str(int(style["fontWeight"])) if style.get("fontWeight") else "",
+                        f"/{int(round(float(line)))}px" if line else "",
+                        f"tracking {round(float(style['letterSpacing']), 2)}px"
+                        if style.get("letterSpacing") else "",
+                    ) if x)] += 1
+                continue
+            if colour.startswith("#"):
+                fills[colour] += 1
+            for stroke in node.get("strokes") or []:
+                if isinstance(stroke, dict) and stroke.get("type") == "SOLID" and stroke.get("visible") is not False:
+                    hx = _hex(stroke.get("color"))
+                    if hx:
+                        strokes[f"{hx} {int(round(float(node.get('strokeWeight') or 1)))}px"] += 1
+            if node.get("cornerRadius"):
+                radii[int(round(float(node["cornerRadius"])))] += 1
+            if node.get("layoutMode") in ("HORIZONTAL", "VERTICAL"):
+                if node.get("itemSpacing"):
+                    spacing[f"gap {int(round(float(node['itemSpacing'])))}"] += 1
+                pad = _pad(node)
+                if pad:
+                    spacing[pad.replace("pad", "padding ")] += 1
+
+    def top(counter: Counter, n: int) -> str:
+        return ", ".join(f"{k} (\u00d7{v})" for k, v in counter.most_common(n))
+
+    lines = [f"- {label}: {top(c, n)}" for label, c, n in (
+        ("surface fills", fills, 14), ("text colours", texts, 10), ("borders", strokes, 8),
+        ("type styles (family size weight /line-height)", type_styles, 14),
+        ("corner radii px", radii, 8), ("spacing", spacing, 14)) if c]
+    return "\n".join(lines)
+
+
+def drawn_palette(documents: list[dict]) -> tuple[list[str], bool]:
+    """Every solid colour the frames are painted in — fills, text and box
+    outlines — and whether any of them draws a gradient. A page reproducing
+    them is held to these (`ui_engineer._drawn_findings`)."""
+    colours: set[str] = set()
+    gradients = False
+    boxes = {"FRAME", "RECTANGLE", "INSTANCE", "COMPONENT", "COMPONENT_SET", "SECTION"}
+    for document in documents:
+        for node in _walk(document):
+            colour = _fill(node)
+            if colour == "gradient":
+                gradients = True
+            elif colour.startswith("#"):
+                colours.add(colour.split("/", 1)[0])
+            if str(node.get("type") or "") in boxes:
+                for stroke in node.get("strokes") or []:
+                    if isinstance(stroke, dict) and stroke.get("type") == "SOLID" and stroke.get("visible") is not False:
+                        hx = _hex(stroke.get("color"))
+                        if hx:
+                            colours.add(hx)
+    return sorted(colours), gradients
+
+
+def content_box(document: Any) -> dict | None:
+    """Where the page sits inside its frame: the frame less the application
+    shell it draws — a full-height column at its left edge (the sidebar) and
+    a full-width bar along its top. The built page is rendered without the
+    shell, so this is the part of the drawing it is compared with. Fractions
+    of the frame, or None when the frame draws no shell."""
+    if not isinstance(document, dict):
+        return None
+    frame = document.get("absoluteBoundingBox") or {}
+    try:
+        fx, fy, fw, fh = (float(frame[k]) for k in ("x", "y", "width", "height"))
+    except (KeyError, TypeError, ValueError):
+        return None
+    def boxes(node: dict, depth: int):
+        for child in node.get("children") or []:
+            if not isinstance(child, dict) or child.get("visible") is False:
+                continue
+            box = child.get("absoluteBoundingBox") or {}
+            try:
+                yield tuple(float(box[k]) for k in ("x", "y", "width", "height"))
+            except (KeyError, TypeError, ValueError):
+                continue
+            if depth < 3:
+                yield from boxes(child, depth + 1)
+
+    left = 0.0
+    for x, y, w, h in boxes(document, 1):
+        if abs(x - fx) < 2 and w < fw * 0.3 and h > fh * 0.8:
+            left = max(left, w)
+    # THE TOP BAR MAY SIT IN THE MAIN COLUMN, beside the sidebar rather than
+    # across the frame: a bar along the top of what is right of it.
+    top = 0.0
+    for x, y, w, h in boxes(document, 1):
+        if abs(y - fy) < 2 and x >= fx + left - 2 and w > (fw - left) * 0.6 and 24 < h < min(140, fh * 0.2):
+            top = max(top, h)
+    if not left and not top:
+        return None
+    # A top bar drawn beside the sidebar starts after it; either way the
+    # page is what is right of the one and below the other.
+    return {"x": round(left / fw, 4), "y": round(top / fh, 4),
+            "w": round(1 - left / fw, 4), "h": round(1 - top / fh, 4)}
+
+
+def screen_image(screen: Any, output_dir: str | Path, source_id: str) -> Path | None:
+    """The frame's picture as a file: the store keeps it beside the screen
+    (`FIGMA-001/screens/<node>.png`); an older store kept it inline as a data
+    URL, which is written out once beside the others."""
+    import base64
+
+    from services.figma import store
+
+    image = str(getattr(screen, "image", "") or "")
+    if not image:
+        return None
+    base = Path(output_dir) / store.STORE_DIR
+    if image.startswith("data:") and "," in image:
+        out = base / source_id / "screens" / (re.sub(r"[^A-Za-z0-9_-]+", "-", str(screen.node_id)) + ".png")
+        if not out.is_file():
+            try:
+                out.parent.mkdir(parents=True, exist_ok=True)
+                out.write_bytes(base64.b64decode(image.split(",", 1)[1]))
+            except (OSError, ValueError):
+                return None
+        return out
+    path = base / image
+    return path if path.is_file() else None
+
+
+def _exact(doc: dict, frame: str) -> bool:
+    """A frame of a design connected as the specification is reproduced;
+    one connected as a reference is adapted (§48)."""
+    from services.figma.store import split_frame_ref
+
+    source_id, _node = split_frame_ref(frame)
+    for source in doc.get("designSources") or []:
+        if not source_id or str(source.get("id")) == source_id:
+            if any(str(f.get("nodeId")) == _node for f in source.get("frames") or []):
+                return str(source.get("treatAs") or "evidence") == "specification"
+    return False
+
+
+def _part_frames(doc: dict, page: dict, output_dir: str | Path) -> list[dict]:
+    """The page's other frames (`pages[].frames`), each with its picture and a
+    short outline, in the order listed."""
+    from services.blueprint import figma_layout
+
+    out: list[dict] = []
+    for entry in page.get("frames") or []:
+        if not isinstance(entry, dict) or not entry.get("frame"):
+            continue
+        try:
+            source, screen = figma_layout.locate(doc, output_dir, str(entry["frame"]))
+        except Exception:  # noqa: BLE001 — a part's picture is a help, never a gate
+            continue
+        if screen is None:
+            continue
+        structure = screen.structure or {}
+        document = structure.get("document") if isinstance(structure.get("document"), dict) else None
+        out.append({"as": str(entry.get("as") or ""), "label": str(entry.get("label") or screen.name or ""),
+                    "section": str(entry.get("section") or ""),
+                    "size": [int(screen.width or 0), int(screen.height or 0)],
+                    "outline": outline(document, PART_OUTLINE_CHARS) if document else "",
+                    "document": document,
+                    "image": screen_image(screen, output_dir, str((source or {}).get("id") or ""))})
+    return out
+
+
 def reference_for(doc: dict, page: dict, output_dir: str | Path) -> tuple[dict | None, str]:
     """``(reference, said)`` for the UI engineer: the page's Figma frame as
     ``{"html", "format", "frame", "tokens", "designId", "reused"}``, and one line for whoever
@@ -233,4 +439,30 @@ def reference_for(doc: dict, page: dict, output_dir: str | Path) -> tuple[dict |
     ref = {"html": markup, "format": fmt, "frame": screen.name, "tokens": tokens,
            "size": [int(screen.width or 0), int(screen.height or 0)],
            "previewUrl": "", "designId": node_id, "reused": True}
-    return ref, f"Adapting Figma frame {screen.name or node_id} for {route}."
+    if not _exact(doc, node_id):
+        return ref, f"Adapting Figma frame {screen.name or node_id} for {route}."
+    # THE DRAWING IS THE SPECIFICATION: REPRODUCED, NOT ADAPTED. The writer
+    # gets every frame the page is made of — as pictures, its main frame
+    # first — and the exact values they are drawn with, and is held to them.
+    from services.blueprint import figma_layout
+
+    owner, _screen = figma_layout.locate(doc, output_dir, node_id)
+    main_image = screen_image(screen, output_dir, str((owner or {}).get("id") or ""))
+    parts = _part_frames(doc, page, output_dir)
+    documents = [d for d in [structure.get("document") if source == "rest_node_document" else None,
+                             *(p.pop("document") for p in parts)] if isinstance(d, dict)]
+    images = [str(x) for x in [main_image, *(p.pop("image") for p in parts)] if x][:MAX_FRAME_IMAGES]
+    from services.figma.styles import named_styles
+
+    named = named_styles(documents)
+    values = exact_values(documents)
+    if named["colors"]:
+        values += "\n- the file's named colours: " + ", ".join(f"{k} {v}" for k, v in list(named["colors"].items())[:20])
+    if named["text"]:
+        values += "\n- the file's text styles: " + ", ".join(f"{k} = {v}" for k, v in list(named["text"].items())[:16])
+    palette, gradients = drawn_palette(documents)
+    ref.update({"exact": True, "images": images, "parts": parts, "values": values,
+                "palette": palette, "gradients": gradients,
+                **({"content": box} if (box := content_box(structure.get("document"))) else {})})
+    return ref, (f"Reproducing Figma frame {screen.name or node_id} for {route}"
+                 + (f" with its {len(parts)} other frame{'s' if len(parts) != 1 else ''}" if parts else "") + ".")

@@ -1599,6 +1599,64 @@ def check_drawn_routes(result: "AgentResult", doc: dict | None = None) -> None:
         raise DrawnScreensShareARoute(_all_of(problems))
 
 
+class InvalidFramePlacement(AuthorRefusal):
+    """A drawn frame placed twice, or a frame the design does not have."""
+
+
+def check_frame_placement(result: "AgentResult", doc: dict | None = None) -> None:
+    """Each drawn frame is built once, and only frames the design has.
+
+    A page names its main frame (`figmaFrame`) and the frames of its tabs,
+    dialogs, steps and states (`frames`). A frame in two pages is one drawing
+    built twice — a dialog that belongs to a job's page drawn again on another
+    — and a frame the design does not have is an id made up. Both are facts,
+    checked against the design and every other page, not judgements. A page
+    this reply restates holds its frames afresh."""
+    from services.blueprint.ids import page_key
+    from services.blueprint.page_planner import page_frames
+    from services.figma.store import frame_ref
+
+    bodies = [p.body for p in result.proposals
+              if p.section == "pages" and isinstance(p.body, dict) and p.body.get("route")]
+    if not any(page_frames(b) for b in bodies):
+        return
+    known: set[str] = set()
+    for source in (doc or {}).get("designSources") or []:
+        for f in source.get("frames") or []:
+            if f.get("nodeId"):
+                known.add(frame_ref(str(source.get("id") or ""), str(f["nodeId"])))
+    restated = {page_key(str(b["route"])) for b in bodies}
+    held: dict[str, str] = {}
+    #: What each restated page already holds: a reply restating a page is not
+    #: asked about a frame it did not just give it (an app built before this
+    #: check may have one frame on two pages; its every later edit would be
+    #: refused for a drawing nobody touched).
+    had: dict[str, set[str]] = {}
+    for page in (doc or {}).get("pages") or []:
+        if not isinstance(page, dict) or str(page.get("status") or "").upper() in ("REMOVED", "DEPRECATED"):
+            continue
+        if page.get("route") and page_key(str(page["route"])) in restated:
+            had[page_key(str(page["route"]))] = page_frames(page)
+            continue
+        for f in page_frames(page):
+            held[f] = str(page.get("route") or page.get("id"))
+    problems: list[str] = []
+    for body in bodies:
+        route = str(body["route"])
+        for entry in body.get("frames") or []:
+            f = str((entry or {}).get("frame") or "") if isinstance(entry, dict) else ""
+            if known and f not in known:
+                problems.append(f"pages: {route} lists frame {f or '(blank)'}, which the design does not have "
+                                "— use a slot's `figmaFrame` exactly")
+        for f in sorted(page_frames(body) - had.get(page_key(route), set())):
+            if f in held and held[f] != route:
+                problems.append(f"pages: frame {f} is placed on {held[f]} and again on {route} — a drawing is "
+                                "built once: keep it on the page it belongs to and take it off the other")
+            held.setdefault(f, route)
+    if problems:
+        raise InvalidFramePlacement(_all_of(problems))
+
+
 class InvalidOwnershipRule(AuthorRefusal):
     """An ownership rule the data engine could not apply as written."""
 
@@ -2859,7 +2917,7 @@ def apply_agent_result(
                   check_mobile, check_requirements, check_business_rules, check_entity_fields,
                   check_page_content, check_page_access, check_role_doors, check_navigation,
                   check_analytics, check_flows, check_security, check_design_modules,
-                  check_drawn_routes):
+                  check_drawn_routes, check_frame_placement):
         run(check, result, svc.doc)
     if refusals:
         raise refusals[0] if len(refusals) == 1 else SeveralRefusals(refusals)
