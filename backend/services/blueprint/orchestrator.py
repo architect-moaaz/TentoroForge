@@ -2050,7 +2050,7 @@ def _execute(
             return
         with svc.lock:
             refused, application = _repair_apply(
-                svc, outcome, commit=commit, user_request=user_request)
+                svc, outcome, commit=commit, user_request=user_request, key=key, subject=spec.subject)
             if refused is None:
                 # A REPAIR IS THE WHOLE ANSWER, NOT AN ADDENDUM. Ids come
                 # from natural keys, so a re-authoring that renames a module
@@ -2348,8 +2348,18 @@ def _record_observation(report: RunReport, ledger: Any, obs: Any) -> None:
               obs.critic)
 
 
+def _subject_checks(key: str, outcome: Any, doc: dict, subject: str) -> None:
+    """What only a fan-out subject can be held to: what it was given to
+    answer. A drawn part of the page set places every frame of its slots
+    (`agent_contract.check_part_frames`)."""
+    if key == "page_contracts" and subject:
+        from services.blueprint.agent_contract import check_part_frames
+        check_part_frames(outcome, doc, subject)
+
+
 def _repair_apply(
     svc: BlueprintService, outcome: Any, *, commit: bool, user_request: str,
+    key: str = "", subject: str = "",
 ) -> tuple[str | None, Any]:
     """Apply one repair. ``(None, application)`` when it landed; otherwise
     ``(why it was refused, None)``.
@@ -2363,6 +2373,7 @@ def _repair_apply(
     if outcome is None:
         return "the executor returned nothing", None
     try:
+        _subject_checks(key, outcome, svc.doc, subject)
         application = apply_agent_result(
             svc, outcome, commit=commit, user_request=user_request,
         )
@@ -3011,6 +3022,7 @@ def _apply_subject(
         return _rejected(_reason(outcome))
 
     try:
+        _subject_checks(key, outcome, svc.doc, subject)
         application = apply_agent_result(
             svc, outcome, commit=commit, user_request=user_request,
         )

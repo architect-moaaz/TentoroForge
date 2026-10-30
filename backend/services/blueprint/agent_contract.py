@@ -1661,6 +1661,53 @@ def check_frame_placement(result: "AgentResult", doc: dict | None = None) -> Non
         raise InvalidFramePlacement(_all_of(problems))
 
 
+def check_part_frames(result: "AgentResult", doc: dict, subject: str) -> None:
+    """A drawn part places every frame it was given, on a page built from one.
+
+    The part is asked a module's drawn screens as slots, each page carrying
+    the `figmaFrame` of its main one, and may set a frame aside only by name
+    in `issues`. Fifteen DITANS parts (2026-10-30) answered with pages and no
+    frames at all: 81 drawn screens sat on no page, and 58 pages would have
+    been written anew instead of built as drawn — and
+    :func:`check_frame_placement` let them by, since a reply that places
+    nothing places nothing twice. A part's slots are what it is for, so a
+    page with no frame, or a frame on no page, is refused back to it."""
+    from services.blueprint.page_planner import DRAWN_PART, page_frames, page_set_parts
+
+    if not subject.startswith(DRAWN_PART):
+        return
+    slots = page_set_parts(doc).get(subject) or []
+    named = {str(s.get("figmaFrame")): str(s.get("name") or s.get("shows") or "") for s in slots
+             if s.get("figmaFrame")}
+    if not named:
+        return
+    bodies = [p.body for p in result.proposals
+              if p.section == "pages" and isinstance(p.body, dict) and p.body.get("route")]
+    from services.blueprint.ids import page_key
+
+    restated = {page_key(str(b["route"])) for b in bodies}
+    placed: set[str] = set()      # what another page already holds stays placed
+    for page in doc.get("pages") or []:
+        if isinstance(page, dict) and page.get("status") != "DEPRECATED" \
+                and page_key(str(page.get("route") or "")) not in restated:
+            placed |= page_frames(page)
+    problems: list[str] = []
+    for body in bodies:
+        frames = page_frames(body)
+        if not frames:
+            problems.append(f"pages: {body['route']} has no `figmaFrame` — every page of this part is "
+                            "built from one of its slots: set its main slot's `figmaFrame`, or drop the page")
+        placed |= frames
+    aside = " ".join(str(i) for i in result.issues)
+    for frame, name in named.items():
+        if frame in placed or frame in aside or (name and name in aside):
+            continue
+        problems.append(f"slots: frame {frame} (“{name}”) is on no page — make it a page's `figmaFrame`, "
+                        "put it in a page's `frames`, or set it aside in `issues` with why it is no screen")
+    if problems:
+        raise InvalidFramePlacement(_all_of(problems))
+
+
 class InvalidOwnershipRule(AuthorRefusal):
     """An ownership rule the data engine could not apply as written."""
 
