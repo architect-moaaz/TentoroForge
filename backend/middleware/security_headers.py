@@ -57,12 +57,16 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 # A sandboxed page is a different origin, so its fonts and fetches need this. What is served is public and carries no
                 # credentials (the picture is loaded without a sign-in), so `*` gives nothing away.
                 response.headers["Access-Control-Allow-Origin"] = "*"
+        # AN APP'S OWN FONTS. Its tokens import its typefaces from Google
+        # Fonts, as the published app loads them; refused here, every drawn
+        # screen in the preview fell back to a serif (DITANS, 2026-10-30).
+        app_fonts = (" https://fonts.googleapis.com", " https://fonts.gstatic.com") if is_preview_serve else ("", "")
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
             "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
-            "style-src 'self' 'unsafe-inline'; "
+            f"style-src 'self' 'unsafe-inline'{app_fonts[0]}; "
             "img-src 'self' data: https:; "
-            "font-src 'self' data:; "
+            f"font-src 'self' data:{app_fonts[1]}; "
             "connect-src 'self' https:"
             f"{frame_ancestors}"
         )
