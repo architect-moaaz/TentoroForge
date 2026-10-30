@@ -67,6 +67,12 @@ def test_columns_rows_are_found_by_are_never_sealed():
     doc = {"data": {"entities": [owned]}, "roles": [],
            "security": {"ownershipRules": [{"entity": "Submission", "kind": "scope", "column": "ownerToken"}]}}
     assert "ownerToken_encrypted" not in emit_entity_module(owned, doc), "an ownership rule filters by it"
+    looked_up = {"data": {"entities": [ENTITY]}, "roles": [], "workflows": [{"steps": [
+        {"type": "action", "config": {"actionType": "db_query", "table": "submissions",
+                                      "where": {"identificationNumber": "{{number}}"}}}]}]}
+    src = emit_entity_module(ENTITY, looked_up)
+    assert "identificationNumber_encrypted" not in src, "a workflow finds rows by it"
+    assert "fullName_encrypted" in src
 
 
 def test_the_engine_seals_only_where_the_table_holds_the_seal():
