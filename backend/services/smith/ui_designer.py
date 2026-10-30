@@ -94,7 +94,16 @@ def live_pages(doc: dict) -> list[dict]:
 def chosen(doc: dict) -> str:
     """``forge`` / ``uxpilot`` as recorded, or "" when nobody has been asked."""
     value = str(((doc or {}).get("application") or {}).get("uiDesigner") or "").strip()
-    return value if value in (FORGE, UXPILOT, FIGMA) else ""
+    if value in (FORGE, UXPILOT, FIGMA):
+        return value
+    # A DESIGN CONNECTED AS THE SPECIFICATION ANSWERED IT. The person said
+    # the drawings are what to build; asked again who designs the screens,
+    # DITANS's 589 drawn screens stopped at a card offering to draw them
+    # anew (2026-10-30).
+    if any(isinstance(s, dict) and s.get("treatAs") == "specification" and s.get("status") != "DEPRECATED"
+           for s in (doc or {}).get("designSources") or []):
+        return FIGMA
+    return ""
 
 
 def _live(items: Any) -> list[dict]:

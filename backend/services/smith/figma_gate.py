@@ -200,8 +200,15 @@ def _pending_message(state: dict[str, Any]) -> dict[str, Any]:
 
 def stop(doc: dict, output_dir: Any) -> dict[str, Any] | None:
     """The message to show INSTEAD of starting the build, or None. Pure: reads what was stored."""
-    if source_of(doc) is None:
+    source = source_of(doc)
+    if source is None:
         return prompt(output_dir)
+    # THE DESIGN IS THE SPECIFICATION: the requirements were written from it,
+    # so there is nothing to check it against, and the check's road connects
+    # the file again as evidence — a re-read that empties the stored screens
+    # first. DITANS (2026-10-30) stopped here with 589 screens converted.
+    if source.get("treatAs") == "specification":
+        return None
     state = _read(output_dir)
     if state is None:
         # READ BUT NEVER CHECKED (the check was interrupted, or the design came with the brief): the
