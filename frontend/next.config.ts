@@ -24,6 +24,17 @@ const nextConfig: NextConfig = {
     // /api/projects/<id>/... URLs; this rewrite keeps the editor's apiBaseUrl
     // simple and avoids per-request token plumbing on the client.
     return [
+      // A DRAWN APP'S PICTURES, ASKED FOR FROM INSIDE THE PREVIEW. A view
+      // converted from Figma names its icons and images `/drawn/…` from the
+      // app's root; in the preview the app lives under
+      // /api/projects/<id>/preview/serve, so the browser asked this origin
+      // and every logo and icon came back broken (DITANS, 2026-10-30). The
+      // page that asks names its project in the Referer.
+      {
+        source: "/drawn/:path*",
+        has: [{ type: "header", key: "referer", value: ".*/api/projects/(?<project>[^/]+)/preview/serve.*" }],
+        destination: `${FASTAPI_URL}/api/projects/:project/preview/serve/drawn/:path*`,
+      },
       {
         source: "/api/projects/:path*",
         destination: `${FASTAPI_URL}/api/projects/:path*`,
