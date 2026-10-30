@@ -2152,6 +2152,13 @@ export const Workflow = z.object({
     entity: EntityId.optional(),
     /** For a field input: string, number, boolean, date, enum, text, … */
     type: z.string().optional(),
+    /**
+     * An enum input's own values — a decision's choices. Undeclared, they
+     * were dropped on save and the SDK took the values of a column of the same
+     * name: DITANS's merge decision offered "linked" where its steps checked
+     * "link", and a sanctions decision offered the match's status values.
+     */
+    options: z.array(z.string()).optional(),
     required: z.boolean().default(true),
     description: z.string().default(""),
   })).default([]),

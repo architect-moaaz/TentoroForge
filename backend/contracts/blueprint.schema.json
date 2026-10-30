@@ -2249,6 +2249,12 @@
                 "type": {
                   "type": "string"
                 },
+                "options": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
                 "required": {
                   "type": "boolean",
                   "default": true
