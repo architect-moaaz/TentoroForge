@@ -63,7 +63,8 @@ export function useSignUp() {
   const router = useRouter();
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const signUp = React.useCallback(async (input: { email: string; password: string; name?: string; account?: Record<string, unknown> }) => {
+  const signUp = React.useCallback(async (input: { email: string; password: string; name?: string; account?: Record<string, unknown>;
+                                                  accountType?: string; then?: string }) => {
     setPending(true);
     setError(null);
     try {
@@ -74,14 +75,15 @@ export function useSignUp() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: input.email, password: input.password,
                                name: input.name || (typeof label === "string" ? label : "") || input.email.split("@")[0],
-                               account }),
+                               account, ...(input.accountType ? { accountType: input.accountType } : {}) }),
       });
       if (!res.ok) {
         setError(messageOf(await res.json().catch(() => null), "Creating the account failed."));
         return false;
       }
       await signIn("credentials", { email: input.email, password: input.password, redirect: false });
-      router.push(AFTER_SIGNUP);
+      // Where this way in goes next (an employer's onboarding), else where a new account goes.
+      router.push(input.then || AFTER_SIGNUP);
       router.refresh();
       return true;
     } catch {

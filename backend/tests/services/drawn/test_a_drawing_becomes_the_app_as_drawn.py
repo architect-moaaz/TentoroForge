@@ -237,9 +237,11 @@ def test_a_view_is_built_from_the_drawing_by_number():
     assert "onClick={() => props.onCreateCode()}" in code
     assert 'import DhTagWarning from "./DhTagWarning";' in code and "export type TenantsViewProps" in code
     # every drawn class is still there and nothing is restyled: the one class
-    # string not drawn is the input, in the look of the text it replaces
+    # string not drawn is the input, in the look of the text it replaces; a
+    # pressed element only gains the hand cursor
     import re
     drawn, made = (set(re.findall(r'className="([^"]*)"', x)) for x in (STATIC, code))
+    made = {c.replace(" cursor-pointer", "") for c in made}
     assert drawn - made == {"flex-1 text-[14px]"}
     assert [c for c in made - drawn] == ["flex-1 text-[14px] w-full bg-transparent outline-none border-0 p-0 m-0 min-w-0 appearance-none"]
     assert out["contract"]["actions"][0]["on"] == "tenants" and "nodes" not in out["contract"]["actions"][0]
@@ -1038,3 +1040,14 @@ def test_a_list_drawn_inside_a_record_is_typed_as_its_field():
     assert "selectedAgency: { id: string; header: string; checks: Array<{ id: string; label: string }> };" in typed
     assert "dispute: { timeline: Array<{ id: string; at: string }> };" in typed
     assert "onOpenCheck(row: { id: string; label: string }): void;" in typed
+
+
+def test_a_pressable_drawing_shows_the_hand():
+    # DITANS (2026-10-31): drawn chips and rows were divs with a handler, and
+    # the pointer stayed an arrow over every one of them.
+    import re
+    out, _ = P.apply(STATIC, json.loads(json.dumps(ANSWER)), "TenantsView",
+                     components={"DhTagSuccess": ["label"], "DhTagWarning": ["label"], "DhButtonPrimary": ["label"]})
+    tags = re.findall(r"<\w+[^<>]*onClick=[^<>]*>", out["code"])
+    assert tags and all("cursor-pointer" in t for t in tags)
+    assert "cursor-pointer" not in re.sub(r"<\w+[^<>]*onClick=[^<>]*>", "", out["code"])

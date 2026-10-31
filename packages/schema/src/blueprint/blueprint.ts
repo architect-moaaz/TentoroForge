@@ -2516,6 +2516,14 @@ export const Security = z.object({
    */
   signupRole: RoleId.optional(),
   /**
+   * EVERY ROLE A PERSON MAY GIVE THEMSELVES when they create their own
+   * account, for an application with several ways in (DITANS: a professional,
+   * an employer, an agency). The signup page names one of them; any other
+   * role named at signup is refused and the person gets `signupRole`. Back
+   * office roles are never here: a role not listed can only be given.
+   */
+  signupRoles: z.array(RoleId).optional(),
+  /**
    * HOW PEOPLE SIGN IN. `password`: email and password (the default).
    * `magicLink`: a one-time link sent to the address, good for fifteen
    * minutes, used once. `sso`: the identity providers an organisation signs

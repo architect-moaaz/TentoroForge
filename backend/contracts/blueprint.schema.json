@@ -2890,6 +2890,12 @@
           "$ref": "#/properties/roles/items/properties/id",
           "description": "Stable ROLE identifier (§12)"
         },
+        "signupRoles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/properties/roles/items/properties/id"
+          }
+        },
         "signIn": {
           "type": "object",
           "properties": {

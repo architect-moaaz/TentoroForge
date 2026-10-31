@@ -639,7 +639,21 @@ def _attrs(attrs: list[tuple[str, str]]) -> str:
 
 def _with(attrs: list[tuple[str, str]], **extra: str) -> list[tuple[str, str]]:
     out = [(k, v) for k, v in attrs if k not in extra]
+    if extra.get("onClick"):
+        # A PRESSABLE DRAWING SHOWS THE HAND. The drawn controls are divs, and a
+        # div keeps the arrow: on DITANS no chip, row or card said it could be
+        # pressed (2026-10-31).
+        out = [(k, _pointer(v) if k == "className" else v) for k, v in out]
+        if not any(k == "className" for k, _ in out):
+            out.insert(0, ("className", '"cursor-pointer"'))
     return out + [(k, v) for k, v in extra.items() if v]
+
+
+def _pointer(classes: str) -> str:
+    """A className attribute with `cursor-pointer` added, as written."""
+    if "cursor-" in classes or not classes.startswith('"'):
+        return classes
+    return '"' + (classes[1:-1] + " cursor-pointer").strip() + '"'
 
 
 def _cond(expr: str, negate: bool = False) -> str:

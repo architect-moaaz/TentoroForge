@@ -115,6 +115,20 @@ def scope_reach(doc: dict) -> list[dict]:
     return out
 
 
+def signup_roles(doc: dict) -> list[str]:
+    """Every role a self-registering person may choose, by name: the declared
+    `security.signupRoles`, else the one `signup_role`. A role named at signup
+    that is not here is refused — anyone could post "DITANS Operations" and
+    hold it (2026-10-31)."""
+    roles = {str(r.get("id")): str(r.get("name")) for r in _live(doc.get("roles")) if r.get("name")}
+    declared = [roles[str(rid)] for rid in ((doc.get("security") or {}).get("signupRoles") or [])
+                if str(rid) in roles]
+    if declared:
+        return list(dict.fromkeys(declared))
+    one = signup_role(doc)
+    return [one] if one else []
+
+
 def signup_role(doc: dict) -> str | None:
     """The role a self-registered person gets: `security.signupRole`, else the
     application's only role, else — with the administrator's role set aside —
@@ -518,6 +532,8 @@ def project_account(doc: dict, app_root: str | Path) -> dict[str, Any]:
         + "/** What the app writes on a new account for the fields it does not ask about. */\n"
         + f"export const ACCOUNT_INITIAL: Record<string, unknown> = {json.dumps(account_initial(doc), indent=2)};\n\n"
         + f"export const SIGNUP_ROLE: string | null = {json.dumps(signup_role(doc))};\n\n"
+        + "/** Every role a person may give themselves at signup; any other is refused. */\n"
+        + f"export const SIGNUP_ROLES: string[] = {json.dumps(signup_roles(doc))};\n\n"
         + "/** The role the built-in admin account holds: the one that reaches the most of the app. */\n"
         + f"export const ADMIN_ROLE: string | null = {json.dumps(admin_role(doc))};\n\n"
         + "/** Every role of the application, by name: the seed signs a demo person into each. */\n"
@@ -651,4 +667,4 @@ def guard_workflow(doc: dict, workflow: dict, nodes: list[dict], edges: list[dic
 
 __all__ = ["AUTH_PAGES", "account_entity", "admin_role", "account_fields", "account_initial", "after_signup_route", "auth_page_bodies",
            "guard_roles", "guard_workflow", "has_sign_in", "home_route", "roles_without_a_door", "is_auth_page", "prerequisites",
-           "project_account", "signup_role"]
+           "project_account", "signup_role", "signup_roles"]
