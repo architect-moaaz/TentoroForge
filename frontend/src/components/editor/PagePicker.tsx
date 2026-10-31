@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronRight, Home, Eye, Plus, List as ListIcon, FileText,
-  PanelLeftClose, Layout, FilePlus,
+  PanelLeftClose, Layout, FilePlus, Trash2,
 } from "lucide-react";
 import { useEditorStore, flushPersister } from "@/lib/editor-store";
 import { NewPageDialog } from "@/components/editor/NewPageDialog";
@@ -107,6 +107,44 @@ export function PagePicker({
     }
     await queryClient.invalidateQueries({ queryKey: ["nav-flow", projectId] });
     onChange(page.pageId);
+  };
+
+  const [deleting, setDeleting] = useState<string | null>(null);
+
+  // Delete a page from the generated app (ED-14). Removes the schema, its
+  // nav-flow entries, and regenerates registry.ts + the shell menu via the
+  // remove_page seam, so the app dispatcher stops importing the deleted page.
+  const handleDeletePage = async (page: NavFlowPage) => {
+    if (deleting) return;
+    const ok = typeof window === "undefined"
+      ? true
+      : window.confirm(`Delete the page "${page.route}"? This removes it from the app and cannot be undone.`);
+    if (!ok) return;
+    setDeleting(page.id);
+    try {
+      const r = await fetch(`${API}/api/projects/${projectId}/editor/remove-page`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(typeof window !== "undefined" && localStorage.getItem("token")
+            ? { Authorization: `Bearer ${localStorage.getItem("token")}` } : {}),
+        },
+        body: JSON.stringify({ route: page.route }),
+      });
+      if (!r.ok) {
+        const detail = await r.json().catch(() => ({}));
+        window.alert(`Could not delete the page: ${detail?.detail ?? r.status}`);
+        return;
+      }
+      await queryClient.invalidateQueries({ queryKey: ["nav-flow", projectId] });
+      // If the deleted page was open, move to the first remaining page (or shell).
+      if (value === page.id) {
+        const next = pages.find((p) => p.id !== page.id);
+        onChange(next?.id ?? "shell");
+      }
+    } finally {
+      setDeleting(null);
+    }
   };
 
   // Does the project have a shell.json? When yes, surface it as a dedicated
@@ -229,24 +267,37 @@ export function PagePicker({
           const isActive = p.id === value;
           const tag = pageTagToDisplay(p.route);
           return (
-            <button
+            <div
               key={p.id}
-              onClick={() => onChange(p.id)}
-              className={`group w-full text-left px-3 py-1.5 flex items-center gap-2 text-sm ${
+              className={`group w-full px-3 py-1.5 flex items-center gap-2 text-sm ${
                 isActive ? "bg-muted/60" : "hover:bg-muted/40"
               }`}
             >
-              <Icon
-                size={14}
-                className={isActive ? "text-foreground" : "text-muted-foreground"}
-              />
-              <span className={`flex-1 truncate font-mono text-[12px] ${isActive ? "font-medium" : ""}`}>
-                {p.route}
-              </span>
-              {tag && (
-                <span className="text-[10px] tracking-wide text-muted-foreground">{tag}</span>
-              )}
-            </button>
+              <button
+                onClick={() => onChange(p.id)}
+                className="flex flex-1 min-w-0 items-center gap-2 text-left"
+              >
+                <Icon
+                  size={14}
+                  className={isActive ? "text-foreground" : "text-muted-foreground"}
+                />
+                <span className={`flex-1 truncate font-mono text-[12px] ${isActive ? "font-medium" : ""}`}>
+                  {p.route}
+                </span>
+                {tag && (
+                  <span className="text-[10px] tracking-wide text-muted-foreground">{tag}</span>
+                )}
+              </button>
+              <button
+                onClick={() => handleDeletePage(p)}
+                disabled={deleting === p.id}
+                className="opacity-0 group-hover:opacity-100 focus:opacity-100 text-muted-foreground hover:text-red-600 disabled:opacity-50 shrink-0"
+                title={`Delete ${p.route}`}
+                aria-label={`Delete page ${p.route}`}
+              >
+                <Trash2 size={13} />
+              </button>
+            </div>
           );
         })}
 

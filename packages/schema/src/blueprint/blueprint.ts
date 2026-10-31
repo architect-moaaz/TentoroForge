@@ -2244,6 +2244,10 @@ export const DecisionTableColumn = z.object({
   label: z.string().optional(),
   type: z.enum(["string", "number", "boolean", "date", "any"]).default("any"),
   variableBinding: z.string().optional(),
+  /** The values the column takes, in priority order: Priority picks the
+   * matching row whose output comes first here, and a cell naming a value
+   * not listed is refused as a typo. Filled from an enum field's values. */
+  values: z.array(z.string()).optional(),
 });
 
 export const DecisionTableRow = z.object({
@@ -2255,6 +2259,8 @@ export const DecisionTableRow = z.object({
 
 export const DecisionTable = z.object({
   hitPolicy: z.enum(["U", "F", "A", "P", "C", "R"]).default("F"),
+  /** Collect only: one value per output instead of a list. */
+  aggregation: z.enum(["SUM", "COUNT", "MIN", "MAX"]).optional(),
   inputs: z.array(DecisionTableColumn).default([]),
   outputs: z.array(DecisionTableColumn).default([]),
   rules: z.array(DecisionTableRow).default([]),
@@ -2312,6 +2318,9 @@ export const BusinessRule = z.object({
   otherwise: z.array(RuleAction).default([]),
   scope: z.enum(["entity", "form", "server"]).default("entity"),
   salience: z.number().int().default(0),
+  /** When the rule fires: a record being created, updated, or both (absent).
+   * A rule about a change ("a closed expense cannot be reopened") fires on update. */
+  on: z.array(z.enum(["create", "update"])).optional(),
   ...artifactBase,
 });
 

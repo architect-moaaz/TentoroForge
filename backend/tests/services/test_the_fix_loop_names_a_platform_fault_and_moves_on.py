@@ -23,7 +23,15 @@ def _wire(monkeypatch, svc, reds, answers):
 
     def run_turn(pid, output_dir, ask, **k):
         asked.append(ask)
-        answer = answers.pop(0) if answers else {"answer": "nothing", "edited_paths": []}
+        # Page groups are worked IN PARALLEL, so the order the turns arrive in
+        # is not the order of the reds: an answer meant for one page reached
+        # the other about one run in thirty. Answers keyed by what the ask
+        # names go to that ask; a list is handed out in order.
+        if isinstance(answers, dict):
+            answer = next((a for key, a in answers.items() if key in ask), None) or {"answer": "nothing",
+                                                                                   "edited_paths": []}
+        else:
+            answer = answers.pop(0) if answers else {"answer": "nothing", "edited_paths": []}
         # A turn that reaches into the engine leaves a platform patch on record.
         for path in answer.get("patched", []):
             from services.smith import file_edit
@@ -42,9 +50,11 @@ def test_a_platform_fault_is_said_recorded_marked_and_left_alone(tmp_path, monke
     reds = {"pages": [sc.item("PAGE-002", "Transaction History", "it shows 'NaN'", "PAGE-002"),
                       sc.item("PAGE-003", "Calendar", "button errors", "PAGE-003")]}
     # The first repair edits the engine; the second edits the app and still fails.
-    answers = [{"answer": "Changed the platform's `src/lib/data-engine.ts` for this app: Dates to strings.",
-                "edited_paths": ["src/lib/data-engine.ts"], "patched": ["src/lib/data-engine.ts"]},
-               {"answer": "Rewrote /calendar", "edited_paths": ["src/app/(dashboard)/calendar/view.tsx"]}]
+    answers = {"PAGE-002": {"answer": "Changed the platform's `src/lib/data-engine.ts` for this app: "
+                                                 "Dates to strings.",
+                                       "edited_paths": ["src/lib/data-engine.ts"],
+                                       "patched": ["src/lib/data-engine.ts"]},
+               "PAGE-003": {"answer": "Rewrote /calendar", "edited_paths": ["src/app/(dashboard)/calendar/view.tsx"]}}
     # The app's classifier: the engine's file is the platform's, a page file is the app's.
     monkeypatch.setattr("services.smith.file_edit.classify",
                         lambda doc, rel: {"kind": "platform"} if rel.startswith("src/lib/") else {"kind": "page"})

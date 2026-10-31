@@ -19,7 +19,10 @@ from __future__ import annotations
 #: translator and the plan-sync generator use, so a workflow looks the same
 #: whichever producer wrote it.
 NODE_X = 250
-ROW_HEIGHT = 120
+#: 150, not 120: a step with its detail pills is ~110 tall, and a save step
+#: also shows the business rules it checks on a line of its own — at 120 the
+#: next step was drawn over it.
+ROW_HEIGHT = 150
 
 
 def workflow_node(node_id: str, ntype: str, row: int, config: dict, label: str) -> dict:

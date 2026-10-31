@@ -125,6 +125,11 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     "add_rule": {"rule"},
     "edit_rule": {"rule", "change"},
     "remove_rule": {"rule"},
+    # A RULE AND A WORKFLOW, TOGETHER. "connect the <rule> to the <workflow>":
+    # often already linked (every step that saves the record checks
+    # it), which is said with the step; otherwise an extra check step.
+    "link_rule": {"rule", "workflow"},
+    "unlink_rule": {"rule", "workflow"},
     # The data model — a new entity, or one retired with everything on it.
     "add_entity": {"entity"},
     "remove_entity": {"entity"},
@@ -222,6 +227,10 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     # keeps. Needs nothing; there is only ever one application to copy.
     "back_up": set(),
     "save_as_template": set(),
+    # Where this app's templates stand, and sending one for review — the
+    # Templates page's status and its Submit for review, from the chat.
+    "template_status": set(),
+    "submit_template": set(),
     # THE ASKS THAT REACH NOTHING, GIVEN SOMEWHERE TO LAND. Each of these is a
     # thing people ask for that Smith genuinely cannot do. Without a verb they
     # were classified as whatever was nearest — "delete the Wards page" as a
@@ -485,6 +494,21 @@ VERB_HELP: dict[str, str] = {
         "different."
     ),
     "remove_rule": ("Retire a business rule. Needs which rule."),
+    "link_rule": (
+        "Connect a business rule to a workflow, or make a workflow follow a rule: \"link the "
+        "<rule> to the <workflow> workflow\", \"make <workflow> check the <rule>\", \"use the "
+        "<rule> in <workflow>\". A rule is checked AUTOMATICALLY by every workflow step "
+        "that saves its record, so it is often linked already — that is said, with the step; a workflow's "
+        "own older check that does not match is shown to the person and kept, and it is replaced by the "
+        "rule only when they say so (put \"replace the old check\" in `change`); otherwise the rule becomes an extra "
+        "check step at the start of the workflow. NOT a question about where a rule is used (read "
+        "`rule_links` and answer). Needs the rule and the workflow."
+    ),
+    "unlink_rule": (
+        "Take a rule's extra check step out of a workflow: \"stop checking the <rule> in <workflow>\", "
+        "\"remove the rule step from <workflow>\". The automatic check when the workflow saves the record "
+        "stays while the rule is on (that is said). Needs the rule and the workflow."
+    ),
     "add_entity": (
         "Add a NEW ENTITY to the data model: \"add a Ward entity with a name and "
         "a capacity\". Declares it, authors its fields, projects the data layer. "
@@ -640,9 +664,24 @@ VERB_HELP: dict[str, str] = {
         "Keep this application as a TEMPLATE the organisation can start new apps "
         "from: \"save this as a template\", \"make a template of this app\", "
         "\"I want to reuse this app later\". Saves its whole definition — screens, "
-        "records, processes, rules, roles, look — to Templates, where anyone in the "
-        "organisation can use it for the same app again or one like it. Takes an "
-        "optional name in `new_value`; changes nothing in this application."
+        "records, processes, rules, roles, look — to Templates as a private template, "
+        "where anyone in the organisation can use it for the same app again or one like "
+        "it; publishing it to everyone in the Templates Gallery is a separate review by "
+        "Tentoro that the person starts from Templates. Takes an optional name in "
+        "`new_value`; changes nothing in this application."
+    ),
+    "template_status": (
+        "Where the organisation's TEMPLATES stand: \"is my template approved?\", \"is it in the "
+        "gallery yet?\", \"what templates do we have?\", \"did Tentoro review it?\". Each template "
+        "with its status (private, waiting for review, in the Gallery, sent back with the reviewer's "
+        "note), version and how often it was used. Changes nothing. Needs nothing."
+    ),
+    "submit_template": (
+        "Send this app's template to Tentoro for review, to be published in the Templates Gallery: "
+        "\"submit my template for review\", \"publish the template to the gallery\", \"send it to "
+        "Tentoro\". The newest template of this app that is not already waiting or published; the "
+        "app's own page pictures are added first when it has none. Free unless they say otherwise. "
+        "NOT save_as_template (that makes the template). Takes an optional template name in `new_value`."
     ),
     "back_up": (
         "A copy of the whole application the owner keeps: \"back it up "
@@ -931,9 +970,24 @@ VERB_EXAMPLES: dict[str, tuple[str, ...]] = {
         'I still cannot see it in the menu',
         'it says it is public but it still asks me to sign in',
     ),
+    'link_rule': (
+        'link the deposit rule to the Book a room workflow',
+        'make Approve leave check the days left rule',
+    ),
+    'unlink_rule': (
+        'stop checking the late fee rule in Return a book',
+    ),
     'save_as_template': (
         'save this app as a template',
         'I want to reuse this app later for another client',
+    ),
+    'template_status': (
+        'is my template approved yet?',
+        'what templates do we have?',
+    ),
+    'submit_template': (
+        'submit my template for review',
+        'publish the template to the gallery',
     ),
     'back_up': (
         'what happens if I lose all this?',

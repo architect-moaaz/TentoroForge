@@ -64,6 +64,7 @@ import { ExportDialog } from "@/components/projects/ExportDialog";
 import { moreTabs, PRIMARY_TABS, TabRow, type Tab } from "@/components/projects/ProjectTabs";
 import { PhonePreview, phoneStatusKey } from "@/components/phone/PhonePreview";
 import { PublishButton } from "@/components/deploy/PublishButton";
+import { ASK_SMITH_EVENT, OPEN_WORKFLOW_EVENT, type AskSmithDetail, type OpenWorkflowDetail } from "@/lib/ask-smith";
 import { SaveAsTemplateButton } from "@/components/templates/SaveAsTemplateButton";
 import { DeleteProjectDialog } from "@/components/projects/DeleteProjectDialog";
 import { CommandPalette } from "@/components/CommandPalette";
@@ -160,6 +161,23 @@ function ProjectWorkspace({
   // "Manage in App settings" from the Publish dialog opens App settings on that section.
   const settingsRequested = useAppSettingsStore((st) => st.requested);
   useEffect(() => { if (settingsRequested) setActiveTab("app-settings"); }, [settingsRequested]);
+  // A tab that hands Smith a request (lib/ask-smith) shows the chat it lands in.
+  useEffect(() => {
+    const show = (e: Event) => {
+      if ((e as CustomEvent<AskSmithDetail>).detail?.projectId === projectId) setActiveTab("chat");
+    };
+    window.addEventListener(ASK_SMITH_EVENT, show);
+    return () => window.removeEventListener(ASK_SMITH_EVENT, show);
+  }, [projectId]);
+  // A workflow named elsewhere (the Business Rules tab's "used in") opens in
+  // the Workflows tab; the panel there picks the workflow out of the event.
+  useEffect(() => {
+    const show = (e: Event) => {
+      if ((e as CustomEvent<OpenWorkflowDetail>).detail?.projectId === projectId) setActiveTab("workflows");
+    };
+    window.addEventListener(OPEN_WORKFLOW_EVENT, show);
+    return () => window.removeEventListener(OPEN_WORKFLOW_EVENT, show);
+  }, [projectId]);
   // Back from a DNS provider's approval (`?settings=domains&dc=…`): App settings → Domains.
   const searchParams = useSearchParams();
   useEffect(() => { if (searchParams?.get("settings") === "domains") setActiveTab("app-settings"); }, [searchParams]);
@@ -466,7 +484,7 @@ function ProjectWorkspace({
   };
 
   return (
-    <div className="flex h-full">
+    <div className="flex h-full overflow-clip">
       {/* Project header bar */}
       <div className="absolute top-0 left-[220px] right-0 z-10 flex h-[70px] items-center justify-between border-b border-slate-200/80 bg-white/80 backdrop-blur-sm px-4 dark:bg-slate-900/80 dark:border-slate-800">
         {/* WHERE YOU ARE, AS A PATH. "‹ Projects › Mark 8": the list this
@@ -525,7 +543,9 @@ function ProjectWorkspace({
       </div>
 
       {/* Main content area */}
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden pt-[70px] bg-background">
+      {/* `clip`: the panes scroll inside themselves; this box is never scrolled
+          by a focus or scrollIntoView, which would shift the columns up. */}
+      <div className="flex min-w-0 flex-1 flex-col overflow-clip pt-[70px] bg-background">
         {/* THE TABS, ACROSS THE TOP. Smith, Data Model, Editor, Workflows and
             Agents; Files, Versions, Preview, Settings and the rest behind
             "More", still a click away and still reachable from ⌘K. A rail of nine icons down

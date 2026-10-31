@@ -23,6 +23,49 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 TEMPLATES = {
+    # The Templates Gallery (services/template_gallery.py). Every value is
+    # HTML-escaped by the sender: names and descriptions are people's words.
+    "template_review_requested": {
+        "subject": "Template to review: {template_name}",
+        "html": """
+        <h2>A template is waiting for your review</h2>
+        <p><strong>{requester}</strong> ({org_name}) asked for <strong>{template_name}</strong>
+        (v{version}) to be added to the Templates Gallery.</p>
+        <p>{description}</p>
+        <p><a href="{review_url}">Review it in Tentoro Forge</a></p>
+        """,
+    },
+    "template_approved": {
+        "subject": "{template_name} is in the Templates Gallery",
+        "html": """
+        <h2>Your template was approved</h2>
+        <p>Hi {name}, <strong>{template_name}</strong> is now in the Templates Gallery, where
+        every team on Tentoro Forge can start an app from it.</p>
+        <p>Note from the reviewer: {note}</p>
+        <p><a href="{template_url}">See it in Forge</a></p>
+        """,
+    },
+    "template_changes_requested": {
+        "subject": "{template_name} needs changes before it is published",
+        "html": """
+        <h2>Your template needs a few changes</h2>
+        <p>Hi {name}, the Tentoro team reviewed <strong>{template_name}</strong> and asked for
+        changes before it goes into the Templates Gallery:</p>
+        <blockquote>{note}</blockquote>
+        <p>Make the changes, then submit it again.</p>
+        <p><a href="{template_url}">Open your template</a></p>
+        """,
+    },
+    "template_removed": {
+        "subject": "{template_name} was taken out of the Templates Gallery",
+        "html": """
+        <h2>Your template is no longer in the Gallery</h2>
+        <p>Hi {name}, <strong>{template_name}</strong> was taken out of the Templates Gallery:</p>
+        <blockquote>{note}</blockquote>
+        <p>Projects already made from it are not affected. You can submit it again.</p>
+        <p><a href="{template_url}">Open your template</a></p>
+        """,
+    },
     "welcome": {
         "subject": "Welcome to Tentoro Forge",
         "html": """
@@ -78,6 +121,21 @@ TEMPLATES = {
 }
 
 
+def render(tmpl: dict, ctx: dict) -> tuple[str, str]:
+    """The subject and the HTML body of one template, filled in.
+
+    VALUES ARE PEOPLE'S WORDS. An organisation or a template is named by
+    whoever made it, so each value is escaped for the HTML body — a name like
+    `<a href=…>` is text, never a link — and the subject, which is plain text,
+    is left unescaped ("R&D Tracker", not "R&amp;D Tracker") but held to one
+    line, so a name holding a line break cannot add a header to the message."""
+    import html as _html
+
+    subject = " ".join(tmpl["subject"].format_map(SafeDict({k: str(v) for k, v in ctx.items()})).split())
+    body = tmpl["html"].format_map(SafeDict({k: _html.escape(str(v), quote=True) for k, v in ctx.items()}))
+    return subject, body
+
+
 async def send_email(
     to: str,
     template: str,
@@ -99,8 +157,7 @@ async def send_email(
         logger.error("Unknown email template: %s", template)
         return False
 
-    subject = tmpl["subject"].format_map(SafeDict(ctx))
-    html = tmpl["html"].format_map(SafeDict(ctx))
+    subject, html = render(tmpl, ctx)
 
     if APP_ENV == "development":
         logger.info("DEV EMAIL → to=%s subject=%s", to, subject)
@@ -109,7 +166,10 @@ async def send_email(
     if SENDGRID_API_KEY:
         return await _send_via_sendgrid(to, subject, html)
     elif SMTP_HOST:
-        return _send_via_smtp(to, subject, html)
+        # smtplib blocks: on the event loop, one slow mail server froze every
+        # request the API was serving until it answered. It runs on a thread.
+        import asyncio
+        return await asyncio.to_thread(_send_via_smtp, to, subject, html)
     else:
         logger.warning("No email provider configured — email not sent to %s", to)
         return False

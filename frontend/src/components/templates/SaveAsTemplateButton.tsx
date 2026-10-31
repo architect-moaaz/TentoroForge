@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { LayoutTemplate, Loader2 } from "lucide-react";
+import { LayoutTemplate, Loader2, Send } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -16,11 +16,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { SubmitTemplateDialog } from "./SubmitTemplateDialog";
 
 /**
  * Save this project's application as a template for the organisation —
  * available at any point once Smith has defined something. The template is
  * a copy of the definition; the project itself is not changed.
+ *
+ * Saved, it is private to the organisation. "Save and publish" goes straight
+ * on to the Gallery request: screenshots, the checks, and Submit — Tentoro
+ * reviews it before anyone else can see it.
  */
 export function SaveAsTemplateButton({
   projectId,
@@ -34,18 +39,24 @@ export function SaveAsTemplateButton({
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [publishing, setPublishing] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
   const save = useMutation({
-    mutationFn: () =>
-      api.post<{ id: string; name: string }>(`/api/projects/${projectId}/templates`, {
+    mutationFn: (_publish: boolean) =>
+      api.post<{ id: string; name: string; version: number }>(`/api/projects/${projectId}/templates`, {
         name: name.trim(),
         description: description.trim(),
       }),
-    onSuccess: (tpl) => {
+    onSuccess: (tpl, publish) => {
       setOpen(false);
       queryClient.invalidateQueries({ queryKey: ["project-templates", orgId] });
-      toast.success(`Saved “${tpl.name}” to Templates`);
+      const v = tpl.version > 1 ? ` (version ${tpl.version})` : "";
+      if (publish) {
+        setPublishing(tpl.id);
+      } else {
+        toast.success(`Saved “${tpl.name}”${v} to Templates — private to your organisation`);
+      }
     },
     onError: (err: Error) => toast.error(err.message || "Could not save the template"),
   });
@@ -53,10 +64,21 @@ export function SaveAsTemplateButton({
   return (
     <>
       <button
-        onClick={() => {
+        onClick={async () => {
+          // A NEW VERSION STARTS FROM THE LAST ONE: this app's newest template
+          // gives the name and description (written and reviewed for the
+          // Gallery); the first template of an app is named after it.
           setName(projectName ? `${projectName} template` : "");
           setDescription("");
           setOpen(true);
+          try {
+            const res = await api.get<{ templates: Array<{ name: string; description?: string; version: number;
+                                                           source_project_id?: string | null }> }>(
+              `/api/orgs/${orgId}/project-templates`);
+            const mine = (res.templates ?? []).filter((t) => t.source_project_id === projectId)
+              .sort((a, b) => b.version - a.version)[0];
+            if (mine) { setName(mine.name); setDescription(mine.description ?? ""); }
+          } catch { /* the app's own name is a fine start */ }
         }}
         aria-label="Save as template"
         title="Save as template"
@@ -70,7 +92,8 @@ export function SaveAsTemplateButton({
             <DialogTitle>Save as template</DialogTitle>
             <DialogDescription>
               Anyone in your organisation can start a new app from it in Templates — the exact
-              same app again, or one like it. This app is not changed.
+              same app again, or one like it. To share it with every team on Tentoro Forge,
+              publish it to the Gallery: Tentoro reviews it first. This app is not changed.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
@@ -93,13 +116,28 @@ export function SaveAsTemplateButton({
             <Button variant="ghost" onClick={() => setOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={() => save.mutate()} disabled={save.isPending}>
-              {save.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Save template
+            <Button variant="outline" onClick={() => save.mutate(false)} disabled={save.isPending}>
+              {save.isPending && !save.variables && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Save, keep private
+            </Button>
+            <Button onClick={() => save.mutate(true)} disabled={save.isPending}>
+              {save.isPending && save.variables ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Send className="mr-2 h-4 w-4" />
+              )}
+              Save and publish…
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <SubmitTemplateDialog
+        templateId={publishing}
+        orgId={orgId}
+        open={!!publishing}
+        startAt={1}
+        onOpenChange={(o) => !o && setPublishing(null)}
+      />
     </>
   );
 }

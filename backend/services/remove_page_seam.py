@@ -135,3 +135,44 @@ def _find_matching(
                 route=derived,
             ))
     return matches
+
+
+# --------------------------------------------------------------------------- #
+# The Blueprint half. On a Blueprint-built application the files this seam
+# removes are PROJECTED from `.forge/blueprint/current.json` on every build —
+# the page's schema and its nav-flow entry come straight back on the next
+# Verify & Fix, rebuild or resume unless the page is retired in the Blueprint
+# too. `DEPRECATED` is the contract's own retirement status, and every reader
+# that matters already skips it: the fan-out (never composed again), the
+# planner and projection (never written again), nav-flow, verification, the
+# observer.
+# --------------------------------------------------------------------------- #
+
+def retire_blueprint_pages(project_dir: str | Path, route: str, *, cascade: bool = False,
+                           note: str = "removed from the app in the editor") -> list[str]:
+    """Mark the Blueprint page at ``route`` (and, with ``cascade``, every page
+    nested under it) DEPRECATED, with its composed layout, and save. Returns
+    the page ids retired; ``[]`` when there is no Blueprint (a legacy tree) or
+    no page matches — the file removal stands on its own either way."""
+    root = Path(project_dir)
+    if not (root / ".forge" / "blueprint" / "current.json").is_file():
+        return []
+    from services.blueprint.service import BlueprintService
+    svc = BlueprintService.load(output_dir=root)
+    wanted = route.rstrip("/") or "/"
+    prefix = wanted + "/"
+    retired: list[str] = []
+    for page in svc.doc.get("pages") or []:
+        if not isinstance(page, dict) or page.get("status") == "DEPRECATED":
+            continue
+        r = str(page.get("route") or "").rstrip("/") or "/"
+        if r == wanted or (cascade and r.startswith(prefix)):
+            svc.set_status(str(page["id"]), "DEPRECATED", note=note)
+            retired.append(str(page["id"]))
+    if not retired:
+        return []
+    for layout in svc.doc.get("pageLayouts") or []:
+        if isinstance(layout, dict) and str(layout.get("page")) in retired:
+            layout["status"] = "DEPRECATED"
+    svc.save()
+    return retired

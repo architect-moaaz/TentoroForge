@@ -45,6 +45,8 @@ from models.auth import PlatformUser
 from auth import get_current_user
 from pathlib import Path
 
+from concurrent.futures import ThreadPoolExecutor
+
 from services.project_paths import project_root
 from services.project_service import get_project_with_auth
 
@@ -83,6 +85,19 @@ _DETACHED: set[asyncio.Task] = set()
 def _detach(task: "asyncio.Task") -> None:
     _DETACHED.add(task)
     task.add_done_callback(_DETACHED.discard)
+
+#: SMITH'S OWN THREADS. Every turn — a whole build included, for up to an hour
+#: — ran on asyncio's DEFAULT pool, which holds a handful of threads on a small
+#: host and is shared with everything that calls `asyncio.to_thread`. A few
+#: builds in flight filled it, and a "Not now" that needs a millisecond waited
+#: in its queue under "Thinking… 2m" while its ledger already said "working"
+#: (forge-v3, 2026-10-09). Builds and page reviews take the long pool; every
+#: other turn the short one, so an answer never queues behind a build.
+_LONG_TURNS = ThreadPoolExecutor(
+    max_workers=int(os.environ.get("FORGE_BUILD_THREADS", "16")), thread_name_prefix="smith-build")
+_SHORT_TURNS = ThreadPoolExecutor(
+    max_workers=int(os.environ.get("FORGE_TURN_THREADS", "32")), thread_name_prefix="smith-turn")
+
 router = APIRouter(tags=["generation", "blueprint"])
 
 
@@ -813,7 +828,7 @@ def _build_complete_message(doc: dict | None) -> str | None:
              f"{'it' if len(waiting) == 1 else 'them'} from the product model whenever you're ready."
              if waiting else "")
     served_pages = [p for p in (doc.get("pages") or [])
-                    if str(p.get("status") or "").upper() != "REMOVED"]
+                    if str(p.get("status") or "").upper() not in ("REMOVED", "DEPRECATED")]
     unbuilt = _unbuilt_pages(doc)
     funnel = (doc.get("runtime") or {}).get("pages") or {}
     planned = funnel.get("planned")
@@ -1164,7 +1179,7 @@ async def generate_via_blueprint(
         try:
             emit("started", {"projectId": str(project_id),
                              "engine": "blueprint"})
-            outcome = await loop.run_in_executor(None, _acting_as(work, user, project))
+            outcome = await loop.run_in_executor(_LONG_TURNS, _acting_as(work, user, project))
             # COMMIT THE BUILT APP. The mainline generate path commits after a
             # build; this DAG path did not, so the app tree stayed untracked and
             # Smith's first change landed in an untracked working tree — its
@@ -1175,7 +1190,14 @@ async def generate_via_blueprint(
                     and isinstance(outcome, dict)
                     and not outcome.get("awaitingApproval")):
                 try:
-                    from services.git_service import git_commit
+                    from services.git_service import git_commit, git_init
+                    # The project's git_init runs at CREATION, before this build
+                    # made output_dir exist, so it no-ops and the app has no repo
+                    # — then Smith's ground-truth (git status vs a baseline) reads
+                    # every change as "nothing changed on disk". git init is
+                    # idempotent, and output_dir exists now, so ensure the repo
+                    # here before the baseline commit.
+                    await git_init(str(output_dir))
                     await git_commit(
                         str(output_dir),
                         f"Initial generation: {(req.description or '')[:80]}",
@@ -2371,7 +2393,7 @@ async def smith_chat(
                 _the_brief = _brief_with_documents(_brief_from(req.history, req.message), req.evidence)
                 named_design = _figma_in(_the_brief) or _uxpilot_in(_the_brief)
                 turn_result = handle_chat_v2(ChatV2Request(
-                    project_id=str(project_id), output_dir=str(output_dir),
+                    project_id=str(project_id), output_dir=str(output_dir), user_id=str(user.id),
                     message=req.message + shown_note,
                     attachments=shown_files,
                     history=[(t.role, t.text) for t in req.history if t.text][-10:],
@@ -2454,7 +2476,7 @@ async def smith_chat(
             # model reasoning; the stage list above still does exactly that.
             # This is the conversation, and it is where the user asked for it.
             turn_result = handle_chat_v2(ChatV2Request(
-                project_id=str(project_id), output_dir=str(output_dir),
+                project_id=str(project_id), output_dir=str(output_dir), user_id=str(user.id),
                 message=req.message + _document_note(
                     str(output_dir), attached_docs,
                     late=bool(svc is not None and (svc.doc.get("requirements") or svc.doc.get("pages")))) + shown_note,
@@ -2536,7 +2558,8 @@ async def smith_chat(
             # Keep the INNER future too: `wait_for` cancels the shield on timeout,
             # but the inner build keeps running, and it is the inner one we wait
             # on to emit the real completion afterwards.
-            _inner = loop.run_in_executor(None, _acting_as(work, user, project))
+            _inner = loop.run_in_executor(
+                _LONG_TURNS if (req.approved or _reviewing) else _SHORT_TURNS, _acting_as(work, user, project))
             # ON DISK, FOR EVERY WORKER. The registry above is this worker's
             # memory; a panel whose stream dropped polls whichever worker
             # answers, and only a ledger tells it the turn is still working —

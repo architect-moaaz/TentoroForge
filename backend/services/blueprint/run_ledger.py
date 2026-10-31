@@ -432,7 +432,11 @@ class TurnLedger:
         (`run_registry.TURNS`)."""
         import threading
         self.kind = kind
-        run_id = time.strftime("%Y%m%d-%H%M%S", time.gmtime()) + _SUFFIX_OF.get(kind, self.SUFFIX)
+        # Unique past the second: two turns begun in the same second (a chip
+        # pressed twice) wrote one file, and each read the other's events.
+        import uuid
+        run_id = (time.strftime("%Y%m%d-%H%M%S", time.gmtime())
+                  + f"-{uuid.uuid4().hex[:6]}" + _SUFFIX_OF.get(kind, self.SUFFIX))
         self.ledger = RunLedger(output_dir, run_id, phase=phase)
         self._stop = threading.Event()
 

@@ -60,6 +60,90 @@ function humanError(result: Json, status: number): string {
   return `Something went wrong (${status}).`;
 }
 
+/**
+ * WHAT THE BUSINESS RULES SAY ABOUT WHAT IS BEING TYPED — asked of the app's
+ * own rules (`/api/form-rules`), never written into the page. A screen that
+ * hard-coded a rule's limit kept asking by the old limit after the rule was
+ * changed; a screen that asks the rules follows every change.
+ *
+ *   const rules = useRuleHints("<Model>", { <field>: value });           // a new record
+ *   const rules = useRuleHints("<Model>", values, { id, previous });     // editing one
+ *   rules.required("<field>")   // true when a rule makes it required now
+ *   rules.hidden("<field>")     // true when a rule hides it now
+ *   rules.message("<field>")    // the rule's own sentence, when it has one
+ *   rules.errors                // what a save of these values would be stopped for
+ *
+ * Asked a moment after the values stop changing; until the first answer every
+ * question says "no" (the save still checks every rule).
+ */
+export interface RuleHints {
+  required: (field: string) => boolean;
+  hidden: (field: string) => boolean;
+  readonly: (field: string) => boolean;
+  message: (field: string) => string | undefined;
+  errors: string[];
+  patches: Json;
+  pending: boolean;
+}
+
+/** What the form is: an edit form passes the record's `id` and, best, the
+ *  record as it was loaded (`previous`) — so rules about a change are asked as
+ *  a change, not as a new record. A number is the old `delayMs`. */
+export type RuleHintsOptions = { id?: string | number | null; previous?: Json | null; delayMs?: number };
+
+export function useRuleHints(model: string, values: Json, options: RuleHintsOptions | number = {}): RuleHints {
+  const opts: RuleHintsOptions = typeof options === "number" ? { delayMs: options } : options ?? {};
+  const delayMs = opts.delayMs ?? 250;
+  const id = opts.id ?? undefined;
+  const prevKey = opts.previous ? JSON.stringify(opts.previous) : "";
+  const [answer, setAnswer] = React.useState<{ hints: Array<Record<string, unknown>>; errors: string[]; patches: Json }>(
+    { hints: [], errors: [], patches: {} });
+  const [pending, setPending] = React.useState(false);
+  const key = JSON.stringify(values ?? {});
+  React.useEffect(() => {
+    let live = true;
+    setPending(true);
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch(apiPath("/api/form-rules"), {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model, values: JSON.parse(key),
+            ...(id !== undefined && id !== null && id !== "" ? { id } : {}),
+            ...(prevKey ? { previous: JSON.parse(prevKey) } : {}),
+          }),
+        });
+        const body = (await res.json().catch(() => ({}))) as Json;
+        if (live) setAnswer({
+          hints: Array.isArray(body.formHints) ? (body.formHints as Array<Record<string, unknown>>) : [],
+          errors: Array.isArray(body.errors) ? (body.errors as string[]) : [],
+          patches: (body.patches && typeof body.patches === "object" ? body.patches : {}) as Json,
+        });
+      } catch { /* no answer: the form behaves as if there were no hints; the save still checks */ }
+      finally { if (live) setPending(false); }
+    }, delayMs);
+    return () => { live = false; clearTimeout(t); };
+  }, [model, key, delayMs, id, prevKey]);
+  // ANY rule that requires, hides or locks a field does: a "not required" from
+  // one rule's Otherwise never cancels another rule's "required" — the save
+  // checks every rule, so the form must show what the save will ask for.
+  const any = (field: string, test: (h: Record<string, unknown>) => boolean) =>
+    answer.hints.some((h) => h.field === field && test(h));
+  return {
+    required: (f) => any(f, (h) => h.required === true),
+    hidden: (f) => any(f, (h) => h.visible === false || h.hidden === true),
+    readonly: (f) => any(f, (h) => h.readonly === true),
+    message: (f) => {
+      const h = answer.hints.find((x) => x.field === f && x.required === true && typeof x.message === "string" && x.message)
+        ?? answer.hints.find((x) => x.field === f && typeof x.message === "string" && x.message);
+      return h ? String(h.message) : undefined;
+    },
+    errors: answer.errors,
+    patches: answer.patches,
+    pending,
+  };
+}
+
 /** Run a workflow from the page. The data the page shows is refreshed after
  *  it succeeds; `redirectTo` navigates instead. */
 export function useWorkflow<I extends Json>(

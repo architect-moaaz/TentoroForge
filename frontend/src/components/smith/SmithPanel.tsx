@@ -65,6 +65,7 @@ import {
   type AttachedPicture,
 } from "./attachedDocuments";
 import ReactMarkdown from "react-markdown";
+import { ASK_SMITH_EVENT, type AskSmithDetail } from "@/lib/ask-smith";
 import { MarkdownLink } from "@/components/chat/MarkdownLink";
 import { SelfHealCard, type SelfHealMetadata } from "@/components/chat/SelfHealCard";
 import remarkGfm from "remark-gfm";
@@ -531,6 +532,10 @@ export function SmithPanel({
   }, [messages.length, run.nodesDone, run.thoughts.length]);
 
   const busy = run.status === "running";
+  // WHAT IS RUNNING, SAID AS IT IS. A build streams its plan of steps; a
+  // reply does not. The input read "Building…" under every turn — a "Not now"
+  // included — so a slow answer looked like a build nobody had asked for.
+  const building = busy && (run.nodesTotal > 0 || run.nodes.some((n) => n.state === "running"));
 
   // Discovery already asked "what would you like to build?", so the workspace
   // does not ask again — it carries that answer in as the first turn. Guarded
@@ -866,6 +871,18 @@ export function SmithPanel({
     setDraft("");
     sendText(text);
   };
+
+  // Another tab hands Smith a request (lib/ask-smith): it lands in the
+  // composer for the person to read and send.
+  useEffect(() => {
+    const onAsk = (e: Event) => {
+      const d = (e as CustomEvent<AskSmithDetail>).detail;
+      if (!d || d.projectId !== projectId || !d.text) return;
+      setDraft(d.text);
+    };
+    window.addEventListener(ASK_SMITH_EVENT, onAsk);
+    return () => window.removeEventListener(ASK_SMITH_EVENT, onAsk);
+  }, [projectId]);
 
   // THE FIGMA IMPORT LANDS HERE.
   //
@@ -1375,7 +1392,11 @@ export function SmithPanel({
             rows={1}
             disabled={busy}
             placeholder={
-              busy ? "Building…" : "Describe the application, or a change to it…"
+              building
+                ? "Building…"
+                : busy
+                  ? "Smith is working on your last message…"
+                  : "Describe the application, or a change to it…"
             }
             className="min-h-11 flex-1 resize-none rounded-xl border bg-background px-4 py-[11px] text-sm leading-5 outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
           />

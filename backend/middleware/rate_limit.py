@@ -1,5 +1,6 @@
 """Rate limiting middleware — in-memory token bucket with per-IP tracking."""
 
+import re
 import time
 import logging
 from collections import defaultdict
@@ -11,7 +12,14 @@ from starlette.responses import JSONResponse
 
 from middleware.phone_paths import is_phone_picture
 
+_TEMPLATE_SHOT = re.compile(r"^/api/project-templates/[0-9a-f]{32}/screenshots/[0-9a-f]{32}$")
 logger = logging.getLogger(__name__)
+
+
+def _signed_in(request: Request) -> bool:
+    """A bearer that verifies: a made-up header is no one."""
+    from middleware.live_activity import _identify
+    return _identify(request) is not None
 
 #: What one caller may ask of one project's phone picture. A page is a dozen files at once and an iframe cannot wait and retry, so the
 #: burst is generous; but it is a limit (PR #28 review, 2026-10-22: the picture was exempt from any).
@@ -82,6 +90,15 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                                     headers={"Retry-After": "5"})
             return await call_next(request)
         if p.endswith("/events") or p.endswith("/verify/events") or p.endswith("/stream"):
+            return await call_next(request)
+        # A template's screenshots: one per card on the Templates page, so a
+        # Gallery of twenty templates spent the whole burst on its pictures
+        # and the rest drew as broken images (2026-10-17). Each is a signed-in,
+        # visibility-checked read of one small file the browser then caches.
+        # Only a caller who says who they are: an anonymous one counts like
+        # any other request (PR #29 review).
+        if (request.method == "GET" and _TEMPLATE_SHOT.match(p)
+                and _signed_in(request)):
             return await call_next(request)
 
         client_ip = self._get_client_ip(request)
