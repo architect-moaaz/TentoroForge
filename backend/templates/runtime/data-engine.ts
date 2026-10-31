@@ -930,6 +930,7 @@ async function fireRuleEffects(
   effects: Array<{ type: string; workflow?: string; message?: string }>,
   record: any,
   ctx: DataEngineContext,
+  table?: string,
 ): Promise<void> {
   // The rule's workflow starts and its notification is stored — the events
   // below are kept for anything that listens, but they were all that
@@ -937,7 +938,7 @@ async function fireRuleEffects(
   try {
     const wf = await import("@/lib/workflows");
     if (typeof (wf as any).runRuleEffects === "function") {
-      await (wf as any).runRuleEffects(effects, record, ctx.user);
+      await (wf as any).runRuleEffects(effects, record, ctx.user, table);
     }
   } catch (e) {
     console.error("[DataEngine] rule side effects could not run:", e);
@@ -1214,7 +1215,7 @@ export async function create(
   // R1: durable bus row ("<slug>.created") — non-fatal, fire-and-forget.
   _persistEvent("created", entityName, { entity: record, user: ctx.user });
   // Fire rule side effects (trigger_workflow / send_notification) after the write.
-  fireRuleEffects(ruleEffects, record, ctx).catch(console.error);
+  fireRuleEffects(ruleEffects, record, ctx, entity.table).catch(console.error);
 
   // Never return the raw ciphertext; mask or unmask per Slice-4 read policy.
   await _maskOrUnmaskOnRead(entityName, record, ctx);
@@ -1313,7 +1314,7 @@ export async function update(
   emit(event, { entityId: record.id, entity: record, previousEntity: existing, user: ctx.user }).catch(console.error);
   // R1: durable bus row ("<slug>.updated") — non-fatal, fire-and-forget.
   _persistEvent("updated", entityName, { entity: record, previousEntity: existing, user: ctx.user });
-  fireRuleEffects(ruleEffects, record, ctx).catch(console.error);
+  fireRuleEffects(ruleEffects, record, ctx, entity.table).catch(console.error);
 
   await _maskOrUnmaskOnRead(entityName, record, ctx);
   return { data: record, event };
