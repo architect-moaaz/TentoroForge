@@ -56,6 +56,14 @@ def _app_mcp() -> Any:
     return project_app_mcp
 
 
+def _drawn(svc: Any, app_root: str) -> dict:
+    if not any(isinstance(v, dict) for v in svc.doc.get("drawnViews") or []):
+        return {}
+    from services.drawn.project import project_drawn
+    project_drawn(svc.doc, svc.output_dir, app_root)
+    return {"files": ["src/components/DrawnShell.tsx"]}
+
+
 def everything(svc: Any, app_root: str | None) -> list[str]:
     """Re-project every part of the application from `svc.doc`."""
     if not app_root:
@@ -97,6 +105,11 @@ def everything(svc: Any, app_root: str | None) -> list[str]:
     # newer view.tsx, charts and all (036farqu's Open a Dispute). The same two
     # calls the build's frontend projection makes, in the same order.
     _run("code_pages", lambda: _code_pages(svc, app_root))
+    # THE DRAWN FRAME. A drawn shell, its menu's bindings and the drawn
+    # components are rows of the drawing (`drawnViews`), and only a build
+    # projected them: a menu entry bound or a shell changed in the document
+    # stayed out of the app until the next build (2026-10-31).
+    _run("drawn", lambda: _drawn(svc, app_root))
     _run("account", lambda: _account(svc, app_root))
     _run("business_rules", lambda: project_business_rules(svc.doc, app_root))
     # WHO REACHES WHICH ROWS, AND WHAT IS HIDDEN IN THEM. The build writes

@@ -181,11 +181,24 @@ WRITES = WRITES + (
      "however small: \"centre the menu\", \"a search box in the top bar\", \"move "
      "the bell to the left\", \"a footer with our address\", \"bigger logo in the "
      "header\". `file` is the frame file the ask is about (read it first with "
-     "`read_file` under `app/`): " + _frame_files_said() + ". `brief` names the change "
+     "`read_file` under `app/`): " + _frame_files_said() + "; in an application DRAWN from a design, "
+     "each portal's drawn shell `src/components/drawn/<Name>Shell.tsx` (its bars, the account menu's place, "
+     "its buttons) and the drawn components every screen shares under `src/components/drawn/` — a fault on "
+     "every screen of a drawn app is often one of these. `brief` names the change "
      "in the code's terms. Edited, compiled, committed as one version; from then on "
      "that file is the application's own. To switch the KIND of frame (side rail, "
      "top bar, bottom dock, its tone) use `write_section` on `designSystem`.",
      {"file": "string", "brief": "string"}),
+)
+
+WRITES = WRITES + (
+    ("bind_menu",
+     "Which screen each entry of a DRAWN menu opens, in an application drawn from a design (one menu per "
+     "portal). `shell`: the portal or shell's name. With no `entries`, says what every entry opens now and "
+     "which lead nowhere — read it before binding. `entries`: [{label, route}] — the entry as the menu "
+     "says it, the screen's route (empty `route`: back to what the drawing links). One version; the menu is "
+     "projected again. An entry whose screen does not exist yet needs that screen first.",
+     {"shell": "string", "entries": "array"}),
 )
 
 WRITE_NAMES: frozenset[str] = frozenset(name for name, _d, _a in WRITES)
@@ -606,7 +619,7 @@ WRITES = WRITES + (
 #: `requested`, on every write that changes code or the definition: true only
 #: when the person asked for this change itself. Until a try has run in the
 #: turn, a write without it is sent to reproduce first (`smith4.turn`).
-_REQUESTED = {"edit_file", "edit_definition", "write_page_code", "rewrite_pages", "edit_pages", "write_frame",
+_REQUESTED = {"edit_file", "edit_definition", "write_page_code", "rewrite_pages", "edit_pages", "bind_menu", "write_frame",
               "write_section", "set_field"}
 WRITES = tuple((n, d + " `requested: true` only when they asked for this change itself — never when "
                 "they reported something not working.", {**a, "requested": "boolean"})
@@ -718,6 +731,10 @@ def run(name: str, args: dict, *, output_dir: str, reasoning: Any = None) -> dic
         return rewrite_pages(output_dir, list(routes) if isinstance(routes, list) else
                              ([str(routes)] if routes else []), str(args.get("brief") or ""),
                              reasoning=reasoning)
+    if name == "bind_menu":
+        from services.smith.drawn_menu import bind_menu
+        entries = args.get("entries")
+        return bind_menu(output_dir, str(args.get("shell") or ""), entries if isinstance(entries, list) else [])
     if name == "edit_pages":
         routes = args.get("routes")
         return edit_pages(output_dir, list(routes) if isinstance(routes, list) else ([str(routes)] if routes else []),

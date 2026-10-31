@@ -81,6 +81,24 @@ SYSTEM = (
 )
 
 
+#: What a drawn file is, said to the writer beside the ask: the platform's
+#: rules (semantic colours, never hex) are for the platform's own frame.
+DRAWN_NOTE = ("This file REPRODUCES A DESIGN someone drew: keep its exact classes, sizes and colours "
+              "(hex included) and its props; change only what is asked.")
+
+
+def drawn_parts(doc: dict) -> dict[str, dict]:
+    """The frame an application DRAWN from a design has instead of the
+    platform's: each portal's drawn shell and the drawn components shells and
+    screens share, `{file under the app: its drawnViews row}`. The shell's
+    bars, its account menu's place, a cursor every shared button lacks — the
+    DITANS faults of 2026-10-31 — live here, and were no tool's to change."""
+    from services.drawn.project import DRAWN_DIR
+    return {f"{DRAWN_DIR.as_posix()}/{v['name']}.tsx": v for v in doc.get("drawnViews") or []
+            if isinstance(v, dict) and v.get("kind") in ("shell", "component") and v.get("name")
+            and v.get("code") and v.get("status") != "DEPRECATED"}
+
+
 class FrameChangeError(ValueError):
     """The frame could not be changed, with the reason in words."""
 
@@ -202,14 +220,18 @@ def change_frame(svc: Any, file: str, brief: str, *, app_root: str, client: Any 
     from services.smith.sync_app import FRAME_FILES, frame_template, owned_frame
 
     rel = normalise(file)
-    if rel not in FRAME_FILES:
+    drawn = drawn_parts(svc.doc)
+    if rel not in FRAME_FILES and rel not in drawn:
+        shells = [f for f, v in drawn.items() if v.get("kind") == "shell"]
         raise FrameChangeError(f"`{file}` is not part of the frame. The frame's files: "
-                               + "; ".join(f"`{f}` — {FRAME_PARTS.get(f, '')}" for f in FRAME_FILES))
+                               + "; ".join(f"`{f}` — {FRAME_PARTS.get(f, '')}" for f in FRAME_FILES)
+                               + ("; and, drawn from the design: " + ", ".join(f"`{f}`" for f in shells)
+                                  + f" and {len(drawn) - len(shells)} shared drawn component(s)" if drawn else ""))
     brief = (brief or "").strip()
     if not brief:
         raise FrameChangeError("nothing was described, so there is nothing to change in the frame")
     root = Path(app_root)
-    current = owned_frame(svc.doc).get(rel)
+    current = str(drawn[rel]["code"]) if rel in drawn else owned_frame(svc.doc).get(rel)
     if current is None:
         on_disk = root / rel
         current = on_disk.read_text("utf-8") if on_disk.is_file() else frame_template(root, svc.doc, rel)
@@ -226,7 +248,9 @@ def change_frame(svc: Any, file: str, brief: str, *, app_root: str, client: Any 
     note = ""
     tell(reasoning, f"Changing the frame ({rel}): {brief}", "step")
     for round_ in range(1, ROUNDS + 1):
-        user = (f"The change asked for: \"{brief}\".\n\n{screens}\n\nThe file `{rel}` — {FRAME_PARTS.get(rel, '')}:\n"
+        what = (f"drawn: {drawn[rel].get('kind')} \"{drawn[rel].get('key')}\". {DRAWN_NOTE}" if rel in drawn
+                else FRAME_PARTS.get(rel, ''))
+        user = (f"The change asked for: \"{brief}\".\n\n{screens}\n\nThe file `{rel}` — {what}:\n"
                 f"```tsx\n{current}\n```" + (f"\n\nYour last reply was refused:\n{note}\nFix that." if note else ""))
         reply = call(system=SYSTEM, user=user, schema=EDIT_SCHEMA)
         try:
@@ -244,9 +268,17 @@ def change_frame(svc: Any, file: str, brief: str, *, app_root: str, client: Any 
             logger.info("[frame] %s round %d: %d error(s)", rel, round_, len(errors))
             continue
         before = svc.snapshot()
-        rows = [r for r in svc.doc.get("frameCode") or [] if isinstance(r, dict) and r.get("file") != rel]
-        rows.append({"file": rel, "rationale": brief, "code": candidate})
-        svc.doc["frameCode"] = rows
+        if rel in drawn:
+            # A DRAWN FILE STAYS THE DRAWING'S ROW: the change is to that
+            # row's code, projected from it like every drawn file.
+            key = drawn[rel].get("key")
+            for view in svc.doc.get("drawnViews") or []:
+                if isinstance(view, dict) and view.get("key") == key:
+                    view["code"] = candidate
+        else:
+            rows = [r for r in svc.doc.get("frameCode") or [] if isinstance(r, dict) and r.get("file") != rel]
+            rows.append({"file": rel, "rationale": brief, "code": candidate})
+            svc.doc["frameCode"] = rows
         try:
             svc.validate()
         except BlueprintInvalid as exc:
@@ -286,4 +318,4 @@ def run(output_dir: str, file: str, brief: str, *, reasoning: Any = None) -> dic
             "version": out["version"]}
 
 
-__all__ = ["FRAME_PARTS", "FrameChangeError", "apply_edits", "change_frame", "normalise", "run", "typecheck"]
+__all__ = ["DRAWN_NOTE", "FRAME_PARTS", "FrameChangeError", "drawn_parts", "apply_edits", "change_frame", "normalise", "run", "typecheck"]
