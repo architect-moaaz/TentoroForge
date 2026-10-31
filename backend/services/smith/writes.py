@@ -155,6 +155,21 @@ WRITES = WRITES + (
 )
 
 
+WRITES = WRITES + (
+    ("edit_pages",
+     "CHANGE several screens at once, each inside the layout it has, to ONE brief — the same fault or the "
+     "same ask on many screens: \"every filter on these screens filters nothing\", \"the hand cursor on "
+     "every pressable thing\", \"call them Candidates everywhere\". `routes`: the screens, or [\"all\"]; "
+     "`having`: optional text from the code — only the screens whose code contains it are changed (the "
+     "copies `grep` found). The brief names the change in the code's terms, once; each screen's writer "
+     "makes it in that screen, in parallel, compiled, all landing as ONE version. A screen whose writer "
+     "found nothing to change is said, not counted as done. Not for a redesign (`rewrite_pages`) and not "
+     "for one screen (`write_page_code`). When the cause is ONE shared file (a drawn component every screen "
+     "imports, a helper), change that file instead — one edit, not forty.",
+     {"routes": "array", "brief": "string", "having": "string"}),
+)
+
+
 def _frame_files_said() -> str:
     from services.smith.frame_change import FRAME_PARTS
     return "; ".join(f"`{f}` — {what}" for f, what in FRAME_PARTS.items())
@@ -413,6 +428,54 @@ def rewrite_pages(output_dir: str, routes: list[str], brief: str, *, reasoning: 
             "version": out.get("version")}
 
 
+def edit_pages(output_dir: str, routes: list[str], brief: str, *, having: str = "", reasoning: Any = None) -> dict:
+    """Several coded pages changed at once to one brief (`compose.relayout_pages`, `whole=False`)."""
+    from services.blueprint.app_sdk import code_page_files
+    from services.blueprint.service import BlueprintService
+    from services.smith.compose import code_row, relayout_pages
+
+    brief = (brief or "").strip()
+    if not brief:
+        return _finding("`edit_pages` needs `brief`: the change, in the code's terms.")
+    try:
+        svc = BlueprintService.load(output_dir=str(output_dir))
+    except FileNotFoundError:
+        return _finding("This project has no Blueprint, so there are no screens to change.")
+    live = [p for p in svc.doc.get("pages") or [] if isinstance(p, dict) and p.get("status") != "DEPRECATED"
+            and code_row(svc.doc, str(p.get("id"))) is not None]
+    wanted = [str(r).strip() for r in routes or [] if str(r).strip()]
+    if not wanted or any(r.lower() in ("all", "*", "every") for r in wanted):
+        wanted = [str(p.get("route")) for p in live]
+    having = (having or "").strip()
+    if having:
+        # THE COPIES, NOT A GUESS AT THEM: only the screens whose code holds the text.
+        by_route = {str(p.get("route")): code_row(svc.doc, str(p.get("id"))) for p in live}
+        holds = {r for r, row in by_route.items() if row is not None
+                 and any(having in str(code) for code in code_page_files(svc.doc, row).values())}
+        wanted = [r for r in wanted if r in holds]
+        if not wanted:
+            return _finding(f"No screen's code contains `{having}`, so none was changed. `grep` shows where it is.")
+    if not wanted:
+        return _finding("No screen of this application is written as code, so none can be changed this way.")
+    try:
+        out = relayout_pages(svc, wanted, app_root=str(Path(output_dir) / "app"), request=brief,
+                             reasoning=reasoning, whole=False)
+    except Exception as exc:  # noqa: BLE001 — a tool degrades, it does not crash
+        logger.exception("[smith] edit_pages failed")
+        return _finding(f"The screens were not changed — {type(exc).__name__}: {exc}")
+    done, failed, unchanged = out.get("done") or [], out.get("failed") or {}, out.get("unchanged") or {}
+    said = (f"Changed {len(done)} screen(s) (version {out.get('version')}): " + ", ".join(f"`{r}`" for r in done) + "."
+            if done else "")
+    if unchanged:
+        said += (" " if said else "") + f"Left as they were ({len(unchanged)}): " + "; ".join(
+            f"{r} — {why[:160]}" for r, why in sorted(unchanged.items())) + "."
+    finding = "; ".join(f"{r} was not changed: {why}" for r, why in sorted(failed.items()))
+    if not done:
+        return _finding(finding or said or "No screen was changed.")
+    return {"applied": True, "said": said, "finding": finding, "touched": list(out.get("committed") or []),
+            "version": out.get("version")}
+
+
 def write_phone_screens(output_dir: str, routes: list[str] | None = None, brief: str = "", *, reasoning: Any = None) -> dict:
     """The phone's screens of a native app written (`compose.native_pass`): the pages that have none, or the named ones."""
     from services.blueprint.service import BlueprintService
@@ -543,7 +606,7 @@ WRITES = WRITES + (
 #: `requested`, on every write that changes code or the definition: true only
 #: when the person asked for this change itself. Until a try has run in the
 #: turn, a write without it is sent to reproduce first (`smith4.turn`).
-_REQUESTED = {"edit_file", "edit_definition", "write_page_code", "rewrite_pages", "write_frame",
+_REQUESTED = {"edit_file", "edit_definition", "write_page_code", "rewrite_pages", "edit_pages", "write_frame",
               "write_section", "set_field"}
 WRITES = tuple((n, d + " `requested: true` only when they asked for this change itself — never when "
                 "they reported something not working.", {**a, "requested": "boolean"})
@@ -639,7 +702,7 @@ def run(name: str, args: dict, *, output_dir: str, reasoning: Any = None) -> dic
     """Carry out one write. The result's `finding` is the observation when an
     oracle refused; `said` is what the person is told."""
     args = {k: v for k, v in (args or {}).items() if v not in (None, "")}
-    if name in ("write_page_code", "rewrite_pages", "write_frame") and args.get("brief"):
+    if name in ("write_page_code", "rewrite_pages", "edit_pages", "write_frame") and args.get("brief"):
         from services.smith.asked import with_their_words
         args["brief"] = with_their_words(str(args["brief"]))
     if name == "write_page_code":
@@ -655,6 +718,10 @@ def run(name: str, args: dict, *, output_dir: str, reasoning: Any = None) -> dic
         return rewrite_pages(output_dir, list(routes) if isinstance(routes, list) else
                              ([str(routes)] if routes else []), str(args.get("brief") or ""),
                              reasoning=reasoning)
+    if name == "edit_pages":
+        routes = args.get("routes")
+        return edit_pages(output_dir, list(routes) if isinstance(routes, list) else ([str(routes)] if routes else []),
+                          str(args.get("brief") or ""), having=str(args.get("having") or ""), reasoning=reasoning)
     if name == "write_phone_screens":
         routes = args.get("routes")
         return write_phone_screens(output_dir, list(routes) if isinstance(routes, list) else
@@ -682,5 +749,5 @@ def run(name: str, args: dict, *, output_dir: str, reasoning: Any = None) -> dic
     raise KeyError(name)
 
 
-__all__ = ["WRITES", "WRITE_NAMES", "SECTION_NODE", "SECTION_WORDS", "run", "rewrite_pages", "write_phone_screens", "set_field",
+__all__ = ["WRITES", "WRITE_NAMES", "SECTION_NODE", "SECTION_WORDS", "run", "edit_pages", "rewrite_pages", "write_phone_screens", "set_field",
            "verify_pages", "write_page_code", "write_section"]

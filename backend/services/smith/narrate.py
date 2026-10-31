@@ -86,6 +86,11 @@ def starting(tool: str, args: dict | None) -> str:
         n = len(pages) if isinstance(pages, list) else 0
         return (f"Laying out {n} screens again{_reason(a)}…" if n and pages != ["all"]
                 else f"Laying out every screen again{_reason(a)}…")
+    if t == "edit_pages":
+        pages = a.get("routes") or []
+        n = len(pages) if isinstance(pages, list) else 0
+        return (f"Changing {n} screens{_reason(a)}…" if n and pages != ["all"]
+                else f"Changing every screen that needs it{_reason(a)}…")
     if t == "write_section":
         return f"Changing the definition's {a.get('section') or 'section'}{_reason(a)}…"
     if t == "write_frame":

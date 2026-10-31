@@ -1236,7 +1236,7 @@ def native_pass(svc: Any, routes: Sequence[str] = (), *, only_missing: bool = Tr
 
 
 def relayout_pages(svc: Any, routes: Sequence[str], *, app_root: str, request: str,
-                   reasoning: Any = None, client_for: Any = None) -> dict:
+                   reasoning: Any = None, client_for: Any = None, whole: bool = True) -> dict:
     """Lay out several coded pages again from the start to `request`, at once,
     and commit them as ONE version.
 
@@ -1248,6 +1248,12 @@ def relayout_pages(svc: Any, routes: Sequence[str], *, app_root: str, request: s
     so the redesign is one change and one undo. Returns `{applied, done,
     failed: {route: reason}, version, committed, native: {route: "updated" | why not}}`.
 
+    `whole=False` CHANGES them instead: each page is edited inside the layout
+    it has, the way `recode_page` edits one — the same fault on forty screens
+    (a filter that filters nothing, a cursor, a word) fixed by one brief, in
+    parallel, as one version. A page whose writer found nothing to change is
+    `unchanged: {route: why}`, neither done nor failed.
+
     A NATIVE APPLICATION'S PHONE SCREENS ARE LAID OUT AGAIN WITH THEIR WEB PAGES: each is written in the same worker,
     saved in the same version, and a screen that cannot be written is said (`native`) without undoing the redesign.
     Before this the redesign changed the web and left the phone as it was."""
@@ -1256,10 +1262,11 @@ def relayout_pages(svc: Any, routes: Sequence[str], *, app_root: str, request: s
     from services.blueprint.agent_contract import AgentResult, ArtifactProposal, apply_agent_result
     from services.blueprint.app_sdk import project_code_pages
     from services.blueprint.executors import RunUsage, tiered_router
-    from services.blueprint.ui_engineer import CompileError, NeedsWorkflow, compose_page, ensure_sdk
+    from services.blueprint.ui_engineer import CompileError, NeedsWorkflow, compose_page, ensure_sdk, reshape_screen
 
     root = Path(app_root)
     doc = svc.doc
+    unchanged: dict[str, str] = {}
     targets: list[tuple[str, dict, dict]] = []
     failed: dict[str, str] = {}
     for route in dict.fromkeys(str(r).strip() for r in routes if str(r).strip()):
@@ -1283,8 +1290,14 @@ def relayout_pages(svc: Any, routes: Sequence[str], *, app_root: str, request: s
         if not getattr(critic, "accepts_images", False):
             critic = None
         try:
-            body, spent = compose_page(doc, page, root, llm, brief=request, relayout_of=row,
-                                       node="page_code", critic=critic)
+            if whole:
+                body, spent = compose_page(doc, page, root, llm, brief=request, relayout_of=row,
+                                           node="page_code", critic=critic)
+            elif row.get("parts"):
+                body, spent = reshape_screen(doc, page, root, llm, row, brief=request, critic=critic)
+            else:
+                body, spent = compose_page(doc, page, root, llm, brief=request, current=row,
+                                           node="page_code", critic=critic)
         except NeedsWorkflow as exc:
             return route, None, f"it needs a process the app does not have: {exc.needs}"
         except CompileError as exc:
@@ -1294,27 +1307,35 @@ def relayout_pages(svc: Any, routes: Sequence[str], *, app_root: str, request: s
             return route, None, f"{type(exc).__name__}: {str(exc)[:200]}"
         for u, elapsed, *who in spent:
             usage.record(node="page_code", agent=who[0] if who else "ui_engineer", usage=u, elapsed_s=elapsed)
+        if not whole and all(str(body.get(k) or "") == str(row.get(k) or "") for k in ("view", "load")) \
+                and dict(body.get("parts") or {}) == dict(row.get("parts") or {}):
+            unchanged[route] = str(body.get("rationale") or "").strip() or "its writer found nothing to change"
+            return route, None, ""
         phone[route] = native_follow(
             svc, with_new_web_page(doc, page, body), page, reasoning=reasoning, usage=usage,
-            brief=f"Lay this screen out again from the start to: {request}. Keep every control and every workflow it already has.")
+            brief=(f"Lay this screen out again from the start to: {request}. Keep every control and every workflow it already has."
+                   if whole else f"Make the same change to this screen: {request}"))
         return route, body, ""
 
     phone: dict[str, tuple[dict | None, str]] = {}
     written: list[tuple[str, dict, dict]] = []
-    tell(reasoning, f"Laying out {len(targets)} screen(s) again: {request}", "step")
+    tell(reasoning, (f"Laying out {len(targets)} screen(s) again: {request}" if whole
+                     else f"Changing {len(targets)} screen(s): {request}"), "step")
     with cf.ThreadPoolExecutor(max_workers=RELAYOUT_WORKERS) as pool:
         futures = [pool.submit(write, route, page, row) for route, page, row in targets]
         for fut in cf.as_completed(futures):
             route, body, why = fut.result()
+            if body is None and route in unchanged:
+                continue
             if body is None:
                 failed[route] = why
             else:
                 page = next(p for r, p, _ in targets if r == route)
                 written.append((route, page, body))
-                tell(reasoning, f"{route} laid out again.", "step")
+                tell(reasoning, f"{route} laid out again." if whole else f"{route} changed.", "step")
     if not written:
         return {"applied": False, "done": [], "failed": failed, "version": int(svc.doc.get("version") or 0),
-                "committed": [], "native": {}}
+                "committed": [], "native": {}, "unchanged": unchanged}
     before = svc.snapshot()
     committed: list[str] = []
     phone_said: dict[str, str] = {}
@@ -1346,7 +1367,8 @@ def relayout_pages(svc: Any, routes: Sequence[str], *, app_root: str, request: s
         svc.save()
         return {"applied": False, "done": [], "failed": failed, "version": int(svc.doc.get("version") or 0),
                 "committed": []}
-    record = svc.commit(user_request=request, smith_interpretation=f"lay out again: {', '.join(done)}",
+    record = svc.commit(user_request=request, smith_interpretation=(f"lay out again: {', '.join(done)}" if whole
+                                                                      else f"change: {', '.join(done)}"),
                         before=before, affected=sorted(set(committed) | {
                             str(p["id"]) for r, p, _b in written if r in done}))
     ensure_sdk(svc.doc, root)
@@ -1358,7 +1380,8 @@ def relayout_pages(svc: Any, routes: Sequence[str], *, app_root: str, request: s
         except Exception as exc:  # noqa: BLE001 - written in the document; projected again by the next build
             logger.warning("[smith] native project not refreshed after the redesign: %s", exc)
     return {"applied": True, "done": sorted(done), "failed": failed, "version": int(record["version"]),
-            "committed": committed, "native": {r: phone_said[r] for r in sorted(done) if r in phone_said}}
+            "committed": committed, "native": {r: phone_said[r] for r in sorted(done) if r in phone_said},
+            "unchanged": unchanged}
 
 
 def run(output_dir: str, verb: str, *, route: str = "",
