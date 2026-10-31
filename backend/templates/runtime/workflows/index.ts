@@ -1192,7 +1192,13 @@ export function _buildWhere(
           const raw = _resolveRef(op.value, ctx);
           const list = Array.isArray(op.value) ? op.value.map((x: unknown) => _resolveRef(x, ctx)) : raw;
           if (op.name === "in" || op.name === "notIn") {
-            const vals = (Array.isArray(list) ? list : [list]).filter((x) => x !== "" && x != null)
+            // ONE OF THESE RECORDS: `positionId in {{find_positions.output}}`
+            // handed the rows themselves, and Postgres got "[object Object]"
+            // for a uuid (DITANS "Apply Hiring Freeze", 2026-10-31). A record
+            // in the list stands for its id.
+            const vals = (Array.isArray(list) ? list : [list])
+              .map((x) => (x && typeof x === "object" && !(x instanceof Date) && "id" in (x as any) ? (x as any).id : x))
+              .filter((x) => x !== "" && x != null)
               .map((x) => _coerceValue(x, table[field]));
             if (!vals.length) return op.name === "in" ? sql`false` : undefined;
             return op.name === "in" ? inArray(table[field], vals as any[]) : notInArray(table[field], vals as any[]);

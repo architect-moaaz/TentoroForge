@@ -338,6 +338,15 @@ def evaluate(node: ASTNode, ctx: dict) -> Any:
         if node.name in ("$today", "$now") and node.name not in ctx:
             return date.today().isoformat() if node.name == "$today" else \
                 datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+        # The person running it, as `$user.id` names them in a step's value; a
+        # variable of that name still wins (DITANS wzml1sa6, 2026-10-31).
+        if (node.name == "$user" or node.name.startswith("$user.")) and "$user" not in ctx:
+            who = ctx.get("user", ctx.get("__user"))
+            for part in node.name.split(".")[1:]:
+                if not isinstance(who, dict):
+                    return None
+                who = who.get(part)
+            return who
         # Support dotted names stored as a single identifier (e.g., "person.age")
         if "." in node.name:
             parts = node.name.split(".")

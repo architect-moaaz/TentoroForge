@@ -116,3 +116,9 @@ def test_the_seed_keeps_keys_keys_and_whole_numbers_whole():
     assert 'val = prop === "id" ? mintToken(String(val)) : null;' in prep
     assert "val = Math.round(Number(val));" in prep
     assert 'const people = ids["users"] || ids["user"];' in prep
+
+
+def test_a_list_of_records_filters_by_their_ids():
+    src = (RUNTIME / "workflows" / "index.ts").read_text()
+    block = src.split('if (op.name === "in" || op.name === "notIn") {', 1)[1].split("return op.name", 1)[0]
+    assert '"id" in (x as any) ? (x as any).id : x' in block
