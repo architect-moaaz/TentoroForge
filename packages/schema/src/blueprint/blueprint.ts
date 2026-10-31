@@ -253,6 +253,22 @@ export const Product = z.object({
       "language. Empty for a single-language app.",
     )
     .default([]),
+  /**
+   * The words a drawn design shows, in each of `languages`. A page written
+   * as code says every string in every language (`t({ en, ar })`); a screen
+   * converted from a drawing says its words as drawn, so the DITANS sidebar,
+   * headings and labels stayed English when the person chose Arabic
+   * (wzml1sa6, 2026-10-31). Keyed by language, then by the text exactly as
+   * the screen shows it (spaces squeezed); projected to
+   * `public/words/<tag>.json`, which the frame's `DrawnWords` reads.
+   */
+  words: z
+    .record(z.string(), z.record(z.string(), z.string()))
+    .describe(
+      "{language tag: {text as the drawn screens show it: the same text in that language}} — " +
+      "the drawn design's words in each of `languages`.",
+    )
+    .optional(),
 });
 
 // ===========================================================================

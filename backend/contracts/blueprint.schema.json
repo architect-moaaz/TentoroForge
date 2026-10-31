@@ -195,6 +195,16 @@
           },
           "description": "BCP-47 tags of the OTHER languages people can switch the interface to, beside `locale` — ['hi'] for an English app that must also be shown in Hindi. Only when the request asks for the interface in more than one language. Empty for a single-language app.",
           "default": []
+        },
+        "words": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "description": "{language tag: {text as the drawn screens show it: the same text in that language}} — the drawn design's words in each of `languages`."
         }
       },
       "additionalProperties": false,
