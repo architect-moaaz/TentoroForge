@@ -210,6 +210,18 @@ WRITES = WRITES + (
      {"language": "string"}),
 )
 
+WRITES = WRITES + (
+    ("report_platform_fault",
+     "File a fault in what FORGE writes — not in this application's own code — for the platform's people, "
+     "BESIDE fixing the app's copy. The sign: the file says it is generated (\"Edit the Blueprint, not this "
+     "file\") and no part of the definition expresses the fix; or the same fault sits in code every drawn "
+     "screen, every page wrapper or every app gets from the platform. `summary`: what is wrong, one sentence. "
+     "`path`: the file under `app/` where it shows (it names the part of Forge that writes it). `evidence`: "
+     "the try or check that shows it. `proposal`: the change Forge should make, in its terms. `app_fix`: what "
+     "you changed in this app meanwhile. Changes nothing in the app.",
+     {"summary": "string", "path": "string", "evidence": "string", "proposal": "string", "app_fix": "string"}),
+)
+
 WRITE_NAMES: frozenset[str] = frozenset(name for name, _d, _a in WRITES)
 
 
@@ -740,6 +752,11 @@ def run(name: str, args: dict, *, output_dir: str, reasoning: Any = None) -> dic
         return rewrite_pages(output_dir, list(routes) if isinstance(routes, list) else
                              ([str(routes)] if routes else []), str(args.get("brief") or ""),
                              reasoning=reasoning)
+    if name == "report_platform_fault":
+        from services.smith.platform_faults import report
+        return report(output_dir, str(args.get("summary") or ""), path=str(args.get("path") or ""),
+                      evidence=str(args.get("evidence") or ""), proposal=str(args.get("proposal") or ""),
+                      app_fix=str(args.get("app_fix") or ""))
     if name == "translate_words":
         from services.smith.translate import translate_words
         return translate_words(output_dir, str(args.get("language") or ""), reasoning=reasoning)

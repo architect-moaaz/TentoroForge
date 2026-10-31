@@ -77,8 +77,9 @@ def bind_menu(output_dir: str, shell_ref: str, entries: list[dict]) -> dict:
     if not entries:
         lines = table(svc.doc, shell)
         nowhere = sum("nowhere" in l for l in lines)
-        return {"applied": False, "touched": [], "version": 0, "finding": "",
-                "said": f"The menu of {who} ({len(lines)} entries, {nowhere} leading nowhere):\n" + "\n".join(lines)}
+        said = f"The menu of {who} ({len(lines)} entries, {nowhere} leading nowhere):\n" + "\n".join(lines)
+        # A LOOK, NOT A CHANGE: an observation for the next step, never a line of the reply.
+        return {"applied": False, "touched": [], "version": 0, "finding": said, "said": said}
     live = {str(p.get("route")): p for p in svc.doc.get("pages") or []
             if isinstance(p, dict) and p.get("status") != "DEPRECATED" and p.get("route")}
     before = svc.snapshot()
