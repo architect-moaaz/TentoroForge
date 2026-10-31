@@ -309,6 +309,12 @@ class RunningApp:
                  # Also what the SDK's empty state answers to: only this server
                  # builds into `.next-review`.
                  "NEXT_DIST_DIR": self.dist_dir, "DATABASE_URL": self.clone[2],
+                 # A COPY'S ERRORS ARE THE CHECK'S, NOT THE APP'S. With the
+                 # app's own FORGE_URL a trial that crashed a workflow on
+                 # purpose-made data reported it as the live app's runtime
+                 # error, and self-heal spent a Smith turn on it (wzml1sa6,
+                 # 2026-10-31). The check reads its own server log.
+                 "FORGE_URL": "",
                  **self.extra_env}))
         self.generation += 1
         from services import dev_servers
@@ -424,13 +430,19 @@ def _query(app: RunningApp, sql: str) -> list[list[str]]:
     """Rows of `sql` against the database copy the app is reviewed on."""
     if app.clone is None:
         return []
-    container, copy, _ = app.clone
+    container, copy, url = app.clone
+    from services import app_databases
     if not container:
-        from services import app_databases
         try:
             return app_databases.query(copy, sql)
         except Exception:  # noqa: BLE001 — as a failed psql: no rows
             return []
+    # The copy's own port, over a held connection: a `docker exec psql` per
+    # statement made each process trial 85 seconds (wzml1sa6, 2026-10-31).
+    try:
+        return app_databases.query_url(url, sql)
+    except Exception:  # noqa: BLE001 — the port did not answer: psql in the container
+        pass
     done = subprocess.run(["docker", "exec", container, "psql", "-U", "postgres", "-d", copy,
                            "-tA", "-F", "\t", "-c", sql], capture_output=True, text=True, timeout=60)
     if done.returncode != 0:

@@ -343,12 +343,18 @@ def _session(app: Any, doc: dict, ref: str, guest: str | None = None) -> tuple[s
         found = login_of_role(app, doc, role)
         # THE ORGANISATION THEY ACT IN rides in the minted session: the app's
         # own sign-in is not run for it, and every scoped read needs it.
-        org = ""
+        # AND THE LOGIN'S OWN EMAIL: a workflow finds the person's membership
+        # by it (DITANS: `OrganisationMember where email`), and the made-up
+        # `<role>@example.com` matched no member of a role with `&` in it.
+        org, email = "", f"{role.lower().replace(' ', '.')}@example.com"
         if found:
             from services.blueprint.page_review import _query
-            rows = _query(app, f"select coalesce(active_org_id, '') from users where id = '{str(found[0]).replace(chr(39), chr(39)*2)}'")
-            org = rows[0][0] if rows and rows[0] else ""
-        who = (Session(sub=found[0], name=found[1], email=f"{role.lower().replace(' ', '.')}@example.com",
+            rows = _query(app, "select coalesce(active_org_id::text, ''), coalesce(email, '') from users "
+                               f"where id = '{str(found[0]).replace(chr(39), chr(39)*2)}'")
+            if rows and rows[0]:
+                org = rows[0][0]
+                email = (rows[0][1] if len(rows[0]) > 1 and rows[0][1] else email)
+        who = (Session(sub=found[0], name=found[1], email=email,
                        role=role, active_org_id=org) if found else
                Session(sub=f"preview-{role.lower().replace(' ', '-')}", name=f"{role} (preview)",
                        email=f"{role.lower().replace(' ', '.')}@example.com", role=role))
@@ -556,7 +562,11 @@ def fill_records(app: Any, doc: dict, flow: dict, payload: dict,
         ent = ents.get(str(spec.get("entity") or ""))
         if spec.get("kind") != "record" or ent is None or _an_id(payload.get(name)):
             continue
-        if not spec.get("required") and name not in payload:
+        # Required unless it says it is not — as the app reads it
+        # (`projection` → `requiredInputs`). Read the other way, Close Job's
+        # `job` was left out and every DITANS job process was refused for
+        # want of its job (wzml1sa6, 2026-10-31).
+        if not spec.get("required", True) and name not in payload:
             continue
         table = str(ent.get("table") or "")
         if not table or not table.replace("_", "").isalnum():

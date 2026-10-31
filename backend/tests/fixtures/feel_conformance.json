@@ -466,5 +466,34 @@
       "path": "a\\b"
     },
     "expected": true
+  },
+  {
+    "expr": "candidate.id = $user.id",
+    "data": {
+      "candidate": {
+        "id": "a1"
+      },
+      "user": {
+        "id": "a1"
+      }
+    },
+    "expected": true
+  },
+  {
+    "expr": "candidate.id = $user.id",
+    "data": {
+      "candidate": {
+        "id": "a1"
+      },
+      "user": {
+        "id": "b2"
+      }
+    },
+    "expected": false
+  },
+  {
+    "expr": "$user.id = null",
+    "data": {},
+    "expected": true
   }
 ]
