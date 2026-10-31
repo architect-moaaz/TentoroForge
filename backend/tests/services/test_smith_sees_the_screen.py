@@ -87,3 +87,14 @@ def test_a_screen_with_nothing_wrong_says_so():
 def test_open_page_offers_the_look():
     said, args = next((d, a) for n, d, a in trials.TRIALS if n == "open_page")
     assert args.get("look") == "boolean" and "EYES" in said
+
+
+def test_the_rules_say_when_to_look_where_to_fix_and_whom_to_tell():
+    from services.smith import tools
+    from services.smith.loop import _RULES
+    for said in ("`look: true`", "ONE CAUSE, ONE PLACE", "`edit_pages` with `having`", "`bind_menu`",
+                 "`run_checks` with\n  `workflows`", "`translate_words`", "`report_platform_fault`"):
+        assert said in _RULES, said
+    rendered = tools.render()
+    for name in ("edit_pages", "bind_menu", "translate_words", "report_platform_fault"):
+        assert f"`{name}`" in rendered
