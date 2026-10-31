@@ -77,6 +77,8 @@ from routers.open_decisions import router as open_decisions_router
 from routers.pages import router as pages_router
 from routers.navigation import router as navigation_router
 from routers.agent_builder import router as agent_builder_router
+from routers.agent_insights_stream import router as agent_insights_stream_router, ingest_router as agent_insights_ingest_router
+from routers.agent_tunnel import router as agent_tunnel_router
 from routers.ai_features import router as ai_features_router
 from routers.portal import router as portal_router
 from routers.health import router as health_router
@@ -232,7 +234,12 @@ app.include_router(decisions_router)
 app.include_router(open_decisions_router)
 app.include_router(pages_router)
 app.include_router(navigation_router)
+# Agent insights (push and rollup): the app's event route, and the builder's key and summary routes. Registered BEFORE the
+# agent-definitions router so its `.../insights/...` paths can never be read as an agent id.
+app.include_router(agent_insights_ingest_router)
+app.include_router(agent_insights_stream_router)
 app.include_router(agent_builder_router)
+app.include_router(agent_tunnel_router)
 app.include_router(ai_features_router)
 app.include_router(portal_router)
 app.include_router(notifications_router)
@@ -420,6 +427,17 @@ async def _start_domain_watch():
     app.state.domain_watch = asyncio.create_task(domain_watch.watch_forever())
 
 
+@app.on_event("startup")
+async def _start_insights_worker():
+    """Applies the events apps push to /api/insights/ingest into the insights rollups — see `services.agent_insights_worker`.
+    Off by default (the feature is not out yet): `FORGE_INSIGHTS_WORKER=1` turns it on."""
+    from services import agent_insights_worker
+
+    if agent_insights_worker.enabled():
+        app.state.insights_worker = agent_insights_worker.InsightsWorker()
+        await app.state.insights_worker.start()
+
+
 @app.on_event("shutdown")
 async def _shutdown():
     # THE WORK UNDER WAY FINISHES FIRST — and before the previews go, since a
@@ -431,6 +449,8 @@ async def _shutdown():
     if left:
         _logging.getLogger("forge.shutdown").warning("[shutdown] stopping with %d job(s) still running: %s",
                                                       len(left), ", ".join(p.stem for p in left[:6]))
+    if hasattr(app.state, "insights_worker"):
+        await app.state.insights_worker.stop()
     stop_all_previews()
     from services import phone_live
     phone_live.stop_all()

@@ -18,7 +18,8 @@
  */
 
 import { installHarness, ok, eqJson, throwsNamed, done } from "./_harness.mts";
-import { readFileSync } from "node:fs";
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -317,6 +318,16 @@ const STUBS: Record<string, string> = {
 
 (globalThis as any).__FAKE_DB__ = fakeDb;
 
+// The engine reads src/lib/fk-labels.json from the working directory, once. An announcement names the child it is about,
+// so its `postedByUserId` shows that child's name: a name read from an entity that is scoped to a parent.
+{
+  const cwd = mkdtempSync(join(tmpdir(), "own-fk-labels-"));
+  mkdirSync(join(cwd, "src", "lib"), { recursive: true });
+  writeFileSync(join(cwd, "src", "lib", "fk-labels.json"),
+    JSON.stringify({ [announcements.__name]: { postedByUserId: { targetEntity: "Child", labelField: "fullName" } } }));
+  process.chdir(cwd);
+}
+
 // `@/lib/rules/row-access-sql` is NOT stubbed — the real compiler runs against
 // the real FEEL-lite parser, so a row rule below is exercised the whole way
 // from the text an author would type to the rows that come back.
@@ -334,7 +345,8 @@ engine.registerEntity(invoices.__name, invoices, { slug: invoices.__name });
 engine.registerEntity(announcements.__name, announcements, { slug: announcements.__name });
 engine.registerEntity(tickets.__name, tickets, { slug: tickets.__name });
 engine.registerEntity(refundCases.__name, refundCases, { slug: refundCases.__name });
-engine.registerEntity(children.__name, children, { slug: children.__name });
+// aliases: "children" is no regular plural of "Child", which is how the label map names it
+engine.registerEntity(children.__name, children, { slug: children.__name, aliases: ["Child"] });
 engine.registerEntity(appointments.__name, appointments, { slug: appointments.__name });
 engine.registerEntity(carts.__name, carts, { slug: carts.__name });
 engine.registerEntity(cartItems.__name, cartItems, { slug: cartItems.__name });
@@ -796,5 +808,23 @@ console.log("row_access: a rule ANDs with the ownership predicate, never replace
 }
 
 RULES({});
+
+console.log("foreign-key names: a name never reads around the scope of the entity it names");
+{
+  // Both announcements are everyone's to read; one is about Alice's child, the other about Bob's.
+  const rows = ROWS[announcements.__name];
+  rows.push({ id: "a-ava", postedByUserId: "c-ava", title: "About Ava", createdAt: d(10) },
+            { id: "a-max", postedByUserId: "c-max", title: "About Max", createdAt: d(11) });
+  const labels = (list: any[]) => Object.fromEntries(list.filter((r) => r.id.startsWith("a-")).map((r) => [r.id, r.postedByUserIdLabel]));
+  const alice = await engine.query(announcements.__name, {}, asAlice);
+  eqJson(labels(alice.data), { "a-ava": "Ava", "a-max": "" }, "a list gives Alice her child's name and none for Bob's child");
+  const bob = await engine.query(announcements.__name, {}, asBob);
+  eqJson(labels(bob.data), { "a-ava": "", "a-max": "Max" }, "and Bob the reverse");
+  eqJson((await engine.findById(announcements.__name, "a-max", asAlice)).postedByUserIdLabel, "", "one record behaves as the list does");
+  eqJson((await engine.findById(announcements.__name, "a-max", asBob)).postedByUserIdLabel, "Max", "and gives the owner the name");
+  eqJson((await engine.findById(announcements.__name, "a-max", asAdmin)).postedByUserIdLabel, "Max", "a role the rule leaves unscoped sees every name");
+  eqJson((await engine.findById(announcements.__name, "a-max", asAlice)).postedByUserId, "c-max", "the id itself is untouched");
+  rows.length -= 2;
+}
 
 done("ownership-scope");

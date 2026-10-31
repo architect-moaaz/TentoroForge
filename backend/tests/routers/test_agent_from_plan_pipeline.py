@@ -1,18 +1,16 @@
 """Integration-lite: install_agent_from_plan writes the AgentDefinition
-file at the expected location AND invokes run_code_editor with the
-Builder-shaped instruction.
+file at the expected location AND installs the fixed agent runtime compiled
+from it — with no model call at all.
 
-We mock `agents.code_editor.run_code_editor` to a no-op async iterator
-so no real Claude call fires — this test is about the file layout and
-the instruction contract, not the code-editor's output.
+The install is deterministic (services.agent_runtime_install), so these tests
+need no patching: they run the real thing against a temp directory and read what
+it wrote.
 """
 from __future__ import annotations
 
 import json
 import uuid
 from pathlib import Path
-from typing import AsyncIterator
-from unittest.mock import patch
 
 import pytest
 
@@ -20,22 +18,17 @@ import pytest
 import models  # noqa: F401  (side-effect import)
 
 
-async def _empty_stream() -> AsyncIterator[dict]:
-    """A no-op async iterator standing in for run_code_editor's message stream."""
-    if False:  # pragma: no cover — needed to make this a generator
-        yield {}
-
-
 @pytest.mark.asyncio
 async def test_install_writes_agent_definition_file(tmp_path, test_db):
     """Full path: JSON file lands under agent-definitions/ with the right shape,
-    code_editor is invoked, and the summary reflects the graph."""
+    the runtime is installed from it, and the summary reflects the graph."""
     from services.agent_from_plan import install_agent_from_plan
     from database import async_session
     from models.org import Organization
 
     output_dir = tmp_path / "app"
     output_dir.mkdir()
+    (output_dir / "package.json").write_text("{}", encoding="utf-8")  # a built app
 
     plan = {
         "name": "TestApp",
@@ -62,17 +55,12 @@ async def test_install_writes_agent_definition_file(tmp_path, test_db):
         await db.flush()
         org_id = org.id
 
-        # Patch run_code_editor to a no-op so no real Claude call fires.
-        with patch(
-            "agents.code_editor.run_code_editor",
-            return_value=_empty_stream(),
-        ) as mock_editor:
-            summary = await install_agent_from_plan(
-                output_dir=str(output_dir),
-                plan=plan,
-                org_id=org_id,
-                db=db,
-            )
+        summary = await install_agent_from_plan(
+            output_dir=str(output_dir),
+            plan=plan,
+            org_id=org_id,
+            db=db,
+        )
 
     # Summary correctness.
     assert summary is not None
@@ -95,15 +83,15 @@ async def test_install_writes_agent_definition_file(tmp_path, test_db):
     # Edges are wired: sp → t1 → t2
     assert len(data["edges"]) == 2
 
-    # code_editor was invoked with an instruction referencing our agent.
-    mock_editor.assert_called_once()
-    kwargs = mock_editor.call_args.kwargs
-    assert kwargs["output_dir"] == str(output_dir)
-    assert "TestAgent" in kwargs["instruction"]
-    # The instruction always ships the authoritative MCP exemplar +
-    # implementation-requirements block from _build_agent_instruction —
-    # anchor on a stable line so this test survives copy edits above it.
-    assert "Implementation Requirements" in kwargs["instruction"]
+    # The runtime was installed from the definition — compiled, not generated.
+    cfg = json.loads((output_dir / "src" / "agents" / "definitions" / f"{summary['agent_id']}.json").read_text())
+    assert cfg["name"] == "TestAgent"
+    assert cfg["systemPrompt"] == "You are a test agent."
+    assert [t["name"] for t in cfg["tools"]] == ["hello", "goodbye"]
+    assert (output_dir / "src" / "lib" / "agents" / "runtime.ts").is_file()
+    assert (output_dir / "src" / "app" / "api" / "agent" / "chat" / "route.ts").is_file()
+    # Tools that were only described say so rather than pretending.
+    assert any("no code" in w for w in summary["warnings"])
 
 
 @pytest.mark.asyncio
@@ -111,13 +99,14 @@ async def test_install_returns_none_and_writes_nothing_without_agent_graph(
     tmp_path, test_db,
 ):
     """No agent_graph in the plan → service is a no-op (no file, no
-    code_editor call, returns None)."""
+    runtime, returns None)."""
     from services.agent_from_plan import install_agent_from_plan
     from database import async_session
     from models.org import Organization
 
     output_dir = tmp_path / "app"
     output_dir.mkdir()
+    (output_dir / "package.json").write_text("{}", encoding="utf-8")  # a built app
 
     async with async_session() as db:
         org = Organization(id=uuid.uuid4(), name="O2", slug=f"o-{uuid.uuid4().hex[:6]}")
@@ -125,19 +114,15 @@ async def test_install_returns_none_and_writes_nothing_without_agent_graph(
         await db.flush()
         org_id = org.id
 
-        with patch(
-            "agents.code_editor.run_code_editor",
-            return_value=_empty_stream(),
-        ) as mock_editor:
-            summary = await install_agent_from_plan(
-                output_dir=str(output_dir),
-                plan={"name": "PlainApp"},  # no agent_graph
-                org_id=org_id,
-                db=db,
-            )
+        summary = await install_agent_from_plan(
+            output_dir=str(output_dir),
+            plan={"name": "PlainApp"},  # no agent_graph
+            org_id=org_id,
+            db=db,
+        )
 
     assert summary is None
-    mock_editor.assert_not_called()
+    assert not (output_dir / "src" / "lib" / "agents").exists()
     assert not (output_dir / "agent-definitions").exists() or not list(
         (output_dir / "agent-definitions").glob("*.json")
     )
@@ -153,6 +138,7 @@ async def test_install_is_idempotent_on_rerun(tmp_path, test_db):
 
     output_dir = tmp_path / "app"
     output_dir.mkdir()
+    (output_dir / "package.json").write_text("{}", encoding="utf-8")  # a built app
 
     plan = {
         "name": "IdApp",
@@ -169,15 +155,15 @@ async def test_install_is_idempotent_on_rerun(tmp_path, test_db):
         await db.flush()
         org_id = org.id
 
-        with patch("agents.code_editor.run_code_editor",
-                   side_effect=lambda **_: _empty_stream()):
-            s1 = await install_agent_from_plan(
-                output_dir=str(output_dir), plan=plan, org_id=org_id, db=db,
-            )
-            s2 = await install_agent_from_plan(
-                output_dir=str(output_dir), plan=plan, org_id=org_id, db=db,
-            )
+        s1 = await install_agent_from_plan(
+            output_dir=str(output_dir), plan=plan, org_id=org_id, db=db,
+        )
+        s2 = await install_agent_from_plan(
+            output_dir=str(output_dir), plan=plan, org_id=org_id, db=db,
+        )
 
     assert s1["agent_id"] == s2["agent_id"]
     files = list((output_dir / "agent-definitions").glob("*.json"))
     assert len(files) == 1
+    defs = list((output_dir / "src" / "agents" / "definitions").glob("*.json"))
+    assert len(defs) == 1

@@ -1,0 +1,141 @@
+# TentoroForge test stack on its own EC2 box (t3.medium, 30 GB).
+#
+#  - everything lives in ./data (bind mounts), so removing this folder removes everything the stack ever wrote
+#  - published ports (nothing else is):
+#      127.0.0.1:3100  the website and API, on this machine only: reach it with an SSH tunnel (safe, encrypted)
+#      80              the same website on the PUBLIC address, in CLEARTEXT (no HTTPS): if the security group lets port 80 in, logins
+#                      and chats cross the internet unencrypted
+#      443             HTTPS, but it only answers when PUBLIC_DOMAIN is set in .env (see README: "WARNING: cleartext")
+#      ${TUNNEL_SSH_PORT:-2222}  the Watch live tunnel service (key login, no shell)
+#    Use test data only until HTTPS is on, or close port 80 in the security group and use the SSH tunnel to 127.0.0.1:3100.
+#  - memory caps sized for a 3.8 GB machine with 4 GB of swap
+#
+# Images are built by ./build.sh (an isolated builder whose cache is removed afterwards).
+name: ttf
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: ttf-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - ./data/pg:/var/lib/postgresql/data
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: ttf-redis
+    restart: unless-stopped
+    # The agent-insights event stream lives here (services/agent_insights_bus.py). "allkeys-lru" would silently evict unread events when
+    # memory fills, so nothing is evicted: when Redis is full the ingest route answers 503 and the app keeps its rows and retries. The
+    # stream is never trimmed by length (entries are deleted once the worker has applied them, and the route refuses new batches above
+    # ~4000 waiting entries, a few tens of MB), so 256mb leaves a wide margin. appendonly keeps entries across a Redis restart
+    # (at most about one second can be lost). Cache keys all carry a TTL, so noeviction does not let them pile up.
+    command: redis-server --maxmemory 256mb --maxmemory-policy noeviction --appendonly yes --appendfsync everysec
+    mem_limit: 384m
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    image: ttf-backend:1
+    container_name: ttf-backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      tunnel:
+        condition: service_started
+    env_file:
+      - keys.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: ${SECRET_KEY}
+      # "staging", not "production": production refuses to start without a model key
+      APP_ENV: ${APP_ENV:-staging}
+      # when HTTPS is on, add https://<PUBLIC_DOMAIN> to this list in .env (comma separated)
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS}
+      FORGE_INTEGRATIONS_SECRET: ${FORGE_INTEGRATIONS_SECRET}
+      # Watch live: reaching the app on a builder's own computer through its reverse SSH tunnel (services/agent_tunnel.py)
+      # A build checks every page with its own tsc; ten at once swamp a small server, so only a few run together (services/blueprint/tsc_gate.py)
+      FORGE_TSC_PARALLEL: "2"
+      FORGE_TUNNEL_DIR: /tunnel
+      FORGE_TUNNEL_HOST: tunnel
+      # The backend reaches a builder's computer ONLY through the tunnel service's gateway (tunnel/gateway.Caddyfile), which forwards
+      # just GET /api/agent/debug and /api/agent/insights. The raw tunnel ports (22000-22999) listen on 127.0.0.1 inside the tunnel
+      # container, so the backend (which also runs generated apps' code) cannot open them. Needs the matching change in
+      # services/agent_tunnel.py (it reads this variable); without it Watch live cannot reach any computer.
+      FORGE_TUNNEL_GATEWAY: http://tunnel:8080
+      FORGE_TUNNEL_PUBLIC_HOST: ${PUBLIC_HOST:-}
+      FORGE_TUNNEL_SSH_PORT: ${TUNNEL_SSH_PORT:-2222}
+      FORGE_SELF_HEAL: "1"
+      FORGE_PLANNER_CRITIC: "0"
+      FORGE_WIZARD: "1"
+    volumes:
+      - ./data/output:/output
+      - ./data/tunnel:/tunnel
+      - ./src/packages:/packages:ro
+    mem_limit: 2560m
+    cpus: 2
+    # no published ports: the proxy is the only way in
+
+  frontend:
+    image: ttf-frontend:1
+    container_name: ttf-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      NEXT_PUBLIC_API_URL: ""
+      FASTAPI_URL: "http://backend:6500"
+    mem_limit: 768m
+
+  # The only other way in: an SSH server that accepts reverse port forwards (key login, no shell, no commands).
+  # Open TCP ${TUNNEL_SSH_PORT:-2222} in the server's security group for the computers that will connect.
+  # Inside it, forwarded ports listen on 127.0.0.1 only; port 8080 (not published) is a gateway that the backend uses.
+  tunnel:
+    image: ttf-tunnel:1
+    container_name: ttf-tunnel
+    restart: unless-stopped
+    ports:
+      - "${TUNNEL_SSH_PORT:-2222}:22"
+    volumes:
+      - ./data/tunnel:/keys
+      - ./data/tunnel-host:/hostkeys
+    mem_limit: 128m
+
+  proxy:
+    image: caddy:2-alpine
+    container_name: ttf-proxy
+    restart: unless-stopped
+    depends_on:
+      - backend
+      - frontend
+    environment:
+      # The site address Caddy serves HTTPS for. Unset = no HTTPS: the placeholder is a plain-http address nobody uses, so only
+      # the cleartext :80 site exists. Set PUBLIC_DOMAIN=name.example.com in .env (a name that points at this server) to turn HTTPS on.
+      TTF_SITE: ${PUBLIC_DOMAIN:-http://domain-not-set.invalid}
+    ports:
+      - "80:80"
+      # HTTPS. Nothing listens on it inside the container until PUBLIC_DOMAIN is set, so by default it only refuses connections.
+      - "443:443"
+      - "127.0.0.1:3100:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # the certificates and their account: kept so a rebuild does not ask Let's Encrypt for new ones (it limits how often)
+      - ./data/caddy-data:/data
+    mem_limit: 64m

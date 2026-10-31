@@ -41,6 +41,7 @@ from services.blueprint.app_sdk import (
     code_page_files, project_app_sdk, sdk_reference,
 )
 from services.blueprint.repeated_sections import drop_repeated_sections
+from services.blueprint.tsc_gate import tsc_slot
 from services.build_usage import carrying
 
 logger = logging.getLogger(__name__)
@@ -1389,8 +1390,9 @@ def typecheck(doc: dict, app_root: Path, page_id: str, load: str, view: str,
             "include": ["page.tsx", "load.ts", "view.tsx", "parts/*.tsx", "../../next-env.d.ts",
                         "../../src/types/**/*.d.ts"],
         }))
-        proc = subprocess.run([str(tsc), "-p", str(check / "tsconfig.json"), "--pretty", "false"],
-                              cwd=str(app_root), capture_output=True, text=True, encoding="utf-8", timeout=timeout)
+        with tsc_slot():
+            proc = subprocess.run([str(tsc), "-p", str(check / "tsconfig.json"), "--pretty", "false"],
+                                  cwd=str(app_root), capture_output=True, text=True, encoding="utf-8", timeout=timeout)
         # tsc prints paths relative to its own idea of the cwd — under a
         # symlinked root (`/tmp` on macOS) that is `../../../../tmp/…/<check>/`,
         # so the check directory is looked for anywhere in the path, not at
