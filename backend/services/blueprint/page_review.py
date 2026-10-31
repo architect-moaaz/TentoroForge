@@ -530,15 +530,17 @@ def _link_node_modules(modules: Path, link: Path) -> None:
 
 
 def run_shots(app: RunningApp, pages: list[dict], out_dir: Path, *, probe: bool = True,
-              states: bool = True) -> list[dict]:
+              states: bool = True, look: bool = False) -> list[dict]:
     """`page_shots.mjs` over `pages` (`{id, route, entity?, as?, cookies?,
-    anonymous?}`): one result per page, or ReviewUnavailable."""
+    anonymous?}`): one result per page, or ReviewUnavailable. `look` adds
+    what the browser measured (`look` on each result): pressable things
+    without the hand, drawn controls nothing handles, panels cut off."""
     modules = _playwright_modules()
     cfg = out_dir / "shots.json"
     out_dir.mkdir(parents=True, exist_ok=True)
     cfg.write_text(json.dumps({"baseUrl": app.base, "email": ADMIN_EMAIL,
                                "password": ADMIN_PASSWORD, "outDir": str(out_dir), "pages": pages,
-                               "probe": probe, "states": states}))
+                               "probe": probe, "states": states, "look": look}))
     work = out_dir / "run"
     work.mkdir(exist_ok=True)
     link = work / "node_modules"

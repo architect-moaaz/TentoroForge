@@ -283,9 +283,9 @@ def side_by_side(drawn: Any, built: Any, out: Path) -> Path:
     except TypeError:                       # an older Pillow has one size
         font = ImageFont.load_default()
     draw.rectangle((0, 0, width, 56), fill="#111111")
-    draw.text((16, 12), "DRAWN — the design", fill="#ffffff", font=font)
+    draw.text((16, 12), "DRAWN - the design", fill="#ffffff", font=font)
     draw.rectangle((width + 24, 0, width * 2 + 24, 56), fill="#1d4ed8")
-    draw.text((width + 40, 12), "BUILT — this page", fill="#ffffff", font=font)
+    draw.text((width + 40, 12), "BUILT - this page", fill="#ffffff", font=font)
     canvas.save(out)
     return out
 

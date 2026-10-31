@@ -1,0 +1,26 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+body{margin:0;font:14px sans-serif}
+.bar{height:72px;overflow:hidden;position:relative;display:flex;align-items:center;justify-content:space-between;padding:0 16px;background:#eee}
+.menu{position:absolute;right:16px;top:56px;width:180px;background:#fff;border:1px solid #ccc;padding:8px}
+.menu p{margin:6px 0}
+.hidden{display:none}
+.hand{cursor:pointer}
+</style></head><body>
+<div class="bar" data-layer="Top bar">
+  <span>Brand</span>
+  <div id="avatar" data-layer="Avatar">A Admin</div>
+  <div id="menu" class="menu hidden"><p>Profile</p><p>Settings</p><p>Sign out</p></div>
+</div>
+<main>
+  <div id="chip" data-layer="Filter chip">Remote only</div>
+  <div id="go" class="hand">Looks pressable</div>
+  <button>Save</button>
+</main>
+<script>
+  // What React leaves on an element it handles: its props, under __reactProps$<id>.
+  const avatar = document.getElementById("avatar");
+  avatar["__reactProps$test"] = { onClick: () => document.getElementById("menu").classList.toggle("hidden") };
+  avatar.addEventListener("click", avatar["__reactProps$test"].onClick);
+</script>
+</body></html>
