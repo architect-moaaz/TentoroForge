@@ -471,6 +471,11 @@ def test_a_coded_root_is_rendered_inside_the_shell_unless_it_is_public(tmp_path)
     doc["pages"][0]["access"] = "public"
     public = page_module(doc, doc["pages"][0], {"page": "PAGE-001", "load": "", "view": ""})
     assert "export const rootIsPublic = true;" in public and "PublicPageFrame" in public
+    # A drawn public page is its own whole screen: its drawing has the header,
+    # and the generic public bar above it listed every public page (DITANS).
+    doc["pages"][0]["figmaFrame"] = "6:56840"
+    drawn = page_module(doc, doc["pages"][0], {"page": "PAGE-001", "load": "", "view": ""})
+    assert "export const rootIsPublic = true;" in drawn and "PublicPageFrame" not in drawn and "<PageFrame" in drawn
 
 
 def test_a_sign_in_page_is_given_a_full_height_frame_to_centre_in():
