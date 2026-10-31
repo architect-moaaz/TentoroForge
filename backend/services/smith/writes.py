@@ -201,6 +201,15 @@ WRITES = WRITES + (
      {"shell": "string", "entries": "array"}),
 )
 
+WRITES = WRITES + (
+    ("translate_words",
+     "Translate every word the DRAWN screens show that a language lacks — in an application drawn from a "
+     "design and shown in more than one language (`run_checks words` says how many). `language`: the tag "
+     "(\"ar\"); left out, every language besides the app's own. Batches in parallel, one version, projected. "
+     "A word translated wrongly is changed with `edit_definition` on `product`.",
+     {"language": "string"}),
+)
+
 WRITE_NAMES: frozenset[str] = frozenset(name for name, _d, _a in WRITES)
 
 
@@ -731,6 +740,9 @@ def run(name: str, args: dict, *, output_dir: str, reasoning: Any = None) -> dic
         return rewrite_pages(output_dir, list(routes) if isinstance(routes, list) else
                              ([str(routes)] if routes else []), str(args.get("brief") or ""),
                              reasoning=reasoning)
+    if name == "translate_words":
+        from services.smith.translate import translate_words
+        return translate_words(output_dir, str(args.get("language") or ""), reasoning=reasoning)
     if name == "bind_menu":
         from services.smith.drawn_menu import bind_menu
         entries = args.get("entries")

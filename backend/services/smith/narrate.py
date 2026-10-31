@@ -86,6 +86,10 @@ def starting(tool: str, args: dict | None) -> str:
         n = len(pages) if isinstance(pages, list) else 0
         return (f"Laying out {n} screens again{_reason(a)}…" if n and pages != ["all"]
                 else f"Laying out every screen again{_reason(a)}…")
+    if t == "translate_words":
+        return f"Translating the screens' words{' into ' + str(a.get('language')) if a.get('language') else ''}…"
+    if t == "bind_menu":
+        return "Reading the menu…" if not a.get("entries") else "Binding the menu's entries to their screens…"
     if t == "edit_pages":
         pages = a.get("routes") or []
         n = len(pages) if isinstance(pages, list) else 0

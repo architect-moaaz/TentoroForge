@@ -99,12 +99,18 @@ TRIALS = TRIALS + (
      "process refuses the case the rule forbids), `pages` (open and press every "
      "control on the screens named in `routes`, as `as`), `guards` (every fix "
      "made before on this app: the try that failed and then passed, run again), "
-     "or `all` (routes, access, rules and guards). `routes` narrows routes/pages to those screens (a route "
-     "or a page name); `entities` narrows access to those record types. Lines "
+     "`workflows` (EVERY process a person starts, run on the copy with inputs from its real records — "
+     "slow: minutes per dozen; `workflows` narrows it to those names), `drawing` (in an app drawn from a "
+     "design: drawn screens no page shows, pages showing no drawing), `words` (every drawn word in every "
+     "language the app is shown in), `logins` (every demo person signs in, belongs to an organisation when "
+     "the app has them, and lands where they may), `looks` (the measured look — cursor, dead drawn controls, "
+     "cut-off menus — of the screens in `routes`, or of every screen, a dozen a call), "
+     "or `all` (routes, access, rules, guards, drawing, words and logins). `routes` narrows routes/pages/looks "
+     "to those screens (a route or a page name); `entities` narrows access to those record types. Lines "
      "marked ✗ are what is not right, with the reason; read them before "
      "deciding what to change, and run the same check again after changing it. "
      "On a copy of the data.",
-     {"what": "string", "routes": "array", "entities": "array", "as": "string"}),
+     {"what": "string", "routes": "array", "entities": "array", "workflows": "array", "as": "string"}),
 )
 
 TRIAL_NAMES: frozenset[str] = frozenset(name for name, _d, _a in TRIALS)
@@ -697,6 +703,28 @@ def _server_back(app: Any, timeout: float | None = None) -> bool:
     return False
 
 
+def _entry(bench: Bench, doc: dict, route: str, as_: str) -> tuple[dict | None, dict, str]:
+    """`(page, the screenshot script's entry, who)` for opening `route` as `as_`."""
+    pages = [p for p in doc.get("pages") or [] if isinstance(p, dict)]
+    page = next((p for p in pages if str(p.get("route") or "") == route), None)
+    ents = {str(e.get("id")): e for e in (doc.get("data") or {}).get("entities") or []}
+    ent = ents.get(str(((page or {}).get("data") or {}).get("primaryEntity") or ""))
+    as_ = as_ or default_person(doc, route=route)
+    who, jar = _session(bench.app(), doc, as_, bench.guest)
+    role, is_admin = _role(doc, as_)
+    entry: dict[str, Any] = {"id": str((page or {}).get("id") or "trial"), "route": route,
+                             "entity": (ent or {}).get("name"), "as": who}
+    if not role:
+        # Signed out, but the same visitor: the guest cookie and nothing else.
+        if jar:
+            entry["cookies"] = jar
+        else:
+            entry["anonymous"] = True
+    elif not is_admin:
+        entry["cookies"] = jar
+    return page, entry, who
+
+
 def open_page(bench: Bench, doc: dict, route: str, as_: str, sign_in: bool = False,
               press: bool = False, look: bool = False) -> str:
     """The page as a browser sees it. `press` presses every control from a
@@ -712,24 +740,8 @@ def open_page(bench: Bench, doc: dict, route: str, as_: str, sign_in: bool = Fal
         return _sign_in(bench, doc, route, as_)
     if not route.startswith("/"):
         return "`route` is a screen's path, starting with `/`."
-    pages = [p for p in doc.get("pages") or [] if isinstance(p, dict)]
-    page = next((p for p in pages if str(p.get("route") or "") == route), None)
-    ents = {str(e.get("id")): e for e in (doc.get("data") or {}).get("entities") or []}
-    ent = ents.get(str(((page or {}).get("data") or {}).get("primaryEntity") or ""))
     app = bench.app()
-    as_ = as_ or default_person(doc, route=route)
-    who, jar = _session(app, doc, as_, bench.guest)
-    role, is_admin = _role(doc, as_)
-    entry: dict[str, Any] = {"id": str((page or {}).get("id") or "trial"), "route": route,
-                             "entity": (ent or {}).get("name"), "as": who}
-    if not role:
-        # Signed out, but the same visitor: the guest cookie and nothing else.
-        if jar:
-            entry["cookies"] = jar
-        else:
-            entry["anonymous"] = True
-    elif not is_admin:
-        entry["cookies"] = jar
+    page, entry, who = _entry(bench, doc, route, as_)
     bench.server_said()
     shots_dir = Path(bench.output_dir) / ".forge" / "trials" / "shots"
     printed: list[str] = []
@@ -1068,7 +1080,7 @@ def _check_lines(kind: str, result: dict, *, holds: str) -> list[str]:
     untried = list(result.get("untried") or [])
     skipped = list(result.get("skipped") or [])
     if total == 0 and not skipped:
-        return [f"checks · {kind}: nothing to check"]
+        return [f"checks · {kind}: nothing to check" + (f" — {result['note']}" if result.get("note") else "")]
     head = f"checks · {kind}: {n_green} of {total} {holds}"
     if red:
         head += f", {len(red)} not right"
@@ -1087,7 +1099,8 @@ def _check_lines(kind: str, result: dict, *, holds: str) -> list[str]:
     return lines
 
 
-def run_checks(bench: Bench, doc: dict, what: str, routes: list, entities: list, as_: str) -> str:
+def run_checks(bench: Bench, doc: dict, what: str, routes: list, entities: list, as_: str,
+               workflows: list | None = None) -> str:
     """The build's own checks, run on the bench, reported as one observation.
 
     A fault a check can see used to be found by Smith one `open_page` at a
@@ -1096,11 +1109,14 @@ def run_checks(bench: Bench, doc: dict, what: str, routes: list, entities: list,
     rule; this is that knowledge offered as one try.
     """
     from services.blueprint import access_check, route_check, rule_trials
+    from services.smith import app_checks
     what = (what or "all").strip().lower()
-    kinds = {"all": ("routes", "access", "rules", "guards"), "routes": ("routes",), "access": ("access",),
-             "rules": ("rules",), "pages": ("pages",), "guards": ("guards",)}.get(what)
+    kinds = {"all": ("routes", "access", "rules", "guards", "drawing", "words", "logins"),
+             **{k: (k,) for k in ("routes", "access", "rules", "pages", "guards", "workflows", "drawing", "words",
+                                  "logins", "looks")}}.get(what)
     if kinds is None:
-        raise ValueError(f"`what` is one of routes, access, rules, pages, all — not {what!r}")
+        raise ValueError(f"`what` is one of routes, access, rules, pages, guards, workflows, drawing, words, "
+                         f"logins, looks, all — not {what!r}")
     if "pages" in kinds and not routes:
         raise ValueError("`pages` presses the screens named in `routes`; name at least one")
     lines: list[str] = []
@@ -1119,6 +1135,18 @@ def run_checks(bench: Bench, doc: dict, what: str, routes: list, entities: list,
             elif kind == "rules":
                 lines += _check_lines("rules", rule_trials.refuse_rules(doc, bench, _rules_client()),
                                       holds="rules refuse their refused case")
+            elif kind == "workflows":
+                lines += _check_lines("workflows", app_checks.workflows(bench, doc, bench.output_dir, workflows),
+                                      holds="processes run through and are seen by who ran them")
+            elif kind == "drawing":
+                lines += _check_lines("drawing", app_checks.drawing(doc), holds="drawn screens and screens match")
+            elif kind == "words":
+                lines += _check_lines("words", app_checks.words(doc), holds="languages show every drawn word")
+            elif kind == "logins":
+                lines += _check_lines("logins", app_checks.logins(bench, doc),
+                                      holds="demo people sign in, belong and land")
+            elif kind == "looks":
+                lines += app_checks.looks(bench, doc, [str(r) for r in routes], as_)
             elif kind == "guards":
                 from services.smith import guards as _guards
                 lines += _guards.run(bench, doc, only_routes=[str(r) for r in routes] or None)["lines"]
@@ -1179,7 +1207,9 @@ def _run(name: str, args: dict, as_: str, *, bench: Bench, doc: dict) -> str:
             routes = routes if isinstance(routes, list) else [routes]
             entities = args.get("entities") or []
             entities = entities if isinstance(entities, list) else [entities]
-            return run_checks(bench, doc, str(args.get("what") or "all"), routes, entities, as_)
+            flows = args.get("workflows") or []
+            flows = flows if isinstance(flows, list) else [flows]
+            return run_checks(bench, doc, str(args.get("what") or "all"), routes, entities, as_, flows)
         if name == "open_page":
             sign_in = str(args.get("sign_in") or "").strip().lower() in ("true", "1", "yes")
             press = str(args.get("press") or "").strip().lower() in ("all", "true", "1", "yes", "every")
