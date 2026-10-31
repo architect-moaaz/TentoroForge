@@ -1051,3 +1051,27 @@ def test_a_pressable_drawing_shows_the_hand():
     tags = re.findall(r"<\w+[^<>]*onClick=[^<>]*>", out["code"])
     assert tags and all("cursor-pointer" in t for t in tags)
     assert "cursor-pointer" not in re.sub(r"<\w+[^<>]*onClick=[^<>]*>", "", out["code"])
+
+
+def test_the_bar_holding_the_account_menu_does_not_clip_it():
+    # DITANS (2026-10-31): the drawn top bar was `overflow-hidden`, and the
+    # account menu and the bell's list opened below it and were cut off.
+    shell = """export default function ShellView() {
+  return (
+    <div className="flex w-full overflow-hidden">
+      <div className="flex flex-col flex-1 overflow-hidden">
+        <div className="flex h-[72px] overflow-hidden" data-layer="Top bar">
+          <p className="text-[14px]">Home</p>
+          <div className="w-[40px] h-[40px] overflow-hidden" data-layer="Avatar"><p className="text-[12px]">SA</p></div>
+        </div>
+        <main className="flex-1"></main>
+      </div>
+    </div>
+  );
+}
+"""
+    reply = {"contract": {"props": {}}, "lists": [], "values": [], "inputs": [], "shows": [], "controls": ["5"]}
+    out, problems = P.apply(shell, reply, "ShellView", children=True)
+    assert problems == [] and "{props.controls}" in out["code"]
+    assert '<div className="flex h-[72px]" data-layer="Top bar">' in out["code"], "the bar no longer clips"
+    assert '<div className="flex w-full overflow-hidden">' in out["code"], "the shell still clips a wide page"

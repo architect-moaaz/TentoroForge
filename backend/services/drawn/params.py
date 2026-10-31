@@ -649,6 +649,13 @@ def _with(attrs: list[tuple[str, str]], **extra: str) -> list[tuple[str, str]]:
     return out + [(k, v) for k, v in extra.items() if v]
 
 
+def _unclipped(classes: str) -> str:
+    """A className attribute without `overflow-hidden`, as written."""
+    if not classes.startswith('"'):
+        return classes
+    return '"' + " ".join(c for c in classes[1:-1].split() if c != "overflow-hidden") + '"'
+
+
 def _pointer(classes: str) -> str:
     """A className attribute with `cursor-pointer` added, as written."""
     if "cursor-" in classes or not classes.startswith('"'):
@@ -790,7 +797,15 @@ class _Writer:
             body = "{" + values[0]["expr"] + "}" if values else n.body
             return [pad + f"<{n.tag}{_attrs(_with(n.attrs, **extra))}>{body}</{n.tag}>"]
         inner = [line for c in n.children for line in self.piece(c, depth + 1, row, done)]
-        head = f"<{n.tag}{_attrs(_with(n.attrs, **extra))}"
+        attrs = n.attrs
+        if re.search(r"(^|\s)h-\[", n.classes()) and any(d.id in plan.controls for d in n.walk() if d is not n):
+            # THE BAR THAT HOLDS THE ACCOUNT MENU DOES NOT CLIP. Auto layout draws
+            # every frame `overflow-hidden`; the top bar holding the bell and the
+            # account then cut their menus off at its bottom edge (DITANS). Only a
+            # box of fixed height ends above the menu — the shell and its columns
+            # keep clipping, so a wide page still does not scroll the window.
+            attrs = [(k, _unclipped(v) if k == "className" else v) for k, v in attrs]
+        head = f"<{n.tag}{_attrs(_with(attrs, **extra))}"
         return [pad + head + ">", *inner, pad + f"</{n.tag}>"] if inner else [pad + head + " />"]
 
     def field(self, n: M.Node, inp: dict, extra: dict) -> str:
