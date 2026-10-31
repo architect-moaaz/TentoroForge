@@ -130,3 +130,11 @@ def test_the_audit_guard_is_set_up_once_however_many_ask():
     assert "if (!_guarding) _guarding = _ensureGuard(executor)" in guard
     assert "DROP TRIGGER IF EXISTS forge_audit_no_change" not in src
     assert src.count("CREATE OR REPLACE TRIGGER forge_audit_no_") == 2
+
+
+def test_a_written_fallback_is_the_value_even_when_empty():
+    src = (RUNTIME / "workflows" / "index.ts").read_text()
+    first = src.split("export function _firstPresent(", 1)[1].split("\n}\n", 1)[0]
+    assert 'if (quoted) return quoted[1] ?? quoted[2] ?? "";' in first
+    coerce = src.split("function _coerceValue(", 1)[1].split("\n}\n", 1)[0]
+    assert '/^Pg(Text|Varchar|Char)$/.test(String(c?.columnType ?? "")) ? "" : null' in coerce

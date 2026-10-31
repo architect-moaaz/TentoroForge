@@ -585,7 +585,11 @@ export function _firstPresent(inner: string, ctx: WorkflowExecutionContext): unk
     const part = raw.trim();
     let v: unknown;
     const quoted = part.match(/^"(.*)"$|^'(.*)'$/s);
-    if (quoted) v = quoted[1] ?? quoted[2];
+    // A WRITTEN FALLBACK IS THE VALUE, EVEN EMPTY: `{{description ?? ""}}`
+    // gave null, and a required text column refused DITANS's "Save Job Draft"
+    // for every draft saved without a description (2026-10-31; 84 such
+    // fallbacks in that app).
+    if (quoted) return quoted[1] ?? quoted[2] ?? "";
     else if (/^-?\d+(\.\d+)?$/.test(part)) v = Number(part);
     else if (part === "true" || part === "false") v = part === "true";
     else if (/^[\w.[\]]+$/.test(part)) {
@@ -804,7 +808,13 @@ function _coerceValue(v: unknown, col?: unknown): unknown {
   // An empty form field arrives as "" — Postgres rejects that for non-text
   // columns ("invalid input syntax for type integer/uuid: \"\""). Treat a blank
   // optional field as NULL.
-  if (v === "") return null;
+  // …EXCEPT WHERE NULL CANNOT GO: a required text column takes the empty text
+  // it was given (`{{description ?? ""}}` on a draft job, DITANS 2026-10-31);
+  // null there was a certain failure.
+  if (v === "") {
+    const c = col as { notNull?: unknown; columnType?: unknown } | undefined;
+    return c?.notNull && /^Pg(Text|Varchar|Char)$/.test(String(c?.columnType ?? "")) ? "" : null;
+  }
   // Float → int coercion for integer columns. Firecrawl / AI extractors
   // routinely return prices as `479.99` even when the column is INTEGER
   // (whole-dollars convention on retail apps). Postgres rejects with
