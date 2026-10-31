@@ -122,3 +122,11 @@ def test_a_list_of_records_filters_by_their_ids():
     src = (RUNTIME / "workflows" / "index.ts").read_text()
     block = src.split('if (op.name === "in" || op.name === "notIn") {', 1)[1].split("return op.name", 1)[0]
     assert '"id" in (x as any) ? (x as any).id : x' in block
+
+
+def test_the_audit_guard_is_set_up_once_however_many_ask():
+    src = (RUNTIME / "audit.ts").read_text()
+    guard = src.split("export async function ensureGuard(", 1)[1].split("\n}\n", 1)[0]
+    assert "if (!_guarding) _guarding = _ensureGuard(executor)" in guard
+    assert "DROP TRIGGER IF EXISTS forge_audit_no_change" not in src
+    assert src.count("CREATE OR REPLACE TRIGGER forge_audit_no_") == 2
