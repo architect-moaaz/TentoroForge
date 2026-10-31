@@ -735,7 +735,7 @@ def open_page(bench: Bench, doc: dict, route: str, as_: str, sign_in: bool = Fal
     printed: list[str] = []
     notes: list[str] = []
     try:
-        shot = run_shots(app, [entry], shots_dir, probe=press, states=False, look=look)[0]
+        shot = run_shots(app, [entry], shots_dir, probe=press, states=False, **({"look": True} if look else {}))[0]
         # A RESTARTING SERVER IS NOT A BROKEN PAGE. `next dev` restarts itself
         # near its heap limit; the request in flight dies with a connection
         # error and the page "says it is loading". Three pages were rewritten
@@ -748,7 +748,7 @@ def open_page(bench: Bench, doc: dict, route: str, as_: str, sign_in: bool = Fal
                 return scrub(f"{route} as {who}: {SERVER_RESTARTED}; it had not answered again after "
                              f"{int(RESTART_WAIT_S)}s. Try it again in a moment — do not change the page for this.")
             notes.append(SERVER_RESTARTED + "; opened again once it was back")
-            shot = run_shots(app, [entry], shots_dir, probe=press, states=False, look=look)[0]
+            shot = run_shots(app, [entry], shots_dir, probe=press, states=False, **({"look": True} if look else {}))[0]
             before = bench.restarts
             printed += bench.server_said()
             if _server_gone(shot, bench.restarts > before):
