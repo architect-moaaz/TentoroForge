@@ -2172,6 +2172,15 @@ def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
             if isinstance(value, str) and _is_css_dimension(value):
                 lines.append(f"  --space-{_kebab(key)}: {value};")
 
+    # DEPTH, TYPE SCALE AND MOTION ARE THE DESIGN'S TOO — not one fixed library
+    # default for every app (`look_scale`). A named scheme the design states in
+    # a word (elevation "soft", scaleMode "editorial", motion "expressive") or
+    # explicit values become the `--shadow-*` / `--text-*` / `--motion-*` the
+    # kit and Tailwind read. Always emitted (sane defaults) so two apps differ
+    # in depth and rhythm, not only hue and typeface.
+    from services.blueprint import look_scale
+    lines += look_scale.look_vars(design)
+
     out = Path(app_root) / "src" / "app"
     out.mkdir(parents=True, exist_ok=True)
     header = ("/* Generated from the Living Blueprint (designSystem).\n"
@@ -2218,6 +2227,15 @@ def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
         from services.blueprint import native_tokens as _tk
         _w = {"regular": 400, "medium": 500, "semibold": 600, "bold": 700}[_tk.heading(doc)["weight"]]
         body_rule += "h1, h2, h3, .font-heading {\n  font-weight: %d;\n}\n" % _w
+    # THE DESIGN'S TYPE SCALE on bare headings — a real h1→h3 ramp (`look_scale`,
+    # `--text-*`), not the one size every app shared. A page that sets its own
+    # size class still wins (a utility class beats this element rule); this is
+    # the considered default beneath, so an unsized heading already reads as
+    # designed and the scale varies with the register.
+    body_rule += (
+        "h1 {\n  font-size: var(--text-h1);\n  letter-spacing: var(--tracking-tight);\n  line-height: 1.15;\n}\n"
+        "h2 {\n  font-size: var(--text-h2);\n  letter-spacing: var(--tracking-tight);\n  line-height: 1.2;\n}\n"
+        "h3 {\n  font-size: var(--text-h3);\n  line-height: 1.3;\n}\n")
     # THE BRAND GRADIENT, AS TWO CLASSES. `bg-gradient-to-br from-gradient-start
     # to-gradient-end` works too (the tailwind config names both stops); these
     # are the short spelling pages are told to use, with the primary and the

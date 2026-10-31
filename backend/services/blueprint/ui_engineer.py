@@ -638,6 +638,19 @@ What a finished page looks like:
 - TYPE IN TWO VOICES. Page titles and card titles are `font-heading` (the design's
   display face; h1–h3 get it by default); everything else is the body face. Never
   `font-serif` or `font-mono` for a title — they are the browser's, not the design's.
+- DEPTH CARRIES THE LAYERS, AND IT IS THE DESIGN'S. Lift surfaces with the shadow scale —
+  `shadow-sm` a resting card, `shadow-md` on hover, `shadow-lg`/`shadow-xl` a dialog or a
+  raised hero — never a hand-rolled `shadow-[0_…]`. The scale is the register's (a flat
+  tool barely lifts; a layered or luxe product stacks deeper), so the same classes read
+  differently per app: use them, never override them. A card that opens lifts a step on
+  hover (`hover:shadow-md transition-shadow`).
+- MOTION IS THE DESIGN'S, AND SPARING. Transitions already carry the design's duration and
+  easing — let them (`transition`, `transition-shadow`, `transition-colors`) rather than
+  naming a long fixed duration, and never animate more than a couple of things on a screen.
+  For a surface that LEADS a page — a hero band, the first dashboard row, an empty state —
+  reach for the kit's made parts (Hero, the elevated cards, FadeIn/Stagger for a list that
+  appears) before hand-rolling flat markup: they carry the depth and the entrance the
+  design asks for. An app whose motion is `none` gets none, and you add none.
 """
 
 

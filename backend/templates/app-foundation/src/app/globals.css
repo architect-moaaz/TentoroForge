@@ -94,13 +94,17 @@
 }
 
 /* ===== GLOBAL INTERACTIONS ===== */
+/* Motion is the design's: duration and easing come from --motion-* (written by
+   the projector from designSystem.motion; see look_scale.py), with today's
+   values as the fallback. A "none" motion level projects 0ms, so a restrained
+   or reduced app simply does not animate. */
 button,
 a,
 input,
 select,
 textarea,
 [role="button"] {
-  transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all var(--motion-duration-fast, 150ms) var(--motion-easing, cubic-bezier(0.4, 0, 0.2, 1));
 }
 
 button:active:not(:disabled) {
