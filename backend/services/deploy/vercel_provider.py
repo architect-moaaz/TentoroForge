@@ -40,11 +40,13 @@ from services.deploy.provider import DeployEvent, DeploySnapshot
 from services.deploy.snapshot import build_snapshot_upload
 from services.deploy.vercel_client import VercelClient
 
-# Vercel build usually completes in 60–120 s for a fresh Next.js app;
-# 300 s ceiling gives headroom for cold caches without leaving the SSE
-# stream hanging forever.
+# Vercel build usually completes in 60–120 s for a fresh Next.js app. THE
+# CEILING IS VERCEL'S OWN, 45 minutes: at 300 s DITANS (400 pages, 8,000
+# files) was declared "timed out" while Vercel was still compiling it, and
+# went on to build with nobody watching (forge-v3, 2026-10-31). A build that
+# overruns is ended by Vercel itself, as ERROR, which is reported as such.
 _POLL_INTERVAL_S = 3
-_POLL_CEILING_S = 300
+_POLL_CEILING_S = 45 * 60
 
 # Post-READY smoke — hit /api/health/db and expect 200 within this budget.
 # Vercel-hosted Next.js needs a few seconds to warm the serverless function
