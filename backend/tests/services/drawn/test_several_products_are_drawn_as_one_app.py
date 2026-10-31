@@ -145,7 +145,7 @@ def test_the_app_wears_the_frame_of_the_product_the_page_was_drawn_in(tmp_path):
     assert 'import ShellView1 from "./drawn/RecruiterShell";' in wrapper
     assert '"shell:Recruiter": Frame1,' in wrapper and 'const FIRST = "shell:Admin";' in wrapper
     assert '"Recruiter": "shell:Recruiter"' in wrapper, "a page no product drew is framed by the role's product"
-    assert "if (phone && PHONE.some((r) => matches(r, path))) return <>{props.children}</>;" in wrapper
+    assert "if (phone && PHONE.some((r) => matches(r, path))) return <><DrawnWords />{props.children}</>;" in wrapper
     assert "role?: string" in wrapper
 
 
@@ -352,3 +352,25 @@ def test_the_layout_hands_each_shell_what_its_read_found():
     assert "<DrawnShell controls={cluster} role={role} data={shellData}>" in layout
     assert (root / "components/DrawnShellLoad.ts").read_text() == DEFAULT_SHELL_LOAD
     assert (root / "components/DrawnShell.tsx").read_text() == DEFAULT_WRAPPER
+
+
+def test_every_frame_is_a_drawer_on_a_narrow_screen_and_speaks_the_chosen_language(tmp_path):
+    from pathlib import Path
+
+    from services.drawn.project import FRAME_FILES, project_drawn
+
+    doc = _portals_doc()
+    doc["application"] = {"name": "Ditans Health"}
+    project_drawn(doc, tmp_path, tmp_path / "app")
+    app = tmp_path / "app"
+    root = Path(__file__).resolve().parents[3] / "templates/app-foundation"
+    for rel in FRAME_FILES:
+        assert (app / rel).read_text() == (root / rel).read_text(), f"{rel} is written with the shell"
+    wrapper = (app / "src/components/DrawnShell.tsx").read_text()
+    assert '<DrawnFrame appName={"Ditans Health"}>' in wrapper
+    assert "return <><DrawnWords />{props.children}</>;" in wrapper, "a bare phone page speaks the language too"
+    frame = (app / "src/components/DrawnFrame.tsx").read_text()
+    assert 'aria-expanded={open}' in frame and 'import "./DrawnFrame.css";' in frame
+    css = (app / "src/components/DrawnFrame.css").read_text()
+    assert "@media (max-width: 1023px)" in css
+    assert "overflow-x: auto" in css, "a table scrolls sideways inside its card"

@@ -24,6 +24,11 @@ the page you are on was drawn in; a page no portal drew (signing in, a page
 the design left out) gets the frame of the portal the signed-in role's pages
 are drawn in. On a phone, a page drawn for the phone too is shown bare: the
 phone drawing is the whole screen, and a desktop sidebar around it is not.
+
+EVERY FRAME IS SHOWN IN `DrawnFrame` (a platform file, written with the shell):
+below 1024px the drawn sidebar is a drawer behind a menu button and the page
+gives way by its auto-layout classes (`DrawnFrame.css`); and the drawn words
+are shown in the language the person chose, from `product.words` (`words`).
 """
 from __future__ import annotations
 
@@ -35,6 +40,11 @@ from typing import Any
 WRAPPER = Path("src/components/DrawnShell.tsx")
 SHELL_LOAD = Path("src/components/DrawnShellLoad.ts")
 DRAWN_DIR = Path("src/components/drawn")
+#: The drawer and the narrow-screen rules every drawn frame is shown in, and
+#: the words in the chosen language (`DrawnFrame.tsx`). Platform files: written
+#: with the shell, so an app built before them has them too.
+FRAME_FILES = (Path("src/components/DrawnFrame.tsx"), Path("src/components/DrawnFrame.css"))
+_FOUNDATION = Path(__file__).resolve().parents[2] / "templates" / "app-foundation"
 
 DEFAULT_WRAPPER = '''"use client";
 // The design draws no frame of its own: the application draws its own.
@@ -200,8 +210,10 @@ def _props(shell: dict) -> str:
 
 
 def _wrapper(shells: list[tuple[dict, list[dict]]], routes: list[list[str]], roles: dict[str, str],
-             phone: list[str]) -> str:
-    """The wrapper the layout renders: the frame for this page, bound."""
+             phone: list[str], app_name: str = "") -> str:
+    """The wrapper the layout renders: the frame for this page, bound, inside
+    `DrawnFrame` — the drawer the sidebar becomes on a narrow screen, and the
+    design's words in the chosen language."""
     imports, frames, table = [], [], []
     for i, (shell, nav) in enumerate(shells):
         imports.append(f'import ShellView{i} from "./drawn/{shell["name"]}";')
@@ -221,6 +233,8 @@ def _wrapper(shells: list[tuple[dict, list[dict]]], routes: list[list[str]], rol
         'import * as React from "react";\n'
         'import { usePathname, useRouter } from "next/navigation";\n'
         'import { useIsPhone } from "@/components/DrawnResponsive";\n'
+        'import { DrawnFrame } from "@/components/DrawnFrame";\n'
+        'import { DrawnWords } from "@/sdk/i18n";\n'
         + "\n".join(imports) + "\n\n"
         "export const DRAWN_SHELL = true;\n\n"
         "type Entry = { href: string; roles?: string[]; [key: string]: unknown };\n"
@@ -252,12 +266,14 @@ def _wrapper(shells: list[tuple[dict, list[dict]]], routes: list[list[str]], rol
         "                                            data?: Record<string, Record<string, unknown>> }) {\n"
         "  const path = usePathname() || \"/\";\n"
         "  const phone = useIsPhone();\n"
-        "  if (phone && PHONE.some((r) => matches(r, path))) return <>{props.children}</>;\n"
+        "  if (phone && PHONE.some((r) => matches(r, path))) return <><DrawnWords />{props.children}</>;\n"
         "  const drawn = ROUTES.find(([r]) => matches(r, path));\n"
         "  const wanted = drawn ? drawn[1] : ROLES[props.role ?? \"\"] ?? FIRST;\n"
         "  const key = FRAMES[wanted] ? wanted : FIRST;\n"
         "  const Frame = FRAMES[key];\n"
-        "  return <Frame controls={props.controls} role={props.role} data={props.data?.[key]}>{props.children}</Frame>;\n"
+        f"  return <DrawnFrame appName={{{json.dumps(app_name, ensure_ascii=False)}}}>\n"
+        "    <Frame controls={props.controls} role={props.role} data={props.data?.[key]}>{props.children}</Frame>\n"
+        "  </DrawnFrame>;\n"
         "}\n"
     )
 
@@ -287,9 +303,12 @@ def project_drawn(doc: dict, output_dir: str | Path, app_root: str | Path) -> di
             if re.search(r'from "\./' + re.escape(name) + r'"', str(shell["code"])):
                 (drawn / f"{name}.tsx").write_text(code, encoding="utf-8")
         bound.append((shell, nav_routes(doc, shell)))
+    for rel in FRAME_FILES:
+        (root / rel).write_text((_FOUNDATION / rel).read_text("utf-8"), encoding="utf-8")
     routes = portal_routes(doc, shells)
     roles = role_portals(doc, routes)
-    wrapper.write_text(_wrapper(bound, routes, roles, phone_routes(doc)), encoding="utf-8")
+    wrapper.write_text(_wrapper(bound, routes, roles, phone_routes(doc),
+                                 str((doc.get("application") or {}).get("name") or "")), encoding="utf-8")
     reads = _shell_loads(shells, drawn)
     (root / SHELL_LOAD).write_text(_shell_loader(reads), encoding="utf-8")
     return {"assets": copied, "shell": True, "shells": len(shells), "nav": sum(len(n) for _s, n in bound),

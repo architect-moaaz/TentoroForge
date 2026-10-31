@@ -1,0 +1,150 @@
+/*
+ * How a drawn screen gives way on a narrow screen (`DrawnFrame.tsx`).
+ *
+ * The drawing's markup is Figma's auto layout as flex: a FILL child is
+ * `flex-1 basis-0`, a FIXED one a `w-[Npx] shrink-0`. Read in those words:
+ * - nothing drawn wider than the screen is wider than the screen;
+ * - columns side by side (two FILL children, or a fixed pane beside a FILL
+ *   one) wrap onto the next line once each would be narrower than 240px;
+ * - a FILL child's neighbours (a title's buttons) go under it once it would be
+ *   narrower than 160px, and so do a spaced-apart row's;
+ * - a TABLE — a row of three or more fixed cells — keeps its columns and
+ *   scrolls sideways inside its card instead of being cut off;
+ * - large headings wrap instead of running out of the page.
+ */
+
+[data-drawn-bar],
+[data-drawn-scrim] {
+  display: none;
+}
+
+@media (max-width: 1023px) {
+  [data-drawn-bar] {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    height: 56px;
+    padding: 0 16px;
+    background: #ffffff;
+    border-bottom: 1px solid #e1e8eb;
+    font: 600 16px/1.2 Inter, system-ui, sans-serif;
+    color: #1e1e20;
+  }
+  [data-drawn-bar] > button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    margin-inline-start: -8px;
+    border-radius: 10px;
+    color: inherit;
+  }
+  [data-drawn-bar] > button:hover {
+    background: rgba(0, 0, 0, 0.05);
+  }
+
+  /* The drawn sidebar: the first of two columns of the drawn frame. */
+  [data-drawn-view] > * > :first-child:not(:only-child) {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    inset-inline-start: 0;
+    z-index: 50;
+    height: 100dvh;
+    max-width: 85vw;
+    overflow-y: auto;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+  }
+  [dir="rtl"] [data-drawn-view] > * > :first-child:not(:only-child) {
+    transform: translateX(100%);
+  }
+  [data-drawn-frame][data-open="true"] [data-drawn-view] > * > :first-child:not(:only-child) {
+    transform: none;
+    box-shadow: 0 16px 48px rgba(15, 23, 42, 0.25);
+  }
+  [data-drawn-frame][data-open="true"] > [data-drawn-scrim] {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 45;
+    background: rgba(15, 23, 42, 0.4);
+  }
+  /* The frame's own top bar wraps rather than pushing past the screen. */
+  [data-drawn-view] > * > :last-child > :first-child:not(main) {
+    flex-wrap: wrap;
+    height: auto;
+    row-gap: 8px;
+  }
+
+  /* --- the page --- */
+  [data-drawn-view] main [class*="w-["] {
+    max-width: 100%;
+  }
+  /* A FILL child with what is drawn beside it (a title and its buttons): the
+     rest goes under it once it would be narrower than 160px. */
+  [data-drawn-view] main .flex-row:has(> .flex-1):not(:has(> .shrink-0[class*="w-["] ~ .shrink-0[class*="w-["] ~ .shrink-0[class*="w-["])) {
+    flex-wrap: wrap;
+    row-gap: 12px;
+  }
+  [data-drawn-view] main .flex-row:has(> .flex-1):not(:has(> .shrink-0[class*="w-["] ~ .shrink-0[class*="w-["] ~ .shrink-0[class*="w-["])) > .flex-1 {
+    flex-basis: 160px;
+  }
+  [data-drawn-view] main .flex-row:has(> .flex-1 ~ .flex-1):not(:has(> .shrink-0[class*="w-["] ~ .shrink-0[class*="w-["] ~ .shrink-0[class*="w-["])),
+  [data-drawn-view] main .flex-row:has(> .self-stretch[class*="w-["] ~ .flex-1),
+  [data-drawn-view] main .flex-row:has(> .flex-1 ~ .self-stretch[class*="w-["]),
+  [data-drawn-view] main .flex-row.justify-between:not(:has(> .shrink-0[class*="w-["] ~ .shrink-0[class*="w-["] ~ .shrink-0[class*="w-["])) {
+    flex-wrap: wrap;
+    row-gap: 12px;
+  }
+  [data-drawn-view] main .flex-row:has(> .flex-1 ~ .flex-1):not(:has(> .shrink-0[class*="w-["] ~ .shrink-0[class*="w-["] ~ .shrink-0[class*="w-["])) > .flex-1,
+  [data-drawn-view] main .flex-row:has(> .self-stretch[class*="w-["] ~ .flex-1) > .flex-1,
+  [data-drawn-view] main .flex-row:has(> .flex-1 ~ .self-stretch[class*="w-["]) > .flex-1,
+  [data-drawn-view] main .flex-row.justify-between > .flex-1 {
+    flex-basis: 240px;
+  }
+  [data-drawn-view] main .flex-row:has(> .self-stretch[class*="w-["] ~ .flex-1) > .self-stretch[class*="w-["],
+  [data-drawn-view] main .flex-row:has(> .flex-1 ~ .self-stretch[class*="w-["]) > .self-stretch[class*="w-["] {
+    flex-grow: 1;
+  }
+
+  /* A table scrolls sideways inside its card. */
+  [data-drawn-view] main .flex-row:has(> .shrink-0[class*="w-["] ~ .shrink-0[class*="w-["] ~ .shrink-0[class*="w-["]) {
+    min-width: max-content;
+    overflow: visible;
+  }
+  [data-drawn-view] main .flex-col:has(> .flex-row > .shrink-0[class*="w-["] ~ .shrink-0[class*="w-["] ~ .shrink-0[class*="w-["]) {
+    overflow-x: auto;
+  }
+
+  [data-drawn-view] main .whitespace-nowrap[class*="text-[2"],
+  [data-drawn-view] main .whitespace-nowrap[class*="text-[3"] {
+    white-space: normal;
+  }
+}
+
+@media (max-width: 639px) {
+  [data-drawn-view] main .p-\[32px\],
+  [data-drawn-view] main .p-\[40px\],
+  [data-drawn-view] main .p-\[48px\] {
+    padding: 16px;
+  }
+  [data-drawn-view] main .px-\[32px\],
+  [data-drawn-view] main .px-\[40px\],
+  [data-drawn-view] main .px-\[48px\],
+  [data-drawn-view] main .pl-\[32px\],
+  [data-drawn-view] main .pl-\[40px\] {
+    padding-inline-start: 16px;
+  }
+  [data-drawn-view] main .px-\[32px\],
+  [data-drawn-view] main .px-\[40px\],
+  [data-drawn-view] main .px-\[48px\],
+  [data-drawn-view] main .pr-\[32px\],
+  [data-drawn-view] main .pr-\[40px\] {
+    padding-inline-end: 16px;
+  }
+}
