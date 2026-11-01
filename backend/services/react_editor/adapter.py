@@ -45,7 +45,8 @@ def _node_path(app_root: Path | None) -> str:
 
 def run(command: str, payload: dict[str, Any], *, app_root: Path | None = None,
         timeout: float = 30.0) -> dict[str, Any]:
-    env = {**os.environ, "NODE_PATH": _node_path(app_root)}
+    from preview import app_env
+    env = app_env(app_root or "/nonexistent", NODE_PATH=_node_path(app_root))
     result: dict[str, Any] | None = None
     if worker.enabled():
         # The script kept running: no Node start per call. A worker that

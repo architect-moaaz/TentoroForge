@@ -27,7 +27,7 @@ def test_what_a_toolchain_needs_is_kept_and_the_callers_values_win(monkeypatch, 
     _set(monkeypatch)
     monkeypatch.setenv("CI", "")
     env = phone_env(tmp_path, CI="1", EXPO_OFFLINE="1")
-    assert env.get("PATH") and env["FORGE_FIXTURE_PLAIN"] == "kept"
+    assert env.get("PATH") and "FORGE_FIXTURE_PLAIN" not in env, "only a toolchain's names (preview.app_env)"
     assert env["CI"] == "1" and env["EXPO_OFFLINE"] == "1"
 
 

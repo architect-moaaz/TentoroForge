@@ -15,6 +15,7 @@ import { useOfficeStore } from "@/components/virtual-office/OfficeStateManager";
 import type { OfficeEvent } from "@/components/virtual-office/types";
 import type { Project } from "@/types/project";
 import { authFetch } from "@/lib/api";
+import { openProjectStream } from "@/lib/project-stream";
 import { describeRefusal } from "@/lib/spend-refusal";
 
 /** Which backend a user message belongs to.
@@ -104,12 +105,8 @@ export function ChatPanel({
   // Backend CORS already allows localhost:6501; in prod same-origin.
   useEffect(() => {
     if (!projectId) return;
-    const apiBase = process.env.NEXT_PUBLIC_API_URL
-      || (typeof window !== "undefined"
-          && window.location.hostname === "localhost"
-          ? "http://localhost:6500"
-          : "");
-    const es = new EventSource(`${apiBase}/api/projects/${projectId}/events`);
+    // Opened with a member's ticket (`lib/project-stream`).
+    return openProjectStream(projectId, `/api/projects/${projectId}/events`, (es) => {
 
     const onSelfHeal = (ev: MessageEvent) => {
       try {
@@ -167,8 +164,8 @@ export function ChatPanel({
     return () => {
       es.removeEventListener("office", onOffice);
       es.removeEventListener("self_heal_message", onSelfHeal);
-      es.close();
     };
+    });
   }, [projectId]);
 
   // JV-21 — Live SSE for in-flight verify events. Opens on mount, closes
@@ -187,14 +184,7 @@ export function ChatPanel({
   useEffect(() => {
     console.log("[JV-24] verify-events useEffect fired, projectId=", projectId);
     if (!projectId) return;
-    const apiBase = process.env.NEXT_PUBLIC_API_URL
-      || (typeof window !== "undefined"
-          && window.location.hostname === "localhost"
-          ? "http://localhost:6500"
-          : "");
-    const url = `${apiBase}/api/projects/${projectId}/verify/events`;
-    console.log("[JV-24] opening EventSource:", url);
-    const es = new EventSource(url);
+    return openProjectStream(projectId, `/api/projects/${projectId}/verify/events`, (es) => {
     es.onopen = () => console.log("[JV-24] SSE open");
     es.onerror = () => console.log("[JV-24] SSE error, readyState=", es.readyState);
     const store = useChatStore.getState();
@@ -296,8 +286,8 @@ export function ChatPanel({
       handlers.forEach(([k, h]) => es.removeEventListener(k, h));
       es.removeEventListener("verify_start", onStart);
       es.removeEventListener("verify_end", onEnd);
-      es.close();
     };
+    });
   }, [projectId]);
 
   // ── Voice output: read each completed assistant reply aloud when enabled. ──

@@ -6,23 +6,21 @@ import { api, ApiError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { AlertCircle, ArrowLeft, Loader2, Copy, Check } from "lucide-react";
+import { AlertCircle, ArrowLeft, Loader2 } from "lucide-react";
 
-type ForgotResponse = { message: string; reset_url?: string | null };
+type ForgotResponse = { message: string };
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ForgotResponse | null>(null);
-  const [copied, setCopied] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
     setError(null);
     setResult(null);
-    setCopied(false);
     try {
       const res = await api.post<ForgotResponse>("/api/auth/forgot-password", { email });
       setResult(res);
@@ -33,17 +31,6 @@ export default function ForgotPasswordPage() {
     }
   }
 
-  async function copyLink() {
-    if (!result?.reset_url) return;
-    try {
-      await navigator.clipboard.writeText(result.reset_url);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      /* ignore clipboard failure */
-    }
-  }
-
   return (
     <div>
       <div className="mb-8">
@@ -51,7 +38,7 @@ export default function ForgotPasswordPage() {
           Reset your password
         </h1>
         <p className="mt-1.5 text-sm text-slate-500">
-          Enter your email and we&apos;ll generate a reset link.
+          Enter your email and we&apos;ll send you a reset link.
         </p>
       </div>
 
@@ -81,7 +68,7 @@ export default function ForgotPasswordPage() {
           </div>
           <Button type="submit" className="w-full h-11 text-sm font-medium" disabled={loading}>
             {loading ? (
-              <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generating…</>
+              <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Sending…</>
             ) : (
               "Send reset link"
             )}
@@ -94,27 +81,9 @@ export default function ForgotPasswordPage() {
           <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300">
             {result.message}
           </div>
-          {result.reset_url && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-200">
-              <div className="mb-2 font-medium">
-                Email is not wired yet — copy this link and send it manually:
-              </div>
-              <div className="flex items-center gap-2">
-                <code className="flex-1 truncate rounded bg-white/60 px-2 py-1.5 font-mono text-[11px] text-slate-700 dark:bg-slate-900/60 dark:text-slate-200">
-                  {result.reset_url}
-                </code>
-                <button
-                  type="button"
-                  onClick={copyLink}
-                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded border border-amber-300 bg-white hover:bg-amber-100 dark:border-amber-700 dark:bg-slate-900 dark:hover:bg-slate-800"
-                  aria-label="Copy reset link"
-                >
-                  {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                </button>
-              </div>
-              <div className="mt-2 text-[11px] opacity-70">Link expires in 30 minutes.</div>
-            </div>
-          )}
+          <p className="text-xs text-slate-500">
+            The link works once. If no email arrives, ask your platform administrator to send you one.
+          </p>
           <Button
             variant="outline"
             className="w-full h-11 text-sm"

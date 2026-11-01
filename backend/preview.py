@@ -6,6 +6,7 @@ Includes health checks, auto-restart with exponential backoff, and crash recover
 import asyncio
 import logging
 import os
+import re
 import signal
 import random
 from pathlib import Path
@@ -68,16 +69,30 @@ PREVIEW_DIST_DIR = ".next-preview"
 #: Half-second polls before a start is given up on — three minutes.
 _READY_POLLS = 360
 
-#: The platform's own settings file. Everything in it is Forge's — its
-#: database, its secrets, its model keys — and none of it is the app's.
-_PLATFORM_ENV_FILE = Path(__file__).resolve().parent / ".env"
-#: What the platform holds that an app must never inherit, whether or not it
-#: came from the settings file.
-_PLATFORM_ONLY = frozenset({
-    "DATABASE_URL", "DATABASE_URL_SYNC", "SECRET_KEY", "ANTHROPIC_API_KEY",
-    "ANTHROPIC_BASE_URL", "OPENAI_API_KEY", "MOONSHOT_API_KEY", "NEXTAUTH_SECRET",
-    "NEXTAUTH_URL", "AUTH_SECRET", "AUTH_URL", "REDIS_URL",
+#: What an app's processes are given from the platform's environment: only
+#: what a toolchain needs to run — finding its programs, its home and caches,
+#: its locale, a proxy, the Docker the app's database runs in. Nothing else.
+_TOOLCHAIN = frozenset({
+    "PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LANGUAGE", "TERM", "COLORTERM", "TZ",
+    "TMPDIR", "TMP", "TEMP", "HOSTNAME", "CI", "NODE_ENV", "NODE_OPTIONS", "NODE_PATH",
+    "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "SSL_CERT_DIR", "NEXT_TELEMETRY_DISABLED",
+    "PLAYWRIGHT_BROWSERS_PATH", "DOCKER_HOST", "DOCKER_CONFIG", "DOCKER_CERT_PATH", "DOCKER_TLS_VERIFY",
+    "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy",
+    "SYSTEMROOT", "SystemRoot", "PATHEXT", "COMSPEC", "WINDIR", "APPDATA", "LOCALAPPDATA",
+    # A phone project's native toolchain.
+    "JAVA_HOME", "ANDROID_HOME", "ANDROID_SDK_ROOT", "ANDROID_NDK_HOME", "GRADLE_USER_HOME", "DEVELOPER_DIR",
 })
+_TOOLCHAIN_PREFIXES = ("LC_", "XDG_", "npm_config_", "NPM_CONFIG_", "NVM_", "VOLTA_", "COREPACK_", "PNPM_")
+#: A name that says it holds a secret — refused even under a toolchain prefix
+#: (`npm_config_//registry…/:_authToken`).
+_SECRET_NAME = re.compile(r"(?:^|_)(?:KEY|KEYS|SECRET|SECRETS|TOKEN|TOKENS|PASSWORD|PASSWD|PWD|CREDENTIAL|CREDENTIALS|DSN)(?:_|$)"
+                          r"|AUTH|DATABASE_URL|CONNECTION_STRING|PRIVATE", re.I)
+
+
+def _toolchain(name: str) -> bool:
+    if name in _TOOLCHAIN:
+        return True
+    return name.startswith(_TOOLCHAIN_PREFIXES) and not _SECRET_NAME.search(name)
 
 
 def _env_keys(path: Path) -> set[str]:
@@ -96,21 +111,24 @@ def _env_keys(path: Path) -> set[str]:
     return keys
 
 
-def app_env(output_dir: str, **extra: str) -> dict[str, str]:
-    """The environment an app's own server runs in.
+def app_env(output_dir: str | Path, **extra: str) -> dict[str, str]:
+    """The environment an app's own processes run in: its dev server, its
+    build, its package scripts, a check that boots it.
 
     It used to be the platform's (``{**os.environ}``), and Next.js lets the
     process environment win over the app's ``.env`` files — so a Preview read
-    FORGE'S ``DATABASE_URL``: every sign-in looked for its user in the
-    platform's database, found none, and answered 401, and the platform's
-    secrets and model keys reached every generated app (2026-10-09). The
-    platform's settings are taken out, and so is anything the app sets for
-    itself, so the app's own files decide. PATH, HOME and the rest a toolchain
-    needs are kept."""
-    drop = set(_PLATFORM_ONLY) | _env_keys(_PLATFORM_ENV_FILE)
+    FORGE'S ``DATABASE_URL`` and every sign-in answered 401 (2026-10-09). A
+    list of the platform's names to take out followed, and missed what the
+    list did not know: on forge-v3 the integrations key, the deploy and
+    database providers' tokens and the apps database reached code a model
+    wrote and packages it installed (audit, 2026-11-01). So it is the other
+    way round now: only what a toolchain needs (`_TOOLCHAIN`), never a name
+    the app's own files set — those decide — and then ``extra``.
+    """
+    own: set[str] = set()
     for name in (".env", ".env.local", ".env.development", ".env.development.local"):
-        drop |= _env_keys(Path(output_dir) / name)
-    env = {k: v for k, v in os.environ.items() if k not in drop}
+        own |= _env_keys(Path(output_dir) / name)
+    env = {k: v for k, v in os.environ.items() if _toolchain(k) and k not in own}
     env.update(extra)
     return env
 

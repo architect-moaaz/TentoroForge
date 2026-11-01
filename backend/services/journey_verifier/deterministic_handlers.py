@@ -163,8 +163,8 @@ def handle_db_migrate(fault: ClassifiedFault, output_dir: str | Path) -> Dispatc
 
     Generated apps use ``drizzle-kit push`` (not alembic — that's for the
     backend platform itself). This is the same command
-    ``preview_manager`` runs after a regenerate. If ``DATABASE_URL`` isn't
-    set in the environment the handler bails with a clear error rather
+    ``preview_manager`` runs after a regenerate. If the app's ``.env.local``
+    sets no ``DATABASE_URL`` the handler bails with a clear error rather
     than pushing against the wrong DB.
     """
     try:
@@ -181,7 +181,12 @@ def handle_db_migrate(fault: ClassifiedFault, output_dir: str | Path) -> Dispatc
                 fixed=False,
                 smith_turns_used=0,
             )
-        env = os.environ.copy()
+        # The app's own database, from its own file: the platform's
+        # DATABASE_URL is Forge's, and a push there writes the app's tables
+        # into the platform's database.
+        from preview import app_env
+        from services.blueprint.assembly import _env_file
+        env = app_env(out, **_env_file(out))
         if not env.get("DATABASE_URL"):
             return DispatchResult(
                 seam="deterministic:db-migrate",
