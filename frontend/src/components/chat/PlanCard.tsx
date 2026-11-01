@@ -34,7 +34,9 @@ interface PlanPage {
 }
 
 interface PlanWorkflow {
+  id?: string;
   name: string;
+  purpose?: string;
   trigger: string;
   steps: (string | { name?: string; action?: string; id?: string; type?: string })[];
 }

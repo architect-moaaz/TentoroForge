@@ -19,8 +19,7 @@ import React from "react";
 // jsdom polyfills the renderer/react need
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 if (typeof window !== "undefined" && !window.matchMedia) {
-  // @ts-expect-error minimal polyfill
-  window.matchMedia = (query: string) => ({
+  (window as any).matchMedia = (query: string) => ({
     matches: false, media: query, onchange: null,
     addListener() {}, removeListener() {},
     addEventListener() {}, removeEventListener() {}, dispatchEvent() { return false; },

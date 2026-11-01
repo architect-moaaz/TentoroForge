@@ -57,6 +57,7 @@ async def run_bootstrap_stage(
     Never raises — all errors surface via ``result.error`` so the
     caller can fall back to the tactical path."""
     from services.blueprint_pipeline_hooks import record_discovery, record_plan
+    from services.smith_agent_adapters import orchestrate_discovery, orchestrate_planner
     from services.smith_narrator import narrate
 
     try:

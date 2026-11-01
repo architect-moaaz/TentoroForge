@@ -34,7 +34,10 @@ import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from PIL import ImageDraw
 
 
 logger = logging.getLogger(__name__)

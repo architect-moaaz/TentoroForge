@@ -18,7 +18,7 @@ import { narrateSmithThought, narrateSmithToolStart, narrateSmithHeartbeat } fro
 import { VirtualOffice } from "@/components/virtual-office";
 import { useOfficeStore } from "@/components/virtual-office/OfficeStateManager";
 import type { ChatMessage as ChatMessageType } from "@/types/project";
-import type { QuestState, ResourceCard } from "@/stores/chat";
+import type { QuestState, ResourceCard, StreamingMessage } from "@/stores/chat";
 import { useChatStore, isBudgetError } from "@/stores/chat";
 import { useFlavorText } from "@/lib/flavor-text";
 import { DeliverablesPanel } from "@/components/generation/DeliverablesPanel";
@@ -50,6 +50,7 @@ interface ChatHistoryProps {
       last_tool?: string;
     }[];
     plannerThoughts: { stage: string; text: string }[];
+    shipReport?: StreamingMessage["shipReport"];
     journey: {
       results: {
         slug: string;

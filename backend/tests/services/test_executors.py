@@ -23,6 +23,7 @@ from services.blueprint.executors import (
     NODE_TASKS,
     PROPOSAL_SCHEMA,
     MalformedEnvelope,
+    OpenAICompatibleModel,
     build_prompt,
     context_for,
     make_executor,

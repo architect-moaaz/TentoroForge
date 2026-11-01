@@ -44,13 +44,13 @@ export function ChatMessage({ message, onSend, isGenerating, isLastAssistantMess
   // re-renders against the fresh plan without waiting for an SSE event
   // and without appending a duplicate card to the timeline.
   const upsertMessage = useChatStore((s) => s.upsertMessage);
-  const handlePlanUpdated = (newPlan: Record<string, unknown>) => {
+  const handlePlanUpdated = (newPlan: object) => {
     upsertMessage({
       ...message,
       metadata: { ...(message.metadata || {}), plan: newPlan },
     });
   };
-  const handleDiscoveryUpdated = (newDossier: Record<string, unknown>) => {
+  const handleDiscoveryUpdated = (newDossier: object) => {
     upsertMessage({
       ...message,
       metadata: { ...(message.metadata || {}), discovery: newDossier },

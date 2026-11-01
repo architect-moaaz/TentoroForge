@@ -5115,6 +5115,10 @@ async def _run_figma_relay_pipeline(
             f"Read each file, fix the error, verify with `npx tsc --noEmit 2>&1 | head -30`."
         )
         try:
+            # Neither name was in scope here, so this fix round raised NameError (lint gate, 2026-11-01).
+            from agents.page_agent import run_page_agent
+            _spec_file = Path(output_dir) / "src" / "contracts" / "design-spec.json"
+            design_spec = json.loads(_spec_file.read_text()) if _spec_file.exists() else None
             async for evt in _stream_phase(
                 "Build-Fix",
                 run_page_agent(output_dir, plan, domain_context=domain_ctx, design_spec=design_spec, fix_prompt=fix_prompt),
@@ -8285,6 +8289,17 @@ async def _handle_smith_turn(project: Project, message: str, deferred: dict | No
     # orchestrator returns an OrchestratorResult; downstream code below
     # expects the classic `run_smith_agent` shape, so we adapt.
     try:
+        # Smith's thoughts cross from the worker thread to this loop through
+        # a queue. These lines went with the legacy agent (b3ba929c) while
+        # the drain that reads them stayed, so every turn here raised
+        # NameError (found by the lint gate, 2026-11-01).
+        _smith_queue: asyncio.Queue = asyncio.Queue()
+        _smith_loop = asyncio.get_running_loop()
+        _last_tool: dict = {"name": ""}
+        _reasoning_chunks_seen: list[str] = []
+        _smith_timeout = int(os.getenv("FORGE_SMITH_TIMEOUT_S", "180"))
+        _HEARTBEAT_SECONDS = 12.0
+
         def _reasoning_cb(text: str) -> None:  # noqa: ANN001
             if isinstance(text, str) and text.strip():
                 _smith_loop.call_soon_threadsafe(

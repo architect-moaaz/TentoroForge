@@ -141,7 +141,7 @@ export interface DesignTemplate {
   shell?: { frame?: "sidebar" | "topbar" | "rail"; tone?: "light" | "dark" };
 }
 
-interface StreamingMessage {
+export interface StreamingMessage {
   logs: string[];
   toolCalls: { tool: string; args: string }[];
   filesCreated: string[];

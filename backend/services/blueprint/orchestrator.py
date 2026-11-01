@@ -3244,6 +3244,7 @@ def _run_agent_subject(
     commit: bool,
     user_request: str,
     report: RunReport,
+    ledger: Any = None,
 ) -> str | None:
     """One agent call (with retries) for one subject.
 
