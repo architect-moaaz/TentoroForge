@@ -75,9 +75,27 @@ def read_screen(document: dict) -> Screen:
         screen.skip.add(str(left.get("id")))
         rest = [c for c in _children(document) if str(c.get("id")) not in screen.skip]
         # THE PAGE IS THE WIDE COLUMN BESIDE IT. Converted as the root, so
-        # the page fills whatever width the app gives it.
-        column = max(rest, key=lambda c: (_box(c) or (0, 0, 0, 0))[2], default=None)
-        screen.page_root = column or document
+        # the page fills whatever width the app gives it. Chosen from the
+        # layout's own columns: a dialog's scrim covers the whole frame, so it
+        # is wider than the page, and 40 DITANS dialogs and drawers were
+        # converted as nothing but their scrim (2026-10-30).
+        # A frame without auto-layout marks nothing as floating: there the
+        # page is the widest layer that starts beside the sidebar, and what is
+        # drawn after it lies over it.
+        sbox = _box(left)
+        edge = sbox[0] + sbox[2] if sbox else fx
+        flow = [c for c in rest if c.get("layoutPositioning") != "ABSOLUTE"
+                and (_box(c) or (edge, 0, 0, 0))[0] >= edge - 2]
+        column = max(flow or rest, key=lambda c: (_box(c) or (0, 0, 0, 0))[2], default=None)
+        if column is not None:
+            # In auto-layout a layer after the page is the next column (a side
+            # panel), not something over it; only a free frame stacks by order.
+            free = str(document.get("layoutMode") or "NONE") == "NONE"
+            after = rest[rest.index(column) + 1:] if free else []
+            screen.page_root = _with_overlays(column, [c for c in rest if c is not column and (
+                c.get("layoutPositioning") == "ABSOLUTE" or c in after)], frame)
+        else:
+            screen.page_root = document
     else:
         screen.page_root = document
     # THE TOP BAR: along the top of the page, as wide as it, short.
@@ -91,6 +109,71 @@ def read_screen(document: dict) -> Screen:
                 screen.skip.add(str(child.get("id")))
                 break
     return screen
+
+
+def _with_overlays(column: dict, overlays: list[dict], frame: tuple[float, float, float, float] | None = None) -> dict:
+    """The page with what is drawn over it — a dialog, a drawer, their scrim —
+    laid over it, each kept within the page: a scrim drawn across the whole
+    frame covers the page, the shell beside it being the app's."""
+    cbox = _box(column)
+    if not overlays or cbox is None:
+        return column
+    cx, _cy, cw, _ch = cbox
+    laid = []
+    for node in overlays:
+        box = dict(node.get("absoluteBoundingBox") or {})
+        try:
+            left, right = max(float(box["x"]), cx), min(float(box["x"]) + float(box["width"]), cx + cw)
+        except (KeyError, TypeError, ValueError):
+            continue
+        if right <= left:
+            continue
+        held = _held(left, right, box, cbox, frame)
+        placed = {**box, "x": left, "width": right - left}
+        # CENTRED MEANS CENTRED ON THE PAGE: drawn centred on the whole frame,
+        # it sat half a sidebar off the page's middle — and further off where
+        # the sidebar folds away.
+        if held["horizontal"] == "CENTER":
+            placed["x"] = cx + (cw - placed["width"]) / 2
+        if held["vertical"] == "CENTER" and placed.get("height") is not None:
+            placed["y"] = cbox[1] + (cbox[3] - float(placed["height"])) / 2
+        laid.append({**node, "layoutPositioning": "ABSOLUTE", "constraints": held, "absoluteBoundingBox": placed})
+    return {**column, "children": [*(column.get("children") or []), *laid]} if laid else column
+
+
+def _held(left: float, right: float, box: dict, page: tuple[float, float, float, float],
+          frame: tuple[float, float, float, float] | None = None) -> dict:
+    """How a layer laid over the page keeps its place as the page changes size,
+    read from where it is drawn ON THE PAGE: its own constraints were the
+    frame's, sidebar included. Across the page it stretches (a scrim); at an
+    edge it stays there (a drawer); about the middle it stays centred (a
+    dialog)."""
+    px, py, pw, ph = page
+    try:
+        top, height = float(box["y"]), float(box["height"])
+    except (KeyError, TypeError, ValueError):
+        top, height = py, ph
+
+    fx, fy, fw, fh = frame or page
+
+    def along(start: float, length: float, origin: float, room: float, low: str, high: str, both: str,
+              whole: tuple[float, float]) -> str:
+        if length >= room * 0.95:
+            return both
+        if abs(start - origin) <= 4:
+            return low
+        if abs(start + length - origin - room) <= 4:
+            return high
+        # About the middle — of the page, or of the whole frame, as a dialog
+        # is drawn: centred on the screen, sidebar included, a little high.
+        centre = start + length / 2
+        for o, r in ((origin, room), whole):
+            if abs(centre - o - r / 2) <= max(24.0, r * 0.1):
+                return "CENTER"
+        return low
+
+    return {"horizontal": along(left, right - left, px, pw, "LEFT", "RIGHT", "LEFT_RIGHT", (fx, fw)),
+            "vertical": along(top, height, py, ph, "TOP", "BOTTOM", "TOP_BOTTOM", (fy, fh))}
 
 
 def _floating(node: dict, depth: int = 0):
