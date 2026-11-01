@@ -31,7 +31,7 @@ interface PreviewFrameProps {
 export function PreviewFrame({ projectId, project }: PreviewFrameProps) {
   const [device, setDevice] = useState<Device>("desktop");
   const [iframeKey, setIframeKey] = useState(0);
-  const { port, servePath, isStarting, error, startPreview, stopPreview, checkStatus } =
+  const { port, serveUrl, isStarting, error, startPreview, stopPreview, checkStatus } =
     usePreview(projectId);
 
   useEffect(() => {
@@ -46,8 +46,9 @@ export function PreviewFrame({ projectId, project }: PreviewFrameProps) {
   // pattern as CanvasFrame / the Blueprint page's LiveApplication. Prefix with
   // the API origin when set (hosted split origin), else the relative path
   // resolves via next.config's /api/projects rewrite.
-  const previewUrl = servePath
-    ? `${process.env.NEXT_PUBLIC_API_URL ?? ""}${servePath}`
+  // At the preview's own origin (`serveUrl`): the app's code never runs at the platform's.
+  const previewUrl = serveUrl
+    ? serveUrl
     : port
       ? `http://localhost:${port}`
       : null;

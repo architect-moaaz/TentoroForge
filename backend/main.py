@@ -171,6 +171,19 @@ app.add_middleware(
     burst=RATE_LIMIT_BURST,
 )
 
+@app.middleware("http")
+async def _the_preview_host_serves_previews_only(request, call_next):
+    """At a named preview origin, only previews: the platform's API is not on
+    the address where the apps' code runs (`services/preview_origin.py`)."""
+    from services import preview_origin
+
+    if preview_origin.configured() and preview_origin.on_preview_origin(request) \
+            and not preview_origin.is_preview_path(request.url.path):
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"detail": "Not found"}, status_code=404)
+    return await call_next(request)
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,

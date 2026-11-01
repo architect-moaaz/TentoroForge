@@ -366,6 +366,13 @@ async def list_versions(
 # Preview
 # ===========================================================================
 
+def _serve_url(project: Project) -> str:
+    """The preview at its own origin, which is what a frame loads
+    (`services/preview_origin.py`)."""
+    from services import preview_origin
+    return preview_origin.origin() + preview_serve_path(project)
+
+
 def preview_serve_path(project: Project) -> str:
     """Where a browser reaches this project's preview.
 
@@ -425,7 +432,7 @@ async def preview_start(
         port = await start_preview(project.short_id, str(app_dir))
         project.preview_port = port
         await db.commit()
-        return {"port": port, "servePath": preview_serve_path(project)}
+        return {"port": port, "servePath": preview_serve_path(project), "serveUrl": _serve_url(project)}
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -456,6 +463,7 @@ async def preview_status(
         "running": port is not None,
         "port": port,
         "servePath": preview_serve_path(project),
+        "serveUrl": _serve_url(project),
     }
 
 

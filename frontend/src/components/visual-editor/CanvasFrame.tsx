@@ -2,6 +2,7 @@
 
 import { useRef, useEffect, useCallback, useImperativeHandle, forwardRef } from "react";
 import { useBridge } from "@/hooks/useBridge";
+import { usePreviewOrigin } from "@/lib/preview-origin";
 import { useVisualEditorStore } from "@/stores/visual-editor";
 import type { DeviceSize, ElementInfo } from "@/types/visual-editor";
 
@@ -45,10 +46,11 @@ export const CanvasFrame = forwardRef<CanvasFrameHandle, CanvasFrameProps>(
     // same prefix, so page + asset URLs it emits already match.
     // previewPort is retained to trigger a re-mount when a new dev
     // server comes up, but its value is not in the URL anymore.
-    const API = process.env.NEXT_PUBLIC_API_URL ?? "";
-    const proxyBase = `${API}/api/projects/${projectId}/preview/serve`;
+    // At the preview's own origin: the app's code never runs at the platform's.
+    const origin = usePreviewOrigin();
+    const proxyBase = `${origin ?? ""}/api/projects/${projectId}/preview/serve`;
     const route = currentRoute || "/";
-    const src = previewPort
+    const src = previewPort && origin
       ? `${proxyBase}${route}`
       : "about:blank";
     const width = DEVICE_WIDTHS[devicePreview];

@@ -21,6 +21,12 @@ short_ids are opaque and preview servers only run when the platform UI
 explicitly calls `POST /preview/start`, so the exposure surface is
 limited to "anyone who knows a short_id can view (not edit) that
 project's dev preview".
+
+ONLY AT THE PREVIEW'S OWN ORIGIN (`services/preview_origin.py`). Through the
+platform's address the app's code ran as the platform, and could read the
+signed-in person's token. A page it serves carries the loader the editor's
+bridge is sent to; the instant pages' host (`/preview/frame`) and the drawn
+pictures (`/drawn/…`) are served here too, at the same origin.
 """
 
 from __future__ import annotations
@@ -28,12 +34,14 @@ from __future__ import annotations
 import logging
 from typing import AsyncIterator
 
+import re
+
 import httpx
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 
 from preview import get_preview_port, start_preview
-from services import dev_servers
+from services import dev_servers, preview_origin
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +79,22 @@ def _filter_headers(headers) -> list[tuple[str, str]]:
     return [(k, v) for k, v in items if k.lower() not in _HOP_BY_HOP]
 
 
-async def _proxy(request: Request, project_id: str, path: str) -> Response:
+def _elsewhere() -> HTTPException:
+    return HTTPException(status_code=404, detail=(
+        f"A preview opens only at its own address ({preview_origin.origin()}), never at the platform's."))
+
+
+def _a_page(request: Request) -> bool:
+    """A document the browser is opening — the one kind of response the loader goes in."""
+    dest = (request.headers.get("sec-fetch-dest") or "").lower()
+    if dest:
+        return dest in ("document", "iframe")
+    return request.method == "GET" and "text/html" in (request.headers.get("accept") or "")
+
+
+async def _proxy(request: Request, project_id: str, path: str, *, upstream_path: str | None = None) -> Response:
+    if not preview_origin.may_serve(request):
+        raise _elsewhere()
     port = get_preview_port(project_id)
     if port is None:
         # A PREVIEW THE REAPER ENDED COMES BACK WHEN IT IS OPENED. The tab
@@ -96,11 +119,15 @@ async def _proxy(request: Request, project_id: str, path: str) -> Response:
     # Next writes them as `/api/projects/.../preview/serve/foo` and the
     # dev server sees the same shape it emitted.
     dev_servers.touch(port)
-    upstream_url = f"http://localhost:{port}{request.url.path}"
+    upstream_url = f"http://localhost:{port}{upstream_path or request.url.path}"
     if request.url.query:
         upstream_url = f"{upstream_url}?{request.url.query}"
 
     fwd_headers = _filter_headers(request.headers)
+    page = _a_page(request)
+    if page:
+        # Plain bytes, so the loader can go in.
+        fwd_headers = [(k, v) for k, v in fwd_headers if k.lower() != "accept-encoding"] + [("accept-encoding", "identity")]
 
     try:
         body_iter = request.stream()
@@ -128,6 +155,19 @@ async def _proxy(request: Request, project_id: str, path: str) -> Response:
             await upstream_resp.aclose()
 
     resp_headers = _filter_headers(upstream_resp.headers)
+    if page and "text/html" in (upstream_resp.headers.get("content-type") or "") \
+            and not upstream_resp.headers.get("content-encoding"):
+        try:
+            body = await upstream_resp.aread()
+        finally:
+            await upstream_resp.aclose()
+        response = Response(preview_origin.inject_loader(body), status_code=upstream_resp.status_code,
+                            headers={k: v for k, v in resp_headers if k.lower() != "set-cookie"},
+                            media_type=upstream_resp.headers.get("content-type"))
+        for k, v in resp_headers:
+            if k.lower() == "set-cookie":
+                response.raw_headers.append((b"set-cookie", v.encode("latin-1")))
+        return response
     response = StreamingResponse(
         stream_upstream(),
         status_code=upstream_resp.status_code,
@@ -166,3 +206,34 @@ async def preview_serve(project_id: str, path: str, request: Request) -> Respons
 )
 async def preview_serve_root(project_id: str, request: Request) -> Response:
     return await _proxy(request, project_id, "")
+
+
+@router.get("/api/preview/origin")
+async def where_previews_are() -> JSONResponse:
+    """The origin every preview frame loads from (`services/preview_origin.py`)."""
+    return JSONResponse({"origin": preview_origin.origin()})
+
+
+@router.get("/api/projects/{project_id}/preview/frame", include_in_schema=False)
+async def instant_page_host(project_id: str, request: Request) -> HTMLResponse:
+    """The page an instant page runs in, at the preview's origin."""
+    if not preview_origin.may_serve(request):
+        raise _elsewhere()
+    return HTMLResponse(preview_origin.frame_host(), headers={"cache-control": "no-store"})
+
+
+_FROM_A_PREVIEW = re.compile(r"/api/projects/([^/]+)/preview/serve")
+
+
+@router.get("/drawn/{path:path}", include_in_schema=False)
+async def drawn_picture(path: str, request: Request) -> Response:
+    """A drawn app's pictures, asked for from inside its preview. A view
+    converted from Figma names them `/drawn/…` from the app's root; the page
+    that asks names its project in the Referer (as the frontend's rewrite did
+    while previews were served there)."""
+    found = _FROM_A_PREVIEW.search(request.headers.get("referer") or "")
+    if not found:
+        raise HTTPException(status_code=404)
+    project_id = found.group(1)
+    return await _proxy(request, project_id, f"drawn/{path}",
+                        upstream_path=f"/api/projects/{project_id}/preview/serve/drawn/{path}")
