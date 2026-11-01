@@ -6,6 +6,7 @@ import json
 
 import pytest
 
+from services.blueprint.agent_contract import AgentResult, ArtifactProposal
 from services.blueprint.orchestrator import DAG, run, subjects_for
 from services.blueprint.service import BlueprintService
 from services.figma import store
@@ -116,6 +117,7 @@ async def test_the_store_the_brief_and_the_dag_take_a_uxpilot_source(svc):
     assert subjects_for(DAG["figma_intelligence"], svc.doc) == ["UXPILOT-001"]
     brief = brief_for(svc.doc, "UXPILOT-001", svc.output_dir)
     assert brief["provider"] == "uxpilot" and brief["screens"][0]["labels"]
-    # The design-system projection reads the theme.
-    run(svc, lambda spec: None, plan=["figma_design_system"])
+    # The design-system node lays the theme over its agent's reply.
+    run(svc, lambda spec: AgentResult(task_id=spec.task_id, agent=spec.agent, confidence=0.9, proposals=[
+        ArtifactProposal(section="designSystem", natural_key="designSystem", body={})]), plan=["design_system"])
     assert svc.doc["designSystem"]["colors"] == {"colors.primary": "#7C3AED"}

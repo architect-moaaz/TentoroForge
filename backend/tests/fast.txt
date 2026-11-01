@@ -17,3 +17,4 @@ tests/services/test_a_run_stops_at_what_its_organisation_can_pay.py
 tests/services/test_the_background_loops_run_once.py
 tests/services/test_builds_are_capped_across_workers.py
 tests/routers/test_a_restart_resumes_or_reports_its_jobs.py
+tests/services/test_each_section_has_one_writer.py
