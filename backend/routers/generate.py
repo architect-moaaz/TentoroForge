@@ -1,5 +1,13 @@
 """Generation and chat endpoints — streams SSE events as the agent works."""
 
+# THE LEGACY ROAD IS NOT SERVED (audit, 2026-11-01). The chat people use is
+# SmithPanel → POST /smith/chat (routers.blueprint_generate). The routes here
+# were reached only by the retired ChatPanel: /generate and /chat started the
+# old pipeline's model work with no spend gate, for any member. They are no
+# longer mounted; the functions stay while code and tests still import from
+# this module. /refresh-index is still served (the Data Model panel).
+
+
 import asyncio
 import functools
 import json
@@ -189,7 +197,7 @@ async def reconnect_event_stream(
                 yield {"comment": "heartbeat"}
 
 
-@router.get("/api/projects/{project_id}/generation/active")
+# Not served since 2026-11-01 (see the module note).
 async def get_active_generation(
     project_id: uuid.UUID,
     user: PlatformUser = Depends(get_current_user),
@@ -216,7 +224,7 @@ async def get_active_generation(
     }
 
 
-@router.get("/api/projects/{project_id}/fix/ab-summary")
+# Not served since 2026-11-01 (see the module note).
 async def get_fix_ab_summary(
     project_id: uuid.UUID,
     limit: int = Query(200, ge=1, le=1000),
@@ -238,7 +246,7 @@ async def get_fix_ab_summary(
     return summarize(list(result.scalars()))
 
 
-@router.post("/api/projects/{project_id}/pipeline/resume")
+# Not served since 2026-11-01 (see the module note).
 async def resume_pipeline(
     project_id: uuid.UUID,
     user: PlatformUser = Depends(get_current_user),
@@ -280,7 +288,7 @@ async def resume_pipeline(
     )
 
 
-@router.get("/api/projects/{project_id}/generation/{session_id}/events")
+# Not served since 2026-11-01 (see the module note).
 async def reconnect_generation(
     project_id: uuid.UUID,
     session_id: str,
@@ -5352,7 +5360,7 @@ def _unwrap_error(e: Exception) -> str:
 # Patterns that indicate the user is approving a plan.
 # Short patterns use word-boundary matching to avoid false positives
 # (e.g. "yes" inside "keyes" or "analysis").
-@router.post("/api/projects/{project_id}/generate")
+# Not served since 2026-11-01 (see the module note).
 async def generate_project(
     project_id: uuid.UUID,
     req: GenerateRequest,
@@ -5760,7 +5768,7 @@ async def generate_project(
     )
 
 
-@router.post("/api/projects/{project_id}/chat")
+# Not served since 2026-11-01 (see the module note).
 async def chat_with_project(
     project_id: uuid.UUID,
     req: ChatRequest,
