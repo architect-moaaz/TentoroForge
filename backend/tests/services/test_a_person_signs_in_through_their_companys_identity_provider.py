@@ -32,6 +32,18 @@ def _client() -> TestClient:
     return TestClient(app)
 
 
+def test_the_mock_issuer_answers_only_the_platforms_own_checks():
+    """Through the public proxy it would redirect anywhere and sign anyone in."""
+    c = _client()
+    assert c.get("/dev/mock-idp/jwks").status_code == 200
+    for header in ({"X-Forwarded-For": "203.0.113.9"}, {"Forwarded": "for=203.0.113.9"}):
+        assert c.get("/dev/mock-idp/jwks", headers=header).status_code == 404
+        assert c.post("/dev/mock-idp/next", json={"client_id": "x", "claims": {}}, headers=header).status_code == 404
+        r = c.get("/dev/mock-idp/authorize", params={"client_id": "x", "redirect_uri": "https://evil.example"},
+                  headers=header, follow_redirects=False)
+        assert r.status_code == 404
+
+
 def test_the_mock_issuer_speaks_oidc_with_pkce_and_a_verifiable_id_token(monkeypatch):
     monkeypatch.setenv("FORGE_URL", "http://platform.test")
     c = _client()
