@@ -23,16 +23,29 @@ which did, and survives to be audited afterwards. This answers one question —
 
 from __future__ import annotations
 
+import functools
 import json
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Any, Callable
 
-#: project_id -> live snapshot. Written from the stream's `emit`, read by the
-#: run endpoint. Single-process, single event loop: no lock needed, and one
-#: would only hide a threading assumption that is not true here.
+#: project_id -> live snapshot. Written from the stream's `emit` — which runs
+#: on the build's and the checks' worker threads, not only the event loop — and
+#: read by the run endpoint. Every change and every read holds `_LOCK`: a
+#: build's counts and a person's Stop arriving together lost one (audit,
+#: 2026-11-01).
 _RUNS: dict[str, dict[str, Any]] = {}
+_LOCK = threading.RLock()
+
+
+def _locked(fn: Callable[..., Any]) -> Callable[..., Any]:
+    @functools.wraps(fn)
+    def run(*args: Any, **kwargs: Any) -> Any:
+        with _LOCK:
+            return fn(*args, **kwargs)
+    return run
 
 
 #: The file a person's Stop leaves beside the application's ledgers. A FILE,
@@ -42,6 +55,7 @@ _RUNS: dict[str, dict[str, Any]] = {}
 STOP_FILE = Path(".forge") / "runs" / "STOP"
 
 
+@_locked
 def request_stop(project_id: str, output_dir: str | Path) -> None:
     """The person pressed Stop: the build in flight ends at its next step,
     the checks at their next page, and what is built is handed over."""
@@ -67,6 +81,7 @@ def clear_stop(output_dir: str | Path) -> None:
         pass
 
 
+@_locked
 def begin(project_id: str, *, phase: str, output_dir: str | Path | None = None) -> None:
     """A run has started for this project. Replaces any previous entry — but
     keeps the checks still running after the last hand-over, which are
@@ -91,6 +106,7 @@ def begin(project_id: str, *, phase: str, output_dir: str | Path | None = None) 
     }
 
 
+@_locked
 def checking(project_id: str, *, phase: str = "checking") -> None:
     """The application is handed over and its checks are running: the panel
     says so without saying "building", and the input stays open."""
@@ -98,6 +114,7 @@ def checking(project_id: str, *, phase: str = "checking") -> None:
     run["checks"] = {"active": True, "phase": phase, "startedAt": time.time(), "scorecard": {}}
 
 
+@_locked
 def checks_done(project_id: str, status: str = "done") -> None:
     run = _RUNS.get(str(project_id))
     if run is None or not isinstance(run.get("checks"), dict):
@@ -127,6 +144,7 @@ MOMENTS = frozenset({"node:subject", "observer:verdict", "observer:repair", "obs
 MOMENTS_KEPT = 600
 
 
+@_locked
 def note(project_id: str, event: str, data: dict[str, Any]) -> None:
     """Fold one stream event into the snapshot.
 
@@ -216,6 +234,7 @@ def _counts(run: dict[str, Any], data: dict[str, Any]) -> None:
             run[key] = data[key]
 
 
+@_locked
 def finish(project_id: str, status: str, *, detail: str | None = None) -> None:
     """The run ended. Kept briefly so a client that reloads at the finish line
     sees an outcome rather than silence."""
@@ -229,6 +248,7 @@ def finish(project_id: str, status: str, *, detail: str | None = None) -> None:
         run["error"] = detail
 
 
+@_locked
 def active_projects() -> list[str]:
     """The projects with a turn in flight — a DAG running, or a chat turn
     still writing its answer after the DAG ended.
@@ -630,6 +650,7 @@ def _epoch(at: Any) -> float | None:
         return None
 
 
+@_locked
 def snapshot(project_id: str) -> dict[str, Any]:
     """What to tell a client that just loaded the page.
 
