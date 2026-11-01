@@ -272,7 +272,7 @@ function clock(at: number): string {
  *  is a change even when no file list came with it. */
 const RECEIPT = /^(Changed|Added|Removed|Rewrote|Renamed|Restyled|Laid out|Edited)\b/;
 
-function kindOf(m: Message): "user" | "progress" | "update" | "heal" | "smith" {
+export function kindOf(m: Message): "user" | "progress" | "update" | "heal" | "smith" {
   if (m.role === "user") return "user";
   if (m.selfHeal) return "heal";
   if (m.status === "progress" || /^Still (at it|working on it|checking)/.test(m.text)) return "progress";

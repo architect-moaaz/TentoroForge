@@ -72,6 +72,7 @@ def test_builds_in_threads_never_run_more_than_the_cap_and_the_waiting_one_is_to
         t.join(5)
     assert most[0] == 1, "two builds, one slot: never both at once"
     assert [n for n, _ in said] == ["b"] and "waiting its turn" in said[0][1]["text"]
+    assert said[0][1]["status"] == "progress", "a quiet line on the panel, not Smith's answer"
     assert not pool._held, "every slot given back"
 
 

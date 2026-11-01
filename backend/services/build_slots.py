@@ -167,7 +167,9 @@ def held(emit: Callable[[str, dict], None] | None = None) -> Iterator[Slot | Non
     async def on_wait() -> None:
         waited["yes"] = True
         if emit is not None:
-            emit("message", {"text": waiting_text(pool.n)})
+            # "progress": drawn as a quiet line while the turn runs, not as
+            # Smith's answer, and it leaves the trail of steps on screen.
+            emit("message", {"text": waiting_text(pool.n), "status": "progress"})
         if job:
             await jobs.set_status(job, "waiting")
 
