@@ -213,6 +213,12 @@ class Emitter:
         if mode not in ("HORIZONTAL", "VERTICAL"):
             return ["relative"]
         out = ["flex", "flex-row" if mode == "HORIZONTAL" else "flex-col"]
+        # WHAT FLOATS IN IT IS PLACED AGAINST IT: an absolute child of a flex
+        # box found the nearest positioned ancestor instead, and a dialog laid
+        # over the page landed a sidebar's width to the left (DITANS, 2026-10-31).
+        if any(isinstance(c, dict) and c.get("layoutPositioning") == "ABSOLUTE" and c.get("visible") is not False
+               for c in node.get("children") or []):
+            out.append("relative")
         if node.get("layoutWrap") == "WRAP":
             out.append("flex-wrap")
         main = str(node.get("primaryAxisAlignItems") or "MIN")
@@ -246,15 +252,34 @@ class Emitter:
         if absolute:
             pbox = _box(parent or {})
             out.append("absolute")
+            # FLOATING IN A FLEX BOX, A LAYER KEEPS ITS CONSTRAINTS: a scrim
+            # stretched over the page, a drawer pinned right, a dialog centred
+            # — at any width, not only at the drawing's. In a free frame
+            # everything stays where it is drawn.
+            pinned = pmode in ("HORIZONTAL", "VERTICAL") and node.get("layoutPositioning") == "ABSOLUTE"
+            cons = (node.get("constraints") or {}) if pinned else {}
             try:
-                out.append(_arb("left", _px(float(box["x"]) - float(pbox["x"]))))
-                out.append(_arb("top", _px(float(box["y"]) - float(pbox["y"]))))
+                for axis, start, end, size, origin, extent, mode, translate in (
+                        ("horizontal", "left", "right", "w", "x", "width", h_mode, "-translate-x-1/2"),
+                        ("vertical", "top", "bottom", "h", "y", "height", v_mode, "-translate-y-1/2")):
+                    offset = float(box[origin]) - float(pbox[origin])
+                    length = float(box[extent])
+                    room = float(pbox[extent])
+                    rule = str(cons.get(axis) or "")
+                    if rule in ("LEFT_RIGHT", "TOP_BOTTOM", "SCALE"):
+                        out += [_arb(start, _px(offset)), _arb(end, _px(room - offset - length))]
+                        continue
+                    if rule in ("RIGHT", "BOTTOM"):
+                        out.append(_arb(end, _px(room - offset - length)))
+                    elif rule == "CENTER":
+                        shift = round(offset + length / 2 - room / 2, 2)
+                        out += [_arb(start, f"calc(50%{'+' if shift >= 0 else '-'}{_px(abs(shift))})"), translate]
+                    else:
+                        out.append(_arb(start, _px(offset)))
+                    if mode != "HUG":
+                        out.append(_arb(size, _px(length)))
             except (KeyError, TypeError, ValueError):
                 pass
-            if box.get("width") is not None and h_mode != "HUG":
-                out.append(_arb("w", _px(box["width"])))
-            if box.get("height") is not None and v_mode != "HUG":
-                out.append(_arb("h", _px(box["height"])))
             return out
         if parent is None:
             return ["w-full", "min-h-screen"]
@@ -356,7 +381,12 @@ class Emitter:
                     + (f'data-node="{node.get("id")}" ' if self.trace_ids else "") + "/>\n")
         if kind == "TEXT":
             return self._text(node, sizing, pad)
-        classes = [*self._layout_classes(node), *sizing, *self._paint_classes(node, style)]
+        layout = self._layout_classes(node)
+        # PLACED ABSOLUTELY IS ALREADY A POSITIONED BOX: `relative` beside
+        # `absolute` won, and a drawn scrim fell back into the page's flow.
+        if "absolute" in sizing:
+            layout = [c for c in layout if c != "relative"]
+        classes = [*layout, *sizing, *self._paint_classes(node, style)]
         if node.get("clipsContent"):
             classes.append("overflow-hidden")
         if kind == "ELLIPSE":
