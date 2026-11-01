@@ -101,8 +101,9 @@ ALLOWED_ORIGINS = os.getenv(
 #: Where an app's preview is served: never the platform's own origin, and on
 #: the same site so the app's own cookies work in the frame
 #: (`services/preview_origin.py`). In production a sub-domain routed to the
-#: backend, e.g. https://preview.forge-v3.tentoro.ai; here, the backend's port.
-PREVIEW_ORIGIN = os.getenv("FORGE_PREVIEW_ORIGIN", "http://localhost:6500").strip().rstrip("/")
+#: backend, e.g. https://preview-v3.tentoro.ai; here, the backend's port (also
+#: when compose passes it empty).
+PREVIEW_ORIGIN = (os.getenv("FORGE_PREVIEW_ORIGIN") or "").strip().rstrip("/") or "http://localhost:6500"
 
 # ---------------------------------------------------------------------------
 # Fidelity mode (Task 36)
