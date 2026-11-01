@@ -528,8 +528,13 @@ def next_step(ask: str, ctx: str, observations: list[Observation],
             else:
                 blocks.append({"type": "text", "text": parts[2] + text[len(prompt):]})
             return _default_provider(blocks, reasoning, images=images)
+    from services.build_usage import RunBudgetSpent
+
     try:
         raw = call(prompt)
+    except RunBudgetSpent as exc:
+        # The turn has spent what the organisation allowed: said, in its terms.
+        return {"tool": "done", "args": {}, "unreachable": True, "spent": True, "why": str(exc)}
     except Exception as exc:  # noqa: BLE001 — a turn degrades, it does not crash
         # The provider's own words go to the log, for whoever runs the
         # platform: "credit balance is too low" is theirs to act on.

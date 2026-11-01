@@ -2543,8 +2543,14 @@ def _call(executor: Executor, spec: TaskSpec) -> Any:
     scheduler's thread. An exception is a classified outcome (§102), not a
     crash; the scheduler decides whether it is a retry or a failure.
     """
+    from services.build_usage import RunBudgetSpent
+
     try:
         return executor(spec)
+    except RunBudgetSpent:
+        # Not the node's failure: the run has spent what it may. Retrying or
+        # repairing would only ask again; the run ends, saying why.
+        raise
     except Exception as exc:  # §102 — a classified outcome, not a crash
         return exc
 

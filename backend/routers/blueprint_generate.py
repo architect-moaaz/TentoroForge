@@ -928,16 +928,21 @@ def _announce_build_complete(doc: dict | None, emit, *, offer_verify: bool,
         logger.warning("[blueprint] %s: could not announce completion", where)
 
 
-async def _spend_gate(db: AsyncSession, project: Any, user: Any, *, build: bool, turns: int = 1) -> None:
+async def _spend_gate(db: AsyncSession, project: Any, user: Any, *, build: bool, turns: int = 1) -> float | None:
     """NOTHING STARTS THAT THE ORGANISATION CANNOT PAY FOR (`services.credits.gate`):
     before a build or a turn, the organisation's balance (when one is
     recorded) must cover what it is expected to cost, and no limit over the
     platform, the organisation, the person or the application may be
-    reached — else 402, in the administrator's terms."""
+    reached — else 402, in the administrator's terms.
+
+    AND NOTHING SPENDS MORE THAN IS LEFT. Returns the run's ceiling — what the
+    balance and the limits still allow — which the work carries
+    (`_actor_of(..., ceiling)`, `build_usage.run_budget`)."""
     from services import credits, spending
-    await credits.gate(db, org_id=getattr(project, "org_id", ""), user_email=str(getattr(user, "email", "") or ""),
-                       project_short_id=str(getattr(project, "short_id", "") or ""),
-                       estimate=None if build else spending.TURN_USD * max(1, turns), turn=not build)
+    who = dict(org_id=getattr(project, "org_id", ""), user_email=str(getattr(user, "email", "") or ""),
+               project_short_id=str(getattr(project, "short_id", "") or ""))
+    await credits.gate(db, **who, estimate=None if build else spending.TURN_USD * max(1, turns), turn=not build)
+    return await credits.headroom(db, **who)
 
 
 def _acting_with(work: Any, actor: dict | None) -> Any:
@@ -946,20 +951,23 @@ def _acting_with(work: Any, actor: dict | None) -> Any:
     inherit the request's context, so it is set inside the call."""
     if not actor:
         return work
-    from services.build_usage import acting
+    from services.build_usage import acting, run_budget
 
     def run() -> Any:
-        with acting(user=str(actor.get("user") or ""), org=str(actor.get("org") or "")):
+        with acting(user=str(actor.get("user") or ""), org=str(actor.get("org") or "")), \
+                run_budget(actor.get("ceiling")):
             return work()
     return run
 
 
-def _actor_of(user: Any, project: Any) -> dict:
-    return {"user": str(getattr(user, "email", "") or ""), "org": str(getattr(project, "org_id", "") or "")}
+def _actor_of(user: Any, project: Any, ceiling: float | None = None) -> dict:
+    """Who the work is for, and the most it may spend (`_spend_gate`)."""
+    return {"user": str(getattr(user, "email", "") or ""), "org": str(getattr(project, "org_id", "") or ""),
+            "ceiling": ceiling}
 
 
-def _acting_as(work: Any, user: Any, project: Any) -> Any:
-    return _acting_with(work, _actor_of(user, project))
+def _acting_as(work: Any, user: Any, project: Any, ceiling: float | None = None) -> Any:
+    return _acting_with(work, _actor_of(user, project, ceiling))
 
 
 def _output_dir(project: Any) -> Path:
@@ -1018,7 +1026,7 @@ async def generate_via_blueprint(
 ):
     """Generate an application through the Blueprint engine, streaming progress."""
     project = await get_project_with_auth(project_id, user, db)
-    await _spend_gate(db, project, user, build=bool(req.approved and not req.define_only), turns=3)
+    ceiling = await _spend_gate(db, project, user, build=bool(req.approved and not req.define_only), turns=3)
 
     from services.blueprint.executors import (
         RunUsage, make_executor, tiered_router)
@@ -1164,7 +1172,7 @@ async def generate_via_blueprint(
         try:
             emit("started", {"projectId": str(project_id),
                              "engine": "blueprint"})
-            outcome = await loop.run_in_executor(None, _acting_as(work, user, project))
+            outcome = await loop.run_in_executor(None, _acting_as(work, user, project, ceiling))
             # COMMIT THE BUILT APP. The mainline generate path commits after a
             # build; this DAG path did not, so the app tree stayed untracked and
             # Smith's first change landed in an untracked working tree — its
@@ -1878,7 +1886,7 @@ async def smith_chat(
     chooses the node order. §28's graph stays authoritative.
     """
     project = await get_project_with_auth(project_id, user, db)
-    await _spend_gate(db, project, user, build=bool(getattr(req, "approved", False)))
+    ceiling = await _spend_gate(db, project, user, build=bool(getattr(req, "approved", False)))
 
     from services.blueprint.executors import (
         RunUsage, make_executor, tiered_router)
@@ -1982,7 +1990,7 @@ async def smith_chat(
             return
         _start_checks(loop, str(project_id), checks["output_dir"], checks["app_root"],
                       memory_lock=memory_lock, app_name=getattr(project, "name", "") or "",
-                      actor=_actor_of(user, project))
+                      actor=_actor_of(user, project, ceiling))
 
     async def turn() -> None:
 
@@ -2536,7 +2544,7 @@ async def smith_chat(
             # Keep the INNER future too: `wait_for` cancels the shield on timeout,
             # but the inner build keeps running, and it is the inner one we wait
             # on to emit the real completion afterwards.
-            _inner = loop.run_in_executor(None, _acting_as(work, user, project))
+            _inner = loop.run_in_executor(None, _acting_as(work, user, project, ceiling))
             # ON DISK, FOR EVERY WORKER. The registry above is this worker's
             # memory; a panel whose stream dropped polls whichever worker
             # answers, and only a ledger tells it the turn is still working —

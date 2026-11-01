@@ -209,3 +209,23 @@ def test_a_retry_after_all_thinking_goes_to_the_floor():
     # Anything else is left exactly as it was.
     same = AnthropicModel(effort="high")
     assert after_no_answer(same, "Refused — the page names no data").effort == "high"
+
+
+def test_a_streamed_call_is_priced_like_any_other(monkeypatch):
+    """Every step of a Smith turn that streamed its reasoning was free in the
+    spend ledger and the gate (audit, 2026-11-01)."""
+    from langchain_core.messages import AIMessageChunk
+
+    class _Chat:
+        def stream(self, _msgs):
+            yield AIMessageChunk(content=[{"type": "thinking", "thinking": "Reading the page first. ", "index": 0}])
+            yield AIMessageChunk(content=[{"type": "text", "text": "done", "index": 1}],
+                                 usage_metadata={"input_tokens": 1200, "output_tokens": 300, "total_tokens": 1500,
+                                                 "input_token_details": {"cache_read": 1000}})
+
+    monkeypatch.setattr(lc, "_chat_model", lambda *_a, **_kw: _Chat())
+    seen: list = []
+    monkeypatch.setattr("services.build_usage.spent", lambda u: seen.append(u.as_ledger_dict()))
+    assert lc.complete(content="x", model="claude-opus-5-5", reasoning_callback=lambda _t: None) == "done"
+    assert seen and seen[0]["output_tokens"] == 300 and seen[0]["cache_read_input_tokens"] == 1000
+    assert seen[0]["input_tokens"] == 200
