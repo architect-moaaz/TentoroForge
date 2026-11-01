@@ -921,7 +921,7 @@ def test_every_agent_can_see_what_its_upstream_produces():
         visible = {s.split(".")[0] for s in cap.reads | cap.writes}
         visible |= {"application", "product", "schemaVersion", "version", "state"}
         for dep in node.depends_on:
-            for produced in DAG[dep].produces:
+            for produced in DAG[dep].sections:
                 top = produced.split(".")[0]
                 if top in visible or (key, top) in _DELIBERATE_BLIND_SPOTS:
                     continue

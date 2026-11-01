@@ -4747,7 +4747,7 @@ def make_executor(
                 )
                 project = str(svc.doc.get("application", {}).get("id", ""))
             result = patch_node_output(
-                spec, client, system=system, produces=DAG[spec.node].produces,
+                spec, client, system=system, produces=DAG[spec.node].sections,
                 task_id=spec.task_id, context=context, usage=usage,
                 project=project, refused=not getattr(spec, "repair", False))
         except Exception as exc:  # noqa: BLE001 — an edit that breaks is a rewrite

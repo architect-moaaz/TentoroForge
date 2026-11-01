@@ -3,7 +3,7 @@
 The Smith panel's stream wrapped the executor and counted its calls: a node
 was "done" the first time any call for it returned, so a fan-out over fifteen
 pages ticked complete at its first page; the nodes that are services rather
-than agent calls (`apis`, `figma_design_system`, `verification`) never passed
+than agent calls (`apis`, `imagery`, `verification`) never passed
 through the wrapper, so they never ticked and the count could not reach the
 total; and the registry a reloaded page reads added one per call, so a run
 that was 12 of 19 reported 23 of 19 and a percentage past a hundred.
