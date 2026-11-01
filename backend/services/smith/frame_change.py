@@ -27,6 +27,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from services.blueprint.tsc_gate import tsc_slot
 from services.llm_client import tell
 
 logger = logging.getLogger(__name__)
@@ -130,9 +131,10 @@ def typecheck(app_root: Path, rel: str, code: str, timeout: float = 240.0) -> li
             "compilerOptions": {"incremental": False, "noEmit": True},
             "include": [f"../../{rel}", "../../next-env.d.ts", "../../src/types/**/*.d.ts"],
         }))
-        proc = subprocess.run([tsc_path, "-p", str(check / "tsconfig.json"), "--pretty", "false"],
-                              cwd=str(app_root), capture_output=True, text=True, encoding="utf-8",
-                              timeout=timeout)
+        with tsc_slot():
+            proc = subprocess.run([tsc_path, "-p", str(check / "tsconfig.json"), "--pretty", "false"],
+                                  cwd=str(app_root), capture_output=True, text=True, encoding="utf-8",
+                                  timeout=timeout)
         errors, ours = [], False
         for line in (proc.stdout + proc.stderr).splitlines():
             # tsc names the file relative to its cwd; under a symlinked root

@@ -1,0 +1,4 @@
+# What the tests need beyond what the platform runs on (the production image installs requirements.txt only; CI installs this file).
+-r requirements.txt
+# Tests of the agent-insights Redis stream (services/agent_insights_bus.py) run its real code on an in-memory Redis; skipped if absent.
+fakeredis>=2.26

@@ -38,6 +38,8 @@ class ApiError extends Error {
     public code?: string,
     /** The server's `detail` as sent — a structured refusal keeps its parts. */
     public detail?: unknown,
+    /** The whole answer the server gave, for the callers that need more than the sentence (a refused save lists its problems). */
+    public body?: unknown,
   ) {
     super(message);
     this.name = "ApiError";
@@ -110,7 +112,7 @@ async function request<T>(
     const message =
       body.error?.message || describeDetail(body.detail) || body.message || res.statusText;
     const code = body.error?.code;
-    throw new ApiError(res.status, message, code, body.detail);
+    throw new ApiError(res.status, message, code, body.detail, body);
   }
 
   if (res.status === 204) return undefined as T;

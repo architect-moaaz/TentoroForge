@@ -46,7 +46,14 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    # The agent-insights event stream lives here (services/agent_insights_bus.py). "allkeys-lru" would silently evict UNREAD
+    # events when memory fills (the stream entries carry no TTL, so they are as evictable as any cache entry). "volatile-lru"
+    # only ever evicts keys that have an expiry: the cache (cache.py) and the job records set one, the stream and the job queue
+    # do not, so they are never dropped. If Redis is full of such keys, writes fail loudly instead (the ingest route answers
+    # 503 and the app keeps its rows and retries; it also refuses new batches above ~4000 waiting entries, a few tens of MB).
+    # A separate Redis database number would NOT help: the memory limit and the eviction policy belong to the whole instance.
+    # appendonly keeps unread entries across a Redis restart (at most about one second can be lost); ./data/redis holds it.
+    command: redis-server --maxmemory 256mb --maxmemory-policy volatile-lru --appendonly yes --appendfsync everysec
     volumes:
       - ./data/redis:/data
     # NO published ports — internal only.

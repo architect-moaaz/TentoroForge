@@ -98,6 +98,7 @@ export function AgentNodeProperties({
           <HandoffEditor
             config={config as HumanHandoffConfig}
             onUpdate={updateConfig}
+            projectId={projectId}
           />
         )}
         {nodeType === "router" && (

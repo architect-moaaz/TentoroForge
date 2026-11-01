@@ -19,6 +19,11 @@ import { getTriggerContract } from "@/lib/events/triggers";
 
 export const runtime = "nodejs";
 
+/** Whether this app has agents, and so has the /api/cron/insights route the tick asks for. False as shipped: the agent
+ *  install (services/agent_runtime_install.py) flips it to true, so an app without agents never makes a call that can
+ *  only be a 404. */
+const HAS_AGENT_INSIGHTS = false; // forge-agent-insights
+
 /** Approximate a 5-field cron ("min hour dom mon dow") to a sweep interval (ms).
  *  A schedule workflow is a periodic sweep, so we map the cron to how OFTEN it
  *  runs rather than an exact wall-clock time. */
@@ -198,9 +203,29 @@ async function handler(req: Request): Promise<Response> {
     console.warn("[cron] the audit prune failed:", err);
   }
 
+  // THE AGENTS' INSIGHTS CATCH-UP. Turns that could not be sent to the platform (it was down, the app crashed) are
+  // sent from here, and old sent ones are cleared out. It lives in its own route because only an app with agents has
+  // it, so the call is made only where the agent install switched it on (HAS_AGENT_INSIGHTS); a 404 is still ignored.
+  // Not on a what-if clock (`?at=`), and never able to hurt the tick.
+  let insights: unknown = null;
+  if (HAS_AGENT_INSIGHTS && !atDate) {
+    try {
+      const base = (process.env.FORGE_INTERNAL_URL || new URL(req.url).origin).replace(/\/$/, "");
+      const res = await fetch(`${base}/api/cron/insights`, {
+        method: "POST",
+        headers: secret ? { authorization: `Bearer ${secret}` } : {},
+        signal: AbortSignal.timeout(30000),
+      });
+      insights = res.ok ? await res.json().catch(() => null) : null;
+    } catch {
+      /* not reachable right now: the next tick tries again */
+    }
+  }
+
   return Response.json({
     at: now.toISOString(),
     ...(forced ? { forced } : {}),
+    ...(insights ? { insights } : {}),
     escalated,
     pruned,
     checked: scheduled.length,

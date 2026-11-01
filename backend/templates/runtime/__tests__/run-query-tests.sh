@@ -10,3 +10,6 @@ BIN="$(cd "$DIR/../../../.." && pwd)/node_modules/.bin"
 ESBUILD="$BIN/esbuild"; [ -x "$ESBUILD" ] || ESBUILD="npx esbuild"
 $ESBUILD "$DIR/query-result.test.mts" --bundle --platform=node --format=esm --outfile=/tmp/query-result-test.mjs --log-level=error
 node /tmp/query-result-test.mjs
+
+# One record carries the same name labels a list does (customerId + customerIdLabel).
+node --experimental-transform-types --no-warnings "$DIR/find-by-id-names.test.mts"
