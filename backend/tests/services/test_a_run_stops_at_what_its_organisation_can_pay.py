@@ -89,7 +89,7 @@ def test_every_start_carries_its_ceiling():
 
     src = inspect.getsource(blueprint_generate)
     assert "return await credits.headroom(db, **who)" in src
-    assert src.count("_acting_as(work, user, project, ceiling)") == 2 and "_actor_of(user, project, ceiling)" in src
+    assert src.count("_acting_as(work, user, project, ceiling, job)") == 2 and "_actor_of(user, project, ceiling)" in src
     assert "run_budget(actor.get(\"ceiling\"))" in src
     assert '"ceiling": ceiling' in inspect.getsource(drafts_room)
     assert "run_budget(ceiling)" in inspect.getsource(output_projects)

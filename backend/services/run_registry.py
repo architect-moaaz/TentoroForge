@@ -534,6 +534,29 @@ def close_orphaned_ledgers(root: str | Path) -> list[str]:
     return closed
 
 
+def close_dead_ledgers(output_dir: str | Path) -> list[str]:
+    """Close this application's ledgers whose writer is gone — another
+    process's, never this one's. What `close_orphaned_ledgers` does at a
+    restart, for one application while the platform runs: a build picked up
+    again after its worker died (`jobs.recover`) would otherwise read the
+    dead run as in flight. Not told: the job that resumes says so."""
+    closed: list[str] = []
+    me = os.getpid()
+    for path in Path(output_dir).glob(".forge/runs/*.jsonl"):
+        try:
+            with path.open("r", encoding="utf-8") as fh:
+                pid = int(json.loads(fh.readline() or "{}").get("pid") or 0)
+        except (OSError, ValueError, TypeError):
+            continue
+        if pid == me:
+            continue
+        if close_once(path, {"event": "run:crashed", "error": "the process working on it went away",
+                             "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())},
+                      still_open=lambda p: not _writer_alive(p)):
+            closed.append(path.stem)
+    return closed
+
+
 #: The turn ledgers alive in this process, by the application's folder.
 TURNS: dict[str, Any] = {}
 

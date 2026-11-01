@@ -432,6 +432,20 @@ async def _start_domain_watch():
     app.state.domain_watch = asyncio.create_task(domain_watch.watch_forever())
 
 
+async def _start_job_recovery():
+    """Builds and turns a dead worker left are picked up again or said to
+    their person — at once, and every minute after; see `services.jobs`."""
+    from services import jobs
+    app.state.job_recovery = asyncio.create_task(jobs.watch_forever())
+
+
+@app.on_event("startup")
+async def _beat_for_this_workers_jobs():
+    """EVERY WORKER says its builds and turns are alive (`jobs.beat_forever`)."""
+    from services import jobs
+    app.state.job_heartbeat = asyncio.create_task(jobs.beat_forever())
+
+
 @app.on_event("startup")
 async def _run_the_loops_once():
     """ONE WORKER RUNS THE PLATFORM'S LOOPS (`services.leader`). Every startup
@@ -440,7 +454,7 @@ async def _run_the_loops_once():
     from services import leader
     app.state.leading = asyncio.create_task(leader.run_when_leading([
         _start_timer_scheduler, _follow_open_mobile_builds, _start_lost_run_watch,
-        _start_dev_server_reaper, _start_domain_watch,
+        _start_dev_server_reaper, _start_domain_watch, _start_job_recovery,
     ]))
 
 
@@ -462,6 +476,9 @@ async def _shutdown():
         app.state.dev_server_reaper.cancel()
     if hasattr(app.state, "domain_watch"):
         app.state.domain_watch.cancel()
+    for task in ("job_recovery", "job_heartbeat"):
+        if hasattr(app.state, task):
+            getattr(app.state, task).cancel()
     if hasattr(app.state, "timer_scheduler"):
         await app.state.timer_scheduler.stop()
     from services import leader
