@@ -668,10 +668,14 @@ def page_module(doc: dict, page: dict, row: dict) -> str:
         public_route_segments(page) is not None or not str(page.get("route") or "/").strip("/"))
     # A public page renders as the public route file it replaces does — in
     # the public frame, with no rail into a product the visitor cannot reach.
-    frame_open = "<PublicPageFrame><PageFrame" if public else "<PageFrame"
-    frame_close = "</PageFrame></PublicPageFrame>" if public else "</PageFrame>"
+    # A DRAWN PUBLIC PAGE IS ITS OWN WHOLE SCREEN. Its frame carries the
+    # header the designer drew; the generic public frame put a second bar
+    # above it listing every public page by name (DITANS sign-up, 2026-10-31).
+    framed = public and not page.get("figmaFrame")
+    frame_open = "<PublicPageFrame><PageFrame" if framed else "<PageFrame"
+    frame_close = "</PageFrame></PublicPageFrame>" if framed else "</PageFrame>"
     frame_import = ('import { PublicPageFrame } from "@/components/PublicPageFrame";\n'
-                    if public else "")
+                    if framed else "")
     root = code_page_dir(page) == ROOT_DIR
     if str(page.get("pattern") or "") == "auth":
         # A sign-in screen is the whole screen: no rail, no public header, no
