@@ -1148,3 +1148,26 @@ def test_chips_drawn_with_several_chosen_hold_a_list_and_every_chip_shows_its_ch
     assert '.filter((x) => x !== "Saudi") : [...' in code
     assert out["sample"]["prefs"]["countries"] == ["UAE", "Saudi"]
     assert "countries?: (" in code or "countries: (" in code
+
+
+PHONE = """export default function JobView() {
+  return (
+    <div className="flex flex-col" data-layer="Job">
+      <div className="flex flex-row h-[44px]" data-layer="Status bar"><p className="text-[15px]">9:41</p></div>
+      <p className="text-[18px]">Staff Nurse</p>
+    </div>
+  );
+}
+"""
+
+
+def test_what_is_not_the_app_is_left_out():
+    """DITANS QA D-19 (2026-11-02): a phone's status bar rendered inside a job's page."""
+    answer = {"contract": {"data": [{"name": "job", "kind": "record", "label": "Job", "fields": [
+                  {"name": "title", "label": "Title", "type": "string"}]}], "actions": []},
+              "lists": [], "values": [{"node": "3", "expr": "props.job.title"}], "inputs": [], "shows": [],
+              "leave_out": ["2"]}
+    out, problems = P.apply(PHONE, answer, "JobView")
+    assert problems == [], problems
+    assert "9:41" not in out["code"] and "{props.job.title}" in out["code"]
+    assert "leave_out" in P.REPLY_SCHEMA["properties"] and "status bar" in P.SYSTEM

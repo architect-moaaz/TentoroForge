@@ -108,6 +108,7 @@ def _schema(children: bool) -> dict[str, Any]:
         "shows": {"type": "array", "items": {
             "type": "object", "additionalProperties": False, "required": ["node", "when"],
             "properties": {"node": {"type": "string"}, "when": {"type": "string"}, "not": {"type": "boolean"}}}},
+        "leave_out": ids,
     }
     if children:
         props["controls"] = ids
@@ -162,6 +163,10 @@ removes its `value`.
 
 SHOWS — `{node, when}`: an element drawn for one state only (a dialog drawn open, a banner, an empty state) is
 shown while `when` — a path as above, `not: true` for its opposite — is true.
+
+LEAVE OUT — `leave_out`: elements drawn on the screen that are not part of the app: a phone's status bar (the
+time, signal, battery), a home indicator or a keyboard drawn on a phone screen, a note or annotation the designer
+wrote for the developer. Nothing else: an element that shows the app's own content is bound, never left out.
 
 The drawing's own content (the sample) is read from the drawing by code: do not write it."""
 
@@ -287,6 +292,12 @@ def _resolve(root: M.Node, reply: dict, *, children: bool) -> tuple[_Plan, list[
     # as "its rows are already another list's" (DITANS readiness ladder,
     # 2026-10-30). The outer rows are drawn as they are, and what was bound
     # to them as a row is left as drawn.
+    # NOT THE APP: a phone's status bar ("9:41 ●●● ▲ ▮") rendered inside a
+    # job's page, a designer's note shown to every candidate (DITANS QA D-19,
+    # D-48, 2026-11-02).
+    for nid in reply.get("leave_out") or []:
+        if str(nid) in nodes and nodes[str(nid)] is not root:
+            plan.skip.add(str(nid))
     entries = [e for e in reply.get("lists") or [] if isinstance(e, dict)]
     inside = [{n.id for r in e.get("rows") or [] if str(r) in nodes for n in nodes[str(r)].walk()} for e in entries]
     outer = {i for i, area in enumerate(inside)
