@@ -569,6 +569,48 @@ NODE_CONFIG_SPECS: dict[str, list[ConfigKey]] = {
         ),
     ],
 
+    # --- Mews (hotel property management) ------------------------------ #
+    # An app's `http_call` step with `auth: {"provider": "mews"}` reaches the
+    # Connector API: the runtime posts to the demo or live host and puts the
+    # two tokens and the client name in the body, which is where Mews reads
+    # them (templates/runtime/workflows/index.ts). Copied into the apps.
+    "__mews__": [
+        ConfigKey(
+            key="MEWS_CLIENT_TOKEN",
+            provider="mews",
+            label="Client token",
+            kind="password",
+            required=True,
+            help_url="https://docs.mews.com/connector-api/guidelines/authentication",
+        ),
+        ConfigKey(
+            key="MEWS_ACCESS_TOKEN",
+            provider="mews",
+            label="Access token (the property's)",
+            kind="password",
+            required=True,
+            help_url="https://docs.mews.com/connector-api/guidelines/authentication",
+        ),
+        ConfigKey(
+            key="MEWS_CLIENT",
+            provider="mews",
+            label="Client name (your integration's name and version)",
+            kind="text",
+            required=False,
+            default="Tentoro Forge 1.0.0",
+        ),
+        ConfigKey(
+            key="MEWS_ENVIRONMENT",
+            provider="mews",
+            label="Environment",
+            kind="select",
+            required=False,
+            default="demo",
+            options=("demo", "production"),
+            help_url="https://docs.mews.com/connector-api/guidelines/environments",
+        ),
+    ],
+
     # --- DNS providers (an app's own address) -------------------------- #
     # Forge writes the DNS records an app's own domain needs at the owner's
     # DNS provider ("Add the records for me" in App settings → Domains, or

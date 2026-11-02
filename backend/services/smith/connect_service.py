@@ -63,6 +63,14 @@ def adapter_lines() -> str:
     for action in sorted(actions()):
         for provider, keys in providers_of(action).items():
             lines.append(f"- {action} — provider `{provider}`: {', '.join(keys)}")
+    # Systems the runtime signs a call to by itself declare the names its
+    # settings card holds, exactly, so a key set there is the key the app reads.
+    from services.signed_services import adapter_lines as signed_lines
+    signed = signed_lines()
+    if signed:
+        lines.append("The runtime also signs calls to these systems itself; an integration with one of these "
+                     "providers declares exactly these names:")
+        lines.extend(signed)
     lines.append("Any other system is declared with `serves: \"\"` and its own names, and reached from a "
                  "workflow step's `auth`; one that calls the application declares `inbound`.")
     return "\n".join(lines)

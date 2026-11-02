@@ -783,7 +783,18 @@ def check_workflow_triggers(result: "AgentResult", doc: dict | None = None) -> N
                     problems.append(f"{name}/{key}: nothing listens for `payment.succeeded` from {pays[0].get('name')} — declare "
                                     "a workflow with a `webhook` trigger on it that records the outcome")
             auth = cfg.get("auth")
-            if auth is not None:
+            # A SYSTEM THE RUNTIME SIGNS FOR ITSELF (`services.signed_services`)
+            # is named by its provider; the step carries no secret of its own.
+            via = str(auth.get("provider") or "").strip().lower() if isinstance(auth, dict) else ""
+            if via:
+                from services.signed_services import SIGNED, signed
+                if not signed(via):
+                    problems.append(f"{name}/{key}: `auth.provider` {via!r} is not a system the runtime signs for "
+                                    f"itself ({', '.join(sorted(SIGNED))}); name the secret as `secretRef` instead")
+                elif not any(str(i.get("provider") or "").strip().lower() == via for i in live_integrations):
+                    problems.append(f"{name}/{key}: calls {SIGNED[via]['name']}, and no integration has "
+                                    f"`provider: \"{via}\"`; declare it first")
+            elif auth is not None:
                 ref = str((auth or {}).get("secretRef") or "") if isinstance(auth, dict) else ""
                 if not ref:
                     problems.append(f"{name}/{key}: `config.auth` names the secret as `secretRef` (a NAME an integration declares)")

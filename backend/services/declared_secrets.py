@@ -26,12 +26,20 @@ APP_PROVIDER = "app:"
 def declared_keys(doc: dict) -> list[ConfigKey]:
     """One key per declared secret name, in document order."""
     from services.blueprint.projection import declared_services
+    from services.node_config_specs import all_providers, keys_for_provider
     out: list[ConfigKey] = []
     seen: set[tuple[str, str]] = set()
+    registry = set(all_providers())
     for svc in declared_services(doc):
         provider = f"{APP_PROVIDER}{svc['slug']}"
+        # A NAME THE PROVIDER'S OWN CARD HOLDS IS SET THERE. An app's Mews
+        # integration declares MEWS_ACCESS_TOKEN; the Mews card already has
+        # it, and a second field for the same variable would be two values
+        # for one name. Only the names the card lacks get a card of the app's.
+        held = ({e.key for e in keys_for_provider(svc["provider"])}
+                if svc.get("provider") in registry else set())
         for name in svc["keys"]:
-            if (provider, name) in seen or not name:
+            if (provider, name) in seen or not name or name in held:
                 continue
             seen.add((provider, name))
             out.append(ConfigKey(key=name, provider=provider, label=f"{svc['name'] or svc['slug']} — {name}",

@@ -1847,7 +1847,34 @@ export function registerDefaultActions(): void {
       // nowhere else — not a variable, not the log. Templates cannot reach
       // the environment, so this is the only way a key enters a call.
       const auth = (config as any).auth;
-      if (auth && typeof auth === "object" && auth.secretRef) {
+      let sentBody = resolvedBody;
+      let method = String(config.method || "GET");
+      // MEWS SIGNS IN THE BODY. Its Connector API takes no header: every call
+      // is a POST whose JSON carries `ClientToken`, `AccessToken` and `Client`,
+      // to a host that differs between the demo and live environments. The
+      // step names the provider and the path; the runtime adds the rest from
+      // the organisation's Mews keys (Settings → Integrations → Mews).
+      // A step that calls a Mews host directly is signed the same way, on the
+      // chosen environment's host: Mews reads no header, so its old
+      // `secretRef` bearer could never have been accepted (forge-v3's Case
+      // Management apps, 2026-11-03), and the tokens belong to one environment.
+      const MEWS_HOST = /^https:\/\/api\.mews(-demo)?\.com(?=\/|$)/;
+      if ((auth && typeof auth === "object" && String(auth.provider || "") === "mews") || MEWS_HOST.test(url)) {
+        const clientToken = process.env.MEWS_CLIENT_TOKEN;
+        const accessToken = process.env.MEWS_ACCESS_TOKEN;
+        if (!clientToken || !accessToken) {
+          const missing = [!clientToken && "MEWS_CLIENT_TOKEN", !accessToken && "MEWS_ACCESS_TOKEN"].filter(Boolean).join(" and ");
+          return { error: `${missing} ${missing.includes(" and ") ? "are" : "is"} not set in this environment`, status: 0, ok: false };
+        }
+        const host = String(process.env.MEWS_ENVIRONMENT || "demo") === "production"
+          ? "https://api.mews.com" : "https://api.mews-demo.com";
+        url = url.startsWith("/") ? host + url : url.replace(MEWS_HOST, host);
+        const given = sentBody && typeof sentBody === "object" && !Array.isArray(sentBody)
+          ? (sentBody as Record<string, unknown>) : {};
+        sentBody = { ...given, ClientToken: clientToken, AccessToken: accessToken,
+                     Client: process.env.MEWS_CLIENT || "Tentoro Forge 1.0.0" };
+        method = "POST";
+      } else if (auth && typeof auth === "object" && auth.secretRef) {
         const name = String(auth.secretRef);
         const value = process.env[name];
         if (!value) return { error: `${name} is not set in this environment`, status: 0, ok: false };
@@ -1863,13 +1890,13 @@ export function registerDefaultActions(): void {
       const timeoutMs = Number((config as any).timeoutMs ?? 30_000) || 30_000;
       const timeout = setTimeout(() => controller.abort(), timeoutMs);
       const res = await fetch(url, {
-        method: String(config.method || "GET"),
+        method,
         headers,
-        body: resolvedBody === undefined ? undefined
-          : asForm && resolvedBody && typeof resolvedBody === "object"
-            ? new URLSearchParams(Object.entries(resolvedBody as Record<string, unknown>)
+        body: sentBody === undefined ? undefined
+          : asForm && sentBody && typeof sentBody === "object"
+            ? new URLSearchParams(Object.entries(sentBody as Record<string, unknown>)
                 .map(([k, v]) => [k, typeof v === "string" ? v : JSON.stringify(v)])).toString()
-            : JSON.stringify(resolvedBody),
+            : JSON.stringify(sentBody),
         signal: controller.signal,
       });
       clearTimeout(timeout);
