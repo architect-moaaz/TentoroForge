@@ -4266,6 +4266,14 @@ MAX_TOKENS_BY_NODE: dict[str, int] = {
     "business_rules": 64000,
     "analytics": 64000,
     "workflow_steps": 64000,
+    # Judges every requirement against every frame and writes a row per
+    # requirement, so the answer grows with the application while the thinking
+    # grows with both. On kkb5mzo3 (157 requirements, 18 frames, 2026-11-02)
+    # the reply was cut off mid-string at 17,701 characters — about 5k tokens
+    # of answer, because on the adaptive path the cap covers the thinking too
+    # and high effort over 157x18 had spent most of it. The build saw only
+    # "JSONDecodeError" and told the person the design could not be checked.
+    "figma_coverage": 64000,
     # One page's thinking plus two whole files — a record workspace's view
     # runs to several hundred lines — and a compile round re-sends the code.
     # 48k ran out on a fifteen-fact record page (0l133sp2); headroom is free.

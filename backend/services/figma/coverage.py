@@ -206,7 +206,22 @@ def check(doc: dict, output_dir: Any, client: Any) -> Coverage:
         raise CoverageUnavailable("No screens were read from the connected Figma design.")
     try:
         reply = client(system=SYSTEM, user=_prompt(reqs, frames), schema=SCHEMA)
-        body = json.loads(getattr(reply, "text", reply))
+        raw = getattr(reply, "text", reply)
+        body = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        # A CUT-OFF ANSWER IS NOT AN UNREADABLE ONE, and saying so is the
+        # difference between raising the cap and hunting a parser bug: this
+        # read "JSONDecodeError: Unterminated string" for a reply that simply
+        # ran out of room (kkb5mzo3, 2026-11-02). The length is the evidence.
+        size = len(str(raw))
+        logger.warning("[figma-coverage] the answer stopped mid-JSON at %d characters "
+                       "(%d requirements x %d frames) — raise `figma_coverage` in "
+                       "MAX_TOKENS_BY_NODE if this repeats: %s",
+                       size, len(reqs), len(frames), str(exc)[:160])
+        raise CoverageUnavailable(
+            f"The design check ran out of room before it finished: its answer stopped mid-way "
+            f"after {size:,} characters, with {len(reqs)} requirements to report on. "
+            f"Nothing is wrong with your design — the check needs a bigger budget.") from exc
     except Exception as exc:  # noqa: BLE001 — the person is told, the build is not stopped by it
         logger.warning("[figma-coverage] %s: %s", type(exc).__name__, str(exc)[:200])
         raise CoverageUnavailable("I could not check the design against the requirements just now.") from exc
