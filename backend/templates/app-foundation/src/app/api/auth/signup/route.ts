@@ -7,6 +7,7 @@ import { z } from "zod";
 import * as accountModule from "@/lib/account";
 import { ACCOUNT, ACCOUNT_INITIAL, SIGNUP_ROLE } from "@/lib/account";
 import { accountTable } from "@/lib/account-table";
+import { sealSensitive } from "@/lib/data-engine";
 
 // The account types signup offers. Empty by default (single-account app);
 // the Blueprint assembly step overwrites this line with the derived options
@@ -143,7 +144,17 @@ export async function POST(request: Request) {
           }
           if (Object.keys(own).length) await tx.update(users).set(own as any).where(eq(users.id, created.id));
         } else {
-          await tx.insert(accountTable).values({ ...account.values, id: created.id });
+          // SEALED AS IT IS WRITTEN, like every write through the engine. Left
+          // in the clear, a new person's sensitive fields waited for the next
+          // start's seal pass — on a deployed app, the next deploy (DITANS QA,
+          // 2026-11-02). Without a key the values stay plain, as before.
+          const values: Record<string, unknown> = { ...account.values, id: created.id };
+          try {
+            await sealSensitive(ACCOUNT.entity, values);
+          } catch (e) {
+            console.warn("[signup] sensitive fields left unsealed:", String((e as Error)?.message ?? e).slice(0, 200));
+          }
+          await tx.insert(accountTable).values(values as any);
         }
       }
       if (tpolicy.kind === "organisation" && orgName && tpolicy.signup !== "joins_by_invite") {
