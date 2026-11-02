@@ -1502,6 +1502,55 @@ def _note(ledger: Any, method: str, *args: Any) -> None:
 Executor = Callable[[TaskSpec], AgentResult]
 
 
+#: Nodes that cannot work without the app's toolchain on disk: they compile
+#: what they write before handing it back.
+NEEDS_TOOLCHAIN: frozenset[str] = frozenset({"page_code", "native_code"})
+
+
+def toolchain_ready(app_root: str | None) -> bool:
+    """Is there a TypeScript compiler under ``app_root``?
+
+    The same question `ui_engineer` asks before it compiles, asked early
+    enough to do something about it."""
+    import shutil
+
+    if not app_root:
+        return False
+    return bool(shutil.which("tsc", path=str(Path(app_root) / "node_modules" / ".bin")))
+
+
+def with_toolchain(order: Sequence[str], app_root: str | None) -> list[str]:
+    """`install` back in the plan when something needs it and it is gone.
+
+    A COMPLETED NODE IS NOT A PRESENT ARTIFACT. `install` produces no
+    Blueprint section, so `completed_nodes` cannot judge it and
+    `incremental_plan` never seeds it — it is foundational, reached only by
+    being written to. That is right until its output stops existing: the app
+    tree is re-projected by `frontend`/`backend`, and `node_modules` does not
+    survive every such rewrite.
+
+    On kkb5mzo3 (2026-11-02) `page_code` ran at 14:05 against a tree with no
+    compiler and failed all 18 pages with "install has not run"; `assemble`
+    reinstalled it at 14:15, ten minutes too late, and the run still reported
+    18 of 19 nodes complete with nothing failed. The graph believed a node
+    whose output had been deleted.
+    """
+    plan = list(order)
+    # NO APP ROOT, NO CLAIM. A caller that projects nowhere (every unit test
+    # of the scheduler, and `--dry-run`) has no tree to inspect and no tree to
+    # install into; adding `install` there only makes it unrunnable and takes
+    # its dependents down with it.
+    if not app_root:
+        return plan
+    if "install" in plan or not any(n in NEEDS_TOOLCHAIN for n in plan):
+        return plan
+    if toolchain_ready(app_root):
+        return plan
+    logger.warning("[run] %s needs a compiler and there is none under %s — running `install` first",
+                   ", ".join(n for n in plan if n in NEEDS_TOOLCHAIN), app_root)
+    return ["install", *plan]
+
+
 def run(
     svc: BlueprintService,
     executor: Executor,
@@ -1546,6 +1595,8 @@ def run(
     loop is testable; with one it is the same loop with a judgement in it.
     """
     order = list(plan) if plan is not None else [k for lvl in levels() for k in lvl]
+    # A node that compiles needs a compiler; see `with_toolchain`.
+    order = with_toolchain(order, app_root)
     in_plan = set(order)
     report = RunReport()
     done: set[str] = set()
@@ -2028,11 +2079,20 @@ def _execute(
                             w.rewrite.add(subject)
                     elif _finding_sig(obs.findings[subject]) == _finding_sig(before):
                         w.stuck.add(subject)
+                    elif len(obs.findings[subject]) > len(before):
+                        # WORSE THAN IT WENT IN. page_contracts went 26 -> 28
+                        # -> 32 findings across its two rounds and was marked
+                        # done; RefundExecution went 5 -> 2 -> 4 -> 5
+                        # (kkb5mzo3, 2026-11-02). A rewrite that adds findings
+                        # is trading one gap for another, and the next round
+                        # trades again at full price.
+                        w.stuck.add(subject)
                 w.open[subject] = RepairTask(
                     node=key, agent=DAG[key].agent, subject=subject,
                     feedback=obs.brief(subject),
                 )
                 w.last[subject] = obs
+                w.counts[subject] = len(obs.findings[subject])
             elif subject in w.open and not sweep:
                 w.open.pop(subject)
                 w.stuck.discard(subject)
@@ -2314,11 +2374,20 @@ class _Watch:
     closed: bool = False
     #: Subject -> identities the node's current answer for it consists of.
     authored: dict[str, set[tuple]] = field(default_factory=dict)
-    #: Subjects a repair round left NO better (finding count did not drop). A
-    #: second identical brief will not help, so they are flagged now instead of
-    #: burning the remaining round — the observer's biggest source of wasted
-    #: re-authoring on hard apps (measured: NKit page_layouts).
+    #: Subjects a repair round left no better, so they are flagged now rather
+    #: than burning the remaining round — the observer's biggest source of
+    #: wasted re-authoring on hard apps (measured: NKit page_layouts).
+    #:
+    #: Two ways to be no better, and they are different claims:
+    #:   * the SAME findings came back (identity) — a second identical brief
+    #:     will not move a defect the agent cannot fix;
+    #:   * MORE findings came back than went in — the rewrite is trading gaps
+    #:     rather than closing them, and another round trades again.
+    #: An answer that merely shifted, same count, keeps its full rounds.
     stuck: set[str] = field(default_factory=set)
+    #: Subject -> how many findings its last verdict carried, to tell a round
+    #: that converged from one that diverged.
+    counts: dict[str, int] = field(default_factory=dict)
     #: Subjects whose last repair was an edit.
     edited: set[str] = field(default_factory=set)
     #: Subjects an edit left with a finding the observer had already sent.
