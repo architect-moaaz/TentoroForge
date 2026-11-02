@@ -297,7 +297,12 @@ async function _encryptSensitiveOnWrite(
   const tbl: any = getEntity(entityName)?.table;
   for (const col of keys) {
     if (!(col in data) || guestCols.has(col)) continue;
-    if (tbl && !(`${col}_encrypted` in tbl)) continue;
+    // AND ONLY WHERE THE TABLE IS KNOWN. Sign-up sealed before the record
+    // types were registered, the table was not found, and a new person's email
+    // went into columns the table does not have: every sign-up failed with
+    // `null value in column "email"` (DITANS, found by Smith's newcomers check,
+    // 2026-11-02). An unknown table leaves the value as written.
+    if (!tbl || !(`${col}_encrypted` in tbl)) continue;
     const raw = data[col];
     // Empty / undefined = "keep existing" on update, "no value" on create.
     // Either way, we must not overwrite _encrypted / _mask with an empty

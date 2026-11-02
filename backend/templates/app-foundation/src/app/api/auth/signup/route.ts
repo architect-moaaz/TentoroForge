@@ -8,6 +8,7 @@ import * as accountModule from "@/lib/account";
 import { ACCOUNT, ACCOUNT_INITIAL, SIGNUP_ROLE } from "@/lib/account";
 import { accountTable } from "@/lib/account-table";
 import { sealSensitive } from "@/lib/data-engine";
+import { ensureDataEngineInitialized } from "@/lib/data-init";
 
 // The account types signup offers. Empty by default (single-account app);
 // the Blueprint assembly step overwrites this line with the derived options
@@ -150,6 +151,9 @@ export async function POST(request: Request) {
           // 2026-11-02). Without a key the values stay plain, as before.
           const values: Record<string, unknown> = { ...account.values, id: created.id };
           try {
+            // The record types first: without them the engine cannot tell which
+            // columns hold a seal, and leaves every value as written.
+            await ensureDataEngineInitialized();
             await sealSensitive(ACCOUNT.entity, values);
           } catch (e) {
             console.warn("[signup] sensitive fields left unsealed:", String((e as Error)?.message ?? e).slice(0, 200));
