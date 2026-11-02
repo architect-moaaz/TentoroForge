@@ -1459,7 +1459,7 @@ NODE_TASKS: dict[str, str] = {
         "GOOD PAIRINGS, KEYED TO THE REGISTER. These heading/body pairs read as designed, not "
         "default, and every face is also served to the phone, so the app and the site match — start "
         "from the one for the register you chose, or pick your own two in the same spirit: "
-        "editorial — `Fraunces` or `Playfair Display` over `Source Sans 3`; "
+        "editorial — `Merriweather` or `Playfair Display` over `Source Sans 3`; "
         "utility — `Manrope` or `Inter` over `Inter`; "
         "warm — `Outfit` or `Poppins` over `DM Sans`; "
         "luxe — `Playfair Display` or `Libre Baskerville` over `Work Sans`; "
