@@ -4435,6 +4435,9 @@
                     "target": {
                       "type": "string"
                     },
+                    "href": {
+                      "type": "string"
+                    },
                     "on": {
                       "type": "string"
                     }

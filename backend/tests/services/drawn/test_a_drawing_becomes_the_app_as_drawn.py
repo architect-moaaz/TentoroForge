@@ -1075,3 +1075,43 @@ def test_the_bar_holding_the_account_menu_does_not_clip_it():
     assert problems == [] and "{props.controls}" in out["code"]
     assert '<div className="flex h-[72px]" data-layer="Top bar">' in out["code"], "the bar no longer clips"
     assert '<div className="flex w-full overflow-hidden">' in out["code"], "the shell still clips a wide page"
+
+
+STEPS = """export default function StepsView() {
+  return (
+    <div className="flex flex-col" data-layer="Your setup">
+      <div className="flex flex-row bg-[#eaf0ff]" data-layer="Step">
+        <p className="text-[12px] text-[#0443fa]">✓</p>
+        <p className="text-[13px]">Organisation type</p>
+      </div>
+      <div className="flex flex-row bg-[#ffffff]" data-layer="Step">
+        <p className="text-[12px] text-[#6b6e76]">2</p>
+        <p className="text-[13px]">Organisation details</p>
+      </div>
+      <div className="flex flex-row bg-[#ffffff]" data-layer="Step">
+        <p className="text-[12px] text-[#6b6e76]">3</p>
+        <p className="text-[13px]">Documents</p>
+      </div>
+    </div>
+  );
+}
+"""
+
+
+def test_a_look_gives_a_row_its_colours_not_its_words():
+    """DITANS QA D-28/D-34 (2026-11-02): a stepper looked by status read
+    "Organisation type" with a ✓ on every step — each look kept row one's words."""
+    answer = {"contract": {"data": [{"name": "steps", "kind": "list", "label": "Steps", "fields": [
+                  {"name": "label", "label": "Step", "type": "string"},
+                  {"name": "mark", "label": "Mark", "type": "string"},
+                  {"name": "status", "label": "Status", "type": "enum", "options": ["done", "upcoming"]}]}],
+                  "actions": []},
+              "lists": [{"prop": "steps", "rows": ["2", "5", "8"], "looks": [
+                  {"field": "status", "by": [{"value": "done", "row": "2"}, {"value": "upcoming", "row": "5"}]}]}],
+              "values": [], "inputs": [], "shows": []}
+    out, problems = P.apply(STEPS, json.loads(json.dumps(answer)), "StepsView")
+    assert out is None and any("reads “Organisation type” but “Organisation details”" in p for p in problems), problems
+    answer["values"] = [{"node": "3", "expr": "row.mark"}, {"node": "4", "expr": "row.label"}]
+    out, problems = P.apply(STEPS, answer, "StepsView")
+    assert problems == [], problems
+    assert "Organisation type" not in out["code"] and "{row.label}" in out["code"]

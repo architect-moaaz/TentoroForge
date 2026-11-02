@@ -47,6 +47,13 @@ def table(doc: dict, shell: dict) -> list[str]:
         where = f"{names.get(href, '')} ({href})".strip() if href != "#" else "nowhere ✗"
         section = f"[{e['section']}] " if e.get("section") else ""
         out.append(f"  {section}\"{e.get('label')}\" → {where}")
+    from services.drawn.project import action_routes
+    bound = action_routes(doc, shell)
+    for a in (shell.get("contract") or {}).get("actions") or []:
+        if isinstance(a, dict) and a.get("name") and str(a.get("on") or "") != "nav":
+            href = bound.get(str(a["name"]), "")
+            where = f"{names.get(href, '')} ({href})".strip() if href else "nowhere ✗"
+            out.append(f"  button {a['name']} \"{a.get('label') or ''}\" → {where}")
     return out
 
 
@@ -88,8 +95,19 @@ def bind_menu(output_dir: str, shell_ref: str, entries: list[dict]) -> dict:
     for e in entries:
         label, route = str(e["label"]).strip(), str(e.get("route") or "").strip()
         row = next((r for r in rows if str(r.get("label") or "").strip().lower() == label.lower()), None)
-        if row is None:
-            refused.append(f"\"{label}\" is not an entry of this menu")
+        # A SHELL'S OWN BUTTON BINDS THE SAME WAY: "Help", "New job" (DITANS QA D-68).
+        action = None if row is not None else next(
+            (a for a in (shell.get("contract") or {}).get("actions") or []
+             if isinstance(a, dict) and str(a.get("on") or "") != "nav"
+             and label.lower() in (str(a.get("name") or "").lower(), str(a.get("label") or "").strip().lower())), None)
+        if action is not None and (not route or route in live):
+            if route:
+                action["href"] = route
+            else:
+                action.pop("href", None)
+            done.append(f"\"{label}\" → {route or 'as the drawing links it'}")
+        elif row is None:
+            refused.append(f"\"{label}\" is not an entry or a button of this menu")
         elif route and route not in live:
             refused.append(f"\"{label}\": `{route}` is not a screen of this application")
         else:
@@ -104,6 +122,7 @@ def bind_menu(output_dir: str, shell_ref: str, entries: list[dict]) -> dict:
     for view in svc.doc.get("drawnViews") or []:
         if isinstance(view, dict) and view.get("key") == shell.get("key"):
             view["sample"] = {**(view.get("sample") or {}), "nav": rows}
+            view["contract"] = shell.get("contract") or view.get("contract")
     svc.validate()
     record = svc.commit(user_request=f"bind the {who} menu: " + "; ".join(done),
                         smith_interpretation="bind drawn menu entries to screens", before=before, affected=[])

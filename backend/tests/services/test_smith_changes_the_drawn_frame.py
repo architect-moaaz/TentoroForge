@@ -55,7 +55,7 @@ def test_an_entry_is_bound_to_a_screen_as_one_version_and_projected(tmp_path):
     out = writes.run("bind_menu", {"shell": "Recruiter", "entries": [{"label": "pools", "route": "/find-talent/pools"},
                                                                     {"label": "Saved", "route": "/x"}]},
                      output_dir=str(tmp_path))
-    assert out["applied"] and "Bound 1 entry" in out["said"] and "not an entry of this menu" in out["finding"]
+    assert out["applied"] and "Bound 1 entry" in out["said"] and "not an entry or a button of this menu" in out["finding"]
     doc = BlueprintService.load(output_dir=str(tmp_path)).doc
     assert doc["version"] == before + 1
     assert doc["drawnViews"][0]["sample"]["nav"][1]["href"] == "/find-talent/pools"
@@ -103,3 +103,21 @@ def test_the_catalogue_offers_the_drawn_frame():
     said = next(d for n, d, _a in writes.WRITES if n == "write_frame")
     assert "drawn shell" in said and "src/components/drawn/" in said
     assert any(n == "bind_menu" for n, _d, _a in writes.WRITES)
+
+
+def test_a_shell_button_leads_where_it_is_bound_or_where_the_drawing_sends_it():
+    """DITANS QA D-68 (2026-11-02): a shell's own buttons ("Help", "New job")
+    were written `() => {}` whatever the drawing or Smith said."""
+    from services.drawn.project import _props, action_routes
+    doc = {"pages": [{"id": "PAGE-1", "route": "/plans", "name": "Plans"},
+                     {"id": "PAGE-2", "route": "/jobs/new", "name": "New job", "figmaFrames": ["F/6:1"]}],
+           "drawnViews": []}
+    shell = {"kind": "shell", "name": "S", "contract": {"actions": [
+        {"name": "onNav", "on": "nav", "kind": "navigate"},
+        {"name": "onHelp", "kind": "navigate", "label": "Help", "href": "/plans"},
+        {"name": "onNewJob", "kind": "navigate", "label": "New job", "target": "6:1"},
+        {"name": "onCollapse", "kind": "open", "label": "Collapse"}]}}
+    routes = action_routes(doc, shell)
+    assert routes.get("onHelp") == "/plans"
+    props = _props(shell, routes)
+    assert 'onHelp={() => router.push("/plans")}' in props and "onCollapse={() => {}}" in props

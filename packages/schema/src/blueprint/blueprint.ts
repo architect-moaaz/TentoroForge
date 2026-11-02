@@ -1445,6 +1445,10 @@ export const DrawnAction = z.object({
   kind: z.enum(["navigate", "open", "submit", "run"]),
   /** For `navigate` / `open`: the frame it leads to, when the prototype says. */
   target: z.string().optional(),
+  /** For `navigate`: the screen of this app it opens (`/plans`), bound by hand
+   *  when the prototype links nowhere — a shell's "Help" or "New job" did
+   *  nothing because only menu rows were ever bound (DITANS QA D-68, 2026-11-02). */
+  href: z.string().optional(),
   /** The slot it acts on: the list whose row it is on, the form it submits. */
   on: z.string().optional(),
 });

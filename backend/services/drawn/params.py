@@ -578,14 +578,24 @@ def _lost(plan: _Plan) -> list[str]:
             # still its look.
             boxed = t.parent is not None and t.parent.unit() is t
             words_bound = t.id in plan.values or (boxed and t.parent.id in plan.values)
-            if t.id in plan.inputs or (boxed and t.parent.id in plan.inputs) or covered(t):
+            if t.id in plan.inputs or (boxed and t.parent.id in plan.inputs):
                 continue
+            # A LOOK GIVES A ROW ITS COLOURS, NOT ITS WORDS. Every look keeps the
+            # template row's text (markup.relook), so a stepper whose rows were
+            # looked by status read "Organisation type" on every step, with a ✓
+            # on each (DITANS QA D-28, D-34, 2026-11-02): under a look, words
+            # that differ from row to row must still be bound.
+            in_look = covered(t)
             unit = t.unit()
             if words_bound and not (unit is t and unit.is_component):
                 continue
             for r in others:
                 there = M.counterpart(template, r, t)
                 if there is None or not M.same_kind(t, there):
+                    continue
+                if in_look:
+                    if t.body is not None and not unit.is_component and M.plain(t) != M.plain(there):
+                        found.append(f"element {t.id} reads “{M.plain(t)[:30]}” but “{M.plain(there)[:30]}” on row {r.id}")
                     continue
                 if unit.is_component and (there.unit().tag != unit.tag
                                           or (not words_bound and M.plain(there) != M.plain(t))):

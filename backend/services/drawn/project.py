@@ -133,9 +133,8 @@ def phone_routes(doc: dict) -> list[str]:
                    if page_frames(p) & twins or str(p.get("figmaFrame") or "") in narrow})
 
 
-def nav_routes(doc: dict, shell: dict) -> list[dict]:
-    """The drawn menu, each entry with the route of the page it leads to: by
-    the prototype's own link from that entry, else the page whose name it is."""
+def _by_frame(doc: dict) -> dict[str, str]:
+    """Each drawn frame -> the route of the page it became."""
     from services.blueprint.page_planner import page_frames
 
     by_frame: dict[str, str] = {}
@@ -143,6 +142,31 @@ def nav_routes(doc: dict, shell: dict) -> list[dict]:
         if isinstance(page, dict) and page.get("status") != "DEPRECATED" and page.get("route"):
             for f in page_frames(page):
                 by_frame.setdefault(f, str(page["route"]))
+                by_frame.setdefault(f.split("/")[-1], str(page["route"]))
+    return by_frame
+
+
+def action_routes(doc: dict, shell: dict) -> dict[str, str]:
+    """Each of a shell's own actions that leads somewhere -> its route: the
+    screen bound by hand (`href`), else the page its prototype target became."""
+    live = {str(p["route"]) for p in _live_pages(doc)}
+    by_frame = _by_frame(doc)
+    out: dict[str, str] = {}
+    for action in (shell.get("contract") or {}).get("actions") or []:
+        if not isinstance(action, dict) or str(action.get("on") or "") == "nav" or not action.get("name"):
+            continue
+        href = str(action.get("href") or "")
+        target = str(action.get("target") or "")
+        route = (href if href in live else "") or by_frame.get(target, "") or by_frame.get(target.split("/")[-1], "")
+        if route:
+            out[str(action["name"])] = route
+    return out
+
+
+def nav_routes(doc: dict, shell: dict) -> list[dict]:
+    """The drawn menu, each entry with the route of the page it leads to: by
+    the prototype's own link from that entry, else the page whose name it is."""
+    by_frame = _by_frame(doc)
     links: dict[str, str] = {}
     frame = str(shell.get("frame") or "")
     for source in doc.get("designSources") or []:
@@ -181,7 +205,7 @@ def nav_routes(doc: dict, shell: dict) -> list[dict]:
     return out
 
 
-def _props(shell: dict) -> str:
+def _props(shell: dict, routes: dict[str, str] | None = None) -> str:
     """The drawn view's props besides `nav`, `controls` and the page."""
     from services.drawn.contract import change_handler
 
@@ -193,6 +217,10 @@ def _props(shell: dict) -> str:
             continue
         if str(action.get("on") or "") == "nav":
             handlers.append(f"{name}={{(row) => router.push(row.href)}}")
+        elif (routes or {}).get(name):
+            # WHERE THE DRAWING SENDS IT, IT GOES: "New job" led to its frame's
+            # page in the prototype and did nothing in the app (DITANS QA D-68).
+            handlers.append(f"{name}={{() => router.push({json.dumps(routes[name])})}}")
         else:
             handlers.append(f"{name}={{() => {{}}}}")
     forms = []
@@ -210,7 +238,7 @@ def _props(shell: dict) -> str:
 
 
 def _wrapper(shells: list[tuple[dict, list[dict]]], routes: list[list[str]], roles: dict[str, str],
-             phone: list[str], app_name: str = "") -> str:
+             phone: list[str], app_name: str = "", actions: list[dict[str, str]] | None = None) -> str:
     """The wrapper the layout renders: the frame for this page, bound, inside
     `DrawnFrame` — the drawer the sidebar becomes on a narrow screen, and the
     design's words in the chosen language."""
@@ -221,7 +249,7 @@ def _wrapper(shells: list[tuple[dict, list[dict]]], routes: list[list[str]], rol
             f"function Frame{i}(props: FrameProps) {{\n"
             "  const router = useRouter();\n"
             f"  const nav = useNav(NAV{i}, props.role);\n"
-            f"  return <ShellView{i} nav={{nav as any}} controls={{props.controls}} {_props(shell)}>"
+            f"  return <ShellView{i} nav={{nav as any}} controls={{props.controls}} {_props(shell, (actions or [])[i] if i < len(actions or []) else None)}>"
             "{props.children}</ShellView" + str(i) + ">;\n"
             "}\n")
         table.append(f"  {json.dumps(str(shell['key']))}: Frame{i},")
@@ -308,7 +336,8 @@ def project_drawn(doc: dict, output_dir: str | Path, app_root: str | Path) -> di
     routes = portal_routes(doc, shells)
     roles = role_portals(doc, routes)
     wrapper.write_text(_wrapper(bound, routes, roles, phone_routes(doc),
-                                 str((doc.get("application") or {}).get("name") or "")), encoding="utf-8")
+                                 str((doc.get("application") or {}).get("name") or ""),
+                                 [action_routes(doc, shell) for shell, _nav in bound]), encoding="utf-8")
     reads = _shell_loads(shells, drawn)
     (root / SHELL_LOAD).write_text(_shell_loader(reads), encoding="utf-8")
     return {"assets": copied, "shell": True, "shells": len(shells), "nav": sum(len(n) for _s, n in bound),
