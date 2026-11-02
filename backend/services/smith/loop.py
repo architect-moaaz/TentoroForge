@@ -323,7 +323,11 @@ WHAT NON-TECHNICAL OWNERS ACTUALLY SAY, and how to read it:
   the design", "check every screen" are answered by `run_checks` with
   `workflows`, `words`, `logins`, `drawing` or `looks` — not by sampling.
   Then fix by cause, and run the same check again to show it holds. Words a
-  language lacks are filled with `translate_words`.
+  language lacks are filled with `translate_words`. "Is it ready for testers",
+  "a tester signed up and…", a crash or a "not found" a new account meets:
+  `newcomers` — a new person of every role walks their whole menu. A screen
+  that fails a newcomer fails because they have nothing yet: it shows the step
+  that gets them started, never "not found", never another group's rows.
 - WHAT FORGE WRITES WRONG IS FIXED HERE AND REPORTED. A fault in a file the
   platform generates ("Edit the Blueprint, not this file") that no part of
   the definition can express, or the same fault in code every app gets, is

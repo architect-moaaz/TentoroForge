@@ -103,9 +103,11 @@ TRIALS = TRIALS + (
      "slow: minutes per dozen; `workflows` narrows it to those names), `drawing` (in an app drawn from a "
      "design: drawn screens no page shows, pages showing no drawing), `words` (every drawn word in every "
      "language the app is shown in), `logins` (every demo person signs in, belongs to an organisation when "
-     "the app has them, and lands where they may), `looks` (the measured look — cursor, dead drawn controls, "
+     "the app has them, and lands where they may), `newcomers` (a brand-new person of every role that signs "
+     "up, with no organisation and no records yet, opens every screen of their menu: a crash, a 'not found' "
+     "or a refusal is a line — what a tester meets first and the demo people never see), `looks` (the measured look — cursor, dead drawn controls, "
      "cut-off menus — of the screens in `routes`, or of every screen, a dozen a call), "
-     "or `all` (routes, access, rules, guards, drawing, words and logins). `routes` narrows routes/pages/looks "
+     "or `all` (routes, access, rules, guards, drawing, words, logins and newcomers). `routes` narrows routes/pages/looks "
      "to those screens (a route or a page name); `entities` narrows access to those record types. Lines "
      "marked ✗ are what is not right, with the reason; read them before "
      "deciding what to change, and run the same check again after changing it. "
@@ -1111,12 +1113,12 @@ def run_checks(bench: Bench, doc: dict, what: str, routes: list, entities: list,
     from services.blueprint import access_check, route_check, rule_trials
     from services.smith import app_checks
     what = (what or "all").strip().lower()
-    kinds = {"all": ("routes", "access", "rules", "guards", "drawing", "words", "logins"),
+    kinds = {"all": ("routes", "access", "rules", "guards", "drawing", "words", "logins", "newcomers"),
              **{k: (k,) for k in ("routes", "access", "rules", "pages", "guards", "workflows", "drawing", "words",
-                                  "logins", "looks")}}.get(what)
+                                  "logins", "newcomers", "looks")}}.get(what)
     if kinds is None:
         raise ValueError(f"`what` is one of routes, access, rules, pages, guards, workflows, drawing, words, "
-                         f"logins, looks, all — not {what!r}")
+                         f"logins, newcomers, looks, all — not {what!r}")
     if "pages" in kinds and not routes:
         raise ValueError("`pages` presses the screens named in `routes`; name at least one")
     lines: list[str] = []
@@ -1145,6 +1147,9 @@ def run_checks(bench: Bench, doc: dict, what: str, routes: list, entities: list,
             elif kind == "logins":
                 lines += _check_lines("logins", app_checks.logins(bench, doc),
                                       holds="demo people sign in, belong and land")
+            elif kind == "newcomers":
+                lines += _check_lines("newcomers", app_checks.newcomers(bench, doc),
+                                      holds="a new person of every role opens their whole menu")
             elif kind == "looks":
                 lines += app_checks.looks(bench, doc, [str(r) for r in routes], as_)
             elif kind == "guards":

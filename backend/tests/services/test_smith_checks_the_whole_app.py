@@ -146,9 +146,22 @@ def test_a_portal_is_looked_at_in_one_call(monkeypatch):
 
 def test_run_checks_offers_the_new_kinds():
     said, args = next((d, a) for n, d, a in trials.TRIALS if n == "run_checks")
-    for kind in ("`workflows`", "`drawing`", "`words`", "`logins`", "`looks`"):
+    for kind in ("`workflows`", "`drawing`", "`words`", "`logins`", "`newcomers`", "`looks`"):
         assert kind in said
     assert args["workflows"] == "array"
-    with pytest.raises(ValueError, match="workflows, drawing, words, logins, looks"):
+    with pytest.raises(ValueError, match="workflows, drawing, words, logins, newcomers, looks"):
         trials.run_checks(SimpleNamespace(), {}, "nope", [], [], "")
     assert any(n == "translate_words" for n, _d, _a in writes.WRITES)
+
+
+def test_a_newcomers_walk_reads_what_the_server_render_threw():
+    """DITANS QA (2026-11-02): the jobs screen answered 200 and drew "not found"
+    later; the CV builder crashed inside a 200. Both travel in the page's stream."""
+    from services.smith.app_checks import _thrown
+    page = ('2a:E{\\"digest\\":\\"NEXT_HTTP_ERROR_FALLBACK;404\\",\\"name\\":\\"Error\\",\\"message\\":\\"x\\"}'
+            '3b:E{\\"digest\\":\\"2487021552\\",\\"name\\":\\"TypeError\\",\\"message\\":\\"Cannot read\\"}'
+            '4c:E{\\"digest\\":\\"\\",\\"name\\":\\"Error\\",\\"message\\":\\"ENOENT\\"}')
+    thrown = _thrown(page)
+    assert ("NEXT_HTTP_ERROR_FALLBACK;404", "Error", "x") in thrown
+    assert ("2487021552", "TypeError", "Cannot read") in thrown
+    assert ("", "Error", "ENOENT") in thrown          # caught: no digest, not a crash
