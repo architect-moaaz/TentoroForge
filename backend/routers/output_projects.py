@@ -393,7 +393,7 @@ async def smith_turn(project_id: str, req: SmithTurnRequest, user: PlatformUser 
     from services.office_bridge import office_sink
     from services.smith.smith import Smith
     from services import credits
-    from services.build_usage import acting
+    from services.build_usage import acting, run_budget
     from services.project_service import project_for
 
     project = await project_for(project_id, user, db)
@@ -401,6 +401,8 @@ async def smith_turn(project_id: str, req: SmithTurnRequest, user: PlatformUser 
     # A turn the organisation cannot pay for is not started (402, in the
     # administrator's words).
     await credits.gate(db, org_id=project.org_id, user_email=user.email, project_short_id=project.short_id, turn=True)
+    ceiling = await credits.headroom(db, org_id=project.org_id, user_email=user.email,
+                                     project_short_id=project.short_id)
     if not (root / ".forge" / "blueprint" / "current.json").exists():
         raise HTTPException(
             status_code=409,
@@ -449,7 +451,8 @@ async def smith_turn(project_id: str, req: SmithTurnRequest, user: PlatformUser 
             # A LEDGER, SO A DEPLOY WAITS FOR IT. This turn kept none: the
             # cutover gate could not see it and a restart cut it off without a
             # trace (2026-10-26).
-            with acting(user=user.email, org=str(project.org_id)), job_ledger(root, "turn", phase="change"):
+            with acting(user=user.email, org=str(project.org_id)), run_budget(ceiling), \
+                    job_ledger(root, "turn", phase="change"):
                 return await asyncio.to_thread(_run)
         except HTTPException:
             raise

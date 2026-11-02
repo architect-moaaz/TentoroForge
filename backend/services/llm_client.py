@@ -189,6 +189,11 @@ def _chat_model(api_key: str | None, *, model: str, max_tokens: int,
                 temperature: float | None, timeout: float | None,
                 thinking: dict | None = None):
     from langchain_anthropic import ChatAnthropic
+
+    from services.build_usage import check_budget
+    # Every call is made through a model built here: the one place a run that
+    # has spent its ceiling is stopped (`build_usage.run_budget`).
+    check_budget()
     kwargs: dict[str, Any] = {"model": model, "max_tokens": max_tokens}
     if api_key:
         kwargs["api_key"] = api_key
@@ -569,8 +574,17 @@ def _complete_streaming(*, model: str, max_tokens: int, messages: list[dict],
                        temperature=None, timeout=timeout, thinking=thinking)
     sink = ReasoningSink(reasoning_callback)
     parts: list[str] = []
+    whole: Any = None
     try:
         for chunk in chat.stream(_lc_messages(messages, system)):
+            # Added up so the last chunk's usage is on the whole: a streamed
+            # call is priced like any other (`_to_message` records it). It was
+            # not, and every step of a Smith turn that streamed its reasoning
+            # was free in the spend ledger and the gate (audit, 2026-11-01).
+            try:
+                whole = chunk if whole is None else whole + chunk
+            except TypeError:
+                whole = chunk
             for block in (chunk.content if isinstance(chunk.content, list)
                           else [chunk.content]):
                 if isinstance(block, str):
@@ -586,4 +600,9 @@ def _complete_streaming(*, model: str, max_tokens: int, messages: list[dict],
         # last sentence is usually the conclusion. Flushed even when the stream
         # raises, so a failed call still shows how far the thinking got.
         sink.close()
+        if whole is not None:
+            try:
+                _to_message(whole, model)
+            except Exception:  # noqa: BLE001 — accounting never fails a call
+                pass
     return "".join(parts)

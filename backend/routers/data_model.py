@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,6 +13,8 @@ from sse_starlette.sse import EventSourceResponse
 
 from auth import get_current_user
 from database import get_db
+
+logger = logging.getLogger(__name__)
 from models.auth import PlatformUser
 from models.org import OrgMemberRole
 from models.project import (

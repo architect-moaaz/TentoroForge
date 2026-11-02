@@ -13,6 +13,7 @@ import { installHarness, ok, eqJson, done } from "./_harness.mts";
 process.env.FORGE_URL = "http://forge.test";
 process.env.FORGE_PROJECT_ID = "project-1";
 process.env.FORGE_SLOW_MS = "2000";
+process.env.FORGE_REPORT_KEY = "the-apps-own-key";
 
 installHarness({
   stubs: {
@@ -29,9 +30,9 @@ installHarness({
   },
 });
 
-const sent: Array<{ url: string; body: any }> = [];
+const sent: Array<{ url: string; body: any; headers: Record<string, string> }> = [];
 (globalThis as any).fetch = async (url: string, init: any) => {
-  sent.push({ url, body: JSON.parse(init.body) });
+  sent.push({ url, body: JSON.parse(init.body), headers: init.headers });
   return { ok: true };
 };
 
@@ -77,6 +78,8 @@ reportRuntimeException({
 eqJson(sent.length, 1, "the crash is sent");
 eqJson(sent[0].url, "http://forge.test/api/projects/project-1/runtime-exceptions",
        "to the ingest endpoint for this project");
+eqJson(sent[0].headers["x-forge-report-key"], "the-apps-own-key",
+       "with the key that says it is this app's own report");
 eqJson(sent[0].body.control, "Button", "the control is resolved from the app's own contract");
 eqJson(sent[0].body.control_label, "Approve", "and named the way the owner named it");
 eqJson(sent[0].body.payload_keys, ["caseId", "recipient"],

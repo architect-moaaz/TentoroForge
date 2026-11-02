@@ -23,7 +23,8 @@ import type { usePreview } from "@/hooks/usePreview";
 import { cn } from "@/lib/utils";
 
 import { InlineTextEditor } from "./InlineTextEditor";
-import { assetObjectUrl } from "./api";
+import { assetDataUrl } from "./api";
+import { usePreviewOrigin } from "@/lib/preview-origin";
 import { dropPosition, moveLanding } from "./lib/drop";
 import { mainRoot, plainName } from "./lib/plain";
 import { DEVICE_WIDTHS, useEditorStore } from "./store";
@@ -75,15 +76,13 @@ export function pageForPath(path: string, pages: { id: string; route: string }[]
   return null;
 }
 
-// A later build of the same page is swapped into the document that is
-// already open — its style and its script — rather than loading a new one:
-// the shared script stays, the bridge stays, the scroll and the selection
-// stay, and nothing flashes.
-const SWAP = `window.addEventListener("message",function(e){var d=e.data;if(!d||d.type!=="forge-editor:swap"||!d.payload)return;var st=document.getElementById("forge-page-css");if(st)st.textContent=d.payload.css||"";var s=document.createElement("script");s.textContent=d.payload.js;document.body.appendChild(s);s.remove();window.parent&&window.parent.postMessage({type:"forge-editor:swapped",payload:{}},"*");});`;
-
-function frameHtml(css: string, vendorUrl: string, js: string): string {
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style id="forge-page-css">${css}</style></head><body><div id="root"></div><script>${SWAP}</script><script src="${vendorUrl}"></script><script>${js}</script></body></html>`;
-}
+// THE FRAME IS ON THE PREVIEW'S ORIGIN, NEVER THIS ONE (`services/preview_origin.py`).
+// The app's code runs there; here it could read the person's sign-in. So
+// nothing reaches into the frame's document: the live app's pages carry a
+// loader the bridge is sent to, and an instant page runs in a host page that
+// is sent its shared script, its own and the bridge (`mount`). A later build
+// of the same page is swapped into the open page (`swap`): the shared script,
+// the bridge, the scroll and the selection stay, and nothing flashes.
 
 export function Canvas({ preview }: { preview: ReturnType<typeof usePreview> }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -128,32 +127,35 @@ export function Canvas({ preview }: { preview: ReturnType<typeof usePreview> }) 
   const [reloadKey, setReloadKey] = useState(0);
 
   const jit = source === "jit";
-  // The live app is reached by the RELATIVE proxy path: Next rewrites
-  // /api/projects/* to the backend, so the frame stays same-origin.
+  const origin = usePreviewOrigin();
+  const projectId = useEditorStore((s) => s.projectId);
+  // The live app, at the preview's own origin.
   const servePath = preview.servePath;
+  const serveUrl = preview.serveUrl;
   const pageRoute = doc?.page.route ?? "/";
   const entryRoute = pages.find((p) => p.id === entryPage)?.route ?? "/";
   const { path: filledRoute, missing } = fillRoute(pageRoute, routeParams);
   const targetPath = previewApp ? entryRoute : filledRoute;
-  const appSrc = servePath && preview.port && !missing.length ? `${servePath}${targetPath === "/" ? "" : targetPath}` : null;
+  const appSrc = serveUrl && preview.port && !missing.length ? `${serveUrl}${targetPath === "/" ? "" : targetPath}` : null;
 
-  // The instant page lives at a blob URL of the parent's origin. A later
-  // build of the same page on the same shared script is swapped into the
-  // open document instead of loading a new one.
-  const [jitUrl, setJitUrl] = useState<string | null>(null);
+  // The instant page's host: a page of the preview's origin, loaded afresh for
+  // another page or another shared script, and sent what to run once it says
+  // it is there (`host-ready`).
+  const [hostKey, setHostKey] = useState(0);
   const mountedRef = useRef<{ vendorKey: string; pageId: string } | null>(null);
   useEffect(() => {
-    if (!jit || !frameDoc || !vendor) { setJitUrl((old) => { if (old) URL.revokeObjectURL(old); return null; }); mountedRef.current = null; return; }
+    if (!jit || !frameDoc || !vendor || !origin) { mountedRef.current = null; return; }
     const m = mountedRef.current;
     const win = iframeRef.current?.contentWindow;
     if (m && m.vendorKey === vendor.key && m.pageId === frameDoc.pageId && useEditorStore.getState().frameReady && win) {
-      win.postMessage({ type: PREFIX + "swap", payload: { js: frameDoc.js, css: frameDoc.css } }, "*");
+      win.postMessage({ type: PREFIX + "swap", payload: { js: frameDoc.js, css: frameDoc.css } }, origin);
       return;
     }
-    mountedRef.current = { vendorKey: vendor.key, pageId: frameDoc.pageId };
-    const url = URL.createObjectURL(new Blob([frameHtml(frameDoc.css, vendor.url, frameDoc.js)], { type: "text/html" }));
-    setJitUrl((old) => { if (old) URL.revokeObjectURL(old); return url; });
-  }, [jit, frameDoc, vendor]);
+    mountedRef.current = null;
+    setHostKey((k) => k + 1);
+  }, [jit, frameDoc, vendor, origin]);
+  const jitUrl = jit && frameDoc && vendor && origin && projectId
+    ? `${origin}/api/projects/${projectId}/preview/frame?k=${hostKey}` : null;
   const src = jit ? jitUrl : appSrc;
 
   // The app-wide preview starts at the entry page; leaving it returns to the open page.
@@ -169,27 +171,12 @@ export function Canvas({ preview }: { preview: ReturnType<typeof usePreview> }) 
 
   const post = useCallback((type: string, payload: unknown = {}) => {
     const win = iframeRef.current?.contentWindow;
-    if (!win) return;
-    win.postMessage({ type: PREFIX + type, payload }, window.location.origin);
-  }, []);
+    if (!win || !origin) return;
+    win.postMessage({ type: PREFIX + type, payload }, origin);
+  }, [origin]);
 
-  // Inject the bridge on every document load of the frame.
-  const onLoad = useCallback(async () => {
-    const frame = iframeRef.current;
-    if (!frame) return;
-    setFrame({ frameReady: false, frameError: null });
-    try {
-      const d = frame.contentDocument;
-      if (!d) throw new Error("The preview could not be reached.");
-      if (!(d.defaultView as Window & { __forgeEditorBridge?: boolean })?.__forgeEditorBridge) {
-        const s = d.createElement("script");
-        s.textContent = await loadBridge();
-        (d.head ?? d.documentElement).appendChild(s);
-      }
-    } catch (err) {
-      setFrame({ frameError: err instanceof Error ? err.message : "The preview could not be reached." });
-    }
-  }, [setFrame]);
+  // Every document the frame loads starts unready; the bridge it is sent says when it is.
+  const onLoad = useCallback(() => { setFrame({ frameReady: false, frameError: null }); }, [setFrame]);
 
   // What an edit looks like, on the page right away.
   const livePatches = useEditorStore((s) => s.livePatches);
@@ -206,13 +193,28 @@ export function Canvas({ preview }: { preview: ReturnType<typeof usePreview> }) 
   // Messages from the frame: the bridge, and (instant) the page's own shims.
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
-      if (e.source !== iframeRef.current?.contentWindow) return;
+      if (e.source !== iframeRef.current?.contentWindow || e.origin !== origin) return;
       const d = e.data;
       if (!d || typeof d.type !== "string" || !d.type.startsWith(PREFIX)) return;
       const type = d.type.slice(PREFIX.length);
       const p = d.payload ?? {};
       const s = useEditorStore.getState();
       switch (type) {
+        case "loader-ready":
+          // A page of the live app: the bridge is sent to the loader it carries.
+          void loadBridge().then((code) => post("bridge", { code }))
+            .catch(() => setFrame({ frameError: "The preview could not be reached." }));
+          break;
+        case "host-ready": {
+          // The instant page's host: what to run, the bridge last, once its page is drawn.
+          const { frameDoc: fd, vendor: v } = useEditorStore.getState();
+          if (!fd || !v) break;
+          void loadBridge().then((bridge) => {
+            post("mount", { css: fd.css, js: fd.js, vendor: v.js, bridge });
+            mountedRef.current = { vendorKey: v.key, pageId: fd.pageId };
+          }).catch(() => setFrame({ frameError: "The preview could not be reached." }));
+          break;
+        }
         case "ready":
           setFrame({ frameReady: true, previewPath: String(p.path ?? "") });
           post("set-mode", { mode: s.mode === "preview" ? "preview" : s.regionSelect ? "region" : "design" });
@@ -285,7 +287,7 @@ export function Canvas({ preview }: { preview: ReturnType<typeof usePreview> }) 
           const path = String(p.path || "");
           const projectId = s.projectId;
           if (!path || !projectId) break;
-          assetObjectUrl(projectId, path)
+          assetDataUrl(projectId, path)
             .then((url) => post("asset-url", { path, url }))
             .catch(() => post("asset-url", { path, url: "" }));
           break;
@@ -379,7 +381,7 @@ export function Canvas({ preview }: { preview: ReturnType<typeof usePreview> }) 
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [post, setFrame, setRects, labelsFor]);
+  }, [post, origin, setFrame, setRects, labelsFor]);
 
   // Push mode and selection into the frame whenever they change.
   useEffect(() => {

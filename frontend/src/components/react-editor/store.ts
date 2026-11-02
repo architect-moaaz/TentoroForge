@@ -56,7 +56,9 @@ export function livePatchesOf(ops: Op[]): LivePatch[] {
 export interface FrameDoc extends FrameTarget { js: string; css: string; revision: string; vendorKey: string; ms: number; cached: boolean; warnings: string[] }
 
 /** The shared script every instant page runs on, held once per app as a blob URL. */
-export interface VendorScript { key: string; url: string; bytes: number }
+/** The app's shared script for instant pages, as text: it is handed to the
+ *  page host on the preview's origin, which runs it there (`Canvas`). */
+export interface VendorScript { key: string; js: string; bytes: number }
 
 export interface ActionTrace {
   at: number;
@@ -368,9 +370,6 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   init: async (projectId) => {
     const prefs = readPrefs(projectId);
-    // Another project has another shared script; let this one's go.
-    const old = get().vendor;
-    if (old && typeof URL.revokeObjectURL === "function" && old.url.startsWith("blob:")) URL.revokeObjectURL(old.url);
     set({ projectId, ...prefs, pages: [], pageId: null, doc: null, selection: [], undoStack: [], redoStack: [], theme: null,
           smith: emptySmith(), mode: "design", previewApp: false, loadError: null,
           vendor: null, frameTarget: null, frameDoc: null, frameBuildError: null, previewStack: [], actions: [] });
@@ -918,14 +917,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     try {
       const bundle: JitBundle = await editorApi.jit(projectId, t.pageId, { params: t.params, search: t.search, fresh: opts.fresh,
                                                                             draft: !!get().doc?.draft && t.pageId === get().pageId });
-      // The shared script is fetched once per app and kept as a blob URL; a
-      // page built against a newer vendor brings the new one along.
+      // The shared script is fetched once per app; a page built against a
+      // newer vendor brings the new one along.
       if (get().vendor?.key !== bundle.vendorKey) {
         const v = await editorApi.vendor(projectId, { fresh: opts.fresh });
-        const old = get().vendor;
-        if (old && typeof URL.revokeObjectURL === "function") URL.revokeObjectURL(old.url);
-        const url = typeof URL.createObjectURL === "function" ? URL.createObjectURL(new Blob([v.js], { type: "text/javascript" })) : `vendor:${v.key}`;
-        set({ vendor: { key: v.key, url, bytes: v.js.length } });
+        set({ vendor: { key: v.key, js: v.js, bytes: v.js.length } });
       }
       // A later request may have superseded this one.
       const now = get().frameTarget;

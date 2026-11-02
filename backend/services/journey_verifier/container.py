@@ -96,8 +96,9 @@ def containerized_app(
     log_path = log_sink or (output_dir / f".journey-container-{project}.log")
     logf = log_path.open("w", buffering=1)
 
+    from preview import app_env
     env = {
-        **os.environ,
+        **app_env(output_dir),
         "WEB_PORT": str(web_port),
         "DB_PORT": str(db_port),
         "NEXTAUTH_SECRET": uuid.uuid4().hex,

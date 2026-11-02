@@ -33,6 +33,7 @@ import logging
 import re
 import time
 import uuid
+from contextlib import nullcontext
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -69,7 +70,7 @@ _advance_state_to_review = _brief_mod.advance_to_review
 #:
 #: A task with no strong reference can be collected mid-await, so they are held
 #: here until they finish and discard themselves.
-from services import run_registry
+from services import build_slots, run_registry
 from services.smith import design_language
 from services.smith import figma_gate as ui_figma_gate
 from services.smith import ui_designer
@@ -928,38 +929,58 @@ def _announce_build_complete(doc: dict | None, emit, *, offer_verify: bool,
         logger.warning("[blueprint] %s: could not announce completion", where)
 
 
-async def _spend_gate(db: AsyncSession, project: Any, user: Any, *, build: bool, turns: int = 1) -> None:
+async def _spend_gate(db: AsyncSession, project: Any, user: Any, *, build: bool, turns: int = 1) -> float | None:
     """NOTHING STARTS THAT THE ORGANISATION CANNOT PAY FOR (`services.credits.gate`):
     before a build or a turn, the organisation's balance (when one is
     recorded) must cover what it is expected to cost, and no limit over the
     platform, the organisation, the person or the application may be
-    reached — else 402, in the administrator's terms."""
+    reached — else 402, in the administrator's terms.
+
+    AND NOTHING SPENDS MORE THAN IS LEFT. Returns the run's ceiling — what the
+    balance and the limits still allow — which the work carries
+    (`_actor_of(..., ceiling)`, `build_usage.run_budget`)."""
     from services import credits, spending
-    await credits.gate(db, org_id=getattr(project, "org_id", ""), user_email=str(getattr(user, "email", "") or ""),
-                       project_short_id=str(getattr(project, "short_id", "") or ""),
-                       estimate=None if build else spending.TURN_USD * max(1, turns), turn=not build)
+    who = dict(org_id=getattr(project, "org_id", ""), user_email=str(getattr(user, "email", "") or ""),
+               project_short_id=str(getattr(project, "short_id", "") or ""))
+    await credits.gate(db, **who, estimate=None if build else spending.TURN_USD * max(1, turns), turn=not build)
+    return await credits.headroom(db, **who)
 
 
 def _acting_with(work: Any, actor: dict | None) -> Any:
     """`work`, run as `actor` ({"user": email, "org": id}): every usage row it
     writes names them (`build_usage.acting`). The executor's thread does not
-    inherit the request's context, so it is set inside the call."""
+    inherit the request's context, so it is set inside the call. With a
+    `job`, the work is that job's (`jobs.working`): its row says running,
+    then done or failed."""
     if not actor:
         return work
-    from services.build_usage import acting
+    from services import jobs
+    from services.build_usage import acting, run_budget
 
     def run() -> Any:
-        with acting(user=str(actor.get("user") or ""), org=str(actor.get("org") or "")):
+        with acting(user=str(actor.get("user") or ""), org=str(actor.get("org") or "")), \
+                run_budget(actor.get("ceiling")), jobs.working(actor.get("job")):
             return work()
     return run
 
 
-def _actor_of(user: Any, project: Any) -> dict:
-    return {"user": str(getattr(user, "email", "") or ""), "org": str(getattr(project, "org_id", "") or "")}
+def _actor_of(user: Any, project: Any, ceiling: float | None = None) -> dict:
+    """Who the work is for, and the most it may spend (`_spend_gate`)."""
+    return {"user": str(getattr(user, "email", "") or ""), "org": str(getattr(project, "org_id", "") or ""),
+            "ceiling": ceiling}
 
 
-def _acting_as(work: Any, user: Any, project: Any) -> Any:
-    return _acting_with(work, _actor_of(user, project))
+def _acting_as(work: Any, user: Any, project: Any, ceiling: float | None = None, job: str | None = None) -> Any:
+    return _acting_with(work, {**_actor_of(user, project, ceiling), "job": job})
+
+
+def _request_args(req: Any, *drop: str) -> dict:
+    """What a job keeps of its request: its own fields, less the bulky ones
+    the Blueprint already holds (the documents, the recent history)."""
+    try:
+        return req.model_dump(exclude=set(drop))
+    except Exception:  # noqa: BLE001 — a request that cannot be dumped is kept by its message
+        return {"message": str(getattr(req, "message", "") or getattr(req, "description", ""))}
 
 
 def _output_dir(project: Any) -> Path:
@@ -1018,7 +1039,7 @@ async def generate_via_blueprint(
 ):
     """Generate an application through the Blueprint engine, streaming progress."""
     project = await get_project_with_auth(project_id, user, db)
-    await _spend_gate(db, project, user, build=bool(req.approved and not req.define_only), turns=3)
+    ceiling = await _spend_gate(db, project, user, build=bool(req.approved and not req.define_only), turns=3)
 
     from services.blueprint.executors import (
         RunUsage, make_executor, tiered_router)
@@ -1061,6 +1082,10 @@ async def generate_via_blueprint(
         run_registry.note(str(project_id), event, data)
 
     run_registry.begin(str(project_id), phase="build", output_dir=output_dir)
+    # ON RECORD BEFORE IT STARTS, so a restart finds it (`services.jobs`).
+    from services import jobs
+    job = await jobs.open(project_id=project_id, kind="build", args=_request_args(req, "evidence"),
+                          actor=_actor_of(user, project, ceiling))
 
     async def generate() -> None:
 
@@ -1141,9 +1166,15 @@ async def generate_via_blueprint(
             # agent calls, and left a reloaded page with a count and no rows.
             progress = Progress(emit, total=len(plan))
 
-            report = run(svc, executor, plan=plan, commit=True,
-                         user_request=req.description, app_root=app_root,
-                         observer=progress, observer_agent=watcher)
+            if not awaiting:
+                # A BUILD CARRIES ON FROM THE BLUEPRINT'S OWN STATE, so a restart can
+                # pick it up again (`jobs.recover`), and it runs in one of the
+                # platform's build slots (`build_slots`).
+                jobs.note_resume({"phase": "build", "app_name": getattr(project, "name", "") or ""})
+            with (nullcontext() if awaiting else build_slots.held(emit)):
+                report = run(svc, executor, plan=plan, commit=True,
+                             user_request=req.description, app_root=app_root,
+                             observer=progress, observer_agent=watcher)
 
             # §26 — what the finished application should contain, so the run
             # can be checked against the plan rather than only watched.
@@ -1164,7 +1195,7 @@ async def generate_via_blueprint(
         try:
             emit("started", {"projectId": str(project_id),
                              "engine": "blueprint"})
-            outcome = await loop.run_in_executor(None, _acting_as(work, user, project))
+            outcome = await loop.run_in_executor(None, _acting_as(work, user, project, ceiling, job))
             # COMMIT THE BUILT APP. The mainline generate path commits after a
             # build; this DAG path did not, so the app tree stayed untracked and
             # Smith's first change landed in an untracked working tree — its
@@ -1878,7 +1909,7 @@ async def smith_chat(
     chooses the node order. §28's graph stays authoritative.
     """
     project = await get_project_with_auth(project_id, user, db)
-    await _spend_gate(db, project, user, build=bool(getattr(req, "approved", False)))
+    ceiling = await _spend_gate(db, project, user, build=bool(getattr(req, "approved", False)))
 
     from services.blueprint.executors import (
         RunUsage, make_executor, tiered_router)
@@ -1971,6 +2002,10 @@ async def smith_chat(
     # what the panel needs to word the wait correctly.
     run_registry.begin(str(project_id),
                        phase="build" if req.approved else "define", output_dir=output_dir)
+    # ON RECORD BEFORE IT STARTS, so a restart finds it (`services.jobs`).
+    from services import jobs
+    job = await jobs.open(project_id=project_id, kind="turn", args=_request_args(req, "history", "evidence"),
+                          actor=_actor_of(user, project, ceiling))
 
     def _after_turn(result: Any) -> None:
         """A build that handed over an application starts its checks here —
@@ -1982,7 +2017,7 @@ async def smith_chat(
             return
         _start_checks(loop, str(project_id), checks["output_dir"], checks["app_root"],
                       memory_lock=memory_lock, app_name=getattr(project, "name", "") or "",
-                      actor=_actor_of(user, project))
+                      actor=_actor_of(user, project, ceiling))
 
     async def turn() -> None:
 
@@ -2536,7 +2571,7 @@ async def smith_chat(
             # Keep the INNER future too: `wait_for` cancels the shield on timeout,
             # but the inner build keeps running, and it is the inner one we wait
             # on to emit the real completion afterwards.
-            _inner = loop.run_in_executor(None, _acting_as(work, user, project))
+            _inner = loop.run_in_executor(None, _acting_as(work, user, project, ceiling, job))
             # ON DISK, FOR EVERY WORKER. The registry above is this worker's
             # memory; a panel whose stream dropped polls whichever worker
             # answers, and only a ledger tells it the turn is still working —
@@ -2805,9 +2840,10 @@ async def prepare_project_tree(project: Any, db: Any) -> tuple[Path, str]:
     return output_dir, app_root
 
 
-def start_build_in_background(loop: Any, project: Any, *, message: str, description: str,
+def start_build_in_background(loop: Any, project: Any, *, message: str | None, description: str,
                               documents: list[str], app_name: str, output_dir: Path, app_root: str,
-                              modules: list[str] | None = None, actor: dict | None = None) -> "asyncio.Future":
+                              modules: list[str] | None = None, actor: dict | None = None,
+                              said: str = "") -> "asyncio.Future":
     """A first build started by the platform, not by a turn: the Drafts Room's
     hand-off. The build used to start only when the person's browser reached
     the new project and replayed the specification as an approved first
@@ -2820,13 +2856,18 @@ def start_build_in_background(loop: Any, project: Any, *, message: str, descript
     transcript); `description` is the app's own description, which the
     Blueprint carries as `application.description`; `documents` are the
     specification, kept beside the Blueprint for the agents that read
-    documents. Returns the future of the build."""
+    documents. Returns the future of the build.
+
+    A build picked up again after a restart (`resume_job`) has no `message`:
+    nobody asked again. What Smith `said` about it opens it instead. The
+    job, if any, is `actor["job"]`."""
     from services import run_registry
     from services.blueprint.run_ledger import TurnLedger
 
     project_id = str(project.id)
     memory_lock = asyncio.Lock()
-    _remember(loop, project_id, "user", message, lock=memory_lock)
+    if message:
+        _remember(loop, project_id, "user", message, lock=memory_lock)
 
     def background_emit(event: str, data: dict) -> None:
         if event == "message":
@@ -2841,6 +2882,8 @@ def start_build_in_background(loop: Any, project: Any, *, message: str, descript
     # exists.
     run_registry.begin(project_id, phase="build", output_dir=output_dir)
     turn_ledger = TurnLedger(output_dir, phase="build")
+    if said:
+        background_emit("message", {"text": said})
 
     def work() -> dict:
         return _run_dag(str(output_dir), app_root, description, approved=True, emit=background_emit,
@@ -2870,6 +2913,48 @@ def start_build_in_background(loop: Any, project: Any, *, message: str, descript
     fut = loop.run_in_executor(None, _acting_with(work, actor))
     fut.add_done_callback(_ended)
     return fut
+
+
+async def resume_job(row: Any) -> None:
+    """A build a dead worker left, started again here from the Blueprint's
+    own state (`jobs.recover`): what was built is kept and the graph runs
+    what is left, in the background like the Drafts Room's build, under the
+    job's own record. Its person is told in the chat that it was picked up.
+
+    The ceiling is read again — the first run spent some of it — and an
+    organisation that cannot pay now is not resumed (`jobs.NotResumed`)."""
+    from database import async_session
+    from models.project import Project
+    from services import credits, jobs
+
+    spec = dict(row.resume or {})
+    actor = dict(row.actor or {})
+    async with async_session() as db:
+        project = await db.get(Project, row.project_id)
+        if project is None:
+            raise jobs.NotResumed("the application is gone.")
+        who = dict(org_id=project.org_id, user_email=str(actor.get("user") or ""),
+                   project_short_id=str(project.short_id or ""))
+        why = await credits.refusal(db, **who)
+        if why:
+            raise jobs.NotResumed("; ".join(why) + ".")
+        ceiling = await credits.headroom(db, **who)
+        output_dir, app_root = await prepare_project_tree(project, db)
+    # WHAT THE DEAD WORKER LEFT OPEN IS CLOSED, or the build reads its own
+    # last run as still in flight and declines to start (`build_in_flight`).
+    await asyncio.to_thread(run_registry.close_dead_ledgers, output_dir)
+    await jobs.adopt(str(row.id), attempts=int(row.attempts or 1) + 1)
+    when = time.strftime("%H:%M UTC", time.gmtime())
+    start_build_in_background(
+        asyncio.get_running_loop(), project, message=None,
+        said=(f"The platform's process building your app went away at {when}. I've picked the build up "
+              "again from where it stopped — what was already built is kept, and I'll post here when it's done."),
+        description="", documents=[], app_name=str(spec.get("app_name") or getattr(project, "name", "") or ""),
+        output_dir=output_dir, app_root=app_root,
+        modules=spec["modules"] if spec.get("modules") is not None else _modules_picked(output_dir),
+        actor={"user": str(actor.get("user") or ""), "org": str(actor.get("org") or project.org_id or ""),
+               "ceiling": ceiling, "job": str(row.id)})
+    logger.info("[jobs] resumed the build of %s (job %s)", project.short_id, row.id)
 
 
 def _start_checks(loop: Any, project_id: str, output_dir: str, app_root: str, *,
@@ -3124,10 +3209,17 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
     watcher = anthropic_observer(router, usage=usage)
     progress = Progress(emit, total=len(plan))
 
-    report = run(svc, executor, plan=plan, commit=True,
-                 user_request=description, app_root=app_root,
-                 observer=progress, observer_agent=watcher,
-                 should_stop=lambda: run_registry.stop_requested(output_dir))
+    if phase == "build" and approved and announce_completion:
+        # FROM HERE THE BUILD CARRIES ON FROM THE BLUEPRINT'S OWN STATE: its job
+        # records how, so a restart picks it up again (`jobs.recover`).
+        from services import jobs
+        jobs.note_resume({"phase": "build", "app_name": app_name, "modules": modules})
+    # ONE OF THE PLATFORM'S BUILD SLOTS for as long as the graph runs (`build_slots`).
+    with (build_slots.held(emit) if phase == "build" else nullcontext()):
+        report = run(svc, executor, plan=plan, commit=True,
+                     user_request=description, app_root=app_root,
+                     observer=progress, observer_agent=watcher,
+                     should_stop=lambda: run_registry.stop_requested(output_dir))
     # DEFECT-B-07: a define run left the state at DISCOVERY (the DAG never calls
     # transition()), so GET /blueprint reported DISCOVERY forever and the
     # approve/build gates were unreachable. A define that produced requirements

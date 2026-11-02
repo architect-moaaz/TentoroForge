@@ -35,15 +35,9 @@ class ForgotPasswordResponse(BaseModel):
     """Response for /forgot-password.
 
     ``message`` is always the same regardless of whether the email exists —
-    we never leak account existence.
-
-    ``reset_url`` is present ONLY when the deploy has no email provider
-    wired (dev/UAT). It lets the operator hand the link to the user
-    manually while the email path is being built out. Never returned in
-    production once email is live — gate on ``FORGE_RESET_URL_IN_RESPONSE``.
+    we never leak account existence, and the link itself goes only by email.
     """
     message: str
-    reset_url: str | None = None
 
 
 class ResetPasswordRequest(BaseModel):

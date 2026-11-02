@@ -145,7 +145,7 @@ def test_a_failed_search_costs_one_picture_not_the_run():
 
 def test_the_imagery_node_runs_after_the_design_and_before_the_page_authors():
     node = DAG["imagery"]
-    assert node.kind == "service" and node.depends_on == {"design_system"} and "designSystem" in node.produces
+    assert node.kind == "service" and node.depends_on == {"design_system"} and node.produces == {"designSystem/imagery-photos"}
     assert "imagery" in DAG["ui_direction"].depends_on
     order = {k: i for i, lvl in enumerate(levels()) for k in lvl}
     assert order["design_system"] < order["imagery"] < order["ui_direction"] < order["page_code"]

@@ -27,7 +27,7 @@ const EMPTY: BlueprintRun = {
 const fixing: ReviewState = {
   phase: "fixing", active: true, round: 1,
   shots: [{ route: "/support-requests/new", image: "data:," }],
-  findings: [{ route: "/support-requests/new", kind: "duplicate_control", note: "x" }],
+  findings: [{ route: "/support-requests/new", kind: "duplicate_control", note: "x", severity: "major" }],
   fixing: ["/support-requests/new"],
 };
 

@@ -355,6 +355,37 @@ def check(rows: Iterable[Mapping[str, Any]], *, estimate: float, org: str = "", 
     return out
 
 
+def headroom(rows: Iterable[Mapping[str, Any]], *, org: str = "", user: str = "", project: str = "",
+             policy: Mapping[str, Any] | None = None, projects: Mapping[str, Mapping[str, Any]] | None = None,
+             now: float | None = None) -> float | None:
+    """The most work may spend now: the organisation's balance when one is
+    recorded, and what is left under every limit that covers it — the least of
+    them. None when nothing bounds it. The run's ceiling (`build_usage.run_budget`)."""
+    rows = attributed(rows, projects)
+    policy = policy or empty_policy()
+    now = float(now if now is not None else time.time())
+    left: list[float] = []
+    if org:
+        bal = balance(rows, policy, org=org)
+        if bal["known"]:
+            left.append(float(bal["balance_usd"] or 0))
+    scopes = [PLATFORM] + [s for s in (f"org:{org}" if org else "", f"user:{user}" if user else "",
+                                       f"project:{project}" if project else "") if s]
+    limits = policy.get("limits") or {}
+    for scope in scopes:
+        kind, _, ident = scope.partition(":")
+        for period, limit in (limits.get(scope) or {}).items():
+            if period not in PERIODS or not limit:
+                continue
+            start, end = period_bounds(period, now)
+            spent = sum(float(r["cost_usd"]) for r in of_scope(
+                within(rows, start, end),
+                org=ident if kind == "org" else "", user=ident if kind == "user" else "",
+                project=ident if kind == "project" else ""))
+            left.append(float(limit) - spent)
+    return max(0.0, min(left)) if left else None
+
+
 def standing(rows: Iterable[Mapping[str, Any]], *, org: str = "", user: str = "", project: str = "",
              policy: Mapping[str, Any] | None = None, projects: Mapping[str, Mapping[str, Any]] | None = None,
              now: float | None = None) -> dict[str, Any]:

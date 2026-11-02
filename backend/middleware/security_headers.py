@@ -24,8 +24,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # iframe outright — this is the one path where the platform
         # legitimately wants a same-origin iframe.
         path = request.url.path
-        # The phone preview's built screens (`/phone/serve`) are framed by the same editor.
-        is_preview_serve = "/preview/serve" in path or is_phone_picture(path)
+        # The phone preview's built screens (`/phone/serve`) are framed by the same editor,
+        # and so is the page an instant page runs in (`/preview/frame`).
+        is_preview_serve = "/preview/serve" in path or path.endswith("/preview/frame") or is_phone_picture(path)
 
         # Security headers
         response.headers["X-Content-Type-Options"] = "nosniff"
@@ -45,7 +46,13 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # frame-ancestors omitted on the preview.serve proxy path so the
         # platform editor's iframe can load its own project's Next dev
         # output (see comment above).
-        frame_ancestors = "" if is_preview_serve else "; frame-ancestors 'none'"
+        # A preview is on an origin of its own (services/preview_origin.py):
+        # framed by the platform's editor, and by nothing else.
+        if is_preview_serve:
+            from services.preview_origin import editor_origins
+            frame_ancestors = "; frame-ancestors 'self' " + " ".join(editor_origins())
+        else:
+            frame_ancestors = "; frame-ancestors 'none'"
         if is_phone_picture(path):
             # THE APP'S CODE RUNS HERE, and the platform keeps its sign-in in `localStorage`. On the platform's own origin a screen's
             # code (or a package's) could read a viewer's token, and the link needs no sign-in, so it can be sent to anyone signed

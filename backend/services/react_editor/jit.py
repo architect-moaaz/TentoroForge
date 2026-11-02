@@ -67,7 +67,8 @@ def _cache_key(page_id: str, revision: str, params: dict, search: dict, vendor_k
 
 
 def _run(project: Project, payload: dict[str, Any], *, timeout: float) -> dict[str, Any]:
-    env = {**os.environ, "NODE_PATH": str(project.app_root / "node_modules")}
+    from preview import app_env  # its Tailwind config and packages are the app's code
+    env = app_env(project.app_root, NODE_PATH=str(project.app_root / "node_modules"))
     result: dict[str, Any] | None = None
     if worker.enabled():
         # One bundler process per app, kept warm: esbuild's own service and

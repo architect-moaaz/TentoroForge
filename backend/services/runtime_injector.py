@@ -3202,9 +3202,11 @@ def _ensure_env_file(output_path: Path, project_id: str | None = None) -> None:
 
     if env_file.exists():
         # Re-generation path — upsert reporter keys, leave the rest alone.
+        from services.app_reporting import KEY_ENV, report_key
         _upsert_env_keys(env_file, {
             "FORGE_URL": forge_url,
             "FORGE_PROJECT_ID": forge_project_id,
+            **({KEY_ENV: report_key(forge_project_id)} if forge_project_id else {}),
         })
         # THE PUSH KEYS, once: an app assembled before push existed gets its
         # pair now; one that has a pair keeps it (a new pair would orphan
@@ -3218,6 +3220,8 @@ def _ensure_env_file(output_path: Path, project_id: str | None = None) -> None:
 
     # Use a concrete port: postgres-js can't expand shell vars at runtime.
     db_port = "5432"
+    from services.app_reporting import report_key
+    forge_report_key = report_key(forge_project_id) if forge_project_id else ""
 
     import base64
     import secrets
@@ -3257,6 +3261,7 @@ VAPID_SUBJECT={vapid["VAPID_SUBJECT"]}
 # silently no-ops (see src/lib/error_reporter.ts).
 FORGE_URL={forge_url}
 FORGE_PROJECT_ID={forge_project_id}
+FORGE_REPORT_KEY={forge_report_key}
 
 # AI workflow nodes (ai_generate/classify/extract/decide). Set your key to enable
 # real inference; without it, AI nodes return deterministic mock output.

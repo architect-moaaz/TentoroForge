@@ -711,6 +711,10 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
                                             said="`answer` needs `text`. Say it, or end with `done`."))
             continue
         if chosen.get("unreachable"):
+            kept = " What is above is done and kept." if landed else " Nothing was changed."
+            if chosen.get("spent"):
+                # The run's ceiling (`build_usage.run_budget`), in the organisation's terms.
+                return _finished(landed, touched, Outcome(status="no_op", said=str(chosen["why"]) + kept))
             # NOT "NOTHING NEEDED DOING". The model could not be reached (the
             # account's credit ran out mid-test, 2026-10-02) and the turn said
             # nothing needed doing — a false answer to "add a spice level".

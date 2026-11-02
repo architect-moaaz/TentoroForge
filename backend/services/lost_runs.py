@@ -17,6 +17,7 @@ import logging
 import os
 import time
 from pathlib import Path
+from typing import Any
 
 from services import incidents
 
@@ -77,7 +78,10 @@ def scan(root: str | Path, lost_s: int | None = None) -> list[str]:
 
 def message_for(path: str | Path, why: str, when: str) -> str:
     """What the person reads, in Smith's voice: what stopped, when, how to go on."""
-    kind = kind_of(path)
+    return message_for_kind(kind_of(path), why, when)
+
+
+def message_for_kind(kind: str, why: str, when: str) -> str:
     cause = ("The platform restarted" if why == "restarted"
              else "The platform's process working on this went away")
     if kind == "turn":
@@ -101,33 +105,55 @@ def message_for(path: str | Path, why: str, when: str) -> str:
 
 async def tell(paths: list[str], why: str) -> int:
     """One line into the chat of each application a closed ledger belongs
-    to, and one incident each. Returns how many were told."""
-    from sqlalchemy import select
+    to, and one incident each. Returns how many were told.
 
-    from database import async_session
-    from models.project import Conversation, MessageRole, MessageType, Project
+    A build or turn whose job is on record is said by the job's recovery
+    instead (`services.jobs`), which resumes it when it can: telling the
+    person to press Build beside "I have picked it up again" is two answers."""
+    from services import jobs
 
     when = time.strftime("%H:%M UTC", time.gmtime())
     told = 0
     for raw in paths:
         path = Path(raw)
         short_id = path.parent.parent.parent.name        # <short_id>/.forge/runs/<ledger>
-        text = message_for(path, why, when)
-        incidents.record(f"{kind_of(path)}_lost", app=short_id, detail=text, why=why, ledger=path.stem)
-        try:
-            async with async_session() as sess:
-                project = (await sess.execute(select(Project).where(Project.short_id == short_id))).scalar_one_or_none()
-                if project is None:
-                    continue
-                sess.add(Conversation(project_id=project.id, role=MessageRole.assistant, content=text,
-                                      message_type=MessageType.chat,
-                                      metadata_={"source": "lost_run", "ledger": path.stem, "why": why}))
-                await sess.commit()
-                told += 1
-                logger.info("[lost-runs] told %s that %s was lost (%s)", short_id, path.stem, why)
-        except Exception:  # noqa: BLE001 — telling is best-effort; the ledger is closed either way
-            logger.warning("[lost-runs] could not tell %s about %s", short_id, path.stem, exc_info=True)
+        kind = kind_of(path)
+        if kind in ("turn", "build") and await jobs.speaks_for(short_id):
+            logger.info("[lost-runs] %s: %s is its job's to say", short_id, path.stem)
+            continue
+        if await say(short_id=short_id, text=message_for(path, why, when), kind=kind, why=why, ledger=path.stem):
+            told += 1
     return told
+
+
+async def say(*, text: str, kind: str, why: str, ledger: str, short_id: str = "", project_id: Any = None) -> bool:
+    """`text` into the application's chat, as Smith, and an incident on the
+    record. The application by its short id or its id. Whether it was said."""
+    from sqlalchemy import select
+
+    from database import async_session
+    from models.project import Conversation, MessageRole, MessageType, Project
+
+    if short_id:
+        incidents.record(f"{kind}_lost", app=short_id, detail=text, why=why, ledger=ledger)
+    try:
+        async with async_session() as sess:
+            where = Project.short_id == short_id if short_id else Project.id == project_id
+            project = (await sess.execute(select(Project).where(where))).scalar_one_or_none()
+            if project is None:
+                return False
+            if not short_id:
+                short_id = project.short_id
+                incidents.record(f"{kind}_lost", app=short_id, detail=text, why=why, ledger=ledger)
+            sess.add(Conversation(project_id=project.id, role=MessageRole.assistant, content=text,
+                                  message_type=MessageType.chat,
+                                  metadata_={"source": "lost_run", "ledger": ledger, "why": why}))
+            await sess.commit()
+            logger.info("[lost-runs] told %s that %s was lost (%s)", short_id, ledger, why)
+            return True
+    except Exception:  # noqa: BLE001 — telling is best-effort; the ledger is closed either way
+        logger.warning("[lost-runs] could not tell %s about %s", short_id or project_id, ledger, exc_info=True)
+        return False
 
 
 async def watch_forever() -> None:

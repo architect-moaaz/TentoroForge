@@ -618,7 +618,7 @@ async def _apply_plan_binding(output_dir: str, plan: dict, page: dict, reports: 
                 p.get("route") for p in (plan.get("pages") or [])
                 if isinstance(p, dict) and p.get("route")
             }
-            call_llm = make_anthropic_guard_llm() if _os.environ.get("ANTHROPIC_API_KEY") else None
+            call_llm = make_anthropic_guard_llm() if os.environ.get("ANTHROPIC_API_KEY") else None
             guarded, wiring_report = await run_wiring_guard(
                 bound, real_workflows=real_workflows, real_routes=real_routes,
                 call_llm=call_llm)

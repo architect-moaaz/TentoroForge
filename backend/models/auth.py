@@ -9,6 +9,12 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from models.org import OrgMember
+    from models.project import Project
+
 #: The one platform-wide role. A person with it runs the cockpit: every
 #: login, organisation, app and credit on the platform. Granted by another
 #: super admin, or at sign-in to an email the platform's configuration names.

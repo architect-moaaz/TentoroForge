@@ -162,7 +162,10 @@ async def query(*, prompt: str, options: Any) -> AsyncIterator[Any]:
              "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
 
     try:
+        from services.build_usage import check_budget
+        check_budget()
         async for update in agent.astream(inputs, config, stream_mode="updates"):
+            check_budget()  # between the agent's steps: a run past its ceiling stops here
             for node, payload in (update or {}).items():
                 if node != "agent" or not isinstance(payload, dict):
                     continue  # tool results feed the loop; SSE only shows AI steps

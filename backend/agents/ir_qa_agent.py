@@ -50,12 +50,6 @@ async def run_ir_qa(
     # ── Step 2: Report issues (no auto-fix — agents are responsible) ──
     if not result["valid"]:
         result["fixes_applied"] = []
-        if True:
-            remaining_errors = [e for e in errors if e["severity"] == "error"]
-            if not remaining_errors:
-                result["valid"] = True
-                result["errors"] = []
-                logger.info("IR auto-fixed: %s", ", ".join(fixes))
 
     # ── Step 3: Compile ──
     if result["valid"]:

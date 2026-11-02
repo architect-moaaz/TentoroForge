@@ -57,6 +57,9 @@ export const adminApi = {
   people: (q: string, page = 1) => api.get<Paged<AdminPerson>>(`/api/admin/people${qs({ q, page })}`),
   disable: (id: string, reason: string) => api.post<AdminPerson>(`/api/admin/people/${id}/disable`, { reason }),
   enable: (id: string) => api.post<AdminPerson>(`/api/admin/people/${id}/enable`),
+  /** A one-time password reset link, for a platform that sends no mail. */
+  resetLink: (id: string, reason: string) =>
+    api.post<{ reset_url: string; email: string }>(`/api/admin/people/${id}/reset-link`, { reason }),
   /** Remove a login for good: its apps pass to another owner or admin of their organisation. */
   removeLogin: (id: string, confirm_email: string) =>
     api.post<{ deleted: boolean; email: string; apps_handed_on: number; organisations_left: number }>(
