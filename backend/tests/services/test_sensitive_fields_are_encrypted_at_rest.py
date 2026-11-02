@@ -77,4 +77,4 @@ def test_columns_rows_are_found_by_are_never_sealed():
 
 def test_the_engine_seals_only_where_the_table_holds_the_seal():
     src = (ROOT / "templates/runtime/data-engine.ts").read_text()
-    assert "if (tbl && !(`${col}_encrypted` in tbl)) continue;" in src
+    assert "if (!tbl || !(`${col}_encrypted` in tbl)) continue;" in src
