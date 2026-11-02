@@ -66,6 +66,7 @@ def _schema(children: bool) -> dict[str, Any]:
                                 "name": {"type": "string"}, "label": {"type": "string"},
                                 "type": {"type": "string", "enum": _FIELD_TYPES},
                                 "options": {"type": "array", "items": {"type": "string"}},
+                                "many": {"type": "boolean"},
                                 "required": {"type": "boolean"},
                             }}},
                     }}},
@@ -155,7 +156,9 @@ the text showing the value (it becomes the input; `placeholder: true` when the d
 "Search…", not a value), or a shared component drawn as a field, with `prop` the one of its words that is the
 value. `toggle`: `node` is the switch. `choice`: `node` is one option (a chip, a radio row,
 a segment) and `value` the option it sets; `on_look` / `off_look` are the numbers of an option drawn selected
-and one drawn not selected, so the selection shows.
+and one drawn not selected, so the selection shows. When several options may be chosen together (more than one
+drawn selected, "pick up to 3"), the form's field says `many: true`: it holds a list, and each option adds or
+removes its `value`.
 
 SHOWS — `{node, when}`: an element drawn for one state only (a dialog drawn open, a banner, an empty state) is
 shown while `when` — a path as above, `not: true` for its opposite — is true.
@@ -682,12 +685,35 @@ class _Writer:
         self.plan = plan
         self.first_control = True
 
+    def _many(self, inp: dict) -> bool:
+        slot = self.plan.slots.get(inp.get("form"))
+        return bool(slot and _fields(slot).get(inp.get("field"), {}).get("many"))
+
+    def _look_of(self, inp: dict, key: str) -> M.Node | None:
+        """The option drawn selected (`on_look`) or not (`off_look`): this
+        input's own, else a sibling option's of the same field. Without it, the
+        selected look of four of six country chips was their unselected one,
+        and picking them showed nothing (DITANS QA D-09)."""
+        own = self.plan.nodes.get(str(inp.get(key) or ""))
+        if own is not None:
+            return own
+        for other in self.plan.inputs.values():
+            if other.get("form") == inp.get("form") and other.get("field") == inp.get("field") and other.get(key):
+                found = self.plan.nodes.get(str(other.get(key)))
+                if found is not None:
+                    return found
+        return None
+
     def press(self, n: M.Node, row: str | None) -> str:
         a = self.plan.actions.get(n.id)
         if a is not None:
             arg = "row" if row and a.get("on") == row else ""
             return f"{{() => props.{a['name']}({arg})}}"
         inp = self.plan.inputs.get(n.id)
+        if inp and inp["kind"] == "choice" and self._many(inp):
+            have, v = f"(props.{inp['form']}.{inp['field']} ?? [])", json.dumps(inp["value"])
+            return (f"{{() => props.{change_handler(inp['form'])}({json.dumps(inp['field'])}, "
+                    f"{have}.includes({v} as never) ? {have}.filter((x) => x !== {v}) : [...{have}, {v}])}}")
         if inp and inp["kind"] == "choice":
             return f"{{() => props.{change_handler(inp['form'])}({json.dumps(inp['field'])}, {json.dumps(inp['value'])})}}"
         if inp and inp["kind"] == "toggle":
@@ -723,12 +749,14 @@ class _Writer:
             inner = self.piece(n, depth + 1, listed["prop"], done | {(n.id, "list")}, child=False, key=True)
             return wrapped(f"{source}.map((row) => (", inner, "))")
         inp = plan.inputs.get(n.id)
-        if inp and inp["kind"] in ("choice", "toggle") and (inp.get("on_look") or inp.get("off_look")) \
+        if inp and inp["kind"] in ("choice", "toggle") and (self._look_of(inp, "on_look") or self._look_of(inp, "off_look")) \
                 and (n.id, "look") not in done:
-            on = plan.nodes.get(str(inp.get("on_look") or "")) or n
-            off = plan.nodes.get(str(inp.get("off_look") or "")) or n
+            on = self._look_of(inp, "on_look") or n
+            off = self._look_of(inp, "off_look") or n
             value = f"props.{inp['form']}.{inp['field']}"
-            test = value if inp["kind"] == "toggle" else f"{value} === {json.dumps(inp['value'])}"
+            test = value if inp["kind"] == "toggle" else \
+                f"({value} ?? []).includes({json.dumps(inp['value'])} as never)" if self._many(inp) else \
+                f"{value} === {json.dumps(inp['value'])}"
             yes = self.piece(M.relook(n, on, set(plan.values), own_pictures=True), depth + 1, row, done | {(n.id, "look")},
                              child=False)
             no = self.piece(M.relook(n, off, set(plan.values), own_pictures=True), depth + 1, row, done | {(n.id, "look")},
@@ -945,10 +973,17 @@ def _sample(plan: _Plan, contract: dict) -> dict[str, Any]:
             drawn = M.prop_value(n, inp["prop"]) if inp.get("prop") and n.unit().is_component else M.plain(n)
             put(path, "" if inp.get("placeholder") else drawn)
         elif inp["kind"] == "choice":
-            on = plan.nodes.get(str(inp.get("on_look") or ""))
-            off = plan.nodes.get(str(inp.get("off_look") or ""))
+            def look_of(key: str) -> M.Node | None:
+                keys = [inp.get(key)] + [o.get(key) for o in plan.inputs.values()
+                                         if o.get("form") == inp["form"] and o.get("field") == inp["field"]]
+                return next((plan.nodes[str(k)] for k in keys if k and str(k) in plan.nodes), None)
+            on, off = look_of("on_look"), look_of("off_look")
             chosen = (M.look(n) == M.look(on)) if on is not None else (off is not None and M.look(n) != M.look(off))
-            if chosen or (on is None and off is None):
+            many = bool(_fields(plan.slots[inp["form"]]).get(inp["field"], {}).get("many"))
+            if many:
+                have = (out.get(inp["form"]) or {}).get(inp["field"])
+                put(path, [*(have if isinstance(have, list) else []), *([str(inp["value"])] if chosen else [])])
+            elif chosen or (on is None and off is None):
                 put(path, str(inp["value"]))
         else:
             on = plan.nodes.get(str(inp.get("on_look") or ""))
@@ -960,7 +995,7 @@ def _sample(plan: _Plan, contract: dict) -> dict[str, Any]:
         if slot.get("kind") in ("record", "form"):
             rec = out.setdefault(name, {"id": "1"} if slot.get("kind") == "record" else {})
             for f, spec in _fields(slot).items():
-                rec.setdefault(f, False if str(spec.get("type")) == "boolean" else "")
+                rec.setdefault(f, [] if spec.get("many") else False if str(spec.get("type")) == "boolean" else "")
         elif slot.get("kind") == "list":
             out.setdefault(name, [])
     return out

@@ -1417,6 +1417,9 @@ export const DrawnField = z.object({
                 "enum", "email", "phone", "url", "image", "id"]).default("string"),
   /** For `enum`: the values the drawing shows (the pills, the chips). */
   options: z.array(z.string()).optional(),
+  /** Several of the options at once — a list ("pick up to 3"). Chips drawn as
+   *  one value let a second country unselect the first (DITANS QA D-09). */
+  many: z.boolean().optional(),
   /** A field the form must be given. */
   required: z.boolean().optional(),
 });

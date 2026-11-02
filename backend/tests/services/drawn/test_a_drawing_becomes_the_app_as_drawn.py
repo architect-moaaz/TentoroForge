@@ -1115,3 +1115,36 @@ def test_a_look_gives_a_row_its_colours_not_its_words():
     out, problems = P.apply(STEPS, answer, "StepsView")
     assert problems == [], problems
     assert "Organisation type" not in out["code"] and "{row.label}" in out["code"]
+
+
+CHIPS = """export default function CountriesView() {
+  return (
+    <div className="flex flex-row gap-x-[8px]" data-layer="Target countries">
+      <div className="px-[12px] bg-[#0443fa]" data-layer="Chip"><p className="text-[13px] text-[#ffffff]">UAE</p></div>
+      <div className="px-[12px] bg-[#0443fa]" data-layer="Chip"><p className="text-[13px] text-[#ffffff]">Saudi</p></div>
+      <div className="px-[12px] bg-[#ffffff]" data-layer="Chip"><p className="text-[13px] text-[#1e1e20]">Qatar</p></div>
+    </div>
+  );
+}
+"""
+
+
+def test_chips_drawn_with_several_chosen_hold_a_list_and_every_chip_shows_its_choice():
+    """DITANS QA D-09 (2026-11-02): a second country unselected the first, and a
+    chip given no selected look of its own never looked chosen."""
+    answer = {"contract": {"data": [{"name": "prefs", "kind": "form", "label": "Preferences", "fields": [
+                  {"name": "countries", "label": "Target countries", "type": "enum",
+                   "options": ["UAE", "Saudi", "Qatar"], "many": True}]}], "actions": []},
+              "lists": [], "values": [], "shows": [],
+              "inputs": [{"node": "2", "form": "prefs", "field": "countries", "kind": "choice", "value": "UAE",
+                          "on_look": "2", "off_look": "4"},
+                         {"node": "3", "form": "prefs", "field": "countries", "kind": "choice", "value": "Saudi"},
+                         {"node": "4", "form": "prefs", "field": "countries", "kind": "choice", "value": "Qatar"}]}
+    out, problems = P.apply(CHIPS, answer, "CountriesView")
+    assert problems == [], problems
+    code = out["code"]
+    for country in ("UAE", "Saudi", "Qatar"):   # each chip shows whether it is chosen, own look or not
+        assert f'.includes("{country}" as never) ? (\n' in code, country
+    assert '.filter((x) => x !== "Saudi") : [...' in code
+    assert out["sample"]["prefs"]["countries"] == ["UAE", "Saudi"]
+    assert "countries?: (" in code or "countries: (" in code

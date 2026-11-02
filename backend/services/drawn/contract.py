@@ -25,6 +25,9 @@ _BOOLEAN = {"boolean"}
 
 def _ts_field(field: dict) -> str:
     kind = str(field.get("type") or "string")
+    if field.get("many"):
+        one = _ts_field({**field, "many": False})
+        return f"({one})[]" if "|" in one else f"{one}[]"
     if kind == "enum" and field.get("options"):
         return " | ".join(json.dumps(str(o)) for o in field["options"])
     if kind in _BOOLEAN:

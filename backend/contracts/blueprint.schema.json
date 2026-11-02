@@ -4387,6 +4387,9 @@
                               "type": "string"
                             }
                           },
+                          "many": {
+                            "type": "boolean"
+                          },
                           "required": {
                             "type": "boolean"
                           }
