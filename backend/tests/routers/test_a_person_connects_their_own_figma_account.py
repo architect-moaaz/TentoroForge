@@ -123,3 +123,21 @@ async def test_without_an_oauth_app_the_person_is_told_to_paste_a_token(auth_cli
     r = await auth_client.post("/api/me/figma/connect", json={})
     assert r.status_code == 503 and "Paste a Figma access token instead" in r.json()["detail"]
     assert (await auth_client.get("/api/me/figma")).json() == {"configured": False, "connected": False}
+
+
+@pytest.mark.asyncio
+async def test_a_connect_address_opened_in_another_browser_connects_nobody(auth_client, figma_app):
+    """Someone sends their own connect address to another person: that person's Figma
+    account must not land on the sender's login (audit, 2026-11-01)."""
+    q = await _connect(auth_client)
+    auth_client.cookies.clear()  # the other person's browser never got the sign-in cookie
+    r = await auth_client.get("/api/figma/oauth/callback", params={"code": "the-code", "state": q["state"][0]})
+    assert r.status_code == 400 and "started in another browser" in r.text
+    assert figma_app == [], "no code was exchanged"
+    assert (await auth_client.get("/api/me/figma")).json()["connected"] is False
+
+
+@pytest.mark.asyncio
+async def test_with_no_page_to_go_back_to_the_window_tells_no_one(auth_client, figma_app):
+    r = await auth_client.get("/api/figma/oauth/callback", params={"code": "the-code", "state": "forged"})
+    assert 'origin = ""' in r.text and "postMessage(data, \"*\")" not in r.text

@@ -48,13 +48,13 @@ if (typeof window !== "undefined") {
 }
 
 // ---- api mock ---------------------------------------------------------------
-const apiGet = vi.fn<[string], Promise<unknown>>();
-const apiPost = vi.fn<[string, unknown?], Promise<unknown>>(async () => ({
+const apiGet = vi.fn<(url: string) => Promise<unknown>>();
+const apiPost = vi.fn<(url: string, body?: unknown) => Promise<unknown>>(async () => ({
   ok: true,
   tool_count: 3,
 }));
-const apiPut = vi.fn<[string, unknown?], Promise<unknown>>();
-const apiDelete = vi.fn<[string], Promise<unknown>>(async () => undefined);
+const apiPut = vi.fn<(url: string, body?: unknown) => Promise<unknown>>();
+const apiDelete = vi.fn<(url: string) => Promise<unknown>>(async () => undefined);
 
 vi.mock("@/lib/api", () => ({
   api: {

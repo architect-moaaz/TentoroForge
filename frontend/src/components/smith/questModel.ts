@@ -259,9 +259,14 @@ export function questModel(run: BlueprintRun): QuestModel {
   const planned = run.levels?.length ? run.levels : run.nodes.map((n) => [n.key]);
   const levels: Level[] = planned.map((keys, i) => {
     const steps = keys.map(card);
-    const state: Level["state"] = steps.every((s) => s.state === "done" || s.state === "failed") ? "done"
+    // SETTLED, NOT SUCCEEDED: a level is finished once nothing in it can still
+    // move. `skipped` does not count — a paused run skips every node it never
+    // reached, and ticking those levels green said a stopped build had
+    // finished (forge-v3, 2026-11-02).
+    const settled = (s: StepCard) => s.state === "done" || s.state === "failed";
+    const state: Level["state"] = steps.every(settled) ? "done"
       : steps.some((s) => s.state === "running") ? "active"
-      : steps.some((s) => s.state === "done") ? "active" : "ahead";
+      : steps.some((s) => s.state === "done" || s.state === "failed") ? "active" : "ahead";
     return { index: i + 1, steps, state };
   });
   // THE FURTHEST LEVEL IN PLAY. The scheduler starts a step the moment its
@@ -289,7 +294,9 @@ export function questModel(run: BlueprintRun): QuestModel {
     });
     const weight = items.reduce((n, i) => n + i.total, 0);
     const progress = weight ? items.reduce((n, i) => n + i.done, 0) / weight : 0;
-    const state: Area["state"] = items.length && items.every((i) => i.state === "done" || i.state === "failed") ? "done"
+    // Same rule as a level: a skipped item leaves the area unfinished.
+    const state: Area["state"] = items.length
+      && items.every((i) => i.state === "done" || i.state === "failed") ? "done"
       : items.some((i) => i.state === "running" || i.done > 0) ? "active" : "ahead";
     return { key: a.key, label: a.label, items, progress, state, note: areaNote(a.key, items, run, looksPassed, looksTotal) };
   }).filter((a) => a.items.length > 0);

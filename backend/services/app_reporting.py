@@ -12,15 +12,35 @@ Two addresses, because two places run an app:
   backend is `http://127.0.0.1:6500`, or `FORGE_URL` when the platform says;
 - a published app reaches the platform's public address, `FORGE_PUBLIC_URL`
   (`https://forge-v3.tentoro.ai`, whose `/api/*` routes to the backend).
-`FORGE_PROJECT_ID` is the project's UUID — the endpoint's own key.
+`FORGE_PROJECT_ID` is the project's UUID — which inbox. `FORGE_REPORT_KEY`
+says the report is the app's own: a project id is in every preview address,
+and the inbox feeds Smith, so a report anyone could post was text anyone could
+put in front of the agent that edits the app (audit, 2026-11-01). The key is
+derived from the platform secret and the id, so nothing stores it; the
+reporter only runs on the app's server, so it never reaches a browser.
 """
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import os
 from pathlib import Path
 
 PUBLIC_ENV = "FORGE_PUBLIC_URL"
+KEY_ENV = "FORGE_REPORT_KEY"
+KEY_HEADER = "x-forge-report-key"
+
+
+def report_key(project_id: object) -> str:
+    """The key a project's own app reports with."""
+    from config import SECRET_KEY
+
+    return hmac.new(SECRET_KEY.encode(), f"forge-report:{project_id}".encode(), hashlib.sha256).hexdigest()[:48]
+
+
+def is_the_apps(project_id: object, presented: str | None) -> bool:
+    return bool(presented) and hmac.compare_digest(str(presented).encode(), report_key(project_id).encode())
 
 
 def internal_url() -> str:
@@ -54,7 +74,8 @@ def wire(app_root: str | Path, project_id: object) -> bool:
     root = Path(app_root)
     if not project_id or not (root / "package.json").is_file():
         return False
-    _set(root / ".env.local", {"FORGE_URL": internal_url(), "FORGE_PROJECT_ID": str(project_id)})
+    _set(root / ".env.local", {"FORGE_URL": internal_url(), "FORGE_PROJECT_ID": str(project_id),
+                               KEY_ENV: report_key(project_id)})
     return True
 
 
@@ -62,7 +83,10 @@ def publish_env(project_id: object) -> dict[str, str]:
     """The reporter's settings for a published app — only when the platform
     has a public address a deployed app can reach."""
     base = public_url()
-    return {"FORGE_URL": base, "FORGE_PROJECT_ID": str(project_id)} if base and project_id else {}
+    if not (base and project_id):
+        return {}
+    return {"FORGE_URL": base, "FORGE_PROJECT_ID": str(project_id), KEY_ENV: report_key(project_id)}
 
 
-__all__ = ["PUBLIC_ENV", "internal_url", "public_url", "wire", "publish_env"]
+__all__ = ["PUBLIC_ENV", "KEY_ENV", "KEY_HEADER", "report_key", "is_the_apps", "internal_url", "public_url",
+           "wire", "publish_env"]

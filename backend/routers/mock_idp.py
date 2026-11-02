@@ -10,6 +10,13 @@ way. It knows no accounts: the check REGISTERS the claims of the next sign-in
 for a client id (`POST /next`), then drives the application's own sign-in
 through it. An application trusts this issuer only when its `SSO_<ID>_ISSUER`
 is set to it, which only a check's bench environment does.
+
+ONLY THE PLATFORM'S OWN CHECKS REACH IT. It was mounted on the public address
+too, where `/authorize` redirected to any address it was given and `/next`
+let anyone choose the claims of the next sign-in (audit, 2026-11-01). A check
+calls it directly on the internal address; anything that came through the
+public proxy carries a forwarding header, and anything from a public address
+is not a check, so both are 404.
 """
 from __future__ import annotations
 
@@ -19,10 +26,26 @@ import secrets
 import time
 from typing import Any
 
-from fastapi import APIRouter, Form, HTTPException, Request
+import ipaddress
+
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
-router = APIRouter(prefix="/dev/mock-idp", tags=["mock-idp"])
+_FORWARDED = ("forwarded", "x-forwarded-for", "x-forwarded-host", "x-real-ip")
+
+
+def _from_a_check(request: Request) -> None:
+    if any(h in request.headers for h in _FORWARDED):
+        raise HTTPException(404)
+    host = request.client.host if request.client else ""
+    try:
+        if ipaddress.ip_address(host).is_global:
+            raise HTTPException(404)
+    except ValueError:
+        pass  # a named in-process client (a test's), not an address on any network
+
+
+router = APIRouter(prefix="/dev/mock-idp", tags=["mock-idp"], dependencies=[Depends(_from_a_check)])
 
 _KEY: dict[str, Any] = {}
 _NEXT: dict[str, dict[str, Any]] = {}

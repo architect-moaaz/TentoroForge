@@ -5,11 +5,12 @@ The generated app POSTs every caught runtime error to
 by content hash, persists the row, and — when a NEW exception is
 recorded — schedules Smith's self-heal loop as a background task.
 
-The POST endpoint is deliberately UNAUTHENTICATED (any caller who
-knows the project id can report an error). The public surface is bounded
-by rate limits in :mod:`services.self_heal` and by the fact that
-persistence side-effects are limited to writing rows into a project's
-own ledger.
+The POST endpoint takes no sign-in — the generated app has none — but it
+takes the key only that project's app was given (`FORGE_REPORT_KEY`,
+:mod:`services.app_reporting`). It used to take anyone who knew the project
+id, which is in every preview address; and a new report starts Smith's
+self-heal with the report's text in front of it (audit, 2026-11-01). The
+readings are for members of the project's organisation.
 
 IT ALSO LANDS ON DISK. Every crash is appended to the project's own
 ``.forge/incidents.jsonl`` beside its run ledger — see
@@ -43,6 +44,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
 from models.project import Project
+from services.project_access import app_report, member_project
 from models.runtime_exception import (
     RuntimeException,
     RuntimeExceptionKind,
@@ -158,16 +160,9 @@ async def ingest_runtime_exception(
     body: RuntimeExceptionIn = ...,
     background: BackgroundTasks = None,
     db: AsyncSession = Depends(get_db),
+    project: Project = Depends(app_report),
 ) -> RuntimeExceptionOut:
     """Record a runtime error and (on first occurrence) schedule self-heal."""
-
-    # Project exists?  We keep this lookup deliberately non-authenticated —
-    # the generated app has no session cookie to prove itself; the shape
-    # we protect against is a random caller POSTing garbage, and the dedup
-    # + rate limits below cap that damage.
-    project = await db.get(Project, project_id)
-    if project is None:
-        raise HTTPException(404, "project not found")
 
     dedup_key = _compute_dedup_key(body)
     now = datetime.now(timezone.utc)
@@ -291,6 +286,7 @@ async def list_runtime_exceptions(
     status: Optional[RuntimeExceptionStatus] = None,
     limit: int = 50,
     db: AsyncSession = Depends(get_db),
+    _project: Project = Depends(member_project),
 ) -> list[RuntimeExceptionOut]:
     q = select(RuntimeException).where(RuntimeException.project_id == project_id)
     if status is not None:
@@ -305,6 +301,7 @@ async def list_runtime_exceptions(
 async def get_runtime_exception(
     project_id: uuid.UUID, exc_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
+    _project: Project = Depends(member_project),
 ) -> RuntimeExceptionOut:
     row = await db.get(RuntimeException, exc_id)
     if row is None or row.project_id != project_id:

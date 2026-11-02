@@ -171,6 +171,19 @@ app.add_middleware(
     burst=RATE_LIMIT_BURST,
 )
 
+@app.middleware("http")
+async def _the_preview_host_serves_previews_only(request, call_next):
+    """At a named preview origin, only previews: the platform's API is not on
+    the address where the apps' code runs (`services/preview_origin.py`)."""
+    from services import preview_origin
+
+    if preview_origin.configured() and preview_origin.on_preview_origin(request) \
+            and not preview_origin.is_preview_path(request.url.path):
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"detail": "Not found"}, status_code=404)
+    return await call_next(request)
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
@@ -341,10 +354,13 @@ async def _log_forge_gates():
 
 
 @app.on_event("startup")
-async def _start_timer_scheduler():
-    from runtime.timer_scheduler import TimerScheduler
+async def _remember_the_main_loop():
     from services.main_loop import set_main_loop
     set_main_loop(asyncio.get_running_loop())
+
+
+async def _start_timer_scheduler():
+    from runtime.timer_scheduler import TimerScheduler
     app.state.timer_scheduler = TimerScheduler()
     await app.state.timer_scheduler.start()
 
@@ -386,7 +402,6 @@ async def _tell_whose_turn_was_lost(paths: list[str]) -> None:
     await lost_runs.tell(paths, "restarted")
 
 
-@app.on_event("startup")
 async def _follow_open_mobile_builds():
     """A build still going on Expo when this process started is watched again; see `routers.mobile_builds.resume_open_builds`."""
     import logging
@@ -398,7 +413,6 @@ async def _follow_open_mobile_builds():
         logging.getLogger("forge.startup").exception("[mobile_builds] open builds could not be followed again")
 
 
-@app.on_event("startup")
 async def _start_lost_run_watch():
     """A ledger that stops pulsing while the platform is up — a worker died,
     not the container — is closed and its person told; see `services.lost_runs`."""
@@ -406,18 +420,42 @@ async def _start_lost_run_watch():
     app.state.lost_run_watch = asyncio.create_task(lost_runs.watch_forever())
 
 
-@app.on_event("startup")
 async def _start_dev_server_reaper():
     """Ends the app servers nobody is using — see `services.dev_servers`."""
     from services import dev_servers
     app.state.dev_server_reaper = asyncio.create_task(dev_servers.reaper())
 
 
-@app.on_event("startup")
 async def _start_domain_watch():
     """Checks the apps' addresses until they answer — see `services.deploy.domain_watch`."""
     from services.deploy import domain_watch
     app.state.domain_watch = asyncio.create_task(domain_watch.watch_forever())
+
+
+async def _start_job_recovery():
+    """Builds and turns a dead worker left are picked up again or said to
+    their person — at once, and every minute after; see `services.jobs`."""
+    from services import jobs
+    app.state.job_recovery = asyncio.create_task(jobs.watch_forever())
+
+
+@app.on_event("startup")
+async def _beat_for_this_workers_jobs():
+    """EVERY WORKER says its builds and turns are alive (`jobs.beat_forever`)."""
+    from services import jobs
+    app.state.job_heartbeat = asyncio.create_task(jobs.beat_forever())
+
+
+@app.on_event("startup")
+async def _run_the_loops_once():
+    """ONE WORKER RUNS THE PLATFORM'S LOOPS (`services.leader`). Every startup
+    hook ran in both workers: a due timer fired twice, an Expo build was
+    followed twice, and every watch did its work twice."""
+    from services import leader
+    app.state.leading = asyncio.create_task(leader.run_when_leading([
+        _start_timer_scheduler, _follow_open_mobile_builds, _start_lost_run_watch,
+        _start_dev_server_reaper, _start_domain_watch, _start_job_recovery,
+    ]))
 
 
 @app.on_event("shutdown")
@@ -438,8 +476,13 @@ async def _shutdown():
         app.state.dev_server_reaper.cancel()
     if hasattr(app.state, "domain_watch"):
         app.state.domain_watch.cancel()
+    for task in ("job_recovery", "job_heartbeat"):
+        if hasattr(app.state, task):
+            getattr(app.state, task).cancel()
     if hasattr(app.state, "timer_scheduler"):
         await app.state.timer_scheduler.stop()
+    from services import leader
+    await leader.release()
 
 
 

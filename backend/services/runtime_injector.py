@@ -3202,9 +3202,11 @@ def _ensure_env_file(output_path: Path, project_id: str | None = None) -> None:
 
     if env_file.exists():
         # Re-generation path — upsert reporter keys, leave the rest alone.
+        from services.app_reporting import KEY_ENV, report_key
         _upsert_env_keys(env_file, {
             "FORGE_URL": forge_url,
             "FORGE_PROJECT_ID": forge_project_id,
+            **({KEY_ENV: report_key(forge_project_id)} if forge_project_id else {}),
         })
         # THE PUSH KEYS, once: an app assembled before push existed gets its
         # pair now; one that has a pair keeps it (a new pair would orphan
@@ -3218,6 +3220,8 @@ def _ensure_env_file(output_path: Path, project_id: str | None = None) -> None:
 
     # Use a concrete port: postgres-js can't expand shell vars at runtime.
     db_port = "5432"
+    from services.app_reporting import report_key
+    forge_report_key = report_key(forge_project_id) if forge_project_id else ""
 
     import base64
     import secrets
@@ -3257,6 +3261,7 @@ VAPID_SUBJECT={vapid["VAPID_SUBJECT"]}
 # silently no-ops (see src/lib/error_reporter.ts).
 FORGE_URL={forge_url}
 FORGE_PROJECT_ID={forge_project_id}
+FORGE_REPORT_KEY={forge_report_key}
 
 # AI workflow nodes (ai_generate/classify/extract/decide). Set your key to enable
 # real inference; without it, AI nodes return deterministic mock output.
@@ -3369,6 +3374,10 @@ def _upsert_env_keys(env_file: Path, updates: dict[str, str]) -> None:
         logger.info("Upserted %d key(s) in %s", len(updates), env_file)
 
 
+#: A uuid as Postgres spells it — anything else is a short id to resolve.
+_UUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+
+
 def _fetch_project_rules_sync(project_id: str) -> list[dict[str, Any]]:
     """Read a project's active rules straight from the project_rules table.
 
@@ -3393,10 +3402,25 @@ def _fetch_project_rules_sync(project_id: str) -> list[dict[str, Any]]:
     conn = psycopg2.connect(url)
     try:
         cur = conn.cursor()
+        # A SHORT ID IS NOT A UUID. `project_rules.project_id` is a uuid
+        # column, and the Blueprint path passes `application.id` — the short
+        # id, "kkb5mzo3". Postgres then rejects the whole query ("invalid
+        # input syntax for type uuid"), the caller logs a warning and falls
+        # back to the registry, and every editor-authored rule — which lives
+        # ONLY in this table — is silently left out of the built app
+        # (kkb5mzo3, 2026-11-02). Resolve it rather than refuse it: the short
+        # id identifies the project just as well, one lookup away.
+        key = str(project_id or "")
+        if not _UUID.fullmatch(key):
+            cur.execute("SELECT id FROM projects WHERE short_id = %s", (key,))
+            row = cur.fetchone()
+            if not row:
+                return []
+            key = str(row[0])
         cur.execute(
             "SELECT id, name, rule_type, model_name, field_name, config, is_active "
             "FROM project_rules WHERE project_id = %s AND is_active = true",
-            (project_id,),
+            (key,),
         )
         out: list[dict[str, Any]] = []
         for row in cur.fetchall():

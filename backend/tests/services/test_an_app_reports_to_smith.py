@@ -35,7 +35,18 @@ def test_a_published_app_reports_to_the_public_address(monkeypatch):
     monkeypatch.delenv(app_reporting.PUBLIC_ENV, raising=False)
     assert app_reporting.publish_env("p-1") == {}
     monkeypatch.setenv(app_reporting.PUBLIC_ENV, "https://forge-v3.tentoro.ai/")
-    assert app_reporting.publish_env("p-1") == {"FORGE_URL": "https://forge-v3.tentoro.ai", "FORGE_PROJECT_ID": "p-1"}
+    assert app_reporting.publish_env("p-1") == {"FORGE_URL": "https://forge-v3.tentoro.ai", "FORGE_PROJECT_ID": "p-1",
+                                                "FORGE_REPORT_KEY": app_reporting.report_key("p-1")}
+
+
+def test_the_app_is_given_the_key_only_it_reports_with(tmp_path):
+    root = _app(tmp_path)
+    app_reporting.wire(root, "p-1")
+    env = (root / ".env.local").read_text()
+    assert f"FORGE_REPORT_KEY={app_reporting.report_key('p-1')}\n" in env
+    assert app_reporting.is_the_apps("p-1", app_reporting.report_key("p-1"))
+    assert not app_reporting.is_the_apps("p-2", app_reporting.report_key("p-1"))
+    assert not app_reporting.is_the_apps("p-1", "") and not app_reporting.is_the_apps("p-1", None)
 
 
 def test_every_way_an_app_runs_is_wired():

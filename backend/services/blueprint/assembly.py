@@ -1153,6 +1153,13 @@ def _capped_env(env: dict) -> dict:
     return capped_env(env)
 
 
+def _app_env(root: str | Path, **extra: str) -> dict[str, str]:
+    """The app's own environment, never the platform's (`preview.app_env`):
+    these processes run code a model wrote and packages it installed."""
+    from preview import app_env
+    return app_env(root, **extra)
+
+
 def verify_boot(app_root: str | Path, *, entry: str = "/",
                 timeout: int = 120) -> dict[str, Any]:
     """Start the app and prove it serves its way in. Raise if it will not.
@@ -1204,7 +1211,7 @@ def verify_boot(app_root: str | Path, *, entry: str = "/",
     proc = subprocess.Popen(
         [_NPM, "run", "dev", "--", "--port", str(port)],
         cwd=str(root), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        text=True, env=_capped_env({**os.environ, "BROWSER": "none"}),
+        text=True, env=_capped_env(_app_env(root, BROWSER="none")),
         **group_kwargs(),
     )
     from services import dev_servers
@@ -1421,7 +1428,7 @@ def verify_build(app_root: str | Path, *, timeout: int = 900,
     # the dev server's half-written chunks — three times on one project. The
     # generated Next config reads its `distDir` from this variable, so the
     # verification compiles beside the served app and never into it.
-    env = {**os.environ, "NEXT_DIST_DIR": VERIFY_DIST_DIR}
+    env = _app_env(root, NEXT_DIST_DIR=VERIFY_DIST_DIR)
     out: dict[str, Any] = {}
     for name, cmd in steps:
         if name == "install":
@@ -1500,7 +1507,7 @@ def verify_dispatches(app_root: str | Path, *, timeout: int = 300) -> int:
     root = Path(app_root)
     if not (root / DISPATCH_VERIFIER).is_file() or not (root / DISPATCH_MANIFEST).is_file():
         return 0
-    env = {**os.environ, **_env_file(root)}
+    env = _app_env(root, **_env_file(root))
     env.setdefault("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/dry_run")
     proc = subprocess.run([_NPX, "tsx", DISPATCH_VERIFIER], cwd=root, capture_output=True,
                           text=True, timeout=timeout, env=env)

@@ -64,7 +64,8 @@ def booted_app(
     # — a known NEXTAUTH_SECRET, so a session cookie can be minted for it —
     # wins over the ambient environment rather than being silently overridden
     # by whatever the developer happens to have exported.
-    env = {**os.environ, "PORT": str(port), "NODE_ENV": "development",
+    from preview import app_env
+    env = {**app_env(output_dir), "PORT": str(port), "NODE_ENV": "development",
            **(env_extra or {})}
     # Suppress open-browser-on-start etc. — the harness drives the app,
     # not a human.

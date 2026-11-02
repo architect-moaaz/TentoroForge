@@ -14,7 +14,10 @@
  * way entirely in Preview mode.
  *
  * Protocol: messages are `{type: "forge-editor:<name>", payload}`, posted to
- * the parent at the page's own origin.
+ * the editor at its own origin and taken only from it. The page is on the
+ * preview's origin, never the editor's (the app's code could otherwise read
+ * the person's sign-in); the loader that ran this says which origin the
+ * editor is (`__forgeEditorParent`).
  */
 (function () {
   "use strict";
@@ -22,6 +25,7 @@
   window.__forgeEditorBridge = true;
 
   var PREFIX = "forge-editor:";
+  var PARENT = window.__forgeEditorParent || window.location.origin;
   var Z = 2147483000;
   var mode = "design"; // design | preview | region
   var selected = [];
@@ -210,7 +214,7 @@
     return { top: r.top, left: r.left, width: r.width, height: r.height };
   }
   function send(type, payload) {
-    try { window.parent.postMessage({ type: PREFIX + type, payload: payload || {} }, window.location.origin); } catch (e) { /* not cloneable */ }
+    try { window.parent.postMessage({ type: PREFIX + type, payload: payload || {} }, PARENT); } catch (e) { /* not cloneable */ }
   }
 
   function drawEdge() {
@@ -619,7 +623,7 @@
 
   // --- commands ------------------------------------------------------------
   window.addEventListener("message", function (e) {
-    if (e.origin !== window.location.origin) return;
+    if (e.origin !== PARENT) return;
     var d = e.data;
     if (!d || typeof d.type !== "string" || d.type.indexOf(PREFIX) !== 0) return;
     var cmd = d.type.slice(PREFIX.length);

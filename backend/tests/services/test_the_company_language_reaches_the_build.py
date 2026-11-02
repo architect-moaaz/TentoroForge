@@ -1,7 +1,7 @@
 """The company's design language, from the organisation to the application.
 
 Two consumers and one condition. The tokens are merged over `designSystem` by
-`brand_design_system`; the document is put in front of the agents that can act
+the `design_system` node when its agent's reply lands; the document is put in front of the agents that can act
 on it. Both happen only when the owner answered `company` at the gate — an
 application that inherits a palette nobody chose for it is the failure this
 whole path is shaped to avoid.
@@ -172,15 +172,14 @@ def test_choosing_the_company_with_nothing_adopted_is_not_a_failure(svc):
     assert _project(svc)["colors"]["primary"] == "#2563EB"
 
 
-def test_the_node_runs_after_the_design_agent_and_before_the_figma_projection():
-    """`designSystem` is a singleton, so the last writer of a key wins and the
-    ordering IS the precedence: the company outranks the platform's own
+def test_the_company_is_laid_over_the_design_agent_and_under_the_figma_projection(tmp_path, monkeypatch):
+    """The design node lays the languages over its agent's reply in order, and
+    the order IS the precedence: the company outranks the platform's own
     recommendation, and a design attached to THIS app outranks the company."""
-    from services.blueprint.orchestrator import DAG, SERVICE_HANDLERS
+    from services.blueprint import orchestrator
 
-    node = DAG["brand_design_system"]
-    assert node.kind == "service"
-    assert "design_system" in node.depends_on
-    assert "designSystem" in node.produces
-    assert "brand_design_system" in DAG["figma_design_system"].depends_on
-    assert "brand_design_system" in SERVICE_HANDLERS
+    seen = []
+    monkeypatch.setattr(orchestrator, "_project_company_language", lambda svc: seen.append("company"))
+    monkeypatch.setattr(orchestrator, "_project_design_reference", lambda svc: seen.append("figma"))
+    orchestrator.SETTLE["design_system"](object())
+    assert seen == ["company", "figma"]

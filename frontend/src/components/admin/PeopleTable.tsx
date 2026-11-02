@@ -16,7 +16,7 @@ export function when(iso: string | null | undefined): string {
 }
 
 export function PeopleTable({
-  rows, selfId, onDisable, onEnable, onGrant, onRevoke, onImpersonate, onWatchLive, onRemove,
+  rows, selfId, onDisable, onEnable, onGrant, onRevoke, onImpersonate, onWatchLive, onRemove, onResetLink,
 }: {
   rows: AdminPerson[];
   selfId: string;
@@ -28,6 +28,8 @@ export function PeopleTable({
   onWatchLive?: (p: AdminPerson) => void;
   /** Remove the login for good (typed confirmation in the page). */
   onRemove?: (p: AdminPerson) => void;
+  /** A one-time reset link for the admin to hand over (reason in the page). */
+  onResetLink?: (p: AdminPerson) => void;
 }) {
   return (
     <Table>
@@ -74,6 +76,7 @@ export function PeopleTable({
                       {p.disabled_at
                         ? <DropdownMenuItem onClick={() => onEnable(p)}>Enable login</DropdownMenuItem>
                         : <DropdownMenuItem onClick={() => onDisable(p)}>Disable login…</DropdownMenuItem>}
+                      {onResetLink && <DropdownMenuItem onClick={() => onResetLink(p)}>Password reset link…</DropdownMenuItem>}
                       <DropdownMenuSeparator />
                       {p.platform_role === "super_admin"
                         ? <DropdownMenuItem onClick={() => onRevoke(p)}>Revoke super admin</DropdownMenuItem>

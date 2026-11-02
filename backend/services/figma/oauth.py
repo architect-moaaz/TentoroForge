@@ -110,16 +110,20 @@ def redirect_uri(request_base: str) -> str:
 # The state: who asked, and where to go back to
 # --------------------------------------------------------------------------- #
 
-def make_state(user_id: uuid.UUID | str, *, return_to: str, redirect: str, popup: bool = False) -> str:
+def make_state(user_id: uuid.UUID | str, *, return_to: str, redirect: str, popup: bool = False,
+               browser: str = "") -> str:
     """A signed, short-lived ``state``: the callback is not signed in (it is
-    Figma's redirect), so the state is what says whose connection this is."""
+    Figma's redirect), so the state is what says whose connection this is.
+    ``browser`` is the nonce the browser that asked was given as a cookie: a
+    connect address sent to someone else would otherwise put their Figma
+    account on the sender's login."""
     import jwt
 
     from config import JWT_ALGORITHM, SECRET_KEY
 
     now = int(time.time())
     return jwt.encode({"type": _STATE_TYPE, "sub": str(user_id), "ret": return_to, "ruri": redirect,
-                       "pop": bool(popup), "n": secrets.token_urlsafe(12), "iat": now, "exp": now + _STATE_TTL_S},
+                       "pop": bool(popup), "b": browser, "n": secrets.token_urlsafe(12), "iat": now, "exp": now + _STATE_TTL_S},
                       SECRET_KEY, algorithm=JWT_ALGORITHM)
 
 
@@ -137,16 +141,18 @@ def read_state(state: str) -> dict[str, str]:
     if payload.get("type") != _STATE_TYPE or not payload.get("sub"):
         raise FigmaOAuthError("The Figma sign-in came back with a state Forge did not issue.")
     return {"user_id": str(payload["sub"]), "return_to": str(payload.get("ret") or ""),
-            "redirect_uri": str(payload.get("ruri") or ""), "popup": bool(payload.get("pop"))}
+            "redirect_uri": str(payload.get("ruri") or ""), "popup": bool(payload.get("pop")),
+            "browser": str(payload.get("b") or "")}
 
 
-def authorize_url(user_id: uuid.UUID | str, *, return_to: str, redirect: str, popup: bool = False) -> str:
+def authorize_url(user_id: uuid.UUID | str, *, return_to: str, redirect: str, popup: bool = False,
+                  browser: str = "") -> str:
     from urllib.parse import urlencode
 
     cid, _ = _client()
     return f"{AUTHORIZE_URL}?" + urlencode({
         "client_id": cid, "redirect_uri": redirect, "scope": SCOPES,
-        "state": make_state(user_id, return_to=return_to, redirect=redirect, popup=popup),
+        "state": make_state(user_id, return_to=return_to, redirect=redirect, popup=popup, browser=browser),
         "response_type": "code",
     })
 

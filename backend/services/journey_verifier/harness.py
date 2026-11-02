@@ -100,8 +100,9 @@ def run_journey_suite(
 # ── helpers ────────────────────────────────────────────────────────────────
 
 def _env() -> dict[str, str]:
-    import os
-    return {**os.environ}
+    """Only what a toolchain needs: the journeys drive the app's own pages."""
+    from preview import app_env
+    return app_env("/nonexistent")
 
 
 def _wait_for_boot(url: str, timeout_s: int) -> bool:

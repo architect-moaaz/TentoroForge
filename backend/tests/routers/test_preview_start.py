@@ -78,7 +78,9 @@ async def test_starts_in_the_projected_app_directory(tmp_path, project, started)
     body = await preview_start(project_id=uuid.uuid4(), user=_FakeUser(), db=db)
 
     assert started == [("abc12345", str(tmp_path / "app"))]
-    assert body == {"port": 3210, "servePath": "/api/projects/abc12345/preview/serve"}
+    assert body == {"port": 3210, "servePath": "/api/projects/abc12345/preview/serve",
+                    # The frame loads it at the preview's own origin (services/preview_origin.py).
+                    "serveUrl": "http://localhost:6500/api/projects/abc12345/preview/serve"}
     assert project.preview_port == 3210
     assert db.commits == 1
 
@@ -116,6 +118,7 @@ async def test_status_names_the_serve_path(monkeypatch, project):
         "running": True,
         "port": 3210,
         "servePath": "/api/projects/abc12345/preview/serve",
+        "serveUrl": "http://localhost:6500/api/projects/abc12345/preview/serve",
     }
 
     monkeypatch.setattr("routers.projects.get_preview_port", lambda short_id: None)

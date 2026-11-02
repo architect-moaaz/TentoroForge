@@ -6,7 +6,8 @@
   GET    /api/figma/oauth/callback     where Figma sends the browser back
 
 The callback is not signed in: it is Figma's redirect, opened in the window the
-panel popped up. The signed ``state`` says whose connection it is. It answers
+panel popped up. The signed ``state`` says whose connection it is, and the
+cookie set when the sign-in began says it is the same browser. It answers
 with a small page that tells the panel which opened it and closes, or, opened
 on its own, goes back to where the person started.
 
@@ -15,13 +16,15 @@ No route returns a token: the account's name is what the person sees.
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import logging
+import secrets
 import uuid
 from typing import Any
 from urllib.parse import urlencode, urlparse
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,6 +37,9 @@ from services.figma import oauth
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["figma"])
+
+#: The browser that began a sign-in; its value is in the signed state too.
+BROWSER_COOKIE = "forge_figma_signin"
 
 
 class ConnectRequest(BaseModel):
@@ -71,7 +77,7 @@ async def figma_status(user: PlatformUser = Depends(get_current_user),
 
 
 @router.post("/api/me/figma/connect")
-async def figma_connect(body: ConnectRequest, request: Request,
+async def figma_connect(body: ConnectRequest, request: Request, response: Response,
                         user: PlatformUser = Depends(get_current_user)) -> dict[str, str]:
     if getattr(request.state, "impersonated_by", None):
         # The Figma account would be theirs, kept as the person's.
@@ -81,8 +87,11 @@ async def figma_connect(body: ConnectRequest, request: Request,
             "Connect Figma is not set up on this platform yet: an administrator registers Forge as a "
             "Figma OAuth app. Paste a Figma access token instead."))
     redirect = oauth.redirect_uri(str(request.base_url))
+    browser = secrets.token_urlsafe(18)
     url = oauth.authorize_url(user.id, return_to=_return_to(body.return_to, request), redirect=redirect,
-                              popup=body.popup)
+                              popup=body.popup, browser=browser)
+    response.set_cookie(BROWSER_COOKIE, browser, max_age=600, httponly=True, samesite="lax",
+                        secure=redirect.startswith("https://"), path=oauth.CALLBACK_PATH)
     return {"url": url}
 
 
@@ -104,7 +113,8 @@ def _finish(return_to: str, outcome: dict[str, str], *, popup: bool = False) -> 
         target = f"{return_to}{sep}{urlencode({'figma': outcome['figma']})}"
     # `</` cannot close the script from inside a JSON string.
     data = json.dumps({"source": "forge-figma", **outcome}).replace("</", "<\\/")
-    origin = json.dumps(_origin(return_to) or "*").replace("</", "<\\/")
+    # Told only to the page it began on; with no such page the panel asks for the status itself.
+    origin = json.dumps(_origin(return_to)).replace("</", "<\\/")
     back = json.dumps(target).replace("</", "<\\/")
     said = ("Figma is connected. You can close this window." if outcome["figma"] == "connected"
             else f"Figma was not connected: {outcome.get('reason') or 'the sign-in did not finish'}")
@@ -116,7 +126,7 @@ def _finish(return_to: str, outcome: dict[str, str], *, popup: bool = False) -> 
 <script>
 (function () {{
   var data = {data}, origin = {origin}, back = {back}, popup = {json.dumps(bool(popup))};
-  if (window.opener && !window.opener.closed) {{
+  if (origin && window.opener && !window.opener.closed) {{
     try {{ window.opener.postMessage(data, origin); }} catch (e) {{}}
   }}
   if (popup) {{
@@ -126,7 +136,9 @@ def _finish(return_to: str, outcome: dict[str, str], *, popup: bool = False) -> 
   }}
 }})();
 </script></body></html>"""
-    return HTMLResponse(page, status_code=200 if outcome["figma"] == "connected" else 400)
+    answer = HTMLResponse(page, status_code=200 if outcome["figma"] == "connected" else 400)
+    answer.delete_cookie(BROWSER_COOKIE, path=oauth.CALLBACK_PATH)
+    return answer
 
 
 @router.get(oauth.CALLBACK_PATH)
@@ -137,6 +149,12 @@ async def figma_callback(request: Request, code: str = "", state: str = "", erro
     except oauth.FigmaOAuthError as exc:
         return _finish("", {"figma": "error", "reason": str(exc)})
     return_to, popup = claimed["return_to"], claimed["popup"]
+    began = request.cookies.get(BROWSER_COOKIE, "")
+    if not claimed["browser"] or not hmac.compare_digest(began.encode(), claimed["browser"].encode()):
+        logger.warning("[figma-oauth] callback for %s came back to another browser", claimed.get("user_id"))
+        return _finish(return_to, {"figma": "error", "reason": (
+            "This Figma sign-in was started in another browser. Press Connect Figma here to connect your own.")},
+            popup=popup)
     if error or not code:
         return _finish(return_to, {"figma": "error", "reason": "Figma did not grant access."}, popup=popup)
     try:

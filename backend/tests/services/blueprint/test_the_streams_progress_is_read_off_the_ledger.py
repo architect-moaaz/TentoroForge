@@ -35,7 +35,7 @@ def test_a_fan_out_node_is_done_at_its_last_page_not_its_first():
 
 
 def test_a_service_node_counts_like_any_other():
-    """`apis` and `figma_design_system` are services: no executor call, so the
+    """`apis` and `imagery` are services: no executor call, so the
     old wrapper never saw them and the count could not reach the total."""
     events, emit = _stream()
     progress = Progress(emit, total=2)

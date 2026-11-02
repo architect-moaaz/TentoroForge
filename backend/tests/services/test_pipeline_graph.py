@@ -202,10 +202,17 @@ async def test_gate_pauses_then_resume_completes(tmp_path, monkeypatch):
     assert any("spine complete" in str(e) for e in events2)
 
 
-def test_resume_endpoint_registered():
+def test_the_legacy_road_is_not_served():
+    """Only the retired ChatPanel reached these; /generate and /chat ran model
+    work past the spend gate (audit, 2026-11-01). /refresh-index stays."""
     import routers.generate as g
     paths = {getattr(r, "path", "") for r in g.router.routes}
-    assert "/api/projects/{project_id}/pipeline/resume" in paths
+    for gone in ("/api/projects/{project_id}/pipeline/resume", "/api/projects/{project_id}/generate",
+                 "/api/projects/{project_id}/chat", "/api/projects/{project_id}/generation/active",
+                 "/api/projects/{project_id}/generation/{session_id}/events",
+                 "/api/projects/{project_id}/fix/ab-summary"):
+        assert gone not in paths, gone
+    assert "/api/projects/{project_id}/refresh-index" in paths
 
 
 # ── O4: plan-conditional routing ─────────────────────────────────────────

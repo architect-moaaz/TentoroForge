@@ -28,6 +28,7 @@ Design: docs/superpowers/specs/2026-07-22-integrations-settings.md.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Iterable
 
 

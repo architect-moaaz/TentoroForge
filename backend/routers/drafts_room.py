@@ -509,6 +509,7 @@ async def _hand_off(session: dict, org_id: uuid.UUID, owner_id: uuid.UUID, emit)
             session.pop("handoff_request", None)
             store.save(session)
             return
+        ceiling = await credits.headroom(db, org_id=org_id, user_email=owner_email, project_short_id="")
         project = await create_project(org_id=org_id, owner_id=owner_id, name=name,
                                        description=description, db=db)
         await db.commit()
@@ -526,9 +527,14 @@ async def _hand_off(session: dict, org_id: uuid.UUID, owner_id: uuid.UUID, emit)
                      "document": doc, "opening": opening, "at": time.time()}
     emit("step", {"text": "Starting the build…"})
     try:
+        # ON RECORD BEFORE IT STARTS, so a restart finds it (`services.jobs`).
+        from services import jobs
+        actor = {"user": owner_email, "org": str(org_id), "ceiling": ceiling}
+        job = await jobs.open(project_id=project.id, kind="handoff", actor=actor,
+                              args={"message": opening, "description": description, "app_name": name})
         start_build_in_background(asyncio.get_running_loop(), project, message=opening, description=description,
                                   documents=[doc], app_name=name, output_dir=output_dir, app_root=app_root,
-                                  actor={"user": owner_email, "org": str(org_id)})
+                                  actor={**actor, "job": job})
         handoff["build"] = "started"
         said = f"{name} is created and being built from the requirements document. Open it to watch."
     except Exception as exc:  # noqa: BLE001 — the app exists; the build can be asked for there

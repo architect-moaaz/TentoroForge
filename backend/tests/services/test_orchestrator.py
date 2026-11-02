@@ -108,7 +108,7 @@ def test_nodes_only_claim_to_produce_what_their_agent_may_write():
     from services.blueprint.agent_contract import capability_for
     for node in DAG.values():
         cap = capability_for(node.agent)
-        for section in node.produces:
+        for section in node.sections:
             assert cap.can_write(section), (node.key, node.agent, section)
 
 

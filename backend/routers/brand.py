@@ -58,7 +58,7 @@ def _palette_to_full_response(primary_hex: str, secondary_hex: str | None) -> di
 
 
 @router.post("/api/brand/extract/logo")
-async def extract_from_logo(logo: UploadFile = File(...)):
+async def extract_from_logo(logo: UploadFile = File(...), _user: PlatformUser = Depends(get_current_user)):
     data = await logo.read()
     try:
         palette = extract_palette_from_logo(data)
@@ -68,8 +68,10 @@ async def extract_from_logo(logo: UploadFile = File(...)):
 
 
 @router.post("/api/brand/extract/url")
-async def extract_from_url(req: _ExtractURLRequest = Body(...)):
-    result = scrape_brand_from_url(req.url)
+async def extract_from_url(req: _ExtractURLRequest = Body(...), _user: PlatformUser = Depends(get_current_user)):
+    import asyncio
+
+    result = await asyncio.to_thread(scrape_brand_from_url, req.url)
     if result is None:
         raise HTTPException(status_code=404, detail="no og:image found at URL")
     response = _palette_to_full_response(result.primary_hex, result.palette.secondary_hex)

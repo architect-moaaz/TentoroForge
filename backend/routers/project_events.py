@@ -40,6 +40,8 @@ from sse_starlette.sse import EventSourceResponse
 from auth import get_current_user
 from database import get_db
 from models.auth import PlatformUser
+from models.project import Project
+from services.project_access import TICKET_TTL_S, member_project, stream_ticket, ticket_project
 from services.project_event_bus import subscribe
 
 log = logging.getLogger(__name__)
@@ -50,8 +52,17 @@ router = APIRouter()
 _PING_INTERVAL_SECONDS = 25
 
 
+@router.post("/api/projects/{project_id}/stream-ticket")
+async def project_stream_ticket(project_id: uuid.UUID, user: PlatformUser = Depends(get_current_user),
+                                _project: Project = Depends(member_project)) -> dict[str, Any]:
+    """What a member opens this project's streams with: EventSource sends no
+    header, and an access token in a URL is a session in every log it lands in."""
+    return {"ticket": stream_ticket(user.id, project_id), "expires_in": TICKET_TTL_S}
+
+
 @router.get("/api/projects/{project_id}/events")
-async def project_events(project_id: uuid.UUID) -> EventSourceResponse:
+async def project_events(project_id: uuid.UUID,
+                         _project: Project = Depends(ticket_project)) -> EventSourceResponse:
     """Persistent SSE stream for real-time project events.
 
     Emitted event types (grow over time; frontend filters by name):

@@ -199,6 +199,12 @@ def _capped(env: dict) -> dict:
     return capped_env(env, heap_mb=TRIAL_HEAP_MB)
 
 
+def app_env(root, **extra: str) -> dict[str, str]:
+    """The app's own environment, never the platform's (`preview.app_env`)."""
+    from preview import app_env as _app_env
+    return _app_env(root, **extra)
+
+
 class RunningApp:
     """The generated app, its database up and its dev server serving — beside
     whatever the person is already running, never over it."""
@@ -302,7 +308,7 @@ class RunningApp:
             [tool("npx"), "next", "dev", "--port", str(self.port)], cwd=self.root,
             stdout=sink, stderr=subprocess.STDOUT if self._sink is not None else subprocess.DEVNULL,
             **group_kwargs(),
-            env=_capped({**os.environ, "BROWSER": "none",
+            env=_capped({**app_env(self.root), "BROWSER": "none",
                  # The preview secret, so a session minted for a role the
                  # administrator does not hold is a session this server accepts.
                  **boot_env(self.base),
@@ -548,7 +554,7 @@ def run_shots(app: RunningApp, pages: list[dict], out_dir: Path, *, probe: bool 
         _link_node_modules(modules, link)
     script = work / "page_shots.mjs"
     shutil.copyfile(_SHOTS, script)
-    env = {**os.environ}
+    env = app_env(work)  # the browser loads the app's pages, so none of the platform's settings
     # WHERE THE BROWSERS ARE: an explicit PLAYWRIGHT_BROWSERS_PATH wins; on a Mac the cache is
     # ~/Library/Caches/ms-playwright; anywhere else Playwright knows its own default (Windows keeps them
     # under %LOCALAPPDATA%\ms-playwright). Forcing the Mac path everywhere sent a Windows run looking for

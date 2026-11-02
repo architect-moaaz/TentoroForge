@@ -1,5 +1,13 @@
 """Generation and chat endpoints — streams SSE events as the agent works."""
 
+# THE LEGACY ROAD IS NOT SERVED (audit, 2026-11-01). The chat people use is
+# SmithPanel → POST /smith/chat (routers.blueprint_generate). The routes here
+# were reached only by the retired ChatPanel: /generate and /chat started the
+# old pipeline's model work with no spend gate, for any member. They are no
+# longer mounted; the functions stay while code and tests still import from
+# this module. /refresh-index is still served (the Data Model panel).
+
+
 import asyncio
 import functools
 import json
@@ -189,7 +197,7 @@ async def reconnect_event_stream(
                 yield {"comment": "heartbeat"}
 
 
-@router.get("/api/projects/{project_id}/generation/active")
+# Not served since 2026-11-01 (see the module note).
 async def get_active_generation(
     project_id: uuid.UUID,
     user: PlatformUser = Depends(get_current_user),
@@ -216,7 +224,7 @@ async def get_active_generation(
     }
 
 
-@router.get("/api/projects/{project_id}/fix/ab-summary")
+# Not served since 2026-11-01 (see the module note).
 async def get_fix_ab_summary(
     project_id: uuid.UUID,
     limit: int = Query(200, ge=1, le=1000),
@@ -238,7 +246,7 @@ async def get_fix_ab_summary(
     return summarize(list(result.scalars()))
 
 
-@router.post("/api/projects/{project_id}/pipeline/resume")
+# Not served since 2026-11-01 (see the module note).
 async def resume_pipeline(
     project_id: uuid.UUID,
     user: PlatformUser = Depends(get_current_user),
@@ -280,7 +288,7 @@ async def resume_pipeline(
     )
 
 
-@router.get("/api/projects/{project_id}/generation/{session_id}/events")
+# Not served since 2026-11-01 (see the module note).
 async def reconnect_generation(
     project_id: uuid.UUID,
     session_id: str,
@@ -5115,6 +5123,10 @@ async def _run_figma_relay_pipeline(
             f"Read each file, fix the error, verify with `npx tsc --noEmit 2>&1 | head -30`."
         )
         try:
+            # Neither name was in scope here, so this fix round raised NameError (lint gate, 2026-11-01).
+            from agents.page_agent import run_page_agent
+            _spec_file = Path(output_dir) / "src" / "contracts" / "design-spec.json"
+            design_spec = json.loads(_spec_file.read_text()) if _spec_file.exists() else None
             async for evt in _stream_phase(
                 "Build-Fix",
                 run_page_agent(output_dir, plan, domain_context=domain_ctx, design_spec=design_spec, fix_prompt=fix_prompt),
@@ -5348,7 +5360,7 @@ def _unwrap_error(e: Exception) -> str:
 # Patterns that indicate the user is approving a plan.
 # Short patterns use word-boundary matching to avoid false positives
 # (e.g. "yes" inside "keyes" or "analysis").
-@router.post("/api/projects/{project_id}/generate")
+# Not served since 2026-11-01 (see the module note).
 async def generate_project(
     project_id: uuid.UUID,
     req: GenerateRequest,
@@ -5756,7 +5768,7 @@ async def generate_project(
     )
 
 
-@router.post("/api/projects/{project_id}/chat")
+# Not served since 2026-11-01 (see the module note).
 async def chat_with_project(
     project_id: uuid.UUID,
     req: ChatRequest,
@@ -8285,6 +8297,17 @@ async def _handle_smith_turn(project: Project, message: str, deferred: dict | No
     # orchestrator returns an OrchestratorResult; downstream code below
     # expects the classic `run_smith_agent` shape, so we adapt.
     try:
+        # Smith's thoughts cross from the worker thread to this loop through
+        # a queue. These lines went with the legacy agent (b3ba929c) while
+        # the drain that reads them stayed, so every turn here raised
+        # NameError (found by the lint gate, 2026-11-01).
+        _smith_queue: asyncio.Queue = asyncio.Queue()
+        _smith_loop = asyncio.get_running_loop()
+        _last_tool: dict = {"name": ""}
+        _reasoning_chunks_seen: list[str] = []
+        _smith_timeout = int(os.getenv("FORGE_SMITH_TIMEOUT_S", "180"))
+        _HEARTBEAT_SECONDS = 12.0
+
         def _reasoning_cb(text: str) -> None:  # noqa: ANN001
             if isinstance(text, str) and text.strip():
                 _smith_loop.call_soon_threadsafe(

@@ -258,6 +258,24 @@ async def delete_person(
             "organisations_left": len(memberships)}
 
 
+@router.post("/people/{user_id}/reset-link")
+async def issue_reset_link(
+    user_id: uuid.UUID, body: ReasonBody, request: Request,
+    admin: PlatformUser = Depends(require_super_admin), db: AsyncSession = Depends(get_db),
+):
+    """A reset link for a person, handed over by the admin, for a platform that
+    sends no mail. Forgot-password never shows one; this is the only other door."""
+    from auth import create_password_reset_token
+    from routers.auth import _build_reset_url
+
+    user = await _user_or_404(db, user_id)
+    url = _build_reset_url(request, create_password_reset_token(user.id))
+    await audit_request(request, db, "person.reset_link", "platform_user", str(user.id),
+                        changes={"email": user.email, "reason": body.reason})
+    await db.commit()
+    return {"reset_url": url, "email": user.email}
+
+
 @router.post("/people/{user_id}/super-admin")
 async def grant_super_admin(
     user_id: uuid.UUID, request: Request,

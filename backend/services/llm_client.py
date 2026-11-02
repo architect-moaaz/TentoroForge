@@ -189,11 +189,31 @@ def _chat_model(api_key: str | None, *, model: str, max_tokens: int,
                 temperature: float | None, timeout: float | None,
                 thinking: dict | None = None):
     from langchain_anthropic import ChatAnthropic
+
+    from services.build_usage import check_budget
+    # Every call is made through a model built here: the one place a run that
+    # has spent its ceiling is stopped (`build_usage.run_budget`).
+    check_budget()
     kwargs: dict[str, Any] = {"model": model, "max_tokens": max_tokens}
     if api_key:
         kwargs["api_key"] = api_key
-    if temperature is not None:
-        kwargs["temperature"] = temperature
+    # NO `temperature`, EVER — and accepted-then-dropped rather than removed
+    # from the signature, because this is the one place that knows what the
+    # transport takes and a dozen callers still name a temperature.
+    #
+    # The pinned API version has no such parameter: anthropic 2.3.0 sends
+    # `anthropic-version: 2026-10-21`, where `Messages.create` does not accept
+    # `temperature` (nor top_k/top_p) at all. langchain-anthropic 1.7.7 still
+    # offers it, so it smuggles whatever it is given through `extra_body`,
+    # which reaches the API as an unknown field and comes back as
+    # `400 temperature: Extra inputs are not permitted`. Sent with the OLD
+    # `2023-06-01` header the same request is still fine, which is what makes
+    # this confusing to test by hand.
+    #
+    # Measured on forge-v3, 2026-11-02: both thinking paths hardcoded 1.0, so
+    # every Smith turn that streamed its reasoning died here — and the person
+    # was told "I could not reach my reasoning service just now".
+    _ = temperature
     kwargs["timeout"] = DEFAULT_READ_TIMEOUT_S if timeout is None else timeout
     kwargs["max_retries"] = 3
     if thinking is not None:
@@ -529,9 +549,7 @@ def complete(*, system: Any = None, messages: list[dict] | None = None,
         # answer's expense — and a truncated reply parses as a failed one.
         max_tokens=max_tokens + (THINKING_HEADROOM_TOKENS if thinking else 0),
         messages=messages, system=system,
-        # Extended thinking requires temperature=1.0; the API rejects other
-        # values when the thinking block is present.
-        temperature=1.0 if thinking else temperature,
+        temperature=temperature,
         timeout=timeout, thinking=thinking)
 
     if reasoning_callback is not None:
@@ -553,13 +571,20 @@ def _complete_streaming(*, model: str, max_tokens: int, messages: list[dict],
     cannot tell which path ran except by when the reasoning showed up.
     """
     chat = _chat_model(None, model=model, max_tokens=max_tokens,
-                       # Extended thinking requires temperature=1.0; the API
-                       # rejects other values when the block is present.
-                       temperature=1.0, timeout=timeout, thinking=thinking)
+                       temperature=None, timeout=timeout, thinking=thinking)
     sink = ReasoningSink(reasoning_callback)
     parts: list[str] = []
+    whole: Any = None
     try:
         for chunk in chat.stream(_lc_messages(messages, system)):
+            # Added up so the last chunk's usage is on the whole: a streamed
+            # call is priced like any other (`_to_message` records it). It was
+            # not, and every step of a Smith turn that streamed its reasoning
+            # was free in the spend ledger and the gate (audit, 2026-11-01).
+            try:
+                whole = chunk if whole is None else whole + chunk
+            except TypeError:
+                whole = chunk
             for block in (chunk.content if isinstance(chunk.content, list)
                           else [chunk.content]):
                 if isinstance(block, str):
@@ -575,4 +600,9 @@ def _complete_streaming(*, model: str, max_tokens: int, messages: list[dict],
         # last sentence is usually the conclusion. Flushed even when the stream
         # raises, so a failed call still shows how far the thinking got.
         sink.close()
+        if whole is not None:
+            try:
+                _to_message(whole, model)
+            except Exception:  # noqa: BLE001 — accounting never fails a call
+                pass
     return "".join(parts)
