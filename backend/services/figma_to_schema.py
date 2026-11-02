@@ -155,10 +155,35 @@ def _build_node(entry: dict, asset_paths: dict[str, str] | None = None) -> dict:
     fid = node.get("id")
     if fid:
         props["_figmaNodeId"] = str(fid)
+    # WHAT A DRAWN BUTTON DOES. The JSX path has asked
+    # `figma_action_classifier` this since it was written; the REST path never
+    # did, so every button it built declared no action — and a control with no
+    # action is refused outright ("declares no action — it would do nothing").
+    # Production Figma reads go over REST, so on kkb5mzo3 (2026-11-02) that was
+    # every button of every drawn page. The classifier only ever returns a
+    # route or workflow from the vocabulary it was given, so this cannot invent
+    # a target the application does not define.
+    if schema_type == "Button" and not props.get("navigate") and not props.get("workflow"):
+        try:
+            from services.figma_action_llm import classify_action
+
+            action = classify_action(str(props.get("label") or ""),
+                                     str(node.get("name") or ""))
+        except Exception:  # noqa: BLE001 — a label nobody can place is not a failure
+            action = {}
+        for key, value in (action or {}).items():
+            if value:
+                props[key] = value
     # Wire any pre-exported asset URL onto Image / Icon nodes so they render
     # the design instead of a broken-image icon. Callers can pass None when
     # asset export hasn't run yet — the schema then carries no `src`, and the
     # Image renderer renders nothing rather than a broken-image placeholder.
+    #
+    # A src-less Image IS refused by the component contract, so a path that
+    # validates its tree must resolve them before it does — see
+    # `figma_layout._drop_sourceless_images`. It is not done here: the asset
+    # pipeline discovers Image/Icon nodes in a pass with no `asset_paths` and
+    # supplies them in a second, so erasing the type here erases the hook.
     if asset_paths and schema_type in ("Image", "Icon"):
         src = asset_paths.get(node.get("id") or "")
         if src:
