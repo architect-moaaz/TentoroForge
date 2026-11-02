@@ -56,9 +56,11 @@ def test_complete_asks_for_thinking_only_when_someone_is_listening(transport):
     lc.complete(content="hi", reasoning_callback=lambda _t: None)
     assert transport["path"] == "stream"
     assert transport["thinking"] == {"type": "adaptive"}
-    # Extended thinking requires temperature=1.0; the API rejects other values
-    # when the block is present.
-    assert transport["temperature"] == 1.0
+    # AND NO TEMPERATURE. This asserted 1.0 until 2026-11-02, when every Smith
+    # turn on forge-v3 that streamed its reasoning died on
+    # "temperature: Extra inputs are not permitted" — the pinned API version
+    # has no such parameter. See test_the_transport_sends_no_temperature.
+    assert transport["temperature"] is None
 
 
 def test_the_answer_gets_its_own_room(transport):

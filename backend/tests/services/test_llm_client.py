@@ -51,7 +51,11 @@ async def test_async_create_matches_anthropic_shape():
     # Anthropic's shape: input_tokens is the uncached part of LangChain's total of 10.
     assert resp.usage.input_tokens == 6 and resp.usage.cache_read_input_tokens == 4
     assert _FakeChat.last_kwargs["model"] == "claude-sonnet-4-6"
-    assert _FakeChat.last_kwargs["temperature"] == 0.0
+    # NOT FORWARDED. The caller may name a temperature; the pinned API version
+    # has no such parameter, so the transport drops it rather than letting it
+    # reach the request through `extra_body` and 400 the call. See
+    # test_the_transport_sends_no_temperature.
+    assert "temperature" not in _FakeChat.last_kwargs
     assert isinstance(_FakeChat.last_messages[0], SystemMessage)
     assert isinstance(_FakeChat.last_messages[1], HumanMessage)
 
