@@ -12,7 +12,8 @@
  * screenshot it was scored on. Nothing here is guessed: see `questModel`.
  */
 import { useEffect, useMemo, useState } from "react";
-import { CheckCircle2, ChevronDown, ChevronRight, Circle, Eye, Loader2, XCircle } from "lucide-react";
+import { CheckCircle2, ChevronDown, ChevronRight, Circle, CircleDashed, CircleSlash, Eye, Loader2, XCircle }
+  from "lucide-react";
 
 import type { BlueprintRun, RunLook } from "@/hooks/useBlueprintRun";
 import { cn } from "@/lib/utils";
@@ -93,6 +94,16 @@ function StateIcon({ state }: { state: StepCard["state"] }) {
   if (state === "done") return <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />;
   if (state === "running") return <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />;
   if (state === "failed") return <XCircle className="h-3.5 w-3.5 text-destructive" />;
+  // A PAUSED NODE IS NOT A BROKEN ONE. `skipped` is what every node of a
+  // stopped run gets, and the next build continues from there — so it reads
+  // as not-yet-run, like `waiting`, with a pause mark rather than a cross.
+  if (state === "skipped") {
+    return <CircleDashed className="h-3.5 w-3.5 text-muted-foreground/60" aria-label="Not run yet" />;
+  }
+  // Blocked: something it needed never arrived. Worth noticing, not a crash.
+  if (state === "blocked") {
+    return <CircleSlash className="h-3.5 w-3.5 text-amber-600" aria-label="Blocked" />;
+  }
   return <Circle className="h-3.5 w-3.5 text-muted-foreground/40" />;
 }
 

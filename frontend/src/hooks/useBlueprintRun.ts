@@ -28,7 +28,15 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
 const IDLE_POLLS_BEFORE_GIVING_UP = 4;
 
 /** What the orchestrator says about one node, as the run unfolds. */
-export type NodeState = "waiting" | "running" | "done" | "failed";
+/**
+ * A node's outcome. `skipped` and `blocked` are NOT failures: a paused run
+ * skips every node it had not reached ("paused: stopped by the person") and
+ * the next build continues from there, which is what the panel's own banner
+ * promises. Folding them into `failed` drew a red cross on all 28 nodes of a
+ * build the person had simply stopped (forge-v3, 2026-11-02).
+ */
+export type NodeState =
+  | "waiting" | "running" | "done" | "failed" | "skipped" | "blocked";
 
 export interface RunNode {
   key: string;
@@ -870,13 +878,21 @@ export function reduce(
 
     case "node:failed":
     case "node:blocked":
-    case "node:skipped":
+    case "node:skipped": {
+      // Each says something different and the person reads the difference:
+      // failed is broken, blocked is waiting on something unmet, skipped is
+      // "not run yet" — most often because the run was paused.
+      const state: NodeState =
+        event === "node:failed" ? "failed"
+          : event === "node:blocked" ? "blocked"
+          : "skipped";
       return {
         ...prev,
         nodes: prev.nodes.map((n) =>
-          n.key === data.node ? { ...n, state: "failed", subject: undefined } : n,
+          n.key === data.node ? { ...n, state, subject: undefined } : n,
         ),
       };
+    }
 
     case "forecast":
       return { ...prev, forecast: data as RunForecast };
