@@ -58,7 +58,10 @@ def _app_mcp() -> Any:
 
 def _drawn(svc: Any, app_root: str) -> dict:
     if not any(isinstance(v, dict) for v in svc.doc.get("drawnViews") or []):
-        return {}
+        # No drawing, but the wrapper may be the old client stub that hid
+        # every app's menu (`drawn.project.settle_default_wrapper`).
+        from services.drawn.project import settle_default_wrapper
+        return {"files": ["src/components/DrawnShell.tsx"]} if settle_default_wrapper(app_root) else {}
     from services.drawn.project import project_drawn
     project_drawn(svc.doc, svc.output_dir, app_root)
     return {"files": ["src/components/DrawnShell.tsx"]}
