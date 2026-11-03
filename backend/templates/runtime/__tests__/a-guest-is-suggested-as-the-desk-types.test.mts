@@ -85,7 +85,10 @@ const customers = [
   { Id: "c-kiosk", FirstName: "Tokyo", LastName: "KioskTest853002", Email: "kiosk@example.com" },
   { Id: "c-smith", FirstName: "Ana", LastName: "Smith", Email: "ana.smith@example.com" },
   { Id: "c-inhouse", FirstName: "Walk", LastName: "Inman", Email: null },
+  { Id: "c-hart", FirstName: "Amelia", LastName: "Hart", Email: "amelia.hart@example.com" },
 ];
+// What Mews says changed since a pass: the first time, a cancellation.
+let changed: any[] = [{ ...reservations[0], State: "Canceled" }];
 const asked: { op: string; body: any }[] = [];
 g.fetch = async (url: string, init: any) => {
   const op = url.split("/api/connector/v1/")[1];
@@ -99,7 +102,7 @@ g.fetch = async (url: string, init: any) => {
       return reply({ Reservations: [...reservations, ...extra].filter((r) => body.AccountIds.includes(r.AccountId)) });
     }
     // Two pages the first time; what changed after.
-    if (body.UpdatedUtc) return reply({ Reservations: [{ ...reservations[0], State: "Canceled" }], Cursor: null });
+    if (body.UpdatedUtc) return reply({ Reservations: changed, Cursor: null });
     if (!body.Limitation?.Cursor) return reply({ Reservations: reservations.slice(0, 2), Cursor: "page-2" });
     return reply({ Reservations: reservations.slice(2), Cursor: null });
   }
@@ -151,4 +154,21 @@ const next = await mews.syncStays();
 const nextAsk = asked.filter((a) => a.op === "reservations/getAll/2023-06-06").pop()!.body;
 ok(Boolean(nextAsk.UpdatedUtc?.StartUtc) && !nextAsk.CollidingUtc, "the next sync asks only for what changed since");
 eqJson([next.stays, stays.get("r-left")?.state], [1, "Canceled"], "and keeps the change");
+
+// ── no cron tick: a search brings stale kept stays up to date ──────────────
+// A test deployment runs no scheduled jobs, so a booking made after the first
+// pass never reached the Guest field (kkb5mzo3, 2026-11-03).
+changed = [{ Id: "r-hart", Number: "12", State: "Confirmed", ScheduledStartUtc: day(9), ScheduledEndUtc: day(10),
+             AccountId: "c-hart", AssignedResourceId: null, UpdatedUtc: day(0) }];
+const fresh = asked.length;
+eqJson((await mews.suggestStays("amel")).stays.length, 0, "kept stays a minute old are not refreshed on every keystroke");
+ok(!asked.slice(fresh).some((a) => a.op === "reservations/getAll/2023-06-06" && a.body.UpdatedUtc),
+   "and Mews is not asked for changes");
+sync.set("organisation", { ...sync.get("organisation"), last_run_at: new Date(Date.now() - 10 * 60_000).toISOString() });
+const late = await Promise.all([mews.suggestStays("amel"), mews.suggestStays("amel")]);
+eqJson(late[0].stays.map((s: any) => [s.reservationId, s.guestName]), [["r-hart", "Amelia Hart"]],
+       "kept stays ten minutes old are refreshed first, and the new booking is suggested");
+eqJson(late[0].refreshed, true, "saying it refreshed");
+eqJson(asked.slice(fresh).filter((a) => a.op === "reservations/getAll/2023-06-06" && a.body.UpdatedUtc).length, 1,
+       "two searches at once refresh once");
 done("a-guest-is-suggested-as-the-desk-types");
