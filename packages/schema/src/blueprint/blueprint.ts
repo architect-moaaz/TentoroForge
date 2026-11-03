@@ -1465,6 +1465,10 @@ export const DrawnView = z.object({
   /** A frame's reference (`1:2`, `FIGMA-002/1:2`), `shell`, or `component:<Name>`. */
   key: z.string().min(1),
   kind: z.enum(["screen", "shell", "component"]),
+  /** For a screen: drawn inside its portal's sidebar and top bar. A screen
+   *  drawn without them (onboarding, a public page) is shown as drawn, with
+   *  no shell around it (DITANS D2, 2026-11-03). */
+  framed: z.boolean().optional(),
   /** The React component's name: `TenantsEntitlementsView`. */
   name: z.string().min(1),
   /** The frame it was converted from (a screen's own; a shell's or a

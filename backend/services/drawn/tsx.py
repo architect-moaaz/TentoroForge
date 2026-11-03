@@ -213,12 +213,6 @@ class Emitter:
         if mode not in ("HORIZONTAL", "VERTICAL"):
             return ["relative"]
         out = ["flex", "flex-row" if mode == "HORIZONTAL" else "flex-col"]
-        # WHAT FLOATS IN IT IS PLACED AGAINST IT: an absolute child of a flex
-        # box found the nearest positioned ancestor instead, and a dialog laid
-        # over the page landed a sidebar's width to the left (DITANS, 2026-10-31).
-        if any(isinstance(c, dict) and c.get("layoutPositioning") == "ABSOLUTE" and c.get("visible") is not False
-               for c in node.get("children") or []):
-            out.append("relative")
         if node.get("layoutWrap") == "WRAP":
             out.append("flex-wrap")
         main = str(node.get("primaryAxisAlignItems") or "MIN")
@@ -240,6 +234,27 @@ class Emitter:
                     out.append(_arb(cls, _px(value)))
         return out
 
+    def _dialog_part(self, node: dict, dialog: dict) -> list[str]:
+        """A dialog's scrim fills the window; its panel keeps the edge it is
+        drawn against — a drawer the right, a modal the middle — at any width."""
+        box, frame = _box(node), _box(dialog)
+        try:
+            x, y, w, h = (float(box[k]) for k in ("x", "y", "width", "height"))
+            fx, fy, fw, fh = (float(frame[k]) for k in ("x", "y", "width", "height"))
+        except (KeyError, TypeError, ValueError):
+            return ["absolute", "inset-0"]
+        if w >= fw * 0.95 and h >= fh * 0.9:
+            return ["absolute", "inset-0"]
+        size = [_arb("w", _px(w)), "max-w-full", "overflow-y-auto"]
+        if abs((x + w) - (fx + fw)) < 2:
+            return ["absolute", "top-0", "right-0", "h-full", *size]
+        if abs(x - fx) < 2:
+            return ["absolute", "top-0", "left-0", "h-full", *size]
+        if abs((x + w / 2) - (fx + fw / 2)) < fw * 0.05:
+            return ["absolute", "left-1/2", "top-1/2", "-translate-x-1/2", "-translate-y-1/2", *size,
+                    "max-h-[calc(100vh-48px)]"]
+        return ["absolute", _arb("left", _px(x - fx)), _arb("top", _px(y - fy)), *size]
+
     def _size_classes(self, node: dict, parent: dict | None) -> list[str]:
         """How big a node is, in its parent's terms."""
         box = _box(node)
@@ -249,37 +264,23 @@ class Emitter:
                                            or node.get("layoutPositioning") == "ABSOLUTE")
         h_mode = str(node.get("layoutSizingHorizontal") or "FIXED")
         v_mode = str(node.get("layoutSizingVertical") or "FIXED")
+        if parent is None and node.get("forgeDialog"):
+            # A DIALOG IS SHOWN OVER WHATEVER PAGE OPENS IT, the window's size.
+            return ["fixed", "inset-0", "z-[60]"]
+        if parent is not None and parent.get("forgeDialog"):
+            return self._dialog_part(node, parent)
         if absolute:
             pbox = _box(parent or {})
             out.append("absolute")
-            # FLOATING IN A FLEX BOX, A LAYER KEEPS ITS CONSTRAINTS: a scrim
-            # stretched over the page, a drawer pinned right, a dialog centred
-            # — at any width, not only at the drawing's. In a free frame
-            # everything stays where it is drawn.
-            pinned = pmode in ("HORIZONTAL", "VERTICAL") and node.get("layoutPositioning") == "ABSOLUTE"
-            cons = (node.get("constraints") or {}) if pinned else {}
             try:
-                for axis, start, end, size, origin, extent, mode, translate in (
-                        ("horizontal", "left", "right", "w", "x", "width", h_mode, "-translate-x-1/2"),
-                        ("vertical", "top", "bottom", "h", "y", "height", v_mode, "-translate-y-1/2")):
-                    offset = float(box[origin]) - float(pbox[origin])
-                    length = float(box[extent])
-                    room = float(pbox[extent])
-                    rule = str(cons.get(axis) or "")
-                    if rule in ("LEFT_RIGHT", "TOP_BOTTOM", "SCALE"):
-                        out += [_arb(start, _px(offset)), _arb(end, _px(room - offset - length))]
-                        continue
-                    if rule in ("RIGHT", "BOTTOM"):
-                        out.append(_arb(end, _px(room - offset - length)))
-                    elif rule == "CENTER":
-                        shift = round(offset + length / 2 - room / 2, 2)
-                        out += [_arb(start, f"calc(50%{'+' if shift >= 0 else '-'}{_px(abs(shift))})"), translate]
-                    else:
-                        out.append(_arb(start, _px(offset)))
-                    if mode != "HUG":
-                        out.append(_arb(size, _px(length)))
+                out.append(_arb("left", _px(float(box["x"]) - float(pbox["x"]))))
+                out.append(_arb("top", _px(float(box["y"]) - float(pbox["y"]))))
             except (KeyError, TypeError, ValueError):
                 pass
+            if box.get("width") is not None and h_mode != "HUG":
+                out.append(_arb("w", _px(box["width"])))
+            if box.get("height") is not None and v_mode != "HUG":
+                out.append(_arb("h", _px(box["height"])))
             return out
         if parent is None:
             return ["w-full", "min-h-screen"]
@@ -382,10 +383,18 @@ class Emitter:
         if kind == "TEXT":
             return self._text(node, sizing, pad)
         layout = self._layout_classes(node)
-        # PLACED ABSOLUTELY IS ALREADY A POSITIONED BOX: `relative` beside
-        # `absolute` won, and a drawn scrim fell back into the page's flow.
-        if "absolute" in sizing:
+        # ONE POSITION PER ELEMENT. A free shape placed in its parent came out
+        # `relative absolute`; Tailwind's `relative` wins, so it sat in the flow
+        # over its neighbours (DITANS's menu guide line over the labels, D2,
+        # 2026-11-03). Placed, it is `absolute` — itself a containing block.
+        if "absolute" in sizing or "fixed" in sizing:
             layout = [c for c in layout if c != "relative"]
+        # AND THE BOX IT IS PLACED IN HOLDS IT: an auto-layout row with a child
+        # placed absolutely is its containing block.
+        elif "relative" not in layout and any(isinstance(c, dict) and c.get("visible") is not False
+                                              and c.get("layoutPositioning") == "ABSOLUTE"
+                                              for c in node.get("children") or []):
+            layout = ["relative", *layout]
         classes = [*layout, *sizing, *self._paint_classes(node, style)]
         if node.get("clipsContent"):
             classes.append("overflow-hidden")
