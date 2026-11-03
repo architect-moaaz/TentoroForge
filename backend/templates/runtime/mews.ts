@@ -773,6 +773,20 @@ function _kept(r: any): MewsStay {
   };
 }
 
+/** Kept stays older than this are brought up to date before a suggestion. */
+const STAYS_STALE_MS = 2 * 60_000;
+
+/** One refresh per connection at a time: a desk typing fires several searches. */
+const _syncing = new Map<string, Promise<unknown>>();
+function _syncOnce(connection: string, run: () => Promise<unknown>): Promise<unknown> {
+  let p = _syncing.get(connection);
+  if (!p) {
+    p = run().catch(() => null).finally(() => _syncing.delete(connection));
+    _syncing.set(connection, p);
+  }
+  return p;
+}
+
 /** What a live name search found, for a few seconds: a desk types, Mews limits. */
 const _inHouse = new Map<string, { at: number; stays: MewsStay[] }>();
 
@@ -796,9 +810,19 @@ export async function suggestStays(term: unknown, ref?: unknown, limit = 8):
   // After that the cron tick keeps them fresh, and a search never waits on it.
   const any = _rows(await db.execute(sql`
     SELECT 1 AS one FROM forge_mews_stays WHERE connection = ${connection} LIMIT 1`)).length > 0;
-  if (!any && Date.now() - (state?.last_run_at ? new Date(state.last_run_at).getTime() : 0) > 60_000) {
-    await syncStays(ref, { budgetMs: 15_000 }).catch(() => null);
+  const ranAgo = Date.now() - (state?.last_run_at ? new Date(state.last_run_at).getTime() : 0);
+  if (!any && ranAgo > 60_000) {
+    await _syncOnce(connection, () => syncStays(ref, { budgetMs: 15_000 }));
     refreshed = true;
+  } else if (any && ranAgo > STAYS_STALE_MS) {
+    // KEPT, BUT NOT LATELY: the cron tick is what keeps them fresh, and a test
+    // deployment has none (Vercel runs scheduled jobs on production only) —
+    // Criterion's ten new bookings never reached the Guest field (kkb5mzo3,
+    // 2026-11-03). What changed since the last pass is a page or two.
+    await _syncOnce(connection, () => syncStays(ref, { budgetMs: 5_000 }));
+    refreshed = true;
+  }
+  if (refreshed) {
     state = _rows(await db.execute(sql`
       SELECT synced_through, last_run_at FROM forge_mews_sync WHERE connection = ${connection}`))[0];
   }
