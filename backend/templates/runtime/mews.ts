@@ -196,6 +196,16 @@ function _reachable(hasToken: boolean, enterpriseId: string | null): void {
   }
 }
 
+/** A token sealed with the app's key — or a refusal the administrator can read. */
+async function _seal(token: string): Promise<string> {
+  try {
+    return await encryptSensitive(token);
+  } catch {
+    throw new MewsError("This application has no encryption key yet (SENSITIVE_ENCRYPTION_KEY), so a token cannot be "
+      + "stored safely. Ask Forge to bring the application up to date, then add the token again.", 503);
+  }
+}
+
 export async function addProperty(input: PropertyInput, actorId: string | null): Promise<MewsProperty> {
   await ensure();
   const name = _text(input.name);
@@ -208,7 +218,7 @@ export async function addProperty(input: PropertyInput, actorId: string | null):
   if (enterpriseId && await _enterpriseTaken(enterpriseId, null)) {
     throw new MewsError("That enterprise id already belongs to another property.", 409);
   }
-  const sealed = token ? await encryptSensitive(token) : null;
+  const sealed = token ? await _seal(token) : null;
   const masked = token ? mask(token, "last4") : null;
   const row = _rows(await db.execute(sql`
     INSERT INTO forge_mews_properties (name, enterprise_id, environment, access_token_encrypted, access_token_mask, created_by)
@@ -239,7 +249,7 @@ export async function updateProperty(id: string, input: PropertyInput): Promise<
     ? sql`access_token_encrypted = access_token_encrypted, access_token_mask = access_token_mask`
     : token === null
       ? sql`access_token_encrypted = NULL, access_token_mask = NULL`
-      : sql`access_token_encrypted = ${await encryptSensitive(token)}, access_token_mask = ${mask(token, "last4")}`;
+      : sql`access_token_encrypted = ${await _seal(token)}, access_token_mask = ${mask(token, "last4")}`;
   const checkSql = recheck ? sql`, check_ok = NULL, checked_at = NULL, check_message = NULL, enterprise_name = NULL` : sql``;
   const row = _rows(await db.execute(sql`
     UPDATE forge_mews_properties

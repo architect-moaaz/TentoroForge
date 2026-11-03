@@ -3250,10 +3250,12 @@ def _ensure_env_file(output_path: Path, project_id: str | None = None) -> None:
         # pair now; one that has a pair keeps it (a new pair would orphan
         # every subscribed device).
         from services.push_keys import VAPID_KEYS, generate_vapid
-        present = {line.split("=", 1)[0].strip() for line in env_file.read_text("utf-8").splitlines() if "=" in line}
+        present = {line.split("=", 1)[0].strip() for line in env_file.read_text("utf-8").splitlines()
+                   if "=" in line and line.split("=", 1)[1].strip() and not line.lstrip().startswith("#")}
         if not all(k in present for k in VAPID_KEYS):
             pair = generate_vapid()
-            _upsert_env_keys(env_file, {k: v for k, v in pair.items() if k not in present})
+            _write_app_keys(env_file, {k: v for k, v in pair.items() if k not in present})
+        ensure_sensitive_key(env_file)
         return
 
     # Use a concrete port: postgres-js can't expand shell vars at runtime.
@@ -3374,6 +3376,41 @@ def _ensure_providers_import(providers_file: Path, module: str, why: str) -> Non
             break
     lines.insert(insert_at, f'// Auto-added by runtime_injector: {why}\nimport "{module}";')
     providers_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def ensure_sensitive_key(env_file: Path) -> bool:
+    """THE SEALING KEY, ONCE. An app whose `.env.local` already existed when
+    the runtime was injected got its push keys filled in and never this one,
+    so nothing it held could be sealed: the Case Management apps on forge-v3
+    could not store a Mews property's token (500, gvrhwft9, 2026-11-03).
+    Written only where the file has no non-empty value for it — a key that is
+    there is never replaced, or every value sealed with it is lost. Returns
+    whether one was written."""
+    if not env_file.is_file():
+        return False
+    for line in env_file.read_text("utf-8").splitlines():
+        name, _, value = line.partition("=")
+        if name.strip() == "SENSITIVE_ENCRYPTION_KEY" and value.strip():
+            return False
+    import base64
+    import secrets
+    _write_app_keys(env_file, {"SENSITIVE_ENCRYPTION_KEY": base64.b64encode(secrets.token_bytes(32)).decode("ascii")})
+    return True
+
+
+def _write_app_keys(env_file: Path, keys: dict[str, str]) -> None:
+    """Keys the application owns, written ABOVE the platform's managed block:
+    everything below its marker is rewritten by `services.env_writer`, so a
+    key appended there is lost on the next integrations sync. Replaces an
+    empty line for the same name; never a line with a value."""
+    from services.env_writer import _MANAGED_MARKER
+    lines = env_file.read_text("utf-8").splitlines() if env_file.is_file() else []
+    lines = [ln for ln in lines if not (ln.partition("=")[0].strip() in keys and not ln.partition("=")[2].strip())]
+    at = next((i for i, ln in enumerate(lines) if ln.strip() == _MANAGED_MARKER), len(lines))
+    while at > 0 and not lines[at - 1].strip():
+        at -= 1
+    lines[at:at] = [f"{k}={v}" for k, v in keys.items()]
+    env_file.write_text("\n".join(lines).rstrip() + "\n", "utf-8")
 
 
 def _upsert_env_keys(env_file: Path, updates: dict[str, str]) -> None:

@@ -309,6 +309,12 @@ def refresh_engine(app_root: str | Path, doc: dict | None = None, *, complete: b
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(src, dst)
         changed.append(rel)
+    # A property's token is sealed with the app's key; an app built before the
+    # key was written into an existing `.env.local` has none (gvrhwft9).
+    if len(mews_wanted) > 1:
+        from services.runtime_injector import ensure_sensitive_key
+        if ensure_sensitive_key(root / ".env.local"):
+            changed.append(".env.local")
     # THE WORKFLOW ROUTES ARE WRITTEN BY CODE, not copied from a file, so the
     # lists above never carried them: an app kept the route it was built with.
     # TCommerce's kept one that gave a signed-out shopper no guest token, so the
