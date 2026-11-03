@@ -42,6 +42,7 @@ from __future__ import annotations
 import re
 
 import asyncio
+from pathlib import Path
 from typing import Any
 
 #: Fields this verb needs. `token_env` is the NAME of an environment variable,
@@ -261,6 +262,19 @@ def connect(output_dir: Any, *, figma_url: str, token_env: str,
 
     record = attach(svc, ref, treat_as=treat_as)
     finish()
+    # THE DESIGN'S LOOK IS THE APP'S FROM THE MOMENT IT IS CONNECTED. Its
+    # colours, faces and corners reached `designSystem` only while a build's
+    # design step settled (`orchestrator._settle_design_system`); a design
+    # connected to an app already built — Criterion's, after its first build —
+    # changed nothing, and the app stayed the platform's default blue beside a
+    # deep-purple drawing (kkb5mzo3, 2026-11-03). Same precedence as the build:
+    # what the design states over what the agent chose; then written out.
+    from services.figma.projection import apply_design_reference
+    looked = apply_design_reference(svc)
+    app_root = Path(output_dir) / "app"
+    if looked.get("designSystem") and (app_root / "package.json").is_file():
+        from services.smith.reproject import everything
+        everything(svc, str(app_root))
     summary = summarise(ref, record)
     others = [str(s.get("id")) + (f" ({s.get('name') or s.get('url') or s.get('fileKey')})")
               for s in svc.doc.get("designSources") or [] if s.get("id") != record.get("id")]

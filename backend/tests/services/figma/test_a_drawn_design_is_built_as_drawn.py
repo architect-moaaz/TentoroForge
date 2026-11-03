@@ -383,6 +383,29 @@ def test_the_primary_is_what_buttons_are_painted_in_and_icons_draw_no_borders():
     assert "border-[#000000]" not in _document_to_pseudocode(doc)
 
 
+def test_a_dark_button_is_the_primary_and_a_bells_dot_is_not_a_button():
+    """Criterion (kkb5mzo3): every button deep indigo, and on every screen a
+    bell — a pressable with no fill whose only filled child is its red unread
+    dot. The primary came out red."""
+    from services.figma.styles import action_colours
+
+    def box(w, h):
+        return {"x": 0, "y": 0, "width": w, "height": h}
+
+    indigo = {"r": 25 / 255, "g": 19 / 255, "b": 89 / 255}
+    red = {"r": 201 / 255, "g": 55 / 255, "b": 44 / 255}
+    frame = {"type": "FRAME", "children": [
+        *[{"type": "FRAME", "name": "Button - Notifications", "absoluteBoundingBox": box(38, 38), "children": [
+            {"type": "ELLIPSE", "name": "dot", "absoluteBoundingBox": box(8, 8), "fills": [{"type": "SOLID", "color": red}]}]}
+          for _ in range(3)],
+        {"type": "FRAME", "name": "Button", "absoluteBoundingBox": box(120, 36), "children": [
+            {"type": "RECTANGLE", "absoluteBoundingBox": box(120, 36), "fills": [{"type": "SOLID", "color": indigo}]}]},
+        {"type": "FRAME", "name": "Button", "absoluteBoundingBox": box(120, 36),
+         "fills": [{"type": "SOLID", "color": indigo}]},
+    ]}
+    assert action_colours([frame]) == {"#191359": 2}
+
+
 def test_a_reproduced_page_is_painted_in_the_drawings_colours():
     from services.blueprint.ui_engineer import _drawn_findings
 
@@ -432,3 +455,48 @@ def test_the_drawn_primary_keeps_the_design_system_valid(tmp_path):
     svc = BlueprintService.create(output_dir=str(tmp_path), app_id="v", name="V", domain="unknown")
     svc.doc["designSystem"] = {**(svc.doc.get("designSystem") or {}), **ds}
     svc.save()
+
+
+def test_a_design_connected_after_the_build_gives_the_app_its_look(tmp_path, monkeypatch):
+    """Criterion (kkb5mzo3): the design was connected after the first build, and
+    its colours reached `designSystem` only while a build's design step settled —
+    so the app stayed the platform's blue beside a deep-purple drawing."""
+    from services.blueprint.service import BlueprintService
+    from services.figma import reference as reference_mod
+    from services.figma.reference import _attach_structure
+    from services.smith import figma_connect, reproject
+
+    def frame(i):
+        purple, indigo = {"r": 0.17, "g": 0.10, "b": 0.32}, {"r": 25 / 255, "g": 19 / 255, "b": 89 / 255}
+        return {"id": f"1:{i}", "type": "FRAME", "name": f"Screen {i}", "absoluteBoundingBox": {"width": 1271, "height": 900},
+                "fills": [{"type": "SOLID", "color": {"r": 0.98, "g": 0.97, "b": 0.99}}],
+                "children": [
+                    {"type": "FRAME", "name": "Sidebar", "absoluteBoundingBox": {"width": 248, "height": 900},
+                     "fills": [{"type": "SOLID", "color": purple}]},
+                    *[{"type": "FRAME", "name": "Button", "absoluteBoundingBox": {"width": 120, "height": 36},
+                       "fills": [{"type": "SOLID", "color": indigo}], "children": [_text("Create refund")]} for _ in range(3)],
+                    *[{"type": "FRAME", "name": f"card {c}", "absoluteBoundingBox": {"width": 300, "height": 120},
+                       "fills": [{"type": "SOLID", "color": {"r": 1, "g": 1, "b": 1}}], "children": [_text("126")]}
+                      for c in range(4)]]}
+
+    ref = DesignReference(target=FigmaTarget(file_key="zYxW9876VuTs", node_id=""))
+    for i in range(4):
+        doc = frame(i)
+        ref.screens.append(ScreenRef(node_id=doc["id"], name=doc["name"], width=1271, height=900, image=PNG))
+        _attach_structure(ref, ref.screens[-1], [{"type": "structured", "data": doc}])
+
+    async def read(gateway, target, **kw):
+        return ref
+    monkeypatch.setattr(reference_mod, "extract", read)
+    projected = []
+    monkeypatch.setattr(reproject, "everything", lambda svc, root: projected.append(root) or [])
+    BlueprintService.create(output_dir=str(tmp_path), app_id="c2", name="Refunds", domain="unknown",
+                            description="refunds").save()
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "package.json").write_text("{}")
+
+    figma_connect.connect(tmp_path, figma_url="https://www.figma.com/design/zYxW9876VuTs/Criterion",
+                          token_env="", treat_as="specification")
+    colors = BlueprintService.load(output_dir=str(tmp_path)).doc["designSystem"]["colors"]
+    assert colors["primary"] == "#191359" and colors["background"] == "#faf7fc"
+    assert projected == [str(tmp_path / "app")], "the built app is written out in its new look"
