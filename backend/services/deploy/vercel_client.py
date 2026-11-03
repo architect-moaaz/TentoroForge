@@ -41,6 +41,15 @@ BASE = "https://api.vercel.com"
 UPLOAD_BACKOFF_S: tuple[float, ...] = (1.0, 3.0, 8.0)
 
 
+class VercelMissingFiles(RuntimeError):
+    """A deployment named files Vercel does not hold yet: `missing` lists
+    their SHAs. The caller uploads those and asks again."""
+
+    def __init__(self, missing: list[str]):
+        super().__init__(f"Vercel is missing {len(missing)} file(s)")
+        self.missing = missing
+
+
 def _raise_with_body(r: httpx.Response, op: str) -> None:
     """Bare `raise_for_status()` on Vercel gives only URL + status; a 400
     could be reserved name, malformed files, quota, permissions… we can't
@@ -319,6 +328,17 @@ class VercelClient:
                 "projectSettings": {"framework": "nextjs"},
             },
         )
+        # ONLY WHAT VERCEL HAS NOT GOT. A deployment that names a file by a
+        # SHA Vercel does not hold is refused with `missing_files` and the
+        # list of those SHAs — the way to learn which of an app's files are
+        # new, so a publish uploads a handful instead of all of them.
+        if r.status_code == 400:
+            try:
+                err = (r.json() or {}).get("error") or {}
+            except ValueError:
+                err = {}
+            if err.get("code") == "missing_files":
+                raise VercelMissingFiles([str(s) for s in (err.get("missing") or [])])
         _raise_with_body(
             r, f"create_deployment name={name!r} project={project_id!r} files={len(files)}"
         )

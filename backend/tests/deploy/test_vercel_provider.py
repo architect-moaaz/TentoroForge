@@ -288,3 +288,52 @@ async def test_a_redeploy_the_live_data_takes_goes_on(
     events = [e async for e in provider.publish(snap)]
     assert any(e.stage == "migrate" and "takes the change" in e.message for e in events)
     assert events[-1].stage == "done"
+
+
+
+async def _publish(db_session, project_id, tmp_path, vercel, monkeypatch) -> list:
+    async def _fake_smoke(url: str):
+        return True, None
+    monkeypatch.setattr("services.deploy.vercel_provider._smoke_test_db", _fake_smoke)
+    provider = VercelDeployProvider(db=db_session, vercel=vercel, neon=_mock_neon_client())
+    snap = DeploySnapshot(project_id=str(project_id), project_slug="acme", output_dir=str(tmp_path), integrations={})
+    return [e async for e in provider.publish(snap)]
+
+
+@pytest.mark.asyncio
+async def test_a_publish_uploads_only_the_files_vercel_has_not_got(
+    db_session, sample_project_id, tmp_path, monkeypatch
+) -> None:
+    """forge-v3, 2026-11-03: every publish uploaded all 2,917 of kkb5mzo3's
+    files, a dozen publishes spent the team's 40,000 uploads a day, and every
+    app's publish was refused with 429. The deployment is asked for by SHA;
+    only the SHAs Vercel names as missing are uploaded, then it is asked again."""
+    from services.deploy.vercel_client import VercelMissingFiles
+
+    _mk_app_tree(tmp_path)
+    vercel = _mock_vercel_client()
+    calls: list[int] = []
+
+    async def create_deployment(**kwargs):
+        calls.append(len(kwargs["files"]))
+        if len(calls) == 1:
+            page = next(f for f in kwargs["files"] if f["file"].endswith("page.tsx"))
+            raise VercelMissingFiles([page["sha"]])
+        return {"id": "dpl_xyz", "url": "acme-a1b2.vercel.app"}
+
+    vercel.create_deployment.side_effect = create_deployment
+    events = await _publish(db_session, sample_project_id, tmp_path, vercel, monkeypatch)
+    assert len(calls) == 2 and calls[0] == calls[1] and calls[0] > 1, "the whole app is named both times"
+    assert vercel.upload_file.call_count == 1, "only the file Vercel lacked is uploaded"
+    assert any("1 new or changed" in e.message for e in events if e.stage == "upload")
+    assert events[-1].stage == "done"
+
+
+@pytest.mark.asyncio
+async def test_a_publish_vercel_already_holds_uploads_nothing(
+    db_session, sample_project_id, tmp_path, monkeypatch
+) -> None:
+    _mk_app_tree(tmp_path)
+    vercel = _mock_vercel_client()
+    await _publish(db_session, sample_project_id, tmp_path, vercel, monkeypatch)
+    assert vercel.upload_file.call_count == 0 and vercel.create_deployment.call_count == 1

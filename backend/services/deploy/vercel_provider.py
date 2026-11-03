@@ -38,7 +38,7 @@ from services.deploy.env_sync import build_deploy_env
 from services.deploy.neon_client import NeonClient
 from services.deploy.provider import DeployEvent, DeploySnapshot
 from services.deploy.snapshot import build_snapshot_upload
-from services.deploy.vercel_client import VercelClient
+from services.deploy.vercel_client import VercelClient, VercelMissingFiles
 
 # Vercel build usually completes in 60–120 s for a fresh Next.js app. THE
 # CEILING IS VERCEL'S OWN, 45 minutes: at 300 s DITANS (400 pages, 8,000
@@ -595,9 +595,16 @@ class VercelDeployProvider:
                 vd = await self.vercel.redeploy(_slugify(snapshot.project_slug), promoted.vercel_deployment_id,
                                                 target=envs.vercel_target(envs.PRODUCTION))
             else:
+                # ONLY THE FILES VERCEL HAS NOT GOT. Every publish used to
+                # upload all of an app's files (2,917 for kkb5mzo3) though
+                # Vercel keeps them by SHA; a dozen publishes spent the team's
+                # 40,000 uploads a day and every app's publish was refused
+                # with 429 until the next day (forge-v3, 2026-11-03). The
+                # deployment is asked for by SHA first; Vercel names what it
+                # lacks, those are uploaded, and it is asked for again.
                 yield DeployEvent(
                     "upload",
-                    f"Uploading {len(files)} files to Vercel…",
+                    f"Sending {len(files)} files to Vercel…",
                 )
                 upload_sem = asyncio.Semaphore(8)
 
@@ -605,18 +612,30 @@ class VercelDeployProvider:
                     async with upload_sem:
                         await self.vercel.upload_file(entry["sha"], entry["raw"])
 
-                await asyncio.gather(*(_one(f) for f in files))
-
                 deploy_files = [
                     {"file": f["file"], "sha": f["sha"], "size": f["size"]}
                     for f in files
                 ]
-                vd = await self.vercel.create_deployment(
-                    name=_slugify(snapshot.project_slug),
-                    project_id=vercel_project_id,
-                    files=deploy_files,
-                    target=envs.vercel_target(side),
-                )
+
+                async def _create() -> dict:
+                    return await self.vercel.create_deployment(
+                        name=_slugify(snapshot.project_slug),
+                        project_id=vercel_project_id,
+                        files=deploy_files,
+                        target=envs.vercel_target(side),
+                    )
+
+                try:
+                    vd = await _create()
+                except VercelMissingFiles as lacking:
+                    wanted = set(lacking.missing)
+                    todo = [f for f in files if f["sha"] in wanted] or files
+                    yield DeployEvent(
+                        "upload",
+                        f"Uploading {len(todo)} new or changed files to Vercel…",
+                    )
+                    await asyncio.gather(*(_one(f) for f in todo))
+                    vd = await _create()
             deployment_id = vd["id"]
             vercel_url = vd["url"]
             row.vercel_deployment_id = deployment_id

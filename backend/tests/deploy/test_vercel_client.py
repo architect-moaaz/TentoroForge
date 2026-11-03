@@ -181,3 +181,34 @@ async def test_raises_http_error_on_non_2xx() -> None:
                 await c.create_project(name="acme")
         finally:
             await c.close()
+
+
+
+@pytest.mark.asyncio
+async def test_a_deployment_naming_files_vercel_lacks_says_which() -> None:
+    """Vercel answers 400 `missing_files` with the SHAs it does not hold; the
+    client hands them back so only those are uploaded."""
+    from services.deploy.vercel_client import VercelMissingFiles
+    async with respx.mock(assert_all_called=True) as rmock:
+        rmock.post("https://api.vercel.com/v13/deployments").mock(return_value=Response(
+            400, json={"error": {"code": "missing_files", "message": "Missing files", "missing": ["aaa", "bbb"]}}))
+        c = VercelClient(token="tk", team_id="tm")
+        try:
+            with pytest.raises(VercelMissingFiles) as got:
+                await c.create_deployment(name="acme", project_id="prj", files=[{"file": "a", "sha": "aaa", "size": 1}])
+        finally:
+            await c.close()
+    assert got.value.missing == ["aaa", "bbb"]
+
+
+@pytest.mark.asyncio
+async def test_any_other_refused_deployment_still_says_why() -> None:
+    async with respx.mock(assert_all_called=True) as rmock:
+        rmock.post("https://api.vercel.com/v13/deployments").mock(return_value=Response(
+            400, json={"error": {"code": "bad_request", "message": "nope"}}))
+        c = VercelClient(token="tk", team_id="tm")
+        try:
+            with pytest.raises(RuntimeError, match="nope"):
+                await c.create_deployment(name="acme", project_id="prj", files=[])
+        finally:
+            await c.close()
