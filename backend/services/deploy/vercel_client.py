@@ -29,8 +29,11 @@ Endpoints used:
 """
 from __future__ import annotations
 
+import asyncio
+import email.utils
 import os
-from typing import Any
+import time
+from typing import Any, Callable
 
 import httpx
 
@@ -39,6 +42,56 @@ BASE = "https://api.vercel.com"
 #: Pauses between retries of one file upload (seconds); its length is the
 #: number of retries. Module-level so a test can make them instant.
 UPLOAD_BACKOFF_S: tuple[float, ...] = (1.0, 3.0, 8.0)
+
+#: A 429 that says when the limit resets is waited out — one wait at most
+#: RATE_LIMIT_MAX_WAIT_S, all waits of one client (one publish) at most
+#: RATE_LIMIT_BUDGET_S. Longer than that and the upload fails saying when to
+#: try again; the files already uploaded stay on Vercel for that next try.
+RATE_LIMIT_MAX_WAIT_S: float = 120.0
+RATE_LIMIT_BUDGET_S: float = 300.0
+#: Times one upload waits out a 429 before it gives up.
+RATE_LIMIT_RETRIES: int = 6
+
+# The clock and the pause, module-level so a test can stand in for both.
+_now: Callable[[], float] = time.time
+_sleep = asyncio.sleep
+
+
+class VercelMissingFiles(RuntimeError):
+    """A deployment named files Vercel does not hold yet: `missing` lists
+    their SHAs. The caller uploads those and asks again."""
+
+    def __init__(self, missing: list[str]):
+        super().__init__(f"Vercel is missing {len(missing)} file(s)")
+        self.missing = missing
+
+
+def _rate_limit_wait(r: httpx.Response) -> float | None:
+    """Seconds until a 429's limit resets, from `Retry-After` (seconds or an
+    HTTP date), `x-ratelimit-reset` (epoch seconds) or the body's
+    `error.limit.reset`; None when the answer gives no hint."""
+    retry_after = r.headers.get("retry-after")
+    if retry_after:
+        try:
+            return max(0.0, float(retry_after))
+        except ValueError:
+            try:
+                return max(0.0, email.utils.parsedate_to_datetime(retry_after).timestamp() - _now())
+            except (TypeError, ValueError):
+                pass
+    reset: Any = r.headers.get("x-ratelimit-reset")
+    if reset is None:
+        try:
+            reset = ((r.json().get("error") or {}).get("limit") or {}).get("reset")
+        except Exception:
+            reset = None
+    try:
+        reset = float(reset)
+    except (TypeError, ValueError):
+        return None
+    if reset > 1e12:  # epoch milliseconds
+        reset /= 1000.0
+    return max(0.0, reset - _now())
 
 
 def _raise_with_body(r: httpx.Response, op: str) -> None:
@@ -73,6 +126,10 @@ class VercelClient:
             headers={"Authorization": f"Bearer {self.token}"},
             timeout=timeout,
         )
+        # One rate limit for the whole team: when an upload hears a 429, every
+        # upload of this client holds off until `_paused_until` (epoch s).
+        self._paused_until = 0.0
+        self._rate_waited = 0.0
 
     # ── Projects ────────────────────────────────────────────────────
 
@@ -248,7 +305,12 @@ class VercelClient:
 
     # ── Deployments ─────────────────────────────────────────────────
 
-    async def upload_file(self, sha: str, raw: bytes) -> None:
+    async def upload_file(
+        self,
+        sha: str,
+        raw: bytes,
+        on_wait: Callable[[str], None] | None = None,
+    ) -> None:
         """Upload a single file to Vercel's blob store, keyed by SHA1.
 
         Vercel's POST /v2/files takes the raw bytes as the request body
@@ -266,9 +328,15 @@ class VercelClient:
         # file failed Med Tracker's whole publish (forge-v3, 2026-09-29).
         # An upload is idempotent by SHA, so a 5xx, a 429 or a dropped
         # connection is retried with a short backoff; a 4xx is an answer.
-        import asyncio
+        # A 429 THAT SAYS WHEN IS WAITED OUT. DITANS's publish died on
+        # `api-upload-paid` (forge-v3, 2026-11-03): three short backoffs are
+        # nothing to a limit that resets in a minute. `on_wait` hears each
+        # pause once, whichever upload hit it.
         attempts = len(UPLOAD_BACKOFF_S) + 1
-        for attempt in range(attempts):
+        attempt = 0
+        rate_waits = 0
+        while True:
+            await self._hold_while_paused()
             try:
                 r = await self._client.post(
                     f"{BASE}/v2/files",
@@ -282,13 +350,56 @@ class VercelClient:
             except httpx.TransportError:
                 if attempt == attempts - 1:
                     raise
-                await asyncio.sleep(UPLOAD_BACKOFF_S[attempt])
+                await _sleep(UPLOAD_BACKOFF_S[attempt])
+                attempt += 1
                 continue
+            if r.status_code == 429:
+                wait = _rate_limit_wait(r)
+                if wait is not None and rate_waits < RATE_LIMIT_RETRIES:
+                    rate_waits += 1
+                    self._pause_for(wait, r, on_wait)
+                    continue
             if (r.status_code >= 500 or r.status_code == 429) and attempt < attempts - 1:
-                await asyncio.sleep(UPLOAD_BACKOFF_S[attempt])
+                await _sleep(UPLOAD_BACKOFF_S[attempt])
+                attempt += 1
                 continue
             _raise_with_body(r, f"upload_file sha={sha!r} size={len(raw)}")
             return
+
+    async def _hold_while_paused(self) -> None:
+        delay = self._paused_until - _now()
+        if delay > 0:
+            await _sleep(delay)
+
+    def _pause_for(
+        self, wait: float, r: httpx.Response, on_wait: Callable[[str], None] | None
+    ) -> None:
+        """Hold every upload until the limit resets, or raise when that is
+        further off than a publish waits. A pause other uploads already set
+        is joined silently; only a new or longer one is told and counted."""
+        wait = max(wait, 1.0)
+        until = _now() + wait
+        if until <= self._paused_until + 1.0:
+            return
+        if wait > RATE_LIMIT_MAX_WAIT_S or self._rate_waited + wait > RATE_LIMIT_BUDGET_S:
+            try:
+                body = r.json()
+            except Exception:
+                body = r.text
+            at = time.strftime("%H:%M UTC", time.gmtime(until))
+            raise RuntimeError(
+                f"Vercel upload_file failed: status=429 — the upload rate limit resets in "
+                f"{round(wait)}s (at {at}), longer than a publish waits. The files uploaded "
+                f"so far stay on Vercel; publishing again after {at} uploads only the rest. "
+                f"body={body!r}"
+            )
+        self._rate_waited += wait
+        self._paused_until = until
+        if on_wait is not None:
+            on_wait(
+                f"Vercel's upload rate limit was reached — waiting {round(wait)}s for it "
+                f"to reset, then carrying on."
+            )
 
     async def create_deployment(
         self,
@@ -319,6 +430,17 @@ class VercelClient:
                 "projectSettings": {"framework": "nextjs"},
             },
         )
+        # ONLY WHAT VERCEL HAS NOT GOT. A deployment that names a file by a
+        # SHA Vercel does not hold is refused with `missing_files` and the
+        # list of those SHAs — the way to learn which of an app's files are
+        # new, so a publish uploads a handful instead of all of them.
+        if r.status_code == 400:
+            try:
+                err = (r.json() or {}).get("error") or {}
+            except ValueError:
+                err = {}
+            if err.get("code") == "missing_files":
+                raise VercelMissingFiles([str(s) for s in (err.get("missing") or [])])
         _raise_with_body(
             r, f"create_deployment name={name!r} project={project_id!r} files={len(files)}"
         )

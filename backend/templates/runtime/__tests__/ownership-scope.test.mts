@@ -58,8 +58,13 @@ function matches(row: any, c: Cond | undefined): boolean {
     case "lt": return row[c.col] < (c.val as any);
     // A subquery (`inArray(col, db.select(...).from(...).where(...))`) is
     // evaluated against the same in-memory rows, its ids the set.
-    case "in": return (Array.isArray(c.vals) ? c.vals : runQuery((c.vals as any).__state).map((r) => r.id))
-      .includes(row[c.col]);
+    // The set is the column the subquery selects (`{ id }`, `{ v: organisationId }`).
+    case "in": {
+      if (Array.isArray(c.vals)) return c.vals.includes(row[c.col]);
+      const st = (c.vals as any).__state;
+      const key = Object.keys(st.shape ?? {})[0] ?? "id";
+      return runQuery(st).map((r) => r[key]).includes(row[c.col]);
+    }
     case "isNull": return row[c.col] == null;
     case "isNotNull": return row[c.col] != null;
     case "not": return !matches(row, c.cond);
@@ -71,7 +76,14 @@ function matches(row: any, c: Cond | undefined): boolean {
     case "or": return c.conds.some((x) => matches(row, x));
     // `sql\`false\`` is how scopeConditions fails closed; everything else a
     // template emits (date_trunc, tsquery) is not exercised here.
-    case "raw": return c.text.trim() !== "false";
+    // `lower(col) = lower(value)`: a member found by their email, any case.
+    case "raw": {
+      if (/^lower\(\?\) = lower\(\?\)$/.test(c.text.trim())) {
+        const [col, val] = (c as any).values;
+        return String(row[col.__col] ?? "").toLowerCase() === String(val).toLowerCase();
+      }
+      return c.text.trim() !== "false";
+    }
   }
 }
 
@@ -105,6 +117,11 @@ const carts = makeTable(tableOf("Cart"), fieldsOf("Cart"));
 const cartItems = makeTable(tableOf("CartItem"), fieldsOf("CartItem"));
 // Listing: everyone reads, the vendor writes (`reads: "everyone"`).
 const listings = makeTable(tableOf("Listing"), fieldsOf("Listing"));
+// Opening: an organisation's, reached by its members (OrgMember by email).
+const orgMembers = makeTable(tableOf("OrgMember"), fieldsOf("OrgMember"));
+const openings = makeTable(tableOf("Opening"), fieldsOf("Opening"));
+const BURJEEL = "org-burjeel";
+const MEDSTAFF = "org-medstaff";
 const GUEST_ONE = "6f1c2b8e-0000-4000-8000-000000000001";
 const GUEST_TWO = "6f1c2b8e-0000-4000-8000-000000000002";
 const ST_GILES = "prop-st-giles";
@@ -148,6 +165,17 @@ const ROWS: Record<string, any[]> = {
     { id: "l1", vendorId: ALICE, title: "Alice lamp", createdAt: d(1) },
     { id: "l2", vendorId: BOB, title: "Bob rug", createdAt: d(2) },
   ],
+  [orgMembers.__name]: [
+    { id: "m1", organisationId: BURJEEL, email: "Rania@Burjeel.example", createdAt: d(1) },
+    { id: "m2", organisationId: MEDSTAFF, email: "ops@medstaff.example", createdAt: d(2) },
+    { id: "m3", organisationId: BURJEEL, email: "both@example.test", createdAt: d(3) },
+    { id: "m4", organisationId: MEDSTAFF, email: "both@example.test", createdAt: d(4) },
+  ],
+  [openings.__name]: [
+    { id: "o1", organisationId: BURJEEL, title: "ICU Staff Nurse", createdAt: d(1) },
+    { id: "o2", organisationId: BURJEEL, title: "Charge Nurse", createdAt: d(2) },
+    { id: "o3", organisationId: MEDSTAFF, title: "Locum Pharmacist", createdAt: d(3) },
+  ],
   [refundCases.__name]: [
     { id: "r1", propertyId: ST_GILES, guestName: "Patel", createdAt: d(1) },
     { id: "r2", propertyId: ST_GILES, guestName: "Okafor", createdAt: d(2) },
@@ -177,8 +205,10 @@ function runQuery(state: any): any[] {
     }
     return [...groups].map(([label, value]) => ({ label, value }));
   }
-  // Plain row select.
-  let out = rows.map((r) => ({ ...r }));
+  // Plain row select; `select({ v: table.col })` picks those columns, as drizzle does.
+  const picks = shape && Object.values(shape).every((v: any) => v?.__col)
+    ? Object.entries(shape).map(([k, v]: [string, any]) => [k, v.__col]) : null;
+  let out = rows.map((r) => picks ? Object.fromEntries(picks.map(([k, c]) => [k, r[c]])) : { ...r });
   if (state.offset) out = out.slice(state.offset);
   if (state.limit != null) out = out.slice(0, state.limit);
   return out;
@@ -339,6 +369,8 @@ engine.registerEntity(appointments.__name, appointments, { slug: appointments.__
 engine.registerEntity(carts.__name, carts, { slug: carts.__name });
 engine.registerEntity(cartItems.__name, cartItems, { slug: cartItems.__name });
 engine.registerEntity(listings.__name, listings, { slug: listings.__name });
+engine.registerEntity(orgMembers.__name, orgMembers, { slug: orgMembers.__name });
+engine.registerEntity(openings.__name, openings, { slug: openings.__name });
 
 // ── Assertions ─────────────────────────────────────────────────────────────
 
@@ -653,6 +685,50 @@ console.log("through: a parent books for their own child, not anyone's");
     "ValidationError", "nor can an appointment be moved onto their child");
   const onBehalf = await engine.create(appointments.__name, { childId: "c-max", status: "booked" }, asAdmin);
   ok(!!onBehalf, "an administrator books for any child");
+}
+
+// ── An organisation's rows are its members' ────────────────────────────────
+
+console.log("member scope: an organisation's rows reach its members, and no one else");
+{
+  const rania = { user: { id: "u-rania", email: "rania@burjeel.example", role: "Recruiter" } };
+  const ops = { user: { id: "u-ops", email: "ops@medstaff.example", role: "Agency User" } };
+  const both = { user: { id: "u-both", email: "both@example.test", role: "Recruiter" } };
+  const newcomer = { user: { id: "u-new", email: "new@qa.example", role: "Recruiter" } };
+  eqJson(ids((await engine.query(openings.__name, {}, rania)).data), ["o1", "o2"],
+    "a Burjeel member reads Burjeel's openings, found by email in any case");
+  eqJson(ids((await engine.query(openings.__name, {}, ops)).data), ["o3"], "a MedStaff member reads MedStaff's");
+  eqJson(ids((await engine.query(openings.__name, {}, both)).data), ["o1", "o2", "o3"],
+    "a member of both reads both");
+  eqJson(ids((await engine.query(openings.__name, {}, newcomer)).data), [],
+    "a new account in no organisation reads none (QA D-59)");
+  eqJson((await engine.query(openings.__name, {}, newcomer)).total, 0, "and counts none");
+  eqJson(ids((await engine.query(openings.__name, {}, {})).data), [], "nor does a visitor");
+  eqJson(ids((await engine.query(openings.__name, {}, asAdmin)).data), ["o1", "o2", "o3"],
+    "an exempt role reads every organisation's");
+  eqJson(ids((await engine.query(orgMembers.__name, { filter: { email: "new@qa.example" } }, newcomer)).data), [],
+    "a newcomer's own-membership lookup finds nothing, so a page falls back to nothing");
+  eqJson(ids((await engine.query(orgMembers.__name, {}, rania)).data), ["m1", "m3"],
+    "the membership record is scoped by the same rule: Burjeel's members only");
+  await throwsNamed(() => engine.update(openings.__name, "o3", { title: "taken" }, rania),
+    "NotFoundError", "Rania cannot change MedStaff's opening");
+
+  const made = await engine.create(openings.__name, { title: "Theatre Nurse" }, rania);
+  eqJson(made.data.organisationId, BURJEEL, "a member of one organisation files in it without saying so");
+  await throwsNamed(() => engine.create(openings.__name, { title: "x", organisationId: MEDSTAFF }, rania),
+    "ValidationError", "and cannot file in another");
+  await throwsNamed(() => engine.create(openings.__name, { title: "x" }, both),
+    "ValidationError", "a member of two is asked which");
+  await throwsNamed(() => engine.update(openings.__name, "o1", { organisationId: MEDSTAFF }, rania),
+    "ValidationError", "a row is not moved to an organisation they are not in");
+
+  const founded = await engine.create(orgMembers.__name, { organisationId: "org-qa-agency", email: "new@qa.example" }, newcomer);
+  eqJson(founded.data.organisationId, "org-qa-agency", "whoever registers an organisation becomes its first member");
+  eqJson(ids((await engine.query(orgMembers.__name, {}, newcomer)).data), [founded.data.id], "and then reads it");
+  await throwsNamed(() => engine.create(orgMembers.__name, { organisationId: BURJEEL, email: "new@qa.example" }, newcomer),
+    "ValidationError", "but no one joins an organisation that has members on their own say-so");
+  ROWS[openings.__name] = ROWS[openings.__name].filter((r) => r.id !== made.data.id);
+  ROWS[orgMembers.__name] = ROWS[orgMembers.__name].filter((r) => r.id !== founded.data.id);
 }
 
 // ── A guest's own rows ─────────────────────────────────────────────────────

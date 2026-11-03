@@ -2440,10 +2440,12 @@ export const RecordScopeRule = z.object({
     .default("scope"),
   /** The actor's own id, or the workspace/tenant id their session carries. */
   scope: z
-    .enum(["user", "workspace"])
+    .enum(["user", "workspace", "member"])
     .describe(
-      "What `column` is compared to: the acting user's own id, or the " +
-      "workspace/tenant id their session carries.",
+      "What `column` is compared to: the acting user's own id, the " +
+      "workspace/tenant id their session carries, or (\"member\") the " +
+      "organisations the actor is a member of, read from the membership " +
+      "record named in `members`.",
     )
     .default("user"),
   /** Roles exempt from the rule — they read unscoped, and may write the column. */
@@ -2470,6 +2472,46 @@ export const RecordScopeRule = z.object({
       "the actor's workspace — homePropertyId, organisationId, tenantId. The " +
       "session carries that column and the engine compares `column` to it. " +
       "Omit for scope \"user\", where the actor's id is the value.",
+    )
+    .optional(),
+  /**
+   * MEMBERSHIP IS A RECORD OF THE APPLICATION. DITANS keeps who belongs to
+   * which employer or agency in OrganisationMember (organisationId, email);
+   * the users row carries no organisation, so no rule could say "my
+   * organisation's rows". Its rules were all per person, and a brand-new
+   * employer's Home, Approvals and Messages listed every organisation's jobs,
+   * offers and threads (QA D-59/60/65/67/70/71, 2026-11-02). With
+   * `scope: "member"` the row's `column` must be one of the `memberColumn`
+   * values of the `members` rows that are the actor's — matched on
+   * `memberEmailColumn` (their sign-in email) or `memberUserColumn` (their id).
+   */
+  members: z
+    .string()
+    .describe(
+      "For scope \"member\": the entity recording who belongs to which " +
+      "organisation (OrganisationMember, TeamMember). The actor reaches a row " +
+      "when `column` is an organisation they have a row in.",
+    )
+    .optional(),
+  memberColumn: z
+    .string()
+    .describe(
+      "For scope \"member\": the column of the `members` entity holding the " +
+      "organisation a member belongs to (organisationId).",
+    )
+    .optional(),
+  memberEmailColumn: z
+    .string()
+    .describe(
+      "For scope \"member\": the column of the `members` entity holding the " +
+      "member's sign-in email. Give this or memberUserColumn.",
+    )
+    .optional(),
+  memberUserColumn: z
+    .string()
+    .describe(
+      "For scope \"member\": the column of the `members` entity holding the " +
+      "member's user id. Give this or memberEmailColumn.",
     )
     .optional(),
   /**

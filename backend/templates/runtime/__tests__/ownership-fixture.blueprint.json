@@ -235,6 +235,52 @@
             "type": "timestamp"
           }
         ]
+      },
+      {
+        "name": "OrgMember",
+        "table": "org_members",
+        "fields": [
+          {
+            "name": "id",
+            "type": "uuid",
+            "primaryKey": true
+          },
+          {
+            "name": "organisationId",
+            "type": "uuid"
+          },
+          {
+            "name": "email",
+            "type": "text"
+          },
+          {
+            "name": "createdAt",
+            "type": "timestamp"
+          }
+        ]
+      },
+      {
+        "name": "Opening",
+        "table": "openings",
+        "fields": [
+          {
+            "name": "id",
+            "type": "uuid",
+            "primaryKey": true
+          },
+          {
+            "name": "organisationId",
+            "type": "uuid"
+          },
+          {
+            "name": "title",
+            "type": "text"
+          },
+          {
+            "name": "createdAt",
+            "type": "timestamp"
+          }
+        ]
       }
     ]
   },
@@ -321,6 +367,32 @@
           "admin"
         ],
         "note": "A catalogue: everyone reads every listing; only its vendor changes it."
+      },
+      {
+        "entity": "OrgMember",
+        "column": "organisationId",
+        "unscopedRoles": [
+          "admin"
+        ],
+        "note": "Members see their own organisation's members.",
+        "kind": "scope",
+        "scope": "member",
+        "members": "OrgMember",
+        "memberColumn": "organisationId",
+        "memberEmailColumn": "email"
+      },
+      {
+        "entity": "Opening",
+        "column": "organisationId",
+        "unscopedRoles": [
+          "admin"
+        ],
+        "note": "An opening is its organisation's: its members reach it.",
+        "kind": "scope",
+        "scope": "member",
+        "members": "OrgMember",
+        "memberColumn": "organisationId",
+        "memberEmailColumn": "email"
       }
     ]
   }
