@@ -90,3 +90,29 @@ def test_malformed_ledger_lines_skipped(ledger):
                       '"est_cost_usd": 0.1, "ts": 1700000000}\nNOT JSON\n')
     assert len(build_usage.read_ledger()) == 1
     assert build_usage.usage_summary()["totals"]["events"] == 1
+
+
+def test_the_blueprint_tracker_writes_to_the_ledger_the_environment_names(ledger):
+    """`RunUsage.record` mirrors every call into the platform ledger. Under test
+    that ledger must be the session's own file, never `data/build-usage.jsonl`:
+    the executor fakes report round token counts, and 1,250 of those rows had
+    accumulated in the real file as $108 of spend that never happened."""
+    from services.blueprint.executors import RunUsage, Usage
+
+    before = build_usage._DEFAULT_LEDGER.stat().st_size if build_usage._DEFAULT_LEDGER.exists() else 0
+    RunUsage().record(node="data_model", agent="data_model",
+                      usage=Usage("claude-opus-5", 20000, 4000), elapsed_s=1.0)
+
+    rows = [json.loads(l) for l in ledger.read_text().splitlines()]
+    assert [r["project"] for r in rows] == ["blueprint"]
+    after = build_usage._DEFAULT_LEDGER.stat().st_size if build_usage._DEFAULT_LEDGER.exists() else 0
+    assert after == before, "a test wrote into the real ledger"
+
+
+def test_the_suite_never_points_at_the_real_ledger():
+    """Set once for the session in conftest, before any import. A test that
+    forgets the `ledger` fixture must still land in the temp file."""
+    import os
+
+    assert os.environ.get("FORGE_USAGE_LOG"), "conftest no longer redirects the ledger"
+    assert build_usage._ledger_path() != build_usage._DEFAULT_LEDGER

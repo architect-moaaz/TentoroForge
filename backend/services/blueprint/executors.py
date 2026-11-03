@@ -375,8 +375,36 @@ class ModelClient(Protocol):
 #: decide a threshold with.
 CACHE_MIN_TOKENS = 2048
 
-#: 5-minute TTL. The fan-out it exists for issues its calls seconds apart.
+#: 5-minute TTL. The build-time fan-out issues its calls seconds apart, and
+#: a read refreshes the entry, so a wave keeps its own prefix warm for free.
 _CACHE_CONTROL = {"type": "ephemeral"}
+
+#: Written at 2x instead of 1.25x, then readable for an hour.
+_CACHE_CONTROL_1H = {"type": "ephemeral", "ttl": "1h"}
+
+CACHE_TTLS = ("5m", "1h")
+
+
+def _cache_control(ttl: str = "5m") -> dict[str, str]:
+    """The marker for a prefix whose next reader arrives ``ttl`` later.
+
+    The TTL is chosen from the start-to-start gap between calls that share
+    the prefix, not from how long a call takes. Measured in
+    `data/build-usage.jsonl` for one application composed through Smith a
+    page or two at a time: 47 page-authoring calls over ten hours, in groups
+    of two or three that start 10 to 90 seconds apart, with 6 to 55 minutes
+    between the groups. Every group re-wrote the same 19,187-token prefix —
+    21 writes at 1.25x, where a one-hour entry would have been written 5
+    times and read 16 more at 0.1x. The doubled write costs less than the
+    first rewrite it prevents, so the hour wins on that shape; it loses only
+    where calls are always seconds apart, and there the 5-minute entry is
+    refreshed by every read at no cost.
+    """
+    if ttl == "1h":
+        return dict(_CACHE_CONTROL_1H)
+    if ttl != "5m":
+        raise ValueError(f"cache ttl must be one of {CACHE_TTLS}, not {ttl!r}")
+    return dict(_CACHE_CONTROL)
 
 #: Where a user message stops being the same for every subject of a fan-out.
 #:
@@ -427,7 +455,7 @@ def _user_blocks(user: str) -> Any:
             {"type": "text", "text": sep.lstrip("\n") + tail}]
 
 
-def _cacheable(system: str) -> Any:
+def _cacheable(system: str, ttl: str = "5m") -> Any:
     """Return the system prompt as blocks, cache-tagged when it is big enough.
 
     The page-authoring agent carries the whole component catalog in its system
@@ -445,7 +473,7 @@ def _cacheable(system: str) -> Any:
     """
     if len(system) // 4 < CACHE_MIN_TOKENS:
         return system
-    return [{"type": "text", "text": system, "cache_control": _CACHE_CONTROL}]
+    return [{"type": "text", "text": system, "cache_control": _cache_control(ttl)}]
 
 
 #: What a montage may be. Anthropic accepts these; anything else is a file
@@ -457,7 +485,7 @@ IMAGE_MEDIA_TYPES = {
 }
 
 
-def image_block(path: str | Path) -> dict[str, Any]:
+def image_block(path: str | Path, ttl: str = "5m") -> dict[str, Any]:
     """A design montage as a cache-tagged image block.
 
     A2UI authors against the component catalog and nothing visual, which is
@@ -479,7 +507,7 @@ def image_block(path: str | Path) -> dict[str, Any]:
     if p.suffix.lower() == ".pdf":
         return {"type": "document",
                 "source": {"type": "base64", "media_type": "application/pdf", "data": data},
-                "cache_control": _CACHE_CONTROL}
+                "cache_control": _cache_control(ttl)}
     media = IMAGE_MEDIA_TYPES.get(p.suffix.lower())
     if media is None:
         raise ValueError(
@@ -489,11 +517,11 @@ def image_block(path: str | Path) -> dict[str, Any]:
     return {
         "type": "image",
         "source": {"type": "base64", "media_type": media, "data": data},
-        "cache_control": _CACHE_CONTROL,
+        "cache_control": _cache_control(ttl),
     }
 
 
-def _content(shown: Sequence[str | Path], user: str) -> Any:
+def _content(shown: Sequence[str | Path], user: str, ttl: str = "5m") -> Any:
     """Images first (the stable half of the prefix), then the user text."""
     text = _user_blocks(user)
     # A PDF is read only by Anthropic's own endpoint; an Anthropic-compatible
@@ -502,10 +530,10 @@ def _content(shown: Sequence[str | Path], user: str) -> Any:
         shown = [p for p in shown if Path(p).suffix.lower() != ".pdf"]
     if not shown:
         return text
-    return [*image_blocks(shown), *(text if isinstance(text, list) else [{"type": "text", "text": text}])]
+    return [*image_blocks(shown, ttl), *(text if isinstance(text, list) else [{"type": "text", "text": text}])]
 
 
-def image_blocks(paths: Sequence[str | Path]) -> list[dict[str, Any]]:
+def image_blocks(paths: Sequence[str | Path], ttl: str = "5m") -> list[dict[str, Any]]:
     """Several references as one cache-tagged prefix.
 
     Only the last block carries ``cache_control``. A breakpoint marks a prefix
@@ -516,7 +544,7 @@ def image_blocks(paths: Sequence[str | Path]) -> list[dict[str, Any]]:
     """
     if not paths:
         return []
-    blocks = [image_block(p) for p in paths]
+    blocks = [image_block(p, ttl) for p in paths]
     for block in blocks[:-1]:
         block.pop("cache_control", None)
     return blocks
@@ -618,6 +646,12 @@ class AnthropicModel:
     #: error for a decoder bug, which is a genuinely misleading failure.
     #: Asking for gzip sidesteps it; drop this once brotli/httpx2 agree.
     accept_encoding: str = "gzip"
+
+    #: How long this client's cached prefix stays readable, "5m" or "1h". Per
+    #: route, like `effort`: see `_cache_control` for the measurement, and
+    #: `CACHE_TTL_BY_NODE` for which nodes are re-run far enough apart to
+    #: need the hour.
+    cache_ttl: str = "5m"
 
     #: Called with each readable line of the model's reasoning, as it is
     #: produced. None means nobody is watching — every batch run, every test.
@@ -768,8 +802,8 @@ class AnthropicModel:
         kwargs: dict[str, Any] = dict(
             model=self.model,
             max_tokens=self.max_tokens,
-            system=_cacheable(system),
-            messages=[{"role": "user", "content": _content(shown, user)}],
+            system=_cacheable(system, self.cache_ttl),
+            messages=[{"role": "user", "content": _content(shown, user, self.cache_ttl)}],
             output_config={
                 "effort": self.effort,
                 "format": {"type": "json_schema", "schema": (
@@ -4434,16 +4468,31 @@ def for_repair(client: Any, spec: Any) -> Any:
     return dataclasses.replace(client, effort=_LOWER_EFFORT.get(str(client.effort), client.effort))
 
 
+#: Which nodes' cached prefix outlives the five-minute default.
+#:
+#: `page_layouts` is the node Smith re-runs a page or two at a time as the
+#: conversation goes, and its prefix — component catalog, design language,
+#: montage, ~19k tokens — is byte-identical for every page of an application.
+#: Groups of calls arrive 6 to 55 minutes apart (the measurement is on
+#: `_cache_control`), which is exactly the gap a 5-minute entry expires in
+#: and a 1-hour entry does not. Every other node runs once per wave and its
+#: retries land within a couple of minutes, so the default is right there and
+#: the doubled write would buy nothing.
+CACHE_TTL_BY_NODE: dict[str, str] = {
+    "page_layouts": "1h",
+}
+
+
 def tiered_router(
     default_effort: str = "high", model: str = DEFAULT_MODEL,
     *, reasoning: Any = None,
 ) -> "ModelRouter":
-    """A router that varies effort per node and nothing else.
+    """A router that varies effort, headroom and cache TTL per node — nothing else.
 
     Same model everywhere: this isolates the effort question, so a regression
     can be attributed to thinking budget rather than to a model swap.
     """
-    tuned = set(EFFORT_BY_NODE) | set(MAX_TOKENS_BY_NODE)
+    tuned = set(EFFORT_BY_NODE) | set(MAX_TOKENS_BY_NODE) | set(CACHE_TTL_BY_NODE)
     return ModelRouter(
         default=AnthropicModel(model=model, effort=default_effort,
                                reasoning=reasoning),
@@ -4452,6 +4501,7 @@ def tiered_router(
                 model=model,
                 effort=EFFORT_BY_NODE.get(node, default_effort),
                 max_tokens=MAX_TOKENS_BY_NODE.get(node, DEFAULT_MAX_TOKENS),
+                cache_ttl=CACHE_TTL_BY_NODE.get(node, "5m"),
                 reasoning=reasoning,
             )
             for node in tuned
