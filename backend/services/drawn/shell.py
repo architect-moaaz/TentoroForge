@@ -74,10 +74,25 @@ def read_screen(document: dict) -> Screen:
         screen.sidebar = left
         screen.skip.add(str(left.get("id")))
         rest = [c for c in _children(document) if str(c.get("id")) not in screen.skip]
-        # THE PAGE IS THE WIDE COLUMN BESIDE IT. Converted as the root, so
-        # the page fills whatever width the app gives it.
-        column = max(rest, key=lambda c: (_box(c) or (0, 0, 0, 0))[2], default=None)
+        # THE PAGE IS THE WIDE COLUMN BESIDE IT, laid out in the frame — never a
+        # layer drawn over it. Converted as the root, so the page fills
+        # whatever width the app gives it.
+        flow = [c for c in rest if c.get("layoutPositioning") != "ABSOLUTE"] or rest
+        column = max(flow, key=lambda c: (_box(c) or (0, 0, 0, 0))[2], default=None)
         screen.page_root = column or document
+        # A DIALOG DRAWN OVER THE PAGE IS THE SCREEN. A scrim across the whole
+        # frame with a drawer or a modal on it: the widest layer was the scrim,
+        # it became the page, and the drawer beside it was lost — all 18 of
+        # DITANS's candidate dialogs came out an empty grey (D2, 2026-11-03).
+        over = [c for c in rest if c.get("layoutPositioning") == "ABSOLUTE"]
+        scrim = next((c for c in over if _covers(c, frame)), None)
+        if scrim is not None:
+            panels = [c for c in over[over.index(scrim) + 1:] if not _covers(c, frame)]
+            if panels:
+                screen.page_root = {"id": f"{document.get('id')}:dialog", "type": "FRAME", "name": "Dialog",
+                                    "forgeDialog": True, "absoluteBoundingBox": document.get("absoluteBoundingBox"),
+                                    "children": [scrim, *panels]}
+                return screen
     else:
         screen.page_root = document
     # THE TOP BAR: along the top of the page, as wide as it, short.
@@ -91,6 +106,12 @@ def read_screen(document: dict) -> Screen:
                 screen.skip.add(str(child.get("id")))
                 break
     return screen
+
+
+def _covers(node: dict, frame: tuple) -> bool:
+    """A layer across (nearly) the whole frame: a scrim."""
+    box = _box(node)
+    return bool(box) and box[2] >= frame[2] * 0.95 and box[3] >= frame[3] * 0.9
 
 
 def _floating(node: dict, depth: int = 0):

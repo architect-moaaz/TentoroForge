@@ -234,6 +234,27 @@ class Emitter:
                     out.append(_arb(cls, _px(value)))
         return out
 
+    def _dialog_part(self, node: dict, dialog: dict) -> list[str]:
+        """A dialog's scrim fills the window; its panel keeps the edge it is
+        drawn against — a drawer the right, a modal the middle — at any width."""
+        box, frame = _box(node), _box(dialog)
+        try:
+            x, y, w, h = (float(box[k]) for k in ("x", "y", "width", "height"))
+            fx, fy, fw, fh = (float(frame[k]) for k in ("x", "y", "width", "height"))
+        except (KeyError, TypeError, ValueError):
+            return ["absolute", "inset-0"]
+        if w >= fw * 0.95 and h >= fh * 0.9:
+            return ["absolute", "inset-0"]
+        size = [_arb("w", _px(w)), "max-w-full", "overflow-y-auto"]
+        if abs((x + w) - (fx + fw)) < 2:
+            return ["absolute", "top-0", "right-0", "h-full", *size]
+        if abs(x - fx) < 2:
+            return ["absolute", "top-0", "left-0", "h-full", *size]
+        if abs((x + w / 2) - (fx + fw / 2)) < fw * 0.05:
+            return ["absolute", "left-1/2", "top-1/2", "-translate-x-1/2", "-translate-y-1/2", *size,
+                    "max-h-[calc(100vh-48px)]"]
+        return ["absolute", _arb("left", _px(x - fx)), _arb("top", _px(y - fy)), *size]
+
     def _size_classes(self, node: dict, parent: dict | None) -> list[str]:
         """How big a node is, in its parent's terms."""
         box = _box(node)
@@ -243,6 +264,11 @@ class Emitter:
                                            or node.get("layoutPositioning") == "ABSOLUTE")
         h_mode = str(node.get("layoutSizingHorizontal") or "FIXED")
         v_mode = str(node.get("layoutSizingVertical") or "FIXED")
+        if parent is None and node.get("forgeDialog"):
+            # A DIALOG IS SHOWN OVER WHATEVER PAGE OPENS IT, the window's size.
+            return ["fixed", "inset-0", "z-[60]"]
+        if parent is not None and parent.get("forgeDialog"):
+            return self._dialog_part(node, parent)
         if absolute:
             pbox = _box(parent or {})
             out.append("absolute")
@@ -361,7 +387,7 @@ class Emitter:
         # `relative absolute`; Tailwind's `relative` wins, so it sat in the flow
         # over its neighbours (DITANS's menu guide line over the labels, D2,
         # 2026-11-03). Placed, it is `absolute` — itself a containing block.
-        if "absolute" in sizing:
+        if "absolute" in sizing or "fixed" in sizing:
             layout = [c for c in layout if c != "relative"]
         # AND THE BOX IT IS PLACED IN HOLDS IT: an auto-layout row with a child
         # placed absolutely is its containing block.

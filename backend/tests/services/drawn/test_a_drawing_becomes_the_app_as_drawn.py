@@ -1186,3 +1186,23 @@ def test_a_placed_shape_is_absolute_and_the_row_it_is_placed_in_holds_it():
     assert 'className="relative flex' in first
     guide = next(l for l in out.splitlines() if "left-[21px]" in l)
     assert "absolute" in guide and "relative" not in guide
+
+
+def test_a_dialog_drawn_over_a_page_is_the_screen_and_keeps_its_edge():
+    """DITANS D2 (2026-11-03): a drawer frame's widest layer was its scrim; the
+    scrim became the page and every dialog's contents were lost."""
+    from services.drawn.shell import read_screen
+    box = lambda x, w, h=1000: {"x": x, "y": 0, "width": w, "height": h}
+    frame = {"id": "9", "type": "FRAME", "name": "Edit job — drawer", "absoluteBoundingBox": box(0, 1440),
+             "children": [{"id": "10", "type": "FRAME", "name": "Sidebar", "absoluteBoundingBox": box(0, 248)},
+                          {"id": "11", "type": "FRAME", "name": "Main", "absoluteBoundingBox": box(248, 1192)},
+                          {"id": "12", "type": "RECTANGLE", "name": "Overlay", "layoutPositioning": "ABSOLUTE",
+                           "absoluteBoundingBox": box(0, 1440)},
+                          {"id": "13", "type": "FRAME", "name": "Drawer", "layoutPositioning": "ABSOLUTE",
+                           "layoutMode": "VERTICAL", "absoluteBoundingBox": box(880, 560)}]}
+    screen = read_screen(frame)
+    assert screen.sidebar["name"] == "Sidebar"
+    assert [c["name"] for c in screen.page_root["children"]] == ["Overlay", "Drawer"]
+    out = Emitter(skip=screen.skip).frame(screen.page_root, "EditJobView")
+    assert 'className="fixed inset-0 z-[60]"' in out
+    assert "absolute top-0 right-0 h-full w-[560px]" in out
