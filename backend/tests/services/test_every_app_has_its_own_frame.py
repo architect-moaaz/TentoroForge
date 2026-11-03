@@ -153,6 +153,10 @@ def test_a_drawn_sidebar_paints_the_rail_whatever_the_tone(tmp_path):
     project_shell(doc, tmp_path)
     props = json.loads((tmp_path / "src/schemas/shell.json").read_text())["children"][0]["props"]
     assert props["bg"] == RAIL_PAINT["tinted"]["bg"]
+    # …and the entry you are on stays readable on it, not primary on purple.
+    layout = (ROOT / "templates/app-foundation/src/app/(dashboard)/layout.tsx").read_text()
+    assert layout.count('<nav data-shell-nav="" data-tone={dark ? "dark" : "light"}') == 4
+    assert '[data-shell-nav][data-tone="dark"] [data-nav-item][data-active="true"]{background:rgba(255,255,255,.16)' in layout
 
 
 def test_the_layout_scopes_the_rail_and_keeps_its_controls_in_the_frame():
