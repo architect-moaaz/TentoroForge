@@ -24,6 +24,12 @@ SIGNED: dict[str, dict[str, Any]] = {
         "path": "/api/connector/v1/<resource>/<operation>",
         "example": "/api/connector/v1/reservations/getAll/2023-06-06",
         "docs": "https://docs.mews.com/connector-api",
+        # An application serving several hotels keeps them as properties
+        # (forge_mews_properties, managed in the app): `auth.property` picks one.
+        "property": "`auth.property` names the hotel: a template to the property's id, Mews enterprise id or "
+                    "name (`{{booking.propertyId}}`); the application's administrator adds properties, each with its "
+                    "own access token, on its Mews properties page. With one property, or one hotel set in the "
+                    "organisation's settings, leave it out.",
     },
 }
 
@@ -33,6 +39,11 @@ def signed(provider: Any) -> bool:
     return str(provider or "").strip().lower() in SIGNED
 
 
+def has_properties(provider: Any) -> bool:
+    """Whether a step may name which of the application's properties it calls (`auth.property`)."""
+    return bool(SIGNED.get(str(provider or "").strip().lower(), {}).get("property"))
+
+
 def step_lines() -> str:
     """For whoever writes steps: how a step reaches each such system."""
     return " ".join(
@@ -40,6 +51,7 @@ def step_lines() -> str:
         f"(`{s['example']}`; {s['path']}): the runtime posts it to the right host and adds the credentials, "
         "so the step names no secret and writes none in its body; the body carries the operation's own "
         f"fields. It needs an integration with `provider: \"{p}\"`."
+        + (f" {s['property']}" if s.get("property") else "")
         for p, s in SIGNED.items()
     )
 
@@ -50,4 +62,4 @@ def adapter_lines() -> list[str]:
             for p, s in SIGNED.items()]
 
 
-__all__ = ["SIGNED", "adapter_lines", "signed", "step_lines"]
+__all__ = ["SIGNED", "adapter_lines", "has_properties", "signed", "step_lines"]

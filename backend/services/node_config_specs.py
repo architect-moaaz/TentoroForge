@@ -586,9 +586,12 @@ NODE_CONFIG_SPECS: dict[str, list[ConfigKey]] = {
         ConfigKey(
             key="MEWS_ACCESS_TOKEN",
             provider="mews",
-            label="Access token (the property's)",
+            # Optional: an application with many hotels keeps each one's token on
+            # its own Mews properties page. Set here for one hotel, or as the
+            # portfolio token properties without a token of their own are reached with.
+            label="Access token (one hotel, or a portfolio token)",
             kind="password",
-            required=True,
+            required=False,
             help_url="https://docs.mews.com/connector-api/guidelines/authentication",
         ),
         ConfigKey(

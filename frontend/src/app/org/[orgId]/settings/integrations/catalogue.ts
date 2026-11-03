@@ -65,7 +65,7 @@ export const PROVIDERS: Record<string, ProviderInfo> = {
              note: "Forge never replaces mail records, and asks before changing anything already there." },
   push: { name: "Web push", purpose: "The keys the apps use to send notifications to installed phones and browsers.", group: "platform",
           note: "Generated per app when absent; set here only to share one identity across apps." },
-  mews: { name: "Mews", purpose: "The apps read and write a hotel's reservations, guests and rooms in Mews. Start on the demo environment; switch to production with the property's own tokens.", group: "systems" },
+  mews: { name: "Mews", purpose: "The apps read and write hotels' reservations, guests and rooms in Mews. The client token is your integration's, set once here. Each hotel's access token is added by the app's administrator on the app's own Mews properties page; set one here only for a single hotel, or as a portfolio token.", group: "systems" },
   figma: { name: "Figma", purpose: "Read a Figma file so an app is built to its design.", group: "design" },
   uxpilot: { name: "UX Pilot", purpose: "Generate page designs with UX Pilot when an app is laid out.", group: "design" },
   s3: { name: "Amazon S3", purpose: "Where the apps keep files people upload.", group: "files" },

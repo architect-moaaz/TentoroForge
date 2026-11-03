@@ -54,7 +54,11 @@ const step = { actionType: "http_call", url: "/api/connector/v1/reservations/get
 
 delete process.env.MEWS_CLIENT_TOKEN; delete process.env.MEWS_ACCESS_TOKEN;
 const unset = await call(step, ctx);
-ok(String(unset.error).includes("MEWS_CLIENT_TOKEN and MEWS_ACCESS_TOKEN are not set"), "without the tokens it says which are missing");
+ok(String(unset.error).includes("MEWS_CLIENT_TOKEN is not set"), "without the client token it says so");
+process.env.MEWS_CLIENT_TOKEN = "ct-demo";
+const nowhere = await call(step, ctx);
+ok(String(nowhere.error).includes("No Mews property is set up, and MEWS_ACCESS_TOKEN is not set"),
+   "with no property and no organisation token it says there is nowhere to call");
 eqJson(sent.length, 0, "and calls nothing");
 
 process.env.MEWS_CLIENT_TOKEN = "ct-demo"; process.env.MEWS_ACCESS_TOKEN = "at-demo";

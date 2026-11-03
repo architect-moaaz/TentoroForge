@@ -30,7 +30,10 @@ def test_mews_has_its_card_with_the_names_the_runtime_reads():
     keys = {k.key: k for k in keys_for_provider("mews")}
     assert set(keys) == {"MEWS_CLIENT_TOKEN", "MEWS_ACCESS_TOKEN", "MEWS_CLIENT", "MEWS_ENVIRONMENT"}
     assert keys["MEWS_CLIENT_TOKEN"].kind == keys["MEWS_ACCESS_TOKEN"].kind == "password"
-    assert keys["MEWS_CLIENT_TOKEN"].required and keys["MEWS_ACCESS_TOKEN"].required
+    # The access token here is one hotel's, or a portfolio token: an app with
+    # many hotels keeps theirs on its own Mews properties page
+    # (test_an_app_reaches_many_mews_properties).
+    assert keys["MEWS_CLIENT_TOKEN"].required and not keys["MEWS_ACCESS_TOKEN"].required
     assert keys["MEWS_ENVIRONMENT"].options == ("demo", "production") and keys["MEWS_ENVIRONMENT"].default == "demo"
     assert not any(k.platform_only for k in keys.values()), "the apps read them"
     from services.signed_services import SIGNED

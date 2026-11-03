@@ -9,7 +9,7 @@
 // every frame carries it.
 
 import * as React from "react";
-import { Bot, LogOut, User } from "lucide-react";
+import { Bot, Hotel, LogOut, User } from "lucide-react";
 import { signOut } from "next-auth/react";
 
 function initials(name: string): string {
@@ -36,6 +36,15 @@ export function AccountMenu({ name, email, role, compact = false, extras }: {
     fetch(`${base}/api/mcp/tokens`, { cache: "no-store" })
       .then((r) => setAssistants(r.ok)).catch(() => setAssistants(false));
   }, [open, assistants]);
+  // "Mews properties" only for whoever may manage them, in an application
+  // that talks to Mews: the API answers everyone else 403 or 404.
+  const [mews, setMews] = React.useState<boolean | null>(null);
+  React.useEffect(() => {
+    if (!open || mews !== null) return;
+    const base = (process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/+$/, "");
+    fetch(`${base}/api/mews/properties`, { cache: "no-store" })
+      .then((r) => setMews(r.ok)).catch(() => setMews(false));
+  }, [open, mews]);
 
   React.useEffect(() => {
     if (!open) return;
@@ -73,6 +82,12 @@ export function AccountMenu({ name, email, role, compact = false, extras }: {
             <a role="menuitem" href={`${(process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/+$/, "")}/connect-ai`}
               className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-foreground hover:bg-muted/50">
               <Bot size={14} aria-hidden /> Connect an AI assistant
+            </a>
+          )}
+          {mews && (
+            <a role="menuitem" href={`${(process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/+$/, "")}/mews-properties`}
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-foreground hover:bg-muted/50">
+              <Hotel size={14} aria-hidden /> Mews properties
             </a>
           )}
           <button type="button" role="menuitem"

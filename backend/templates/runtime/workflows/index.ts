@@ -1852,27 +1852,27 @@ export function registerDefaultActions(): void {
       // MEWS SIGNS IN THE BODY. Its Connector API takes no header: every call
       // is a POST whose JSON carries `ClientToken`, `AccessToken` and `Client`,
       // to a host that differs between the demo and live environments. The
-      // step names the provider and the path; the runtime adds the rest from
-      // the organisation's Mews keys (Settings → Integrations → Mews).
+      // step names the provider and the path — and, when the application
+      // serves several hotels, the property (`auth.property`, a template to
+      // its id, enterprise id or name). The runtime adds the rest: the
+      // organisation's client token, and the property's own access token,
+      // opened here from `forge_mews_properties` and nowhere else (src/lib/mews).
       // A step that calls a Mews host directly is signed the same way, on the
-      // chosen environment's host: Mews reads no header, so its old
-      // `secretRef` bearer could never have been accepted (forge-v3's Case
-      // Management apps, 2026-11-03), and the tokens belong to one environment.
+      // property's host: Mews reads no header, so its old `secretRef` bearer
+      // could never have been accepted (forge-v3's Case Management apps,
+      // 2026-11-03), and a token belongs to one environment.
       const MEWS_HOST = /^https:\/\/api\.mews(-demo)?\.com(?=\/|$)/;
       if ((auth && typeof auth === "object" && String(auth.provider || "") === "mews") || MEWS_HOST.test(url)) {
-        const clientToken = process.env.MEWS_CLIENT_TOKEN;
-        const accessToken = process.env.MEWS_ACCESS_TOKEN;
-        if (!clientToken || !accessToken) {
-          const missing = [!clientToken && "MEWS_CLIENT_TOKEN", !accessToken && "MEWS_ACCESS_TOKEN"].filter(Boolean).join(" and ");
-          return { error: `${missing} ${missing.includes(" and ") ? "are" : "is"} not set in this environment`, status: 0, ok: false };
+        const mews: any = await import("../mews");
+        const ref = auth && typeof auth === "object" && auth.property ? _resolveRef(String(auth.property), ctx) : undefined;
+        let creds: any;
+        try {
+          creds = await mews.credentialsFor(ref);
+        } catch (err) {
+          return { error: String((err as Error)?.message || err), status: 0, ok: false };
         }
-        const host = String(process.env.MEWS_ENVIRONMENT || "demo") === "production"
-          ? "https://api.mews.com" : "https://api.mews-demo.com";
-        url = url.startsWith("/") ? host + url : url.replace(MEWS_HOST, host);
-        const given = sentBody && typeof sentBody === "object" && !Array.isArray(sentBody)
-          ? (sentBody as Record<string, unknown>) : {};
-        sentBody = { ...given, ClientToken: clientToken, AccessToken: accessToken,
-                     Client: process.env.MEWS_CLIENT || "Tentoro Forge 1.0.0" };
+        url = url.startsWith("/") ? creds.host + url : url.replace(MEWS_HOST, creds.host);
+        sentBody = mews.signedBody(sentBody, creds);
         method = "POST";
       } else if (auth && typeof auth === "object" && auth.secretRef) {
         const name = String(auth.secretRef);
