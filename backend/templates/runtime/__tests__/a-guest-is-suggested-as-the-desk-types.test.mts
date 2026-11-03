@@ -89,6 +89,10 @@ const customers = [
 ];
 // What Mews says changed since a pass: the first time, a cancellation.
 let changed: any[] = [{ ...reservations[0], State: "Canceled" }];
+// And the payments changed since: none, until a card is taken.
+let paidSince: any[] = [];
+// Every booking Mews holds beyond the first three, as they are made.
+const booked: any[] = [];
 const asked: { op: string; body: any }[] = [];
 g.fetch = async (url: string, init: any) => {
   const op = url.split("/api/connector/v1/")[1];
@@ -102,12 +106,17 @@ g.fetch = async (url: string, init: any) => {
       return reply({ Reservations: [...reservations, ...extra].filter((r) => body.AccountIds.includes(r.AccountId)) });
     }
     // Two pages the first time; what changed after.
+    if (body.ReservationIds) {
+      return reply({ Reservations: [...reservations, ...booked].filter((r) => body.ReservationIds.includes(r.Id)) });
+    }
     if (body.UpdatedUtc) return reply({ Reservations: changed, Cursor: null });
     if (!body.Limitation?.Cursor) return reply({ Reservations: reservations.slice(0, 2), Cursor: "page-2" });
     return reply({ Reservations: reservations.slice(2), Cursor: null });
   }
   if (op === "customers/getAll") return reply({ Customers: customers.filter((c) => (body.CustomerIds ?? []).includes(c.Id)) });
   if (op === "resources/getAll") return reply({ Resources: [{ Id: "room-314", Name: "314" }].filter((r) => (body.ResourceIds ?? []).includes(r.Id)) });
+  if (op === "payments/getAll" && body.UpdatedUtc) return reply({ Payments: paidSince });
+  if (op === "payments/getAll" && (body.ReservationIds ?? []).includes("r-hart")) return reply({ Payments: paidSince });
   if (op === "payments/getAll") return reply({ Payments: [{ Id: "p1", ReservationId: "r-left", State: "Charged", Type: "CreditCardPayment", BillId: "b1", Amount: { Currency: "GBP", GrossValue: -93.14 } }] });
   if (op === "customers/search") return reply({ Customers: /inm/i.test(body.Name) ? [{ Customer: { Id: "c-inhouse" } }] : [] });
   return new Response(JSON.stringify({ Message: `unexpected ${op}` }), { status: 400 });
@@ -160,6 +169,7 @@ eqJson([next.stays, stays.get("r-left")?.state], [1, "Canceled"], "and keeps the
 // pass never reached the Guest field (kkb5mzo3, 2026-11-03).
 changed = [{ Id: "r-hart", Number: "12", State: "Confirmed", ScheduledStartUtc: day(9), ScheduledEndUtc: day(10),
              AccountId: "c-hart", AssignedResourceId: null, UpdatedUtc: day(0) }];
+booked.push(...changed);
 const fresh = asked.length;
 eqJson((await mews.suggestStays("amel")).stays.length, 0, "kept stays a minute old are not refreshed on every keystroke");
 ok(!asked.slice(fresh).some((a) => a.op === "reservations/getAll/2023-06-06" && a.body.UpdatedUtc),
@@ -171,4 +181,14 @@ eqJson(late[0].stays.map((s: any) => [s.reservationId, s.guestName]), [["r-hart"
 eqJson(late[0].refreshed, true, "saying it refreshed");
 eqJson(asked.slice(fresh).filter((a) => a.op === "reservations/getAll/2023-06-06" && a.body.UpdatedUtc).length, 1,
        "two searches at once refresh once");
+
+// ── a card taken after the first pass: the booking did not change ──────────
+// Paying a bill leaves the reservation's UpdatedUtc alone, so a pass by what
+// changed never re-read the stay (kkb5mzo3, 2026-11-03).
+changed = [];
+paidSince = [{ Id: "p-hart", ReservationId: "r-hart", AccountId: "c-hart", State: "Charged", Type: "CreditCardPayment",
+               BillId: "b-hart", Amount: { Currency: "GBP", GrossValue: -100 } }];
+await mews.syncStays();
+eqJson(JSON.parse(stays.get("r-hart")?.payment ?? "null")?.amount, 100,
+       "the next pass reads again the stays whose payments changed, and keeps the card payment");
 done("a-guest-is-suggested-as-the-desk-types");

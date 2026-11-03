@@ -731,6 +731,39 @@ export async function syncStays(ref?: unknown, opts: { now?: Date; budgetMs?: nu
   } catch (err) {
     error = err instanceof MewsError ? err.message : String((err as Error)?.message || err);
   }
+  // PAYING A BILL DOES NOT CHANGE THE BOOKING. A pass by what changed reads
+  // bookings, so a card taken after the first pass never reached the kept
+  // stays, and the Guest field bound Amelia Hart's stay without its £100
+  // (kkb5mzo3, 2026-11-03). The payments changed in the same window name the
+  // stays to read again.
+  if (complete && filter.UpdatedUtc) {
+    try {
+      const changed: any = await call("payments/getAll", { UpdatedUtc: filter.UpdatedUtc, Limitation: { Count: 1000 } });
+      const payments = (changed?.Payments ?? []) as any[];
+      const ids = (pick: (p: any) => unknown) => [...new Set(payments.map(pick).filter(Boolean).map(String))];
+      const asks: [string, string[]][] = [
+        ["ReservationIds", ids((p) => p?.ReservationId)],
+        ["AccountIds", ids((p) => (p?.ReservationId ? null : p?.AccountId))],
+      ];
+      const again = new Map<string, any>();
+      for (const [key, all] of asks) {
+        for (let i = 0; i < all.length; i += 100) {
+          const page: any = await call("reservations/getAll/2023-06-06",
+            { [key]: all.slice(i, i + 100), Limitation: { Count: 1000 } });
+          for (const r of (page?.Reservations ?? []) as any[]) if (r?.Id) again.set(String(r.Id), r);
+        }
+      }
+      if (again.size) {
+        const reservations = [...again.values()];
+        const updated = new Map<string, string | null>(reservations.map((r) => [String(r.Id), r.UpdatedUtc ?? null]));
+        const stays = await _enrich(call, reservations);
+        await _keep(connection, stays, updated);
+        kept += stays.length;
+      }
+    } catch (err) {
+      error = err instanceof MewsError ? err.message : String((err as Error)?.message || err);
+    }
+  }
   if (complete) await remember(null);
   await db.execute(sql`
     INSERT INTO forge_mews_sync (connection, synced_through, last_run_at, last_error, stays)
