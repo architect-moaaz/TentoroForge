@@ -212,3 +212,94 @@ async def test_any_other_refused_deployment_still_says_why() -> None:
                 await c.create_deployment(name="acme", project_id="prj", files=[])
         finally:
             await c.close()
+
+
+@pytest.mark.asyncio
+async def test_a_429_that_says_when_it_resets_is_waited_out(monkeypatch) -> None:
+    """DITANS's publish died on `api-upload-paid` (forge-v3, 2026-11-03):
+    three short backoffs are nothing to a limit that resets in half a minute."""
+    from services.deploy import vercel_client
+    clock = [1_800_000_000.0]
+    slept: list[float] = []
+
+    async def fake_sleep(s: float) -> None:
+        slept.append(s)
+        clock[0] += s
+    monkeypatch.setattr(vercel_client, "_now", lambda: clock[0])
+    monkeypatch.setattr(vercel_client, "_sleep", fake_sleep)
+    told: list[str] = []
+    async with respx.mock(assert_all_called=True) as rmock:
+        route = rmock.post("https://api.vercel.com/v2/files").mock(side_effect=[
+            Response(429, headers={"x-ratelimit-reset": str(int(clock[0]) + 30)},
+                     json={"error": {"code": "rate_limited", "message": "api-upload-paid"}}),
+            Response(200),
+        ])
+        c = VercelClient(token="tk", team_id="tm")
+        try:
+            await c.upload_file(sha="abc123", raw=b"hello", on_wait=told.append)
+        finally:
+            await c.close()
+    assert route.call_count == 2
+    assert slept == [30.0]
+    assert len(told) == 1 and "waiting 30s" in told[0]
+
+
+@pytest.mark.asyncio
+async def test_retry_after_and_the_body_reset_are_read_too(monkeypatch) -> None:
+    from services.deploy import vercel_client
+    monkeypatch.setattr(vercel_client, "_now", lambda: 1_800_000_000.0)
+    assert vercel_client._rate_limit_wait(Response(429, headers={"retry-after": "12"})) == 12.0
+    body = {"error": {"code": "rate_limited", "limit": {"reset": 1_800_000_045_000}}}
+    assert vercel_client._rate_limit_wait(Response(429, json=body)) == 45.0
+    assert vercel_client._rate_limit_wait(Response(429)) is None
+
+
+@pytest.mark.asyncio
+async def test_concurrent_uploads_share_one_pause_and_one_notice(monkeypatch) -> None:
+    import asyncio
+    from services.deploy import vercel_client
+    clock = [1_800_000_000.0]
+
+    async def fake_sleep(s: float) -> None:
+        clock[0] += s
+        await asyncio.sleep(0)
+    monkeypatch.setattr(vercel_client, "_now", lambda: clock[0])
+    monkeypatch.setattr(vercel_client, "_sleep", fake_sleep)
+    told: list[str] = []
+    reset = str(int(clock[0]) + 20)
+    async with respx.mock() as rmock:
+        rmock.post("https://api.vercel.com/v2/files").mock(side_effect=[
+            Response(429, headers={"x-ratelimit-reset": reset}),
+            Response(429, headers={"x-ratelimit-reset": reset}),
+            Response(429, headers={"x-ratelimit-reset": reset}),
+            Response(200), Response(200), Response(200),
+        ])
+        c = VercelClient(token="tk", team_id="tm")
+        try:
+            await asyncio.gather(*(c.upload_file(sha=f"s{i}", raw=b"x", on_wait=told.append)
+                                   for i in range(3)))
+        finally:
+            await c.close()
+    assert len(told) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_limit_that_resets_too_late_fails_saying_when(monkeypatch) -> None:
+    from services.deploy import vercel_client
+    clock = 1_800_000_000.0
+    slept: list[float] = []
+
+    async def fake_sleep(s: float) -> None:
+        slept.append(s)
+    monkeypatch.setattr(vercel_client, "_now", lambda: clock)
+    monkeypatch.setattr(vercel_client, "_sleep", fake_sleep)
+    async with respx.mock() as rmock:
+        route = rmock.post("https://api.vercel.com/v2/files").mock(
+            return_value=Response(429, headers={"retry-after": "3600"}))
+        c = VercelClient(token="tk", team_id="tm")
+        try:
+            with pytest.raises(RuntimeError, match="status=429.*resets in 3600s.*only the rest"):
+                await c.upload_file(sha="abc123", raw=b"hello")
+        finally:
+            await c.close()
+    assert route.call_count == 1 and slept == []

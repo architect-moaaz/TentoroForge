@@ -337,3 +337,32 @@ async def test_a_publish_vercel_already_holds_uploads_nothing(
     vercel = _mock_vercel_client()
     await _publish(db_session, sample_project_id, tmp_path, vercel, monkeypatch)
     assert vercel.upload_file.call_count == 0 and vercel.create_deployment.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_a_rate_limit_wait_is_said_in_the_publish(
+    db_session, sample_project_id, tmp_path, monkeypatch
+) -> None:
+    """DITANS's publish died on `api-upload-paid` (forge-v3, 2026-11-03); the
+    client now waits out a 429 that says when it resets, and the publish says so."""
+    from services.deploy.vercel_client import VercelMissingFiles
+
+    _mk_app_tree(tmp_path)
+    vercel = _mock_vercel_client()
+    told: list[str] = []
+
+    async def create_deployment(**kwargs):
+        if vercel.create_deployment.call_count == 1:
+            raise VercelMissingFiles([f["sha"] for f in kwargs["files"]])
+        return {"id": "dpl_xyz", "url": "acme-a1b2.vercel.app"}
+
+    async def upload_file(sha, raw, on_wait=None):
+        if on_wait and not told:
+            told.append(sha)
+            on_wait("Vercel's upload rate limit was reached — waiting 30s for it to reset, then carrying on.")
+
+    vercel.create_deployment.side_effect = create_deployment
+    vercel.upload_file.side_effect = upload_file
+    events = await _publish(db_session, sample_project_id, tmp_path, vercel, monkeypatch)
+    assert events[-1].stage == "done"
+    assert len([e for e in events if e.stage == "upload" and "waiting 30s" in e.message]) == 1

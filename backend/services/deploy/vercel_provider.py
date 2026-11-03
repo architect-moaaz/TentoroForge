@@ -606,12 +606,6 @@ class VercelDeployProvider:
                     "upload",
                     f"Sending {len(files)} files to Vercel…",
                 )
-                upload_sem = asyncio.Semaphore(8)
-
-                async def _one(entry: dict) -> None:
-                    async with upload_sem:
-                        await self.vercel.upload_file(entry["sha"], entry["raw"])
-
                 deploy_files = [
                     {"file": f["file"], "sha": f["sha"], "size": f["size"]}
                     for f in files
@@ -634,7 +628,8 @@ class VercelDeployProvider:
                         "upload",
                         f"Uploading {len(todo)} new or changed files to Vercel…",
                     )
-                    await asyncio.gather(*(_one(f) for f in todo))
+                    async for note in self._upload(todo):
+                        yield DeployEvent("upload", note)
                     vd = await _create()
             deployment_id = vd["id"]
             vercel_url = vd["url"]
@@ -800,6 +795,33 @@ class VercelDeployProvider:
         finally:
             await self.vercel.close()
             await self.neon.close()
+
+    async def _upload(self, entries: list[dict]) -> AsyncIterator[str]:
+        """Upload `entries` eight at a time, yielding what the client says
+        while it waits out a rate limit, as it says it."""
+        notes: asyncio.Queue[str] = asyncio.Queue()
+        upload_sem = asyncio.Semaphore(8)
+
+        async def _one(entry: dict) -> None:
+            async with upload_sem:
+                await self.vercel.upload_file(
+                    entry["sha"], entry["raw"], on_wait=notes.put_nowait)
+
+        uploads = asyncio.ensure_future(asyncio.gather(*(_one(e) for e in entries)))
+        try:
+            while not uploads.done():
+                note = asyncio.ensure_future(notes.get())
+                await asyncio.wait({uploads, note}, return_when=asyncio.FIRST_COMPLETED)
+                if note.done():
+                    yield note.result()
+                else:
+                    note.cancel()
+            while not notes.empty():
+                yield notes.get_nowait()
+            uploads.result()
+        finally:
+            if not uploads.done():
+                uploads.cancel()
 
     async def destroy(self, deployment_id: str) -> None:
         """Delete the Vercel project + Neon project for cleanup."""
