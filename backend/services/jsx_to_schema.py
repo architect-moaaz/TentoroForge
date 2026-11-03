@@ -470,7 +470,10 @@ from .figma_llm_ctx import _CTX as _FIGMA_LLM_CTX  # noqa: F401
 #: throttled the run into a stall: 342 s in `page_layouts` with nothing
 #: composed and the process nearly idle, waiting on back-off. Same label, same
 #: vocabulary, same answer; asking once is the honest cost.
-_ACTION_MEMO: dict[tuple, dict] = {}
+#: THE SAME DICT the shared classifier uses, kept under this name because
+#: callers and tests reach for it here. One cache, so clearing it clears
+#: it for both paths.
+from .figma_action_llm import _ACTION_MEMO  # noqa: E402
 
 
 def _classify_button_action_with_llm(
@@ -531,32 +534,15 @@ def _first_text(element: "JSXElement") -> str:
 def _classify_button_action_uncached(
     label: str, data_name: str, class_name: str, heading: str = "",
 ) -> dict:
-    if _figma_llm_enabled():
-        routes = _get_routes()
-        workflows = _get_workflows()
-        if routes or workflows:
-            try:
-                from .figma_action_llm import classify_figma_action_llm
-                binding = classify_figma_action_llm(
-                    label,
-                    surrounding_text=(f"{data_name} · under the heading “{heading}”"
-                                      if heading else data_name),
-                    available_routes=routes,
-                    available_workflows=workflows,
-                    query_fn=_get_action_query_fn(),
-                )
-                if binding.kind == "workflow" and binding.target:
-                    return {"workflow": binding.target}
-                if binding.kind == "navigate" and binding.target:
-                    return {"navigate": binding.target}
-                if binding.kind == "external" and binding.target:
-                    # Button schema has no `href` prop; skip and let the
-                    # keyword classifier handle it as a workflow name.
-                    pass
-            except Exception:  # noqa: BLE001
-                # LLM path is best-effort — never break the transform.
-                pass
-    return classify_button_action(label, data_name=data_name, className=class_name)
+    """The LLM classifier, then the keyword table — in `figma_action_llm`.
+
+    It used to live here, which is why the REST path never had it: the logic
+    was inside the JSX transformer rather than beside the question. One copy
+    now, so a thing either path learns is learned by both."""
+    from .figma_action_llm import classify_action
+
+    return classify_action(label, data_name=data_name, class_name=class_name,
+                           heading=heading)
 
 # ---------------------------------------------------------------------------
 # Position-class filter

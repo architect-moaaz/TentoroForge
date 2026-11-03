@@ -166,6 +166,65 @@ def _default_query_fn(system_prompt: str, user_prompt: str) -> str:
         return ""
 
 
+#: One answer per (label, context, vocabulary) for the life of the process.
+#: The classifier is a model call per button; a design's rail is the same
+#: twenty buttons on every screen and a fan-out composes twelve screens at
+#: once, so the same label under the same routes is asked once.
+_ACTION_MEMO: dict[tuple, dict] = {}
+
+
+def classify_action(label: str, data_name: str = "", class_name: str = "",
+                    heading: str = "") -> dict:
+    """What a drawn control does: ``{workflow|navigate: target}``, or ``{}``.
+
+    The LLM classifier when it is enabled and there is a vocabulary to choose
+    from, the keyword table otherwise — and the keyword table again whenever
+    the model declines or errors. Registry safety is enforced inside
+    `classify_figma_action_llm`: it cannot name a route or workflow that is
+    not in the lists it was given.
+
+    ONE IMPLEMENTATION, TWO CALLERS. `jsx_to_schema` has asked this question
+    since it was written and `figma_to_schema` never did, so every button on
+    a REST-derived page declared no action and the page was refused
+    (kkb5mzo3, 2026-11-02). Production Figma reads go over REST. Two copies of
+    this logic would drift the moment one of them learned something.
+    """
+    from .figma_llm_ctx import (
+        figma_llm_enabled, get_action_query_fn, get_routes, get_workflows,
+    )
+    from .figma_action_classifier import classify_button_action
+
+    routes, workflows = get_routes(), get_workflows()
+    key = (label, data_name, heading, tuple(routes), tuple(workflows))
+    hit = _ACTION_MEMO.get(key)
+    if hit is not None:
+        return dict(hit)
+
+    out: dict = {}
+    if figma_llm_enabled() and (routes or workflows):
+        try:
+            binding = classify_figma_action_llm(
+                label,
+                surrounding_text=(f"{data_name} · under the heading \u201c{heading}\u201d"
+                                  if heading else data_name),
+                available_routes=routes,
+                available_workflows=workflows,
+                query_fn=get_action_query_fn(),
+            )
+            if binding.kind == "workflow" and binding.target:
+                out = {"workflow": binding.target}
+            elif binding.kind == "navigate" and binding.target:
+                out = {"navigate": binding.target}
+            # `external` has no home on the Button schema (no `href` prop), so
+            # it falls through to the keyword table like anything unplaced.
+        except Exception:  # noqa: BLE001 — best effort; never break a transform
+            out = {}
+    if not out:
+        out = classify_button_action(label, data_name=data_name, className=class_name)
+    _ACTION_MEMO[key] = dict(out)
+    return out
+
+
 def classify_figma_action_llm(
     label: str,
     *,
