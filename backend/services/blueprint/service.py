@@ -625,12 +625,16 @@ class BlueprintService:
 
         # snapshot the *previous* state so §93 rollback has a target
         if before is not None:
-            self.root.joinpath("versions").mkdir(parents=True, exist_ok=True)
-            self.version_path(prior_version).write_text(
-                json.dumps(before, indent=2, sort_keys=True), "utf-8"
-            )
+            self._write_snapshot(prior_version, before)
 
-        diff = jsonpatch.make_patch(prior or {}, self.doc).patch if before is not None else []
+        # DETACHED FROM THE DOCUMENT. `make_patch` does not copy: an op's
+        # `value` is the very object it found in `self.doc`, so a later change
+        # that mutates that subtree in place rewrites this already-recorded
+        # diff — and the next save puts the newer values under the older
+        # change. The history has to be what was true when it was written, so
+        # the patch is copied out before it is kept.
+        diff = (json.loads(json.dumps(jsonpatch.make_patch(prior or {}, self.doc).patch))
+                if before is not None else [])
         new_version = prior_version + 1 if before is not None else prior_version
 
         record = {
@@ -648,6 +652,10 @@ class BlueprintService:
         self.doc.setdefault("changeHistory", []).append(record)
         self.validate()
         self.save()
+        # Thin the older snapshots only now: the record above is what a replay
+        # needs to rebuild the versions whose files this drops.
+        if before is not None:
+            self.prune_versions()
         return record
 
     def snapshot(self) -> dict:
@@ -666,21 +674,183 @@ class BlueprintService:
                 continue
         return sorted(out)
 
+    # -- how many snapshots are kept whole (§91, §93) -----------------------
+    #
+    # A snapshot used to be the WHOLE document, change history and all, and
+    # the history is the larger half of a grown Blueprint: 56 MB of 95 MB on
+    # the application that found this. Since the same list went into every
+    # snapshot, the versions directory grew with the square of the number of
+    # changes — 119 snapshots of one app came to 8.2 GB, and a UAT host filled
+    # up. So the history is left out of a snapshot (`_write_snapshot`), and
+    # older snapshots are thinned (`prune_versions`); anything thinned away is
+    # replayed from `changeHistory[].blueprintDiff` on demand, so no version a
+    # person could restore stops being restorable.
+
+    #: Kept whole, newest first. An undo or a restore nearly always reaches
+    #: into this window, where reading a file beats replaying patches.
+    KEEP_RECENT = 10
+
+    #: Older snapshots are thinned to every Nth, which is what bounds a
+    #: replay: at most N-1 patches to apply.
+    BASE_EVERY = 25
+
+    def _write_snapshot(self, version: int, doc: dict) -> Path:
+        """Store `doc` as the snapshot of `version`, minus its change history.
+
+        No reader wants the stored copy of the history: `revert` and
+        `restore_to` both put the CURRENT history back over the restored
+        document, because an undo is itself a change and the trail has to keep
+        both it and what it reversed. :meth:`document_at` does the same.
+        """
+        self.root.joinpath("versions").mkdir(parents=True, exist_ok=True)
+        body = {k: v for k, v in doc.items() if k != "changeHistory"}
+        path = self.version_path(version)
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(body, indent=2, sort_keys=True), "utf-8")
+        replace_file(tmp, path)
+        return path
+
+    def _history(self) -> list[dict]:
+        return [h for h in (self.doc.get("changeHistory") or []) if isinstance(h, dict)]
+
+    def _records_after(self, base: int, target: int) -> list[dict]:
+        """The history records that carry `base` forward to `target`.
+
+        Versions never go backwards in the history — an undo is appended, not
+        rewound — so the last record naming a version is where that version
+        ends. A commit made with no prior state records a version without
+        advancing it, which is why the last matching index is the one to take.
+        """
+        hist = self._history()
+        start, end = -1, None
+        for i, h in enumerate(hist):
+            v = int(h.get("version") or 0)
+            if v <= base:
+                start = i
+            if v == target:
+                end = i
+        if end is None or end <= start:
+            raise FileNotFoundError(
+                f"version {target} cannot be rebuilt: the change history does "
+                f"not reach it from the nearest kept snapshot (v{base})"
+            )
+        return hist[start + 1:end + 1]
+
+    def _snapshot_at(self, version: int) -> dict:
+        path = self.version_path(version)
+        if path.is_file():
+            doc = json.loads(path.read_text("utf-8"))
+            # Snapshots written before the history was left out still carry it.
+            doc.pop("changeHistory", None)
+            return doc
+        kept = [v for v in self.versions() if v < version]
+        if not kept:
+            raise FileNotFoundError(f"no snapshot for version {version}")
+        base = kept[-1]
+        doc = json.loads(self.version_path(base).read_text("utf-8"))
+        doc.pop("changeHistory", None)
+        for rec in self._records_after(base, version):
+            patch = rec.get("blueprintDiff") or []
+            if patch:
+                # The PATCH is copied, not the document: `apply_patch` plants
+                # an op's `value` object straight into the result, so applying
+                # the history's own patch in place would hand the rebuilt
+                # document a subtree that belongs to the record — and the next
+                # op would mutate the record. The document is the big one, so
+                # it is the one that gets mutated in place.
+                doc = jsonpatch.apply_patch(
+                    doc, json.loads(json.dumps(patch)), in_place=True)
+        return doc
+
+    def document_at(self, version: int, *, with_history: bool = True) -> dict:
+        """The document as it stood at `version` — read, or replayed.
+
+        Raises :class:`FileNotFoundError` when neither is possible.
+
+        It comes back carrying the CURRENT change history rather than the
+        history as it stood then, which is what a restore wants: the trail
+        keeps every change including the one being undone. Pass
+        ``with_history=False`` to skip that (and the copy it costs) when only
+        the definition is being read.
+        """
+        doc = self._snapshot_at(version)
+        if with_history:
+            doc["changeHistory"] = json.loads(json.dumps(self._history()))
+        doc["version"] = version
+        return doc
+
+    def recoverable_versions(self) -> list[int]:
+        """Every version a restore can reach: kept whole, or replayable.
+
+        A version is replayable once a snapshot below it is kept and the
+        history names it, and the oldest snapshot is never thinned, so this is
+        every version the history records from that floor onwards.
+        """
+        kept = self.versions()
+        if not kept:
+            return []
+        floor = kept[0]
+        named = {int(h.get("version") or 0) for h in self._history()}
+        return sorted(v for v in set(kept) | named if v >= floor)
+
+    def prune_versions(self) -> list[int]:
+        """Thin the snapshots to the recent window plus sparse bases.
+
+        Returns the versions whose files were removed. Nothing stops being
+        restorable: :meth:`document_at` replays what is no longer on disk.
+        """
+        kept = self.versions()
+        if len(kept) <= self.KEEP_RECENT:
+            return []
+        keep = ({kept[0]} | set(kept[-self.KEEP_RECENT:])
+                | {v for v in kept if v % self.BASE_EVERY == 0})
+        dropped = []
+        for v in kept:
+            if v in keep:
+                continue
+            try:
+                self.version_path(v).unlink()
+            except OSError:
+                continue
+            dropped.append(v)
+        return dropped
+
+    def compact_versions(self) -> dict:
+        """Bring an existing versions directory under the policy above.
+
+        Thins the snapshots, then rewrites the ones that stay without their
+        change history — which is what an application versioned before this
+        needs, since its kept snapshots each still hold a copy of the whole
+        trail. Returns what it did, in bytes.
+        """
+        d = self.root / "versions"
+        before = sum(p.stat().st_size for p in d.glob("v*.json")) if d.exists() else 0
+        dropped = self.prune_versions()
+        rewritten = []
+        for v in self.versions():
+            path = self.version_path(v)
+            try:
+                doc = json.loads(path.read_text("utf-8"))
+            except (OSError, ValueError):
+                continue
+            if "changeHistory" not in doc:
+                continue
+            self._write_snapshot(v, doc)
+            rewritten.append(v)
+        after = sum(p.stat().st_size for p in d.glob("v*.json")) if d.exists() else 0
+        return {"dropped": dropped, "rewritten": rewritten,
+                "bytes_before": before, "bytes_after": after}
+
     def rollback(self, version: int) -> dict:
         """§93 — restore a previously saved version.
 
         A failed modification must never destroy the last working application,
         so the current document is snapshotted before being replaced.
         """
-        target = self.version_path(version)
-        if not target.exists():
-            raise FileNotFoundError(f"no snapshot for version {version}")
+        restored = self.document_at(version)
         current_version = int(self.doc.get("version") or 1)
-        self.root.joinpath("versions").mkdir(parents=True, exist_ok=True)
-        self.version_path(current_version).write_text(
-            json.dumps(self.doc, indent=2, sort_keys=True), "utf-8"
-        )
-        self.doc = json.loads(target.read_text("utf-8"))
+        self._write_snapshot(current_version, self.doc)
+        self.doc = restored
         self.validate()
         self.save()
         return self.doc
