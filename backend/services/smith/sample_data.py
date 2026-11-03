@@ -195,10 +195,13 @@ def past_sample_rows(svc: Any, table: str) -> list[dict]:
     from services.blueprint.projection import seed_rows
 
     docs = [svc.doc]
+    # Only the snapshots still kept whole: this walks every one of them, and
+    # replaying the thinned versions to collect sample rows would cost far
+    # more than the few rows it could add.
     for v in reversed(getattr(svc, "versions", lambda: [])()):
         try:
-            docs.append(json.loads(svc.version_path(v).read_text("utf-8")))
-        except (OSError, ValueError):
+            docs.append(svc.document_at(v, with_history=False))
+        except (OSError, ValueError, FileNotFoundError):
             continue
     out: list[dict] = []
     seen: set[str] = set()

@@ -155,12 +155,33 @@ def _saturated(hex_colour: str) -> bool:
     return _saturation(hex_colour) >= 0.35 and 0.03 <= _luminance(hex_colour) <= 0.85
 
 
+def _action_coloured(hex_colour: str) -> bool:
+    """A colour a button can be painted in: not grey and not near white. A
+    DARK ONE COUNTS. Criterion's buttons are deep indigo (#191359, luminance
+    0.012); `_saturated`'s floor dropped every one of them, and the app's
+    primary came out the red of the bell's unread dot (kkb5mzo3, 2026-11-03)."""
+    from services.figma.palette import _luminance, _saturation
+    return _saturation(hex_colour) >= 0.35 and _luminance(hex_colour) <= 0.85
+
+
+def _area(node: dict) -> float:
+    box = node.get("absoluteBoundingBox") or {}
+    return float(box.get("width") or 0) * float(box.get("height") or 0)
+
+
+#: How much of a button a child must cover to be the button's paint.
+_COVERS = 0.5
+
+
 def action_colours(documents: list[dict]) -> Counter:
     """The saturated fills of what a person presses: a node the prototype
     links from, or one the designer named a button. The primary colour is
     the one actions are painted in, not the one drawn most — on one real file
     the count badges outnumbered the single blue button on every screen, and
-    the app's primary came out coral."""
+    the app's primary came out coral.
+
+    A button with no fill of its own is painted by a child that covers it, not
+    by any child: the notification bell's unread dot is its child too."""
     seen: Counter = Counter()
     for document in documents:
         for node in _walk(document):
@@ -168,10 +189,12 @@ def action_colours(documents: list[dict]) -> Counter:
                 continue
             colour = _fill(node)
             if not colour.startswith("#") or "/" in colour:
+                whole = _area(node)
                 child = next((c for c in node.get("children") or []
                               if isinstance(c, dict) and str(c.get("type") or "") != "TEXT"
-                              and _fill(c).startswith("#") and "/" not in _fill(c)), None)
+                              and _fill(c).startswith("#") and "/" not in _fill(c)
+                              and (not whole or _area(c) >= _COVERS * whole)), None)
                 colour = _fill(child) if child else ""
-            if colour.startswith("#") and "/" not in colour and _saturated(colour):
+            if colour.startswith("#") and "/" not in colour and _action_coloured(colour):
                 seen[colour] += 1
     return seen

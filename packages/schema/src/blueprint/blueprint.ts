@@ -2100,13 +2100,26 @@ export const WorkflowStep = z.object({
        * into a variable or a log. `in`: as a bearer token (default), a
        * header called `name`, a query parameter called `name`, or HTTP basic
        * (the secret holds `user:password`).
+       *
+       * Or, for a system the runtime signs for itself (Mews), the PROVIDER
+       * (`{provider: "mews"}`): the runtime adds the host and the credentials.
+       * `property` picks which of the application's Mews properties the call
+       * is for — a template to its id, Mews enterprise id or name
+       * (`{{booking.propertyId}}`); the runtime reads that property's token
+       * itself, so it never reaches the step.
        */
       auth: z
-        .object({
-          secretRef: z.string(),
-          in: z.enum(["bearer", "header", "query", "basic"]).default("bearer"),
-          name: z.string().optional(),
-        })
+        .union([
+          z.object({
+            secretRef: z.string(),
+            in: z.enum(["bearer", "header", "query", "basic"]).default("bearer"),
+            name: z.string().optional(),
+          }),
+          z.object({
+            provider: z.string(),
+            property: z.string().optional(),
+          }),
+        ])
         .optional(),
       /** On a human step: minutes until it is overdue. */
       dueIn: z.number().int().positive().optional(),

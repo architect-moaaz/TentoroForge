@@ -15,7 +15,7 @@ import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
-  BellRing, Bot, Check, CloudUpload, Cog, CreditCard, ExternalLink, Eye, EyeOff, FileText, Globe, Image as ImageIcon, KeyRound, Mail, PenTool,
+  BellRing, Bot, Check, CloudUpload, Cog, CreditCard, ExternalLink, Eye, EyeOff, FileText, Globe, Hotel, Image as ImageIcon, KeyRound, Mail, PenTool, Plug,
   ScanText, Search, Server, Smartphone, Sparkles, Store, Timer, Lock, X as XIcon, type LucideIcon,
 } from "lucide-react";
 import { api } from "@/lib/api";
@@ -25,7 +25,7 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
-  GROUPS, MODEL_LABELS, STATUS_TEXT, type IntegrationEntry, type Status,
+  APP_PROVIDER, GROUPS, MODEL_LABELS, STATUS_TEXT, type IntegrationEntry, type Status,
   groupByProvider, infoFor, lastUpdated, matches, platformOnly, statusOf,
 } from "./catalogue";
 
@@ -33,6 +33,7 @@ const ICONS: Record<string, LucideIcon> = {
   resend: Mail, smtp: Mail, anthropic: Bot, figma: PenTool, uxpilot: PenTool, s3: CloudUpload, paddleocr: ScanText,
   expo_eas: Smartphone, apple_asc: Store, google_play: Store, cron: Timer, encryption: Lock, mcp: Server,
   stripe: CreditCard, embeddings: Sparkles, unsplash: ImageIcon, cloudflare: Globe, route53: Globe, godaddy: Globe, push: BellRing,
+  mews: Hotel,
 };
 
 const STATUS_STYLE: Record<Status, string> = {
@@ -71,7 +72,7 @@ function IntegrationsSettings({ orgId }: { orgId: string }) {
   // A provider managed on another page is neither connected nor missing here.
   const counts = useMemo(() => {
     const c = { connected: 0, partial: 0, unset: 0 };
-    for (const p of providers) if (!infoFor(p).managedAt) c[statusOf(byProvider[p])] += 1;
+    for (const p of providers) if (!infoFor(p, byProvider[p]).managedAt) c[statusOf(byProvider[p])] += 1;
     return c;
   }, [providers, byProvider]);
 
@@ -126,7 +127,7 @@ function IntegrationsSettings({ orgId }: { orgId: string }) {
 
       <div className="space-y-10">
         {GROUPS.map((group) => {
-          const members = shown.filter((p) => infoFor(p).group === group.id);
+          const members = shown.filter((p) => infoFor(p, byProvider[p]).group === group.id);
           if (members.length === 0) return null;
           return (
             <section key={group.id} data-group={group.id}>
@@ -152,8 +153,8 @@ function IntegrationsSettings({ orgId }: { orgId: string }) {
 }
 
 function ProviderCard({ orgId, provider, entries, onOpen }: { orgId: string; provider: string; entries: IntegrationEntry[]; onOpen: () => void }) {
-  const info = infoFor(provider);
-  const Icon = ICONS[provider] ?? Cog;
+  const info = infoFor(provider, entries);
+  const Icon = ICONS[provider] ?? (provider.startsWith(APP_PROVIDER) ? Plug : Cog);
   const status = statusOf(entries);
   const set = entries.filter((e) => e.is_set).length;
   const updated = when(lastUpdated(entries));
@@ -191,7 +192,7 @@ function ProviderCard({ orgId, provider, entries, onOpen }: { orgId: string; pro
 
 function ProviderDialog({ orgId, provider, entries, onClose }: { orgId: string; provider: string; entries: IntegrationEntry[]; onClose: () => void }) {
   const queryClient = useQueryClient();
-  const info = infoFor(provider);
+  const info = infoFor(provider, entries);
   const [values, setValues] = useState<Record<string, string>>({});
   const [shown, setShown] = useState<Record<string, boolean>>({});
   const changes = Object.entries(values).filter(([, v]) => v !== "");

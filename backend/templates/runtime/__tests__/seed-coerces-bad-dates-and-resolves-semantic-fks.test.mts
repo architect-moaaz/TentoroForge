@@ -27,6 +27,8 @@ writeFileSync(join(dir, "src", "db", "seed.json"), JSON.stringify({
   pets: [{ name: "Pet 1", ownerId: "Owner Id 1", dob: "Date Of Birth 1" }],
   products: [{ name: "Product 1", productCategoryId: "Product Category Id 1",
               releaseDate: "Release Date 1" }],
+  // Another system's identifier, kept as text: not a reference (kkb5mzo3).
+  properties: [{ name: "The Criterion Mayfair", pmsPropertyId: "MEWS-CRIT-MAY-01" }],
 }));
 process.chdir(dir);
 
@@ -37,6 +39,7 @@ const tables: Record<string, any> = {
   categories: { __name: "categories", id: col("PgUUID", "string"), name: col("PgText", "string") },
   pets: { __name: "pets", id: col("PgUUID", "string"), name: col("PgText", "string"), ownerId: col("PgUUID", "string", true), dob: col("PgTimestamp", "date", true) },
   products: { __name: "products", id: col("PgUUID", "string"), name: col("PgText", "string"), productCategoryId: col("PgUUID", "string", true), releaseDate: col("PgTimestamp", "date", true) },
+  properties: { __name: "properties", id: col("PgUUID", "string"), name: col("PgText", "string"), pmsPropertyId: col("PgText", "string", true) },
 };
 let counter = 0;
 const db = {
@@ -75,7 +78,7 @@ installHarness({
     "../lib/account": "export const ACCOUNT = null; export const ADMIN_ROLE = 'Admin'; export const SIGNUP_ROLE = null; export const ROLES = [];",
     "../lib/account-table": "export const accountTable = null;",
     "./index": "export const db = globalThis.__db;",
-    "./schema": "export const users = globalThis.__tables.users; export const categories = globalThis.__tables.categories; export const pets = globalThis.__tables.pets; export const products = globalThis.__tables.products;",
+    "./schema": "export const users = globalThis.__tables.users; export const categories = globalThis.__tables.categories; export const pets = globalThis.__tables.pets; export const products = globalThis.__tables.products; export const properties = globalThis.__tables.properties;",
     "bcryptjs": "export default { hashSync: () => 'hash', hash: async () => 'hash' };",
     "drizzle-orm": "export const sql = (s) => ({ s }); sql.raw = (s) => ({ s }); export const eq = () => ({}); export const getTableColumns = (t) => Object.fromEntries(Object.entries(t).filter(([k]) => k !== '__name'));",
   },
@@ -102,4 +105,8 @@ ok((inserted.products ?? []).length === 1, "products seeded — a compound FK re
 eqJson(inserted.products?.[0]?.productCategoryId, inserted.categories?.[0]?.id,
   "productCategoryId resolved to the categories pool by singularized suffix");
 ok(inserted.products?.[0]?.releaseDate instanceof Date, "products.releaseDate coerced to a Date");
+// A text column named …Id is another system's identifier, not a reference: the
+// Mews property id was emptied as a "placeholder token", no property was
+// seeded, and seventeen tables with it (kkb5mzo3, 2026-11-03).
+eqJson(inserted.properties?.[0]?.pmsPropertyId, "MEWS-CRIT-MAY-01", "a text id keeps its value");
 done("seed-semantic-fk");

@@ -2166,29 +2166,48 @@
                       "type": "string"
                     },
                     "auth": {
-                      "type": "object",
-                      "properties": {
-                        "secretRef": {
-                          "type": "string"
-                        },
-                        "in": {
-                          "type": "string",
-                          "enum": [
-                            "bearer",
-                            "header",
-                            "query",
-                            "basic"
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "secretRef": {
+                              "type": "string"
+                            },
+                            "in": {
+                              "type": "string",
+                              "enum": [
+                                "bearer",
+                                "header",
+                                "query",
+                                "basic"
+                              ],
+                              "default": "bearer"
+                            },
+                            "name": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "secretRef"
                           ],
-                          "default": "bearer"
+                          "additionalProperties": false
                         },
-                        "name": {
-                          "type": "string"
+                        {
+                          "type": "object",
+                          "properties": {
+                            "provider": {
+                              "type": "string"
+                            },
+                            "property": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "provider"
+                          ],
+                          "additionalProperties": false
                         }
-                      },
-                      "required": [
-                        "secretRef"
-                      ],
-                      "additionalProperties": false
+                      ]
                     },
                     "dueIn": {
                       "type": "integer",

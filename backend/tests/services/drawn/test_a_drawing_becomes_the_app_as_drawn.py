@@ -829,6 +829,30 @@ def test_the_layout_shows_the_drawn_frame_when_there_is_one():
     assert "DRAWN_SHELL = false" in default.read_text()
 
 
+def test_without_a_drawing_the_layout_reads_the_flag_as_false_and_keeps_its_menu(tmp_path):
+    """The layout is a server component. Read across a "use client" boundary,
+    `DRAWN_SHELL = false` arrived as a client reference — truthy — so every app
+    without a drawing took the drawn-frame branch and showed no menu
+    (kkb5mzo3, 2026-11-03). The stub is a server module, and an app carrying
+    the old one is given the new one."""
+    from services.drawn.project import DEFAULT_WRAPPER, WRAPPER, settle_default_wrapper
+    from services.smith.reproject import _drawn
+
+    template = Path(__file__).resolve().parents[3] / "templates/app-foundation/src/components/DrawnShell.tsx"
+    assert '"use client"' not in DEFAULT_WRAPPER and template.read_text() == DEFAULT_WRAPPER
+    old = tmp_path / "app" / WRAPPER
+    old.parent.mkdir(parents=True)
+    old.write_text('"use client";\nimport * as React from "react";\n\nexport const DRAWN_SHELL = false;\n')
+
+    class Svc:
+        doc: dict = {}
+    assert _drawn(Svc(), str(tmp_path / "app")) == {"files": ["src/components/DrawnShell.tsx"]}
+    assert old.read_text() == DEFAULT_WRAPPER
+    assert settle_default_wrapper(tmp_path / "app") is False      # settled once
+    old.write_text("export const DRAWN_SHELL = false; // someone's own\n")
+    assert settle_default_wrapper(tmp_path / "app") is False      # a hand-written one is left alone
+
+
 def test_the_build_converts_the_frames_first_and_the_requirements_read_the_journey():
     from services.blueprint.orchestrator import DAG, subjects_for
     from services.smith.smith import domain_nodes

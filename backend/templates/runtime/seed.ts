@@ -642,7 +642,13 @@ function prepRow(table: any, row: Record<string, unknown>, ids: Record<string, s
       // id of the already-inserted parent row. Unresolvable refs fall through
       // as null so the FK-fill loop below can pick a valid parent id.
       const m = val.match(/^ref:(\w+)\[(\d+)\]$/);
-      const isId = prop === "id" || /(Id|_id)$/.test(prop);
+      // A REFERENCE IS A UUID COLUMN, NOT A NAME THAT ENDS IN `Id`. Another
+      // system's identifier kept as text — `pmsPropertyId` "MEWS-CRIT-MAY-01",
+      // `mewsPaymentId` — was taken for a placeholder token and emptied, and
+      // with no property seeded, nothing that belongs to one could be either
+      // (kkb5mzo3, 2026-11-03: 17 tables empty).
+      const refCol: any = (table as any)[prop];
+      const isId = prop === "id" || (/(Id|_id)$/.test(prop) && (!refCol || /uuid/i.test(String(refCol.columnType ?? ""))));
       if (m) {
         const pool = ids[norm(m[1])] || ids[norm(m[1]) + "s"] || ids[norm(m[1]) + "es"];
         val = pool && pool.length ? pool[Number(m[2]) % pool.length] : null;

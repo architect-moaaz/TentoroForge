@@ -338,6 +338,19 @@ def inject_runtime(output_dir: str, app_name: str | None = None, domain: str | N
         except Exception as e:
             errors.append(f"Failed to copy sensitive-crypto: {e}")
 
+    # Mews properties: the hotels an application reaches in Mews, each with its
+    # own sealed access token. The workflow runtime's http_call imports it to
+    # sign a Mews call; the /api/mews/properties routes and the page read it.
+    # Copied into every app; it answers only where the Blueprint declares a
+    # Mews integration (`mewsOn`, read from connected.ts's DECLARED).
+    mews_src = _TEMPLATE_DIR / "mews.ts"
+    if mews_src.exists():
+        try:
+            shutil.copy2(mews_src, src_lib / "mews.ts")
+            copied.append("src/lib/mews.ts")
+        except Exception as e:
+            errors.append(f"Failed to copy mews: {e}")
+
     # Embedding fill + query client. The data engine and the workflow runtime
     # import it unconditionally; with no embedding field in the app's
     # manifest every call is a no-op.
@@ -1060,6 +1073,43 @@ def _inject_file_storage(output_path: Path) -> list[str]:
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(standin_page, dst)
         written.append("src/app/pay/stand-in/page.tsx")
+    # 5a-v. forge_mews_properties: the hotels the application reaches in Mews,
+    #        managed by its administrator — the routes, their guard, the page.
+    mews_schema = _TEMPLATE_DIR / "db" / "forge-mews-properties.schema.ts"
+    if mews_schema.exists() and schema_dir.exists():
+        shutil.copy2(mews_schema, schema_dir / "_forge_mews_properties.ts")
+        written.append("src/db/schema/_forge_mews_properties.ts")
+        barrel = schema_dir / "index.ts"
+        if barrel.exists():
+            txt = barrel.read_text(encoding="utf-8")
+            if "_forge_mews_properties" not in txt:
+                barrel.write_text(txt.rstrip() + '\nexport { forgeMewsProperties } from "./_forge_mews_properties";\n', encoding="utf-8")
+    # The stays a desk searches (`suggestStays`), kept beside the properties.
+    stays_schema = _TEMPLATE_DIR / "db" / "forge-mews-stays.schema.ts"
+    if stays_schema.exists() and schema_dir.exists():
+        shutil.copy2(stays_schema, schema_dir / "_forge_mews_stays.ts")
+        written.append("src/db/schema/_forge_mews_stays.ts")
+        barrel = schema_dir / "index.ts"
+        if barrel.exists():
+            txt = barrel.read_text(encoding="utf-8")
+            if "_forge_mews_stays" not in txt:
+                barrel.write_text(txt.rstrip() + '\nexport { forgeMewsStays, forgeMewsSync } from "./_forge_mews_stays";\n', encoding="utf-8")
+    for rel_src, rel_dst in (
+        (("api-mews", "guard.ts"), "src/app/api/mews/guard.ts"),
+        (("api-mews", "properties", "route.ts"), "src/app/api/mews/properties/route.ts"),
+        (("api-mews", "properties", "[id]", "route.ts"), "src/app/api/mews/properties/[id]/route.ts"),
+        (("api-mews", "properties", "[id]", "check", "route.ts"), "src/app/api/mews/properties/[id]/check/route.ts"),
+        (("api-mews", "stays", "route.ts"), "src/app/api/mews/stays/route.ts"),
+        (("api-mews", "stays", "suggest", "route.ts"), "src/app/api/mews/stays/suggest/route.ts"),
+        (("pages", "mews-properties", "page.tsx"), "src/app/(dashboard)/mews-properties/page.tsx"),
+        (("pages", "mews-properties", "MewsPropertiesPanel.tsx"), "src/app/(dashboard)/mews-properties/MewsPropertiesPanel.tsx"),
+    ):
+        src_file = _TEMPLATE_DIR.joinpath(*rel_src)
+        if src_file.exists():
+            dst = output_path / rel_dst
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src_file, dst)
+            written.append(rel_dst)
     money = output_path / "src" / "lib" / "money.ts"
     if money.parent.exists() and not money.exists():
         money.write_text("// Written by the Blueprint projection (project_money). The currency money is kept and shown in.\n"

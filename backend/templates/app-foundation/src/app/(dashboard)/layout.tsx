@@ -445,7 +445,7 @@ function TopNav({ items, appName, id, right }: { items: Sub[]; appName: string; 
           style={{ fontFamily: "var(--font-heading)" }}>
           <ShellBrand appName={appName} height={28}>{appName}</ShellBrand>
         </span>
-        <nav data-shell-nav="" className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+        <nav data-shell-nav="" data-tone={dark ? "dark" : "light"} className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
           {items.map((it) => (
             <a
               key={it.route}
@@ -835,7 +835,7 @@ function WideRail({ props, appName, caption, footer }: {
   const accent = props.accent ?? "#5B8DEF";
   const pillBg = dark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)";
   return (
-    <nav data-shell-nav="" className="hidden h-full shrink-0 flex-col overflow-y-auto md:flex"
+    <nav data-shell-nav="" data-tone={dark ? "dark" : "light"} className="hidden h-full shrink-0 flex-col overflow-y-auto md:flex"
       style={{ width: "var(--sk-nav-w, 272px)", background: bg, color: text,
                borderRight: dark ? "none" : "1px solid rgba(0,0,0,0.08)" }}>
       <div className="px-5 pb-2 pt-5">
@@ -906,7 +906,7 @@ function IconRail({ props, appName, footer }: { props: NavProps; appName: string
     </a>
   );
   return (
-    <nav data-shell-nav="" className="hidden h-full shrink-0 flex-col items-center overflow-y-auto md:flex"
+    <nav data-shell-nav="" data-tone={dark ? "dark" : "light"} className="hidden h-full shrink-0 flex-col items-center overflow-y-auto md:flex"
       style={{ width: "var(--sk-nav-w, 64px)", background: bg, color: text,
                borderRight: dark ? "none" : "1px solid rgba(0,0,0,0.08)" }}>
       {/* 64px of rail. `BrandMark` caps the mark at its container, so a wide
@@ -953,7 +953,7 @@ function DockNav({ props, appName }: { props: NavProps; appName: string }) {
   // pages 9+ unreachable on dock-chrome apps).
   const items = flattenNav(props.groups);
   return (
-    <nav data-shell-nav="" data-dock=""
+    <nav data-shell-nav="" data-tone={dark ? "dark" : "light"} data-dock=""
       className="fixed bottom-4 left-1/2 z-40 flex max-w-[calc(100vw-1rem)] -translate-x-1/2 items-center gap-1 overflow-x-auto rounded-2xl px-2 py-1.5 shadow-2xl backdrop-blur"
       style={{ background: bg, color: text, border: "1px solid rgba(127,127,127,.18)" }}>
       <span className="mx-1.5 flex items-center text-[13px] font-bold tracking-tight"
@@ -1069,7 +1069,10 @@ export default async function DashboardLayout({
   const activeTracker = `(function(){function m(){var path=location.pathname,here=path+location.search;var items=Array.prototype.slice.call(document.querySelectorAll("[data-nav-item]"));var best="";items.forEach(function(a){var h=a.getAttribute("href")||"";if(!h||h.charAt(0)!=="/")return;var bare=h.split("?")[0];var hit=h===here||bare===path||(bare!=="/"&&path.indexOf(bare+"/")===0);if(hit&&(h===here||bare.length>best.length))best=h===here?here:bare;});items.forEach(function(a){var h=a.getAttribute("href")||"";var on=!!best&&(h===best||(h.split("?")[0]===best&&!items.some(function(b){return b.getAttribute("href")===here})));a.setAttribute("data-active",String(on));if(on)a.setAttribute("aria-current","page");else a.removeAttribute("aria-current");});}function soon(){m();setTimeout(m,0);}if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",soon);else soon();addEventListener("popstate",soon);var p=history.pushState;history.pushState=function(){p.apply(this,arguments);setTimeout(m,0)};var r=history.replaceState;history.replaceState=function(){r.apply(this,arguments);setTimeout(m,0)}})()`;
   const trackerTag = (
     <>
-      <style dangerouslySetInnerHTML={{ __html: `[data-nav-item][data-active="true"]{opacity:1!important;background:hsl(var(--primary) / .14)!important;color:hsl(var(--primary))!important;font-weight:600}` }} />
+      <style dangerouslySetInnerHTML={{ __html: `[data-nav-item][data-active="true"]{opacity:1!important;background:hsl(var(--primary) / .14)!important;color:hsl(var(--primary))!important;font-weight:600}` +
+        // ON A DARK RAIL THE LIT ENTRY IS LIGHT. Painted in the primary, it vanished
+        // into Criterion's deep-purple rail — indigo on purple (kkb5mzo3, 2026-11-03).
+        `[data-shell-nav][data-tone="dark"] [data-nav-item][data-active="true"]{background:rgba(255,255,255,.16)!important;color:#fff!important}` }} />
       <script dangerouslySetInnerHTML={{ __html: activeTracker }} />
     </>
   );

@@ -1847,7 +1847,34 @@ export function registerDefaultActions(): void {
       // nowhere else — not a variable, not the log. Templates cannot reach
       // the environment, so this is the only way a key enters a call.
       const auth = (config as any).auth;
-      if (auth && typeof auth === "object" && auth.secretRef) {
+      let sentBody = resolvedBody;
+      let method = String(config.method || "GET");
+      // MEWS SIGNS IN THE BODY. Its Connector API takes no header: every call
+      // is a POST whose JSON carries `ClientToken`, `AccessToken` and `Client`,
+      // to a host that differs between the demo and live environments. The
+      // step names the provider and the path — and, when the application
+      // serves several hotels, the property (`auth.property`, a template to
+      // its id, enterprise id or name). The runtime adds the rest: the
+      // organisation's client token, and the property's own access token,
+      // opened here from `forge_mews_properties` and nowhere else (src/lib/mews).
+      // A step that calls a Mews host directly is signed the same way, on the
+      // property's host: Mews reads no header, so its old `secretRef` bearer
+      // could never have been accepted (forge-v3's Case Management apps,
+      // 2026-11-03), and a token belongs to one environment.
+      const MEWS_HOST = /^https:\/\/api\.mews(-demo)?\.com(?=\/|$)/;
+      if ((auth && typeof auth === "object" && String(auth.provider || "") === "mews") || MEWS_HOST.test(url)) {
+        const mews: any = await import("../mews");
+        const ref = auth && typeof auth === "object" && auth.property ? _resolveRef(String(auth.property), ctx) : undefined;
+        let creds: any;
+        try {
+          creds = await mews.credentialsFor(ref);
+        } catch (err) {
+          return { error: String((err as Error)?.message || err), status: 0, ok: false };
+        }
+        url = url.startsWith("/") ? creds.host + url : url.replace(MEWS_HOST, creds.host);
+        sentBody = mews.signedBody(sentBody, creds);
+        method = "POST";
+      } else if (auth && typeof auth === "object" && auth.secretRef) {
         const name = String(auth.secretRef);
         const value = process.env[name];
         if (!value) return { error: `${name} is not set in this environment`, status: 0, ok: false };
@@ -1863,13 +1890,13 @@ export function registerDefaultActions(): void {
       const timeoutMs = Number((config as any).timeoutMs ?? 30_000) || 30_000;
       const timeout = setTimeout(() => controller.abort(), timeoutMs);
       const res = await fetch(url, {
-        method: String(config.method || "GET"),
+        method,
         headers,
-        body: resolvedBody === undefined ? undefined
-          : asForm && resolvedBody && typeof resolvedBody === "object"
-            ? new URLSearchParams(Object.entries(resolvedBody as Record<string, unknown>)
+        body: sentBody === undefined ? undefined
+          : asForm && sentBody && typeof sentBody === "object"
+            ? new URLSearchParams(Object.entries(sentBody as Record<string, unknown>)
                 .map(([k, v]) => [k, typeof v === "string" ? v : JSON.stringify(v)])).toString()
-            : JSON.stringify(resolvedBody),
+            : JSON.stringify(sentBody),
         signal: controller.signal,
       });
       clearTimeout(timeout);

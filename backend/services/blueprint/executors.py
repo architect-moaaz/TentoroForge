@@ -1324,6 +1324,12 @@ discouraged, because a pattern is advice a decoder does not enforce.
 two modules naming the same entity update one record rather than duplicating \
 it — which makes a near-miss spelling the one thing that creates a duplicate."""
 
+def _signed_step_lines() -> str:
+    """How a step reaches a system the runtime signs for itself (Mews)."""
+    from services.signed_services import step_lines
+    return step_lines()
+
+
 NODE_TASKS: dict[str, str] = {
     "figma_intelligence": (
         "Read a connected Figma design and record what it is evidence for.\n\n"
@@ -2054,7 +2060,7 @@ NODE_TASKS: dict[str, str] = {
         "an outside system (`http_call`) carries `config.auth` naming the "
         "secret by NAME (`{\"secretRef\": \"XERO_API_KEY\"}`, declared on an "
         "integration's `secretRefs`); the runtime attaches the value, and a "
-        "template can never reach it. A process another system starts has no "
+        "template can never reach it. " + _signed_step_lines() + " A process another system starts has no "
         "person acting; it reads who it concerns from what it was handed. A "
         "`create_checkout` names `amount` (major units, the application's "
         "currency) or `lineItems`, the `reference` {entity, id} it pays for, "

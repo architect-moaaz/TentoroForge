@@ -47,6 +47,64 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+def _unarm_actionless_controls(node: Any, actions: set[str]) -> int:
+    """A drawn control nobody can say the purpose of becomes a label.
+
+    `functional_completeness` refuses a Button or Form with no action, and it
+    is right to: "a control with no action renders, is clickable, and does
+    nothing — indistinguishable from a broken application". Inventing one is
+    worse, which is what the action vocabulary exists to prevent.
+
+    So the drawing loses the affordance rather than the page losing validity —
+    the same choice `services/figma/cards.py` makes for a card whose
+    destination it cannot place: "the card keeps its children and loses the
+    action, which is what it was on the drawing". The label survives as Text,
+    so the screen still reads, and Smith can wire it later.
+    """
+    changed = 0
+    if isinstance(node, dict):
+        props = node.get("props") or {}
+        label = str(props.get("label") or props.get("submitLabel") or "")
+        templated = label.startswith("$") or bool(node.get("repeat"))
+        if node.get("type") in ("Button", "Form") and not (set(props) & actions) and not templated:
+            node["type"] = "Text"
+            node["props"] = {k: v for k, v in props.items()
+                             if k in ("_figmaNodeId", "className")}
+            if label:
+                node["props"]["text"] = label
+            changed += 1
+        for child in node.get("children") or []:
+            changed += _unarm_actionless_controls(child, actions)
+    elif isinstance(node, list):
+        for child in node:
+            changed += _unarm_actionless_controls(child, actions)
+    return changed
+
+
+def _drop_sourceless_images(node: Any) -> int:
+    """Turn every Image with no `src` into a plain box, in place.
+
+    The box keeps the space the picture occupied — its place in the stack,
+    its size — so the layout still reads as drawn, and the page is valid.
+    `_figmaNodeId` stays on it, so an asset export can make it an Image again.
+    Returns how many were changed, for the caller to log.
+    """
+    changed = 0
+    if isinstance(node, dict):
+        props = node.get("props")
+        if node.get("type") == "Image" and not (isinstance(props, dict) and props.get("src")):
+            node["type"] = "Container"
+            if isinstance(props, dict):
+                props.pop("alt", None)
+            changed += 1
+        for child in node.get("children") or []:
+            changed += _drop_sourceless_images(child)
+    elif isinstance(node, list):
+        for child in node:
+            changed += _drop_sourceless_images(child)
+    return changed
+
+
 def _run(coro: Any) -> Any:
     """Run the async pipeline from the orchestrator's synchronous executor."""
     try:
@@ -384,6 +442,22 @@ def _build_from_rest(
     from services.figma_to_schema import build_page_schema
 
     page = build_page_schema(document, asset_paths={}).page
+    # THIS PATH NEVER HAS ASSETS (see the docstring above: `asset_paths={}`),
+    # so every Image it builds is source-less — and `src` is required by the
+    # component contract, so `page_layouts` refused the whole page. On
+    # kkb5mzo3 (2026-11-02) that was dozens of refusals per page and not one
+    # layout written from the design. Done here rather than in the shared
+    # converter, because the asset pipeline finds Image nodes in a pass with
+    # no asset_paths and fills them in a second one.
+    _drop_sourceless_images(page)
+    # And the other half of what refused every drawn page: buttons the
+    # classifier could not place. See `_unarm_actionless_controls`.
+    from services.blueprint.functional_completeness import _action_props
+
+    unarmed = _unarm_actionless_controls(page, _action_props())
+    if unarmed:
+        logger.info("[figma] %d drawn control(s) had no action anyone could name "
+                    "— kept as labels", unarmed)
     # `build_page_schema` flattens a Stack root into `children`; compose treats
     # `schema["children"][0]` as THE frame root, so re-wrap when it flattened.
     kids = [c for c in (page.get("children") or []) if isinstance(c, dict)]
@@ -561,10 +635,19 @@ def _classify_regions(svc: Any, page: dict, code: str, screen: Any,
     if not shots:
         return []
 
-    from services.blueprint.executors import AnthropicModel
+    from services.blueprint.executors import DEFAULT_MAX_TOKENS, AnthropicModel
 
+    # NOT 8,000. The cap covers the thinking AND the answer, and this call
+    # reasons over every rendered region of a screen at once before writing a
+    # record per region. On kkb5mzo3 (2026-11-02) it spent the whole 8,000
+    # reasoning and wrote nothing: "[figma-vision] classification failed: the
+    # model spent all 8,000 output tokens reasoning and wrote no answer".
+    # Vision is an enrichment that returns [] on failure, so the cost of being
+    # too small is silent — the page simply composes with no idea what its
+    # regions are. The platform default tracks the rest of the pipeline;
+    # unused headroom is free.
     entities = (svc.doc.get("data") or {}).get("entities") or []
-    return vision.classify(AnthropicModel(max_tokens=8000), shots, entities)
+    return vision.classify(AnthropicModel(max_tokens=DEFAULT_MAX_TOKENS), shots, entities)
 
 
 #: Chrome per (project, designs) for the life of the process. The fan-out
