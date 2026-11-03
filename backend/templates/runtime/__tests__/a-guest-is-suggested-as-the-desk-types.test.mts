@@ -28,9 +28,15 @@ const ilike = (v: unknown, pattern: string) =>
     (m, esc) => esc ? "\\" + esc : m === "%" ? ".*" : m === "_" ? "." : "\\" + m) + "$", "i").test(String(v ?? ""));
 g.__execute = async (q: any) => {
   const { text, values: v } = sqlOf(q);
-  if (text.startsWith("CREATE TABLE")) return { rows: [] };
+  if (text.startsWith("CREATE TABLE") || text.startsWith("ALTER TABLE")) return { rows: [] };
   if (text.startsWith("SELECT id FROM forge_mews_properties")) return { rows: [] };
   if (text.startsWith("SELECT synced_through")) return { rows: sync.has(v[0]) ? [sync.get(v[0])] : [] };
+  if (text.startsWith("SELECT 1 AS one FROM forge_mews_stays"))
+    return { rows: [...stays.values()].some((s) => s.connection === v[0]) ? [{ one: 1 }] : [] };
+  if (text.startsWith("INSERT INTO forge_mews_sync (connection, pending")) {
+    sync.set(v[0], { ...(sync.get(v[0]) ?? {}), pending: v[1], last_run_at: new Date().toISOString() });
+    return { rows: [] };
+  }
   if (text.startsWith("INSERT INTO forge_mews_stays")) {
     const [reservation_id, connection, confirmation_number, state, arrival_date, departure_date, customer_id,
            account_id, guest_name, guest_email, room_number, bill_id, payment] = v;
@@ -41,8 +47,8 @@ g.__execute = async (q: any) => {
   if (text.startsWith("INSERT INTO forge_mews_sync")) {
     const [connection, through, error, count] = v;
     const prev = sync.get(connection) ?? {};
-    sync.set(connection, { synced_through: through ?? prev.synced_through ?? null, last_run_at: new Date().toISOString(),
-                           last_error: error, stays: count });
+    sync.set(connection, { ...prev, synced_through: through ?? prev.synced_through ?? null,
+                           last_run_at: new Date().toISOString(), last_error: error, stays: count });
     return { rows: [] };
   }
   if (text.startsWith("DELETE FROM forge_mews_stays")) {
@@ -107,9 +113,16 @@ process.env.MEWS_CLIENT_TOKEN = "ct";
 process.env.MEWS_ACCESS_TOKEN = "at";
 const mews: any = await import("../mews.ts");
 
-// ── the first sync keeps the window ────────────────────────────────────────
+// ── the first sync keeps the window, carrying on where it stopped ──────────
+const cut = await mews.syncStays(undefined, { budgetMs: 0 });
+eqJson([cut.stays, cut.complete], [2, false], "a pass out of time keeps the page it read");
+eqJson(JSON.parse(sync.get("organisation").pending).cursor, "page-2", "and remembers where it stopped");
 const first = await mews.syncStays();
-eqJson([first.stays, first.complete, first.error], [3, true, null], "the first sync keeps every stay in the window, page by page");
+eqJson([first.stays, first.complete, first.error], [1, true, null], "the next pass reads on from there, not from page one");
+ok(asked.filter((a) => a.op === "reservations/getAll/2023-06-06").pop()!.body.Limitation.Cursor === "page-2",
+   "with the cursor it stopped at");
+eqJson(stays.size, 3, "every stay in the window is kept");
+eqJson(sync.get("organisation").pending, null, "a finished pass leaves nothing pending");
 const firstAsk = asked.find((a) => a.op === "reservations/getAll/2023-06-06")!.body;
 ok(Boolean(firstAsk.CollidingUtc?.StartUtc && firstAsk.CollidingUtc?.EndUtc) && !firstAsk.UpdatedUtc, "by the stays in the window");
 eqJson(stays.get("r-left")?.guest_name, "Tokyo KioskTest853002", "each kept with its guest");

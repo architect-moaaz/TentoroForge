@@ -406,12 +406,20 @@ export interface MewsStay {
 const STAY_WINDOW_DAYS = { back: 60, ahead: 30 };
 
 async function _call(creds: MewsCredentials, operation: string, body: Record<string, unknown>): Promise<any> {
-  const res = await fetch(`${creds.host}/api/connector/v1/${operation}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(signedBody(body, creds)),
-    signal: AbortSignal.timeout(20_000),
-  });
+  let res!: Response;
+  // TOO MANY REQUESTS IS WAITED OUT. Mews limits each token; a sync reading a
+  // busy hotel met it on the demo and stopped (2026-11-03).
+  for (let attempt = 0; attempt < 3; attempt++) {
+    res = await fetch(`${creds.host}/api/connector/v1/${operation}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(signedBody(body, creds)),
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (res.status !== 429 || attempt === 2) break;
+    const after = Number(res.headers.get("retry-after"));
+    await new Promise((r) => setTimeout(r, Number.isFinite(after) && after > 0 ? Math.min(after, 10) * 1000 : 1500 * (attempt + 1)));
+  }
   const answer: any = await res.json().catch(() => null);
   if (!res.ok) throw new MewsError(`Mews answered ${res.status} to ${operation}: ${String(answer?.Message || res.statusText || "no reason given")}`, 502);
   return answer ?? {};
@@ -551,8 +559,6 @@ async function _enrich(call: (op: string, body: Record<string, unknown>) => Prom
 // typing part of a name is answered from it at once (`suggestStays`).
 // --------------------------------------------------------------------------- //
 
-/** How stale the kept stays may be before a suggestion refreshes them itself. */
-const STAYS_FRESH_MS = 15 * 60_000;
 /** A sync stops asking Mews past this, and carries on next time. */
 const SYNC_BUDGET_MS = 40_000;
 
@@ -586,8 +592,10 @@ export function ensureStays(): Promise<void> {
           synced_through timestamp,
           last_run_at timestamp,
           last_error text,
-          stays integer NOT NULL DEFAULT 0
+          stays integer NOT NULL DEFAULT 0,
+          pending jsonb
         )`);
+      await db.execute(sql`ALTER TABLE forge_mews_sync ADD COLUMN IF NOT EXISTS pending jsonb`);
     })().catch((err) => { _staysEnsured = null; throw err; });
   }
   return _staysEnsured;
@@ -633,16 +641,32 @@ export async function syncStays(ref?: unknown, opts: { now?: Date; budgetMs?: nu
   const now = opts.now ?? new Date();
   const deadline = Date.now() + (opts.budgetMs ?? SYNC_BUDGET_MS);
   const state = _rows(await db.execute(sql`
-    SELECT synced_through FROM forge_mews_sync WHERE connection = ${connection}`))[0];
+    SELECT synced_through, pending FROM forge_mews_sync WHERE connection = ${connection}`))[0];
   const windowStart = new Date(now.getTime() - STAY_WINDOW_DAYS.back * 864e5);
-  const since = state?.synced_through ? new Date(state.synced_through) : null;
-  // Changed since the last finished sync, a few minutes back for clock drift —
-  // or, the first time and after a long gap, the whole window.
-  const filter = since && since > windowStart
-    ? { UpdatedUtc: { StartUtc: _iso(new Date(since.getTime() - 5 * 60_000)), EndUtc: _iso(now) } }
-    : { CollidingUtc: { StartUtc: _iso(windowStart),
-                        EndUtc: _iso(new Date(now.getTime() + STAY_WINDOW_DAYS.ahead * 864e5)) } };
+  // A PASS IS FINISHED WHERE IT STOPPED. A busy hotel has thousands of stays
+  // in the window — the demo's had over 9,500 — and a pass that ran out of
+  // time began again at page one, so it never finished.
+  const pending = typeof state?.pending === "string" ? JSON.parse(state.pending) : state?.pending;
+  let filter: Record<string, unknown>;
+  let startedAt: string;
   let cursor: string | null = null;
+  if (pending?.filter) {
+    filter = pending.filter;
+    startedAt = String(pending.startedAt);
+    cursor = pending.cursor ?? null;
+  } else {
+    const since = state?.synced_through ? new Date(state.synced_through) : null;
+    // Changed since the last finished pass, a few minutes back for clock
+    // drift — or, the first time and after a long gap, the whole window.
+    filter = since && since > windowStart
+      ? { UpdatedUtc: { StartUtc: _iso(new Date(since.getTime() - 5 * 60_000)), EndUtc: _iso(now) } }
+      : { CollidingUtc: { StartUtc: _iso(windowStart),
+                          EndUtc: _iso(new Date(now.getTime() + STAY_WINDOW_DAYS.ahead * 864e5)) } };
+    startedAt = _iso(now);
+  }
+  const remember = (next: Record<string, unknown> | null) => db.execute(sql`
+    INSERT INTO forge_mews_sync (connection, pending, last_run_at) VALUES (${connection}, ${next ? JSON.stringify(next) : null}::jsonb, now())
+    ON CONFLICT (connection) DO UPDATE SET pending = EXCLUDED.pending, last_run_at = now()`);
   let kept = 0;
   let complete = false;
   let error: string | null = null;
@@ -659,16 +683,18 @@ export async function syncStays(ref?: unknown, opts: { now?: Date; budgetMs?: nu
       }
       cursor = page?.Cursor && reservations.length ? String(page.Cursor) : null;
       if (!cursor) { complete = true; break; }
+      await remember({ filter, cursor, startedAt });
       if (Date.now() > deadline) break;
     }
   } catch (err) {
     error = err instanceof MewsError ? err.message : String((err as Error)?.message || err);
   }
+  if (complete) await remember(null);
   await db.execute(sql`
     INSERT INTO forge_mews_sync (connection, synced_through, last_run_at, last_error, stays)
-    VALUES (${connection}, ${complete ? _iso(now) : null}, now(), ${error}, ${kept})
+    VALUES (${connection}, ${complete ? startedAt : null}, now(), ${error}, ${kept})
     ON CONFLICT (connection) DO UPDATE SET
-      synced_through = COALESCE(${complete ? _iso(now) : null}::timestamp, forge_mews_sync.synced_through),
+      synced_through = COALESCE(${complete ? startedAt : null}::timestamp, forge_mews_sync.synced_through),
       last_run_at = now(), last_error = EXCLUDED.last_error, stays = EXCLUDED.stays`);
   // Stays that left the window are not kept.
   await db.execute(sql`
@@ -721,14 +747,18 @@ export async function suggestStays(term: unknown, ref?: unknown, limit = 8):
   await ensureStays();
   const creds = await credentialsFor(ref);
   const connection = _connectionOf(creds);
-  const state = _rows(await db.execute(sql`
+  let state = _rows(await db.execute(sql`
     SELECT synced_through, last_run_at FROM forge_mews_sync WHERE connection = ${connection}`))[0];
   let refreshed = false;
-  const last = state?.last_run_at ? new Date(state.last_run_at).getTime() : 0;
-  if (!state?.synced_through || Date.now() - last > STAYS_FRESH_MS) {
-    // Never kept, or stale: refresh now, briefly — the cron tick does the rest.
-    await syncStays(ref, { budgetMs: state?.synced_through ? 8_000 : 20_000 }).catch(() => null);
+  // NOTHING KEPT YET: read the first pages now, so the first search answers.
+  // After that the cron tick keeps them fresh, and a search never waits on it.
+  const any = _rows(await db.execute(sql`
+    SELECT 1 AS one FROM forge_mews_stays WHERE connection = ${connection} LIMIT 1`)).length > 0;
+  if (!any && Date.now() - (state?.last_run_at ? new Date(state.last_run_at).getTime() : 0) > 60_000) {
+    await syncStays(ref, { budgetMs: 15_000 }).catch(() => null);
     refreshed = true;
+    state = _rows(await db.execute(sql`
+      SELECT synced_through, last_run_at FROM forge_mews_sync WHERE connection = ${connection}`))[0];
   }
   if (!q) return { stays: [], syncedAt: state?.synced_through ? String(state.synced_through) : null, refreshed };
   const like = `%${q.replace(/[\\%_]/g, (c) => "\\" + c)}%`;
