@@ -48,6 +48,14 @@ g.fetch = async (url: string, init: any) => {
     if (body.Names) return reply({ Resources: all.filter((r) => body.Names.includes(r.Name)) });
     return reply({ Resources: all.filter((r) => (body.ResourceIds ?? []).includes(r.Id)) });
   }
+  if (op === "payments/getAll" && body.AccountIds) {
+    // Taken on the guest's bill: the account's, with no reservation (Zedwell demo, 2026-11-03).
+    return reply({ Payments: [
+      { Id: "p-bill", AccountId: "c1", ReservationId: null, State: "Charged", Type: "CreditCardPayment", BillId: "b2",
+        ChargedUtc: "2026-11-03T09:00:00Z", Amount: { Currency: "GBP", GrossValue: -149 },
+        Data: { CreditCard: { ObfuscatedNumber: "************1111" } } },
+    ].filter((p) => body.AccountIds.includes(p.AccountId)) });
+  }
   if (op === "payments/getAll") {
     return reply({ Payments: [
       { Id: "p-cash", ReservationId: "r1", State: "Charged", Type: "CashPayment", BillId: "b0",
@@ -83,7 +91,9 @@ ok(!sent.some((x) => x.op === "reservations/getAll/2023-06-06" && !x.body.Number
 // ── By last name, any case ─────────────────────────────────────────────────
 const byName = await mews.findStays("sorlito");
 eqJson(byName.map((x: any) => x.reservationId), ["r2", "r1"], "a last name finds the guest's stays, newest first");
-eqJson(byName[0].payment, null, "a stay whose only payment failed has none");
+eqJson(byName[0].payment, { id: "p-bill", amount: 149, currency: "GBP", kind: "Card", cardLast4: "1111", billId: "b2" },
+       "a card charge taken on the guest's bill, with no reservation on it, is the stay's nearest it");
+eqJson(byName[1].payment?.id, "p-card", "and never displaces a stay's own payment");
 
 // ── By room ────────────────────────────────────────────────────────────────
 const byRoom = await mews.findStays("314");

@@ -84,6 +84,19 @@ def test_the_constraints_push_would_ask_about_are_added_before_it():
     assert "HAVING count(*) > 1" in src, "rows that break the uniqueness are named, not deleted"
 
 
+def test_a_unique_on_a_new_column_brings_its_column_first():
+    """kkb5mzo3 (2026-11-03): Guest gained `mewsCustomerId` with `.unique()`.
+    prepare-schema added the constraint to a column the database had not got
+    yet and failed ("column mews_customer_id does not exist"); skipping it
+    would leave push to add both on a table with rows, and ask. The column is
+    added first, empty, as push would make it."""
+    src = (TEMPLATES / "app-foundation" / "src" / "db" / "prepare-schema.ts").read_text()
+    uniques = src[src.index("for (const [table, uniques] of declaredUniques())"):]
+    assert uniques.index("ADD COLUMN") < uniques.index("ADD CONSTRAINT")
+    assert "declaredColumns(table)" in uniques and "getSQLType()" in src
+    assert "IS NOT NULL" in uniques, "empty values are not duplicates: UNIQUE admits any number of NULLs"
+
+
 @pytest.mark.parametrize("where", ["build", "start"])
 def test_nothing_pushes_before_the_schema_is_prepared(where):
     if where == "build":
