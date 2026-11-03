@@ -77,17 +77,18 @@ def read_screen(document: dict) -> Screen:
         # THE PAGE IS THE WIDE COLUMN BESIDE IT, laid out in the frame — never a
         # layer drawn over it. Converted as the root, so the page fills
         # whatever width the app gives it.
-        flow = [c for c in rest if c.get("layoutPositioning") != "ABSOLUTE"] or rest
+        flow = [c for c in rest if c.get("layoutPositioning") != "ABSOLUTE" and not _covers(c, frame)] or rest
         column = max(flow, key=lambda c: (_box(c) or (0, 0, 0, 0))[2], default=None)
         screen.page_root = column or document
         # A DIALOG DRAWN OVER THE PAGE IS THE SCREEN. A scrim across the whole
         # frame with a drawer or a modal on it: the widest layer was the scrim,
         # it became the page, and the drawer beside it was lost — all 18 of
         # DITANS's candidate dialogs came out an empty grey (D2, 2026-11-03).
-        over = [c for c in rest if c.get("layoutPositioning") == "ABSOLUTE"]
-        scrim = next((c for c in over if _covers(c, frame)), None)
+        # Drawn after the page, in drawing order: an auto-layout frame marks it
+        # ABSOLUTE, a free one does not (DITANS's newer drawers).
+        scrim = next((c for c in rest if c is not column and _covers(c, frame)), None)
         if scrim is not None:
-            panels = [c for c in over[over.index(scrim) + 1:] if not _covers(c, frame)]
+            panels = [c for c in rest[rest.index(scrim) + 1:] if not _covers(c, frame)]
             if panels:
                 screen.page_root = {"id": f"{document.get('id')}:dialog", "type": "FRAME", "name": "Dialog",
                                     "forgeDialog": True, "absoluteBoundingBox": document.get("absoluteBoundingBox"),
