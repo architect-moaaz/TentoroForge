@@ -240,6 +240,18 @@ def refresh_engine(app_root: str | Path, doc: dict | None = None, *, complete: b
                 changed.append(signup)
         except Exception:  # noqa: BLE001 — a refresh that cannot read the definition leaves the route alone
             logger.debug("[engine] the signup route could not be refreshed", exc_info=True)
+    # THE SEED'S BOOKKEEPING IS NOT THE SCHEMA'S. An app whose filter predates
+    # the import log saw it as an unknown table at the next push that added
+    # one, asked "created or renamed?", and could not be published (kkb5mzo3).
+    config = root / "drizzle.config.ts"
+    try:
+        text = config.read_text("utf-8") if config.is_file() else ""
+        if 'tablesFilter: ["!_forge_seed_meta"]' in text:
+            config.write_text(text.replace('tablesFilter: ["!_forge_seed_meta"]',
+                                           'tablesFilter: ["!_forge_seed_meta", "!_forge_import_log"]'), "utf-8")
+            changed.append("drizzle.config.ts")
+    except OSError:
+        logger.debug("[engine] the drizzle config could not be widened", exc_info=True)
     for rel in DB_SCRIPTS:
         src, dst = foundation / rel, root / rel
         if not src.is_file() or not (root / "drizzle.config.ts").is_file():
