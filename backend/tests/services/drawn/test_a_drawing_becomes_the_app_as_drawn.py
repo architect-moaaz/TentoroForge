@@ -1171,3 +1171,18 @@ def test_what_is_not_the_app_is_left_out():
     assert problems == [], problems
     assert "9:41" not in out["code"] and "{props.job.title}" in out["code"]
     assert "leave_out" in P.REPLY_SCHEMA["properties"] and "status bar" in P.SYSTEM
+
+
+def test_a_placed_shape_is_absolute_and_the_row_it_is_placed_in_holds_it():
+    """DITANS D2 (2026-11-03): the menu's guide line came out `relative absolute`
+    and sat in the flow over the labels."""
+    row = {"id": "1", "type": "FRAME", "layoutMode": "HORIZONTAL", "absoluteBoundingBox": {"x": 0, "y": 0, "width": 200, "height": 32},
+           "children": [{"id": "2", "type": "RECTANGLE", "layoutPositioning": "ABSOLUTE",
+                         "absoluteBoundingBox": {"x": 21, "y": 0, "width": 2, "height": 32}},
+                        {"id": "3", "type": "TEXT", "characters": "Find jobs", "style": {},
+                         "absoluteBoundingBox": {"x": 40, "y": 6, "width": 80, "height": 20}}]}
+    out = Emitter().element(row, {"id": "0", "type": "FRAME", "layoutMode": "VERTICAL"})
+    first = out.splitlines()[0]
+    assert 'className="relative flex' in first
+    guide = next(l for l in out.splitlines() if "left-[21px]" in l)
+    assert "absolute" in guide and "relative" not in guide

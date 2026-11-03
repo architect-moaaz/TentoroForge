@@ -356,7 +356,20 @@ class Emitter:
                     + (f'data-node="{node.get("id")}" ' if self.trace_ids else "") + "/>\n")
         if kind == "TEXT":
             return self._text(node, sizing, pad)
-        classes = [*self._layout_classes(node), *sizing, *self._paint_classes(node, style)]
+        layout = self._layout_classes(node)
+        # ONE POSITION PER ELEMENT. A free shape placed in its parent came out
+        # `relative absolute`; Tailwind's `relative` wins, so it sat in the flow
+        # over its neighbours (DITANS's menu guide line over the labels, D2,
+        # 2026-11-03). Placed, it is `absolute` — itself a containing block.
+        if "absolute" in sizing:
+            layout = [c for c in layout if c != "relative"]
+        # AND THE BOX IT IS PLACED IN HOLDS IT: an auto-layout row with a child
+        # placed absolutely is its containing block.
+        elif "relative" not in layout and any(isinstance(c, dict) and c.get("visible") is not False
+                                              and c.get("layoutPositioning") == "ABSOLUTE"
+                                              for c in node.get("children") or []):
+            layout = ["relative", *layout]
+        classes = [*layout, *sizing, *self._paint_classes(node, style)]
         if node.get("clipsContent"):
             classes.append("overflow-hidden")
         if kind == "ELLIPSE":
