@@ -57,3 +57,12 @@ def test_the_email_members_are_found_by_is_never_sealed():
     doc["security"] = {"ownershipRules": [RULE]}
     sealed = _sealed_fields(member, doc)
     assert "email" not in sealed and "phone" in sealed
+
+
+def test_a_public_board_reaches_visitors_and_scopes_members():
+    """DITANS's job board is browsed signed out; scoped to members alone it
+    listed no job (2026-11-03). `reads: "visitors"` is carried to the engine."""
+    rules = ownership_rules({**DOC, "security": {"ownershipRules": [{**RULE, "reads": "visitors"}]}})
+    assert rules["job"][0]["reads"] == "visitors"
+    rules = ownership_rules({**DOC, "security": {"ownershipRules": [{**RULE, "reads": "scoped"}]}})
+    assert "reads" not in rules["job"][0]

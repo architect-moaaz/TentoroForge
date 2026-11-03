@@ -387,12 +387,13 @@
         "unscopedRoles": [
           "admin"
         ],
-        "note": "An opening is its organisation's: its members reach it.",
+        "note": "An opening is its organisation's: its members reach it, and the public board shows it to people not signed in.",
         "kind": "scope",
         "scope": "member",
         "members": "OrgMember",
         "memberColumn": "organisationId",
-        "memberEmailColumn": "email"
+        "memberEmailColumn": "email",
+        "reads": "visitors"
       }
     ]
   }

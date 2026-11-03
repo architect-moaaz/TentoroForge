@@ -4146,8 +4146,10 @@ def ownership_rules(doc: dict) -> dict[str, list[dict]]:
             rule["guestColumn"] = str(item["guestColumn"])
         # EVERYONE READS, THE OWNER WRITES: a catalogue, a listing, a public
         # profile. The engine lifts the rule from reads and keeps it on writes.
-        if str(item.get("reads") or "") == "everyone":
-            rule["reads"] = "everyone"
+        # A PUBLIC LISTING IN A SCOPED WORKSPACE: signed-out visitors read
+        # every row, signed-in people what their scope gives them.
+        if str(item.get("reads") or "") in ("everyone", "visitors"):
+            rule["reads"] = str(item["reads"])
         # OWNED THROUGH ANOTHER RECORD: `column` references a record of
         # `through`, and the row is reachable when that one is. Written as
         # the target's TABLE, which the engine's registry always resolves —
@@ -4242,7 +4244,8 @@ def render_ownership_rules_module(manifest: dict[str, list[dict]]) -> str:
         "  guestColumn?: string;\n"
         "  /** \"everyone\": anyone reads every row, signed in or not; the column still\n"
         "   *  decides who may change or remove it. Absent: reads are scoped like writes. */\n"
-        '  reads?: "scoped" | "everyone";\n'
+        "  /** \"visitors\": people not signed in read every row; signed-in people stay scoped. */\n"
+        '  reads?: "scoped" | "everyone" | "visitors";\n'
         "  /** For scope \"member\": the membership table, its organisation column, and\n"
         "   *  the column matching the actor (their email, or their user id). */\n"
         "  members?: string;\n"

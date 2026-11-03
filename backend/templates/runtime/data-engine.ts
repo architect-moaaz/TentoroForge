@@ -609,6 +609,10 @@ function scopeConditions(
     // guest no products and every category "0 products" (Ecom L1,
     // 2026-10-11). `reads: "everyone"` lifts the rule from reads only.
     if (op === "read" && rule.reads === "everyone") continue;
+    // A PUBLIC LISTING IN A SCOPED WORKSPACE. DITANS's job board is browsed
+    // signed out, while an employer's workspace lists only its own jobs; scoped
+    // to members alone, the public board showed no job at all (2026-11-03).
+    if (op === "read" && rule.reads === "visitors" && !ctx.user?.id) continue;
     if (role && (rule.unscopedRoles || []).includes(role)) continue;
     const col = cols[rule.column];
     if (col === undefined) {

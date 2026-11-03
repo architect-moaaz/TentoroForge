@@ -703,7 +703,10 @@ console.log("member scope: an organisation's rows reach its members, and no one 
   eqJson(ids((await engine.query(openings.__name, {}, newcomer)).data), [],
     "a new account in no organisation reads none (QA D-59)");
   eqJson((await engine.query(openings.__name, {}, newcomer)).total, 0, "and counts none");
-  eqJson(ids((await engine.query(openings.__name, {}, {})).data), [], "nor does a visitor");
+  eqJson(ids((await engine.query(openings.__name, {}, {})).data), ["o1", "o2", "o3"],
+    "a visitor who is not signed in browses the public board (reads: \"visitors\")");
+  await throwsNamed(() => engine.update(openings.__name, "o1", { title: "x" }, {}),
+    "NotFoundError", "but changes nothing on it");
   eqJson(ids((await engine.query(openings.__name, {}, asAdmin)).data), ["o1", "o2", "o3"],
     "an exempt role reads every organisation's");
   eqJson(ids((await engine.query(orgMembers.__name, { filter: { email: "new@qa.example" } }, newcomer)).data), [],

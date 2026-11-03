@@ -2542,13 +2542,16 @@ export const RecordScopeRule = z.object({
    */
   /** Who may READ the rows: the same people who may write them, or everyone. */
   reads: z
-    .enum(["scoped", "everyone"])
+    .enum(["scoped", "everyone", "visitors"])
     .describe(
       'Who may read the rows. "scoped": the same people who may write them (the default). ' +
       '"everyone": anyone, signed in or not, reads every row — a catalogue, a listing, a ' +
       "public profile — while `column` still decides who may change or remove it. Say " +
       '"everyone" wherever visitors browse what owners manage; without it a signed-out ' +
-      "visitor, who holds no role, reaches no row at all.",
+      "visitor, who holds no role, reaches no row at all. " +
+      '"visitors": people who are not signed in read every row (a public job board), while ' +
+      "each signed-in person still reads only what the rule gives them — an employer's " +
+      "workspace lists its own jobs, not every employer's.",
     )
     .default("scoped"),
   guestColumn: z
