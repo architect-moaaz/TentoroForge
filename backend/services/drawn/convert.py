@@ -91,6 +91,7 @@ class Prepared:
     images: dict[str, str] = field(default_factory=dict)         # frame ref -> picture path
     links: dict[str, list[dict]] = field(default_factory=dict)   # frame ref -> links
     dropped: dict[str, list[str]] = field(default_factory=dict)  # frame ref -> furniture left out
+    framed: dict[str, bool] = field(default_factory=dict)        # frame ref -> drawn inside the shell
     #: The shell of a design of one product…
     shell_markup: str = ""
     shell_frame: str = ""
@@ -177,6 +178,7 @@ def _prepare(doc: dict, output_dir: str | Path) -> Prepared:
                            "to_name": frame_names.get(str(link.get("to") or ""), "")}
                           for link in frame.get("links") or [] if isinstance(link, dict)]
         out.dropped[ref] = list(screen_read.dropped)
+        out.framed[ref] = screen_read.sidebar is not None
     for portal, portal_read in read_by.items():
         chosen = _shell.the_shell(portal_read)
         if chosen is None:
@@ -197,6 +199,34 @@ def _prepare(doc: dict, output_dir: str | Path) -> Prepared:
     if SHELL_KEY in out.shells:
         only = out.shells[SHELL_KEY]
         out.shell_markup, out.shell_frame, out.shell_image = only["markup"], only["frame"], only["image"]
+    return out
+
+
+def framing(doc: dict, output_dir: str | Path) -> dict[str, bool]:
+    """Each drawn screen's frame -> whether it is drawn inside its portal's
+    shell: as its row records it, else as the converter reads the stored
+    frame (rows converted before `framed` was recorded)."""
+    out: dict[str, bool] = {}
+    unknown = False
+    for v in doc.get("drawnViews") or []:
+        if isinstance(v, dict) and v.get("kind") == "screen":
+            if isinstance(v.get("framed"), bool):
+                out[str(v.get("frame") or v.get("key"))] = v["framed"]
+            else:
+                unknown = True
+    if unknown:
+        try:
+            read = prepare(doc, output_dir).framed
+        except Exception:  # noqa: BLE001 — without the stored frames, every screen keeps its shell
+            read = {}
+        for v in doc.get("drawnViews") or []:
+            ref = str(v.get("frame") or v.get("key") or "") if isinstance(v, dict) else ""
+            if ref and ref not in out and v.get("kind") == "screen":
+                hit = read.get(ref)
+                if hit is None:
+                    hit = next((f for r, f in read.items() if r.split("/")[-1] == ref.split("/")[-1]), None)
+                if hit is not None:
+                    out[ref] = hit
     return out
 
 
@@ -229,6 +259,7 @@ def screen_row(client: Any, prepared: Prepared, ref: str, *, usage: list | None 
     return {"key": ref, "kind": "screen", "name": name, "frame": ref, "code": out["code"],
             "contract": out["contract"], "sample": out["sample"],
             "source": hashlib.sha1(static.encode()).hexdigest()[:16],
+            **({"framed": prepared.framed[ref]} if ref in prepared.framed else {}),
             **({"portal": prepared.portal_of[ref]} if prepared.portal_of.get(ref) else {})}
 
 
