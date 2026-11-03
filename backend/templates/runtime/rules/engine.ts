@@ -1130,6 +1130,24 @@ async function applyTypedRules(
   }
 }
 
+/**
+ * ON A CREATE, NOTHING CHANGED. `previous.gridCodeId != gridCodeId` asks
+ * whether a field changed; on a create there is no previous record, every
+ * `previous.x` is null, and the test held for every new case — "the grid code
+ * cannot be changed once submitted" refused the creation of every submitted
+ * case (kkb5mzo3, 2026-11-03). A field compared with its own previous value is
+ * read as unchanged on a create. Every other use of `previous` stays as it is:
+ * `previous.status = null` is how a rule recognises a create, and it holds.
+ */
+export function unchangedOnCreate(whenFeel: string, previous: Record<string, unknown> | null | undefined): string {
+  if (previous) return whenFeel;
+  return whenFeel
+    .replace(/\bprevious\.(\w+)\s*(!=|<>)\s*(\w+)\b/g, (m, a, _op, b) => (a === b ? "false" : m))
+    .replace(/\b(\w+)\s*(!=|<>)\s*previous\.(\w+)\b/g, (m, a, _op, b) => (a === b ? "false" : m))
+    .replace(/\bprevious\.(\w+)\s*=\s*(\w+)\b(?!\s*\()/g, (m, a, b) => (a === b ? "true" : m))
+    .replace(/\b(\w+)\s*=\s*previous\.(\w+)\b/g, (m, a, b) => (a === b ? "true" : m));
+}
+
 export async function evaluateRuleSet(
   modelName: string,
   event: "create" | "update" | "read",
@@ -1170,7 +1188,7 @@ export async function evaluateRuleSet(
   const before = previous ?? {};
   for (const rule of rules) {
     const config = rule.config as ConditionActionConfig;
-    const whenFeel = normalizeBlankChecks((config.whenFeel ?? "true").trim() || "true");
+    const whenFeel = unchangedOnCreate(normalizeBlankChecks((config.whenFeel ?? "true").trim() || "true"), previous);
     let matched = false;
     try {
       matched = Boolean(evaluateExpression(whenFeel, { ...working, user, previous: before } as any));
@@ -1223,7 +1241,7 @@ export async function evaluateFormRules(
   const before = previous ?? {};
   for (const rule of rules) {
     const config = rule.config as ConditionActionConfig;
-    const whenFeel = normalizeBlankChecks((config.whenFeel ?? "true").trim() || "true");
+    const whenFeel = unchangedOnCreate(normalizeBlankChecks((config.whenFeel ?? "true").trim() || "true"), previous);
     let matched = false;
     try {
       matched = Boolean(evaluateExpression(whenFeel, { ...working, user, previous: before } as any));

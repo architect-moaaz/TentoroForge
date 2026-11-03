@@ -11,7 +11,7 @@
 import assert from "node:assert/strict";
 import {
   setRules, evaluateRuleSet, evaluateFormRules, evaluateRuleSetForTable,
-  effectiveScope, normalizeBlankChecks, ruleGoverns,
+  effectiveScope, normalizeBlankChecks, ruleGoverns, unchangedOnCreate,
 } from "../rules/engine.ts";
 
 const ca = (id: string, model: string, whenFeel: string, then: any[], extra: any = {}) => ({
@@ -77,6 +77,23 @@ const forward = await evaluateRuleSet("Task", "update", { status: "done" }, unde
 assert.deepEqual(forward.errors, []);
 const created = await evaluateRuleSet("Task", "create", { status: "todo" });
 assert.deepEqual(created.errors, [], "a new record has no previous value");
+// "The grid code cannot be changed once submitted", as the build wrote it for
+// Criterion Refunds (kkb5mzo3): on a create nothing changed, so a submitted case
+// can be made; on an update the change is still refused.
+setRules([
+  ca("RULE-036", "RefundCase", 'status != "draft" and previous.gridCodeId != gridCodeId',
+     [{ id: "g", type: "show_error", message: "The grid code cannot be changed once a case is submitted." }], { scope: "entity" }),
+]);
+assert.deepEqual((await evaluateRuleSet("RefundCase", "create", { status: "submitted", gridCodeId: "g1" })).errors, [],
+                 "a submitted case can be created");
+assert.deepEqual((await evaluateRuleSet("RefundCase", "update", { status: "submitted", gridCodeId: "g2" }, undefined,
+                                        { status: "submitted", gridCodeId: "g1" })).errors,
+                 ["The grid code cannot be changed once a case is submitted."], "its grid code cannot be changed after");
+assert.deepEqual((await evaluateFormRules("RefundCase", { status: "submitted", gridCodeId: "g1" })).errors, [],
+                 "the new-case form does not say it either");
+assert.equal(unchangedOnCreate('previous.a != a and b = previous.b and previous.c = null', null),
+             'false and true and previous.c = null');
+assert.equal(unchangedOnCreate("previous.a != a", { a: 1 }), "previous.a != a", "an update reads it as written");
 console.log("previous values: PASS ✅");
 
 // ── required is enforced on save, not only drawn ────────────────────────────

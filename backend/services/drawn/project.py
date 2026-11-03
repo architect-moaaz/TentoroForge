@@ -46,8 +46,14 @@ DRAWN_DIR = Path("src/components/drawn")
 FRAME_FILES = (Path("src/components/DrawnFrame.tsx"), Path("src/components/DrawnFrame.css"))
 _FOUNDATION = Path(__file__).resolve().parents[2] / "templates" / "app-foundation"
 
-DEFAULT_WRAPPER = '''"use client";
-// The design draws no frame of its own: the application draws its own.
+# A SERVER MODULE, NOT A CLIENT ONE. The layout is a server component and reads
+# `DRAWN_SHELL` from here; across a "use client" boundary it is handed a client
+# reference — a function, truthy whatever the value — so `if (DRAWN_SHELL)`
+# took the drawn-frame branch in every app without a drawing, and every page
+# showed with no menu at all (kkb5mzo3, 2026-11-03). The drawn wrapper below
+# stays a client module: it uses hooks, and its flag is true either way.
+DEFAULT_WRAPPER = '''// The design draws no frame of its own: the application draws its own.
+// A server module: the layout reads DRAWN_SHELL as the value it is.
 import * as React from "react";
 
 export const DRAWN_SHELL = false;
@@ -306,6 +312,22 @@ def _wrapper(shells: list[tuple[dict, list[dict]]], routes: list[list[str]], rol
     )
 
 
+def settle_default_wrapper(app_root: str | Path) -> bool:
+    """With no drawn shell, the wrapper is :data:`DEFAULT_WRAPPER`: written when
+    it is missing, when it was a drawn shell's, and when it is the old client
+    stub whose flag the layout read as true. A wrapper someone wrote otherwise is
+    left alone. Whether it was written."""
+    wrapper = Path(app_root) / WRAPPER
+    current = wrapper.read_text("utf-8") if wrapper.is_file() else ""
+    stale = (not current or "DRAWN_SHELL = true" in current
+             or (current.lstrip().startswith('"use client"') and "DRAWN_SHELL = false" in current))
+    if not stale or current == DEFAULT_WRAPPER:
+        return False
+    wrapper.parent.mkdir(parents=True, exist_ok=True)
+    wrapper.write_text(DEFAULT_WRAPPER, encoding="utf-8")
+    return True
+
+
 def project_drawn(doc: dict, output_dir: str | Path, app_root: str | Path) -> dict[str, Any]:
     """Write the drawn shell and copy the drawn pictures. Idempotent."""
     from services.drawn.assets import copy_into
@@ -316,8 +338,7 @@ def project_drawn(doc: dict, output_dir: str | Path, app_root: str | Path) -> di
     wrapper = root / WRAPPER
     wrapper.parent.mkdir(parents=True, exist_ok=True)
     if not shells:
-        if not wrapper.is_file() or "DRAWN_SHELL = true" in wrapper.read_text("utf-8"):
-            wrapper.write_text(DEFAULT_WRAPPER, encoding="utf-8")
+        settle_default_wrapper(root)
         (root / SHELL_LOAD).write_text(DEFAULT_SHELL_LOAD, encoding="utf-8")
         return {"assets": copied, "shell": False}
     drawn = root / DRAWN_DIR

@@ -1,5 +1,5 @@
-"use client";
 // The design draws no frame of its own: the application draws its own.
+// A server module: the layout reads DRAWN_SHELL as the value it is.
 import * as React from "react";
 
 export const DRAWN_SHELL = false;

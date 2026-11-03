@@ -373,3 +373,151 @@ export async function checkProperty(id: string): Promise<MewsProperty> {
     RETURNING ${PUBLIC_COLUMNS}`))[0];
   return _public(row);
 }
+
+// --------------------------------------------------------------------------- //
+// FINDING A STAY. A desk starts a refund from the stay it is about: a
+// confirmation number, a guest's last name or a room. Mews answers each of
+// those directly — reservations by `Numbers`, customers by `LastNames` then
+// their reservations by `AccountIds`, rooms by `Names` then the stays in them
+// by `AssignedResourceIds` — so a search never downloads a hotel's whole
+// reservation list to read the match out of it. Each stay comes back with its
+// guest, room and charged payment, ready to be kept as records.
+// --------------------------------------------------------------------------- //
+
+/** A stay Mews found, in the words a refund case needs. */
+export interface MewsStay {
+  reservationId: string;
+  confirmationNumber: string | null;
+  reservationStatus: string | null;
+  arrivalDate: string | null;
+  departureDate: string | null;
+  customerId: string | null;
+  accountId: string | null;
+  guestName: string | null;
+  guestEmail: string | null;
+  roomNumber: string | null;
+  billId: string | null;
+  /** The stay's charged payment (a card one when there is one), or null. */
+  payment: { id: string; amount: number | null; currency: string | null; kind: string | null;
+             cardLast4: string | null; billId: string | null } | null;
+}
+
+/** How far back and ahead a room's stays are looked for: Mews caps an interval. */
+const ROOM_WINDOW_DAYS = { back: 60, ahead: 30 };
+
+async function _call(creds: MewsCredentials, operation: string, body: Record<string, unknown>): Promise<any> {
+  const res = await fetch(`${creds.host}/api/connector/v1/${operation}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(signedBody(body, creds)),
+    signal: AbortSignal.timeout(20_000),
+  });
+  const answer: any = await res.json().catch(() => null);
+  if (!res.ok) throw new MewsError(`Mews answered ${res.status} to ${operation}: ${String(answer?.Message || res.statusText || "no reason given")}`, 502);
+  return answer ?? {};
+}
+
+function _day(utc: unknown): string | null {
+  const s = typeof utc === "string" ? utc : "";
+  return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : null;
+}
+
+function _iso(d: Date): string {
+  return d.toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
+/** A charged payment of the stay, a card one first. */
+function _payment(payments: any[]): MewsStay["payment"] {
+  const charged = payments.filter((p) => String(p?.State || "") === "Charged");
+  const card = (p: any) => /card/i.test(String(p?.Type || "")) || /card/i.test(String(p?.Kind || ""))
+    || Boolean(p?.Data?.CreditCard);
+  const p = charged.find(card) ?? charged[0];
+  if (!p) return null;
+  const gross = Number(p?.Amount?.GrossValue);
+  const masked = String(p?.Data?.CreditCard?.ObfuscatedNumber || p?.Data?.CreditCard?.Number || "");
+  return {
+    id: String(p.Id),
+    amount: Number.isFinite(gross) ? Math.abs(gross) : null,
+    currency: p?.Amount?.Currency ? String(p.Amount.Currency) : null,
+    kind: card(p) ? "Card" : String(p?.Type || p?.Kind || "") || null,
+    cardLast4: /\d{4}$/.test(masked) ? masked.slice(-4) : null,
+    billId: p?.BillId ? String(p.BillId) : null,
+  };
+}
+
+/**
+ * The stays matching `term` — a confirmation number, a guest's last name or a
+ * room — newest first, at most `limit`. `ref` names the property as
+ * `credentialsFor` reads it; without one, the organisation's own connection.
+ */
+export async function findStays(term: unknown, ref?: unknown, limit = 10): Promise<MewsStay[]> {
+  const q = String(term ?? "").trim();
+  if (!q) return [];
+  const creds = await credentialsFor(ref);
+  const call = (op: string, body: Record<string, unknown>) => _call(creds, op, body);
+  const now = Date.now();
+  const window = {
+    StartUtc: _iso(new Date(now - ROOM_WINDOW_DAYS.back * 864e5)),
+    EndUtc: _iso(new Date(now + ROOM_WINDOW_DAYS.ahead * 864e5)),
+  };
+  const capital = q.charAt(0).toUpperCase() + q.slice(1);
+  const byNumber = call("reservations/getAll/2023-06-06", { Numbers: [q], Limitation: { Count: limit } });
+  const byName = call("customers/getAll", { LastNames: [...new Set([q, capital])], Extent: { Customers: true },
+                                            Limitation: { Count: 25 } })
+    .then((a) => {
+      const ids = (a?.Customers ?? []).map((c: any) => c?.Id).filter(Boolean);
+      return ids.length ? call("reservations/getAll/2023-06-06", { AccountIds: ids, Limitation: { Count: limit } }) : {};
+    });
+  const byRoom = call("resources/getAll", { Names: [q], Limitation: { Count: 10 } })
+    .then((a) => {
+      const ids = (a?.Resources ?? []).map((r: any) => r?.Id).filter(Boolean);
+      return ids.length ? call("reservations/getAll/2023-06-06", { AssignedResourceIds: ids, CollidingUtc: window,
+                                                                    Limitation: { Count: limit } }) : {};
+    });
+  const settled = await Promise.allSettled([byNumber, byName, byRoom]);
+  if (settled.every((s) => s.status === "rejected")) throw (settled[0] as PromiseRejectedResult).reason;
+  const seen = new Map<string, any>();
+  for (const s of settled) {
+    if (s.status !== "fulfilled") continue;
+    for (const r of s.value?.Reservations ?? []) if (r?.Id && !seen.has(r.Id)) seen.set(r.Id, r);
+  }
+  const reservations = [...seen.values()]
+    .sort((a, b) => String(b?.ScheduledStartUtc || "").localeCompare(String(a?.ScheduledStartUtc || "")))
+    .slice(0, limit);
+  if (!reservations.length) return [];
+
+  const accountIds = [...new Set(reservations.map((r) => r.AccountId).filter(Boolean))];
+  const roomIds = [...new Set(reservations.map((r) => r.AssignedResourceId).filter(Boolean))];
+  const [customers, rooms, payments] = await Promise.all([
+    accountIds.length ? call("customers/getAll", { CustomerIds: accountIds, Extent: { Customers: true },
+                                                   Limitation: { Count: accountIds.length } }) : {},
+    roomIds.length ? call("resources/getAll", { ResourceIds: roomIds, Limitation: { Count: roomIds.length } }) : {},
+    call("payments/getAll", { ReservationIds: reservations.map((r) => r.Id), Limitation: { Count: 100 } }),
+  ]);
+  const customer = new Map<string, any>((customers?.Customers ?? []).map((c: any) => [c.Id, c]));
+  const room = new Map<string, any>((rooms?.Resources ?? []).map((r: any) => [r.Id, r]));
+  const paid = new Map<string, any[]>();
+  for (const p of payments?.Payments ?? []) {
+    if (!p?.ReservationId) continue;
+    paid.set(p.ReservationId, [...(paid.get(p.ReservationId) ?? []), p]);
+  }
+  return reservations.map((r) => {
+    const c = customer.get(r.AccountId);
+    const name = c ? [c.FirstName, c.LastName].filter(Boolean).join(" ").trim() : "";
+    const payment = _payment(paid.get(r.Id) ?? []);
+    return {
+      reservationId: String(r.Id),
+      confirmationNumber: r.Number ? String(r.Number) : null,
+      reservationStatus: r.State ? String(r.State) : null,
+      arrivalDate: _day(r.ScheduledStartUtc),
+      departureDate: _day(r.ScheduledEndUtc),
+      customerId: c?.Id ? String(c.Id) : (r.AccountId ? String(r.AccountId) : null),
+      accountId: r.AccountId ? String(r.AccountId) : null,
+      guestName: name || null,
+      guestEmail: c?.Email ? String(c.Email) : null,
+      roomNumber: room.get(r.AssignedResourceId)?.Name ? String(room.get(r.AssignedResourceId).Name) : null,
+      billId: payment?.billId ?? null,
+      payment,
+    };
+  });
+}

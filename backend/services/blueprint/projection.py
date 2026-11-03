@@ -1310,7 +1310,7 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
     # text and its accent, as the tokens the page already reads.
     # …AND IN THE TONE THE DESIGN CHOSE (`shell.tone`), not the inverse
     # surface on every app: see `RAIL_PAINT`.
-    paint = RAIL_PAINT[derive_shell(doc)["tone"]]
+    paint = {**RAIL_PAINT[derive_shell(doc)["tone"]], **drawn_rail_paint(doc)}
     rail: dict[str, Any] = {"groups": groups, "appName": app_name, **paint, "accent": "hsl(var(--accent))"}
     # THE OWNER'S MARK GOES WHERE THE APPLICATION'S NAME IS. The rail's brand
     # block draws a square with the first letter of the name in it; given a
@@ -1946,6 +1946,23 @@ RAIL_PAINT: dict[str, dict[str, str]] = {
     "tinted": {"mode": "light", "bg": "color-mix(in srgb, hsl(var(--primary)) 9%, hsl(var(--background)))",
                "text": "hsl(var(--foreground) / 0.88)", "muted": "hsl(var(--muted-foreground))"},
 }
+
+
+def drawn_rail_paint(doc: dict) -> dict[str, str]:
+    """THE SIDEBAR THE DESIGN DRAWS IS THE RAIL'S PAINT. A connected design's
+    sidebar colour (`designSystem.colors.sidebarBackground`, counted off its
+    frames by `figma.palette`) was written as a token and read by nothing: the
+    rail took its paint from a tone, and Criterion's deep-purple sidebar came
+    out a pale lavender wash (kkb5mzo3, 2026-11-03). The colour, with text
+    that reads on it; nothing when the design draws no sidebar."""
+    colour = str(((doc.get("designSystem") or {}).get("colors") or {}).get("sidebarBackground") or "")
+    if not re.fullmatch(r"#[0-9a-fA-F]{6}", colour):
+        return {}
+    r, g, b = (int(colour[i:i + 2], 16) / 255 for i in (1, 3, 5))
+    dark = 0.299 * r + 0.587 * g + 0.114 * b < 0.55
+    if dark:
+        return {"mode": "dark", "bg": colour, "text": "rgba(255, 255, 255, 0.86)", "muted": "rgba(255, 255, 255, 0.58)"}
+    return {"mode": "light", "bg": colour, "text": "hsl(var(--foreground) / 0.88)", "muted": "hsl(var(--muted-foreground))"}
 
 
 #: The most destinations an icon-only rail or a dock may hold before the

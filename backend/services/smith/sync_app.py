@@ -118,6 +118,7 @@ MEWS_FILES: tuple[tuple[str, str], ...] = (
     ("api-mews/properties/route.ts", "src/app/api/mews/properties/route.ts"),
     ("api-mews/properties/[id]/route.ts", "src/app/api/mews/properties/[id]/route.ts"),
     ("api-mews/properties/[id]/check/route.ts", "src/app/api/mews/properties/[id]/check/route.ts"),
+    ("api-mews/stays/route.ts", "src/app/api/mews/stays/route.ts"),
     ("pages/mews-properties/page.tsx", "src/app/(dashboard)/mews-properties/page.tsx"),
     ("pages/mews-properties/MewsPropertiesPanel.tsx", "src/app/(dashboard)/mews-properties/MewsPropertiesPanel.tsx"),
 )
