@@ -1,6 +1,7 @@
 """Email service — SendGrid or SMTP integration with template support."""
 
 import logging
+import re
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -78,7 +79,7 @@ TEMPLATES = {
         "subject": "Reset your Tentoro Forge password",
         "html": """
         <h2>Password Reset</h2>
-        <p>Click the link below to reset your password. This link expires in 1 hour.</p>
+        <p>Click the link below to reset your password. This link expires in 30 minutes and works once.</p>
         <p><a href="{reset_url}">Reset Password</a></p>
         <p>If you didn't request this, you can safely ignore this email.</p>
         """,
@@ -160,7 +161,9 @@ async def send_email(
     subject, html = render(tmpl, ctx)
 
     if APP_ENV == "development":
-        logger.info("DEV EMAIL → to=%s subject=%s", to, subject)
+        # Nothing leaves a development platform: the links in the mail are in the log instead.
+        links = re.findall(r'href="([^"]+)"', html)
+        logger.info("DEV EMAIL → to=%s subject=%s links=%s", to, subject, links)
         return True
 
     if SENDGRID_API_KEY:

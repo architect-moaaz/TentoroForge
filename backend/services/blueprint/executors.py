@@ -1167,6 +1167,82 @@ def context_for(doc: dict, agent: str) -> dict:
 PROVENANCE_FIELDS = frozenset({"evidence", "syncNote"})
 
 
+#: What a page names of a record: its id (`sections[].entity`,
+#: `data.primaryEntity`); its fields' names say which record a screen draws.
+#: Kinds, sample values, bounds and masks are the data model's, never a page's.
+_PAGE_ENTITY_KEYS = ("id", "name", "description", "table", "labelField", "account", "status")
+
+
+def page_part_context(doc: dict, agent: str) -> dict:
+    """The Blueprint every part of a page set shares: :func:`context_for`
+    without what changes while the parts land or what one part cannot use.
+
+    DITANS (2026-10-30) sent every one of 74 parts the whole slice — every
+    drawn frame of the design (30%), every record with its sample values
+    (36%) and every page already declared (21%), 520k tokens — and paid $230
+    in 18 minutes. Each part wrote it to the cache afresh: a 520k prefill
+    outlasts the fan-out's warm-up wait, and each part that landed changed
+    `pages`, so no later call or repair matched. A part's own frames are its
+    slots, its own pages follow the break (:func:`page_part_own`), and a page
+    names a record by its id."""
+    ctx = without_frames_or_samples(context_for(doc, agent))
+    ctx.pop("pages", None)
+    data = ctx.get("data")
+    if isinstance(data, dict):
+        ctx["data"] = {
+            "entities": [
+                {**{k: e[k] for k in _PAGE_ENTITY_KEYS if k in e},
+                 "fields": [str(f.get("name")) for f in e.get("fields") or []
+                            if isinstance(f, dict) and f.get("name")]}
+                for e in data.get("entities") or [] if isinstance(e, dict)
+            ],
+            "relationships": data.get("relationships") or [],
+        }
+    return ctx
+
+
+def without_frames_or_samples(ctx: dict) -> dict:
+    """A page author's slice without the design's frames or the records'
+    sample values. A page is bound to its frames by `figmaFrame` and
+    `frames`, which it carries; the frame list is the design's, every drawn
+    frame of it (30% of DITANS's slice), and the samples are the seed's. A
+    field's flags that are false say nothing an absent flag does not."""
+    if isinstance(ctx.get("designSources"), list):
+        ctx["designSources"] = [{k: v for k, v in s.items() if k not in ("frames", "gaps")}
+                                for s in ctx["designSources"] if isinstance(s, dict)]
+    data = ctx.get("data")
+    if isinstance(data, dict) and isinstance(data.get("entities"), list):
+        ctx["data"] = {**data, "entities": [
+            {**e, "fields": [{k: v for k, v in f.items() if k != "examples" and v is not False}
+                             if isinstance(f, dict) else f for f in e.get("fields") or []]}
+            if isinstance(e, dict) else e
+            for e in data["entities"]]}
+    return ctx
+
+
+def page_part_own(doc: dict, subject: str, slots: list[dict]) -> str:
+    """After the break, what is this part's alone: the pages it declared
+    before (a repair edits them) and the frames its slots link to elsewhere.
+    Not the other parts' routes: each keeps to its module's own address
+    (:func:`~services.blueprint.page_planner.drawn_address`)."""
+    from services.blueprint.page_planner import page_set_pages
+
+    mine = page_set_pages(doc, subject)
+    placed = {str(s.get("figmaFrame")) for s in slots}
+    linked = {str(l.get("to")) for s in slots for l in s.get("links") or [] if isinstance(l, dict)} - placed
+    names = {str(f.get("nodeId")): str(f.get("name") or f.get("shows") or "")
+             for source in doc.get("designSources") or [] for f in source.get("frames") or []
+             if str(f.get("nodeId")) in linked}
+    out = ""
+    if mine:
+        out += ("\n\nThe pages this part declared before:\n\n```json\n"
+                + json.dumps(mine, indent=2, sort_keys=True) + "\n```")
+    if names:
+        out += ("\n\nFrames these slots link to, placed by other parts:\n"
+                + "\n".join(f"{k}: {v}" for k, v in sorted(names.items())))
+    return out
+
+
 def _without_provenance(value: Any) -> Any:
     """Strip provenance from a section an agent reads but does not own."""
     if isinstance(value, list):
@@ -1247,6 +1323,12 @@ discouraged, because a pattern is advice a decoder does not enforce.
 - Do not invent IDs. Identity is assigned for you from the entity's name, so \
 two modules naming the same entity update one record rather than duplicating \
 it — which makes a near-miss spelling the one thing that creates a duplicate."""
+
+def _signed_step_lines() -> str:
+    """How a step reaches a system the runtime signs for itself (Mews)."""
+    from services.signed_services import step_lines
+    return step_lines()
+
 
 NODE_TASKS: dict[str, str] = {
     "figma_intelligence": (
@@ -1985,7 +2067,7 @@ NODE_TASKS: dict[str, str] = {
         "an outside system (`http_call`) carries `config.auth` naming the "
         "secret by NAME (`{\"secretRef\": \"XERO_API_KEY\"}`, declared on an "
         "integration's `secretRefs`); the runtime attaches the value, and a "
-        "template can never reach it. A process another system starts has no "
+        "template can never reach it. " + _signed_step_lines() + " A process another system starts has no "
         "person acting; it reads who it concerns from what it was handed. A "
         "`create_checkout` names `amount` (major units, the application's "
         "currency) or `lineItems`, the `reference` {entity, id} it pays for, "
@@ -2460,7 +2542,35 @@ def reference_hold(doc: dict, node: str) -> str:
     )
 
 
+#: The steps that generate what drawn views need, shown every view's contract
+#: (`services.drawn.contract.digest`).
+DRAWN_READERS = frozenset({"data_model", "entity_fields", "workflows", "workflow_steps", "security",
+                           "page_contracts", "business_rules"})
+
+
 def build_prompt(
+    doc: dict, node: str, *, inline_schema: bool = False, inline_shapes: bool = True,
+    subject: str = "", feedback: str = "", references: Sequence[Path] = (),
+    output_dir: Any = None, brief: str = "", agent: str = "",
+) -> tuple[str, str]:
+    """Build (system, user) for a node — see :func:`_build_prompt`. A node
+    that backs a design built as drawn is shown every drawn view's contract,
+    in the part of the prompt its subjects share (it is the same for all)."""
+    system, user = _build_prompt(doc, node, inline_schema=inline_schema, inline_shapes=inline_shapes,
+                                 subject=subject, feedback=feedback, references=references,
+                                 output_dir=output_dir, brief=brief, agent=agent)
+    if node in DRAWN_READERS and doc.get("drawnViews"):
+        from services.drawn.contract import DIGEST_PREAMBLE, digest
+
+        drawn = digest(doc)
+        if drawn:
+            block = DIGEST_PREAMBLE + drawn
+            head, sep, tail = user.partition(CACHE_BREAK)
+            user = head + block + sep + tail if sep else user + block
+    return system, user
+
+
+def _build_prompt(
     doc: dict, node: str, *, inline_schema: bool = False, inline_shapes: bool = True,
     subject: str = "", feedback: str = "", references: Sequence[Path] = (),
     output_dir: Any = None, brief: str = "", agent: str = "",
@@ -2734,14 +2844,16 @@ def build_prompt(
 
         if subject and is_page_set_part(subject):
             # ONE PART OF A PAGE SET TOO LARGE FOR ONE REPLY. What every part
-            # shares — the Blueprint — first, so the parts read it from the
-            # cache; this part's question and slots after the break.
+            # shares first, so the parts read it from the cache; this part's
+            # question, slots and own pages after the break.
+            slots = page_set_parts(doc).get(subject, [])
             user = (
                 "Here is the Blueprint the page set is derived from.\n\n```json\n"
-                + json.dumps(context_for(doc, agent), indent=2, sort_keys=True)
+                + json.dumps(page_part_context(doc, agent), indent=2, sort_keys=True)
                 + "\n```" + CACHE_BREAK
                 + page_set_part_prompt(doc, subject) + "\n\n```json\n"
-                + json.dumps(page_set_parts(doc).get(subject, []), indent=2) + "\n```"
+                + json.dumps(slots, indent=2) + "\n```"
+                + page_part_own(doc, subject, slots)
             )
             if subject != FEATURES_PART:
                 user += ("\n\nEVERY page you author carries `figmaFrame`, set to the "
@@ -3548,7 +3660,7 @@ def _page_details_prompt(doc: dict, system: str, subject: str,
         for p in doc.get("pages") or []
         if isinstance(p, dict) and p.get("status") != "DEPRECATED"
     ]
-    context = context_for(doc, "page_design")
+    context = without_frames_or_samples(context_for(doc, "page_design"))
     context["pages"] = index
     keys = {
         str(p.get("id")): _declared_key(output_dir, str(p.get("id")))
@@ -4076,6 +4188,13 @@ EFFORT_BY_NODE: dict[str, str] = {
     # costs a subject its correctness.
     "page_details": "medium",
     "workflow_steps": "medium",
+    # ONE DRAWN SCREEN AGAINST ITS OWN MARKUP: which numbered element is which
+    # prop. At `high` most of a screen's 3-29k output tokens were thinking
+    # (DITANS D6 Promotions, 2026-10-29). A refused round is asked again at
+    # `high` (`drawn.params.parameterise`, `retry`).
+    "drawn_views": "medium",
+    # Matching drawings by what they show is reading, not deliberating.
+    "drawn_pairs": "medium",
     # Tests are enumerated from what the Blueprint already claims, not invented.
     # A short list of named third parties.
     "integrations": "low",
@@ -4121,6 +4240,13 @@ MAX_TOKENS_BY_NODE: dict[str, int] = {
     # Screens, records, processes, rules, conventions and benchmarks of a
     # whole field in one reply; the headroom is free when unused.
     "domain_reference": 64000,
+    # One drawn screen's bindings, by number. A dense screen (hundreds of
+    # elements) was cut off at 32,000 twice in one DITANS run (2026-10-30);
+    # the answer is small, the thinking over a big screen is not.
+    "drawn_views": 64000,
+    # Every phone drawing against every desktop one, in one reply: cut off at
+    # 32,000 twice on DITANS's 194 phones and 381 desktops (2026-10-30).
+    "drawn_pairs": 64000,
     # Names the entities and their relationships without a field; the 64k
     # the single call needed went on fields, which `entity_fields` writes one
     # entity at a time inside the default.
@@ -4153,6 +4279,14 @@ MAX_TOKENS_BY_NODE: dict[str, int] = {
     "business_rules": 64000,
     "analytics": 64000,
     "workflow_steps": 64000,
+    # Judges every requirement against every frame and writes a row per
+    # requirement, so the answer grows with the application while the thinking
+    # grows with both. On kkb5mzo3 (157 requirements, 18 frames, 2026-11-02)
+    # the reply was cut off mid-string at 17,701 characters — about 5k tokens
+    # of answer, because on the adaptive path the cap covers the thinking too
+    # and high effort over 157x18 had spent most of it. The build saw only
+    # "JSONDecodeError" and told the person the design could not be checked.
+    "figma_coverage": 64000,
     # One page's thinking plus two whole files — a record workspace's view
     # runs to several hundred lines — and a compile round re-sends the code.
     # 48k ran out on a fifteen-fact record page (0l133sp2); headroom is free.
@@ -4211,6 +4345,15 @@ def after_refusal(client: Any, spec: Any) -> Any:
             or getattr(spec, "node", "") not in RETRY_AT_HIGH
             or not dataclasses.is_dataclass(client) or not hasattr(client, "effort")
             or str(client.effort) not in ("low", "medium")):
+        return client
+    return at_high(client)
+
+
+def at_high(client: Any) -> Any:
+    """``client`` at `high` effort when it runs below it, else as it is."""
+    import dataclasses
+
+    if not dataclasses.is_dataclass(client) or str(getattr(client, "effort", "")) not in ("low", "medium"):
         return client
     return dataclasses.replace(client, effort="high")
 
@@ -4625,7 +4768,7 @@ def make_executor(
                 )
                 project = str(svc.doc.get("application", {}).get("id", ""))
             result = patch_node_output(
-                spec, client, system=system, produces=DAG[spec.node].produces,
+                spec, client, system=system, produces=DAG[spec.node].sections,
                 task_id=spec.task_id, context=context, usage=usage,
                 project=project, refused=not getattr(spec, "repair", False))
         except Exception as exc:  # noqa: BLE001 — an edit that breaks is a rewrite
@@ -4712,6 +4855,24 @@ def make_executor(
         if not getattr(critic, "accepts_images", False):
             critic = None
         def compose(doc: dict, page: dict) -> tuple[Any, list]:
+            # A DRAWN PAGE IS BOUND, NOT WRITTEN (`services.drawn.binder`): its
+            # views are the design's markup, and only load.ts and the page
+            # around them are written — never on a change Smith briefs, which
+            # edits the page like any other.
+            from services.drawn import binder as drawn_binder
+            if not getattr(spec, "brief", "") and drawn_binder.applies(doc, page):
+                tell(reasoning, f"Attaching {page.get('route')} to its data — the drawing stays as drawn.",
+                     "step", spec.node)
+                body, spent = drawn_binder.bind(doc, page, Path(svc.output_dir) / "app", client,
+                                                feedback=spec.feedback or "")
+                seed = body.pop("seed", None)
+                if seed:
+                    from services.drawn.seed import record
+                    with svc.lock:
+                        for line in record(svc, seed, page_id=str(page.get("id")),
+                                           app_root=str(Path(svc.output_dir) / "app")):
+                            tell(reasoning, f"Sample data from the drawing — {line}.", "step", spec.node)
+                return body, spent
             return ui_engineer.compose_page(
                 doc, page, Path(svc.output_dir) / "app", client,
                 feedback=spec.feedback or "", brief=getattr(spec, "brief", "") or "",
@@ -4719,8 +4880,21 @@ def make_executor(
                 critic=critic, reference=reference,
                 on_look=lambda v: _looked(svc, spec, page, v, reasoning))
 
+        from services.drawn.binder import NeedsFields
+
         try:
-            body, spent = compose(doc, page)
+            try:
+                body, spent = compose(doc, page)
+            except NeedsFields as need:
+                # WHAT THE DRAWING SHOWS, THE RECORDS HOLD. A drawn column no
+                # field backs is added to its record (no screens to surface it
+                # on: the drawing already shows it), then the page is bound again.
+                if not _add_needed_fields(page, need.fields, reasoning):
+                    raise
+                with svc.lock:
+                    doc = _copy.deepcopy(svc.doc)
+                page = next((p for p in doc.get("pages") or [] if str(p.get("id")) == spec.subject), page)
+                body, spent = compose(doc, page)
         except ui_engineer.NeedsWorkflow as need:
             # A SCREEN THAT NEEDS AN ACTION GETS IT, THEN IS WRITTEN. F&B's Edit
             # Category, Edit Menu Item and Incoming Orders, and SnapIt's
@@ -4742,6 +4916,84 @@ def make_executor(
         return AgentResult(task_id=spec.task_id, agent=spec.agent, confidence=0.9,
                            proposals=[ArtifactProposal(section="pageCode",
                                                        natural_key=spec.subject, body=body)])
+
+    def _convert_drawn(spec: TaskSpec) -> AgentResult:
+        """One frame of a design held as the specification as a React view
+        with its contract — or the shell, or every shared component (see
+        `services.drawn`). The frame's markup is converted, not written; the
+        one model call turns its example content into props."""
+        import copy as _copy
+
+        from services.drawn import convert
+        from services.llm_client import tell
+
+        with svc.lock:
+            doc = _copy.deepcopy(svc.doc)
+        prepared = convert.prepare(doc, svc.output_dir)
+        client = model.for_task(spec.node, spec.agent) if isinstance(model, ModelRouter) else model
+        # A retry after a reply that ran out of room thinks less, with more room.
+        client = after_no_answer(client, str(getattr(spec, "feedback", "") or ""))
+        spent: list = []
+        project = str((svc.doc.get("application") or {}).get("id", ""))
+        # WHAT A FAILED CONVERSION SPENT IS SPENT. Recorded only on success, the
+        # rounds of a screen refused three times were missing from the run's cost
+        # (DITANS, 2026-10-29).
+        try:
+            if spec.subject == convert.COMPONENTS_KEY:
+                rows = convert.component_rows(prepared)
+                report = convert.export_assets(prepared, svc.output_dir)
+                tell(reasoning, f"Kept {len(rows)} shared components and {report.get('saved', 0) + report.get('kept', 0)} "
+                     "icons and pictures from the design" + (f"; {len(report['missing'])} could not be rendered"
+                                                              if report.get("missing") else "") + ".", "step", spec.node)
+            elif convert.is_shell_subject(spec.subject):
+                row = convert.shell_row(client, prepared, spec.subject, usage=spent, retry=at_high(client))
+                rows = [row] if row else []
+                where = spec.subject[len(convert.SHELL_PREFIX):] if spec.subject.startswith(convert.SHELL_PREFIX) else ""
+                tell(reasoning, (f"Converted the frame {where}'s screens are drawn in." if where else
+                                 "Converted the frame every screen is drawn in.") if rows
+                     else (f"{where} draws no shared frame." if where else "The design draws no shared frame."),
+                     "step", spec.node)
+            else:
+                if spec.subject not in prepared.static:
+                    raise ValueError(f"{spec.subject} has no stored drawing to convert")
+                tell(reasoning, f"Converting {prepared.headings.get(spec.subject) or spec.subject} to React.", "step", spec.node)
+                rows = [convert.screen_row(client, prepared, spec.subject, usage=spent, retry=at_high(client))]
+        finally:
+            for u, elapsed in spent:
+                if usage is not None and u is not None:
+                    usage.record(node=spec.node, agent=spec.agent, usage=u, elapsed_s=elapsed, project=project)
+        return AgentResult(task_id=spec.task_id, agent=spec.agent, confidence=0.9,
+                           proposals=[ArtifactProposal(section="drawnViews", natural_key=row["key"], body=row)
+                                      for row in rows])
+
+    def _pair_drawn(spec: TaskSpec) -> AgentResult:
+        """Which phone and desktop drawings are one screen (`drawn.pairs`):
+        one call, none when the design draws only one size."""
+        import copy as _copy
+
+        from services.drawn import pairs as drawn_pairs
+        from services.llm_client import tell
+
+        with svc.lock:
+            doc = _copy.deepcopy(svc.doc)
+        phones, _wides = drawn_pairs.candidates(doc)
+        proposals: list[ArtifactProposal] = []
+        if phones:
+            client = model.for_task(spec.node, spec.agent) if isinstance(model, ModelRouter) else model
+            # A retry after a reply that ran out of room thinks less, with more room.
+            client = after_no_answer(client, str(getattr(spec, "feedback", "") or ""))
+            spent: list = []
+            project = str((svc.doc.get("application") or {}).get("id", ""))
+            try:
+                found, left = drawn_pairs.pair(client, doc, usage=spent)
+            finally:
+                for u, elapsed in spent:
+                    if usage is not None and u is not None:
+                        usage.record(node=spec.node, agent=spec.agent, usage=u, elapsed_s=elapsed, project=project)
+            tell(reasoning, f"{len(found)} of {len(phones)} phone screens are drawn for the desktop too; each pair "
+                 "is one page." + (f" Left out: {'; '.join(left[:5])}." if left else ""), "step", spec.node)
+            proposals = [ArtifactProposal(section="drawnPairs", natural_key=p["phone"], body=p) for p in found]
+        return AgentResult(task_id=spec.task_id, agent=spec.agent, confidence=0.9, proposals=proposals)
 
     def _compose_native(spec: TaskSpec) -> AgentResult:
         """One page as a React Native screen (see ``native_engineer``): the web
@@ -4812,6 +5064,27 @@ def make_executor(
                 added.append(str(out.get("name") or out.get("workflow") or need))
         return added
 
+    def _add_needed_fields(page: dict, fields: list[dict], reasoning: Any) -> list[str]:
+        """Each field a drawn page showed with nothing behind it, added to its
+        record — the column only, under the document's lock. Returns what landed."""
+        from services.llm_client import tell
+        from services.smith.field_change import add_field
+        from services.smith.section_change import SectionChangeError
+
+        added: list[str] = []
+        with svc.lock:
+            for f in fields:
+                try:
+                    add_field(svc, str(f.get("entity")), {"name": f.get("name"), "type": f.get("type") or "string",
+                                                           "label": f.get("label") or ""}, surface=False)
+                except SectionChangeError as exc:
+                    tell(reasoning, f"Could not add {f.get('entity')}.{f.get('name')}: {exc}", "step", "page_code")
+                    continue
+                added.append(f"{f.get('entity')}.{f.get('name')}")
+                tell(reasoning, f"{page.get('route')} shows {f.get('label') or f.get('name')} — added it to "
+                     f"{f.get('entity')}.", "step", "page_code")
+        return added
+
     def _looked(svc: Any, spec: TaskSpec, page: dict, v: dict, reasoning: Any) -> None:
         """A look's verdict, told to whoever watches: the thoughts and the
         run ledger (from which the panel draws the page's score and picture)."""
@@ -4833,6 +5106,10 @@ def make_executor(
             pass
 
     def executor(spec: TaskSpec) -> AgentResult:
+        if spec.node == "drawn_views":
+            return _convert_drawn(spec)
+        if spec.node == "drawn_pairs":
+            return _pair_drawn(spec)
         if spec.agent in ("ui_director", "ui_engineer"):
             return _compose_ui(spec)
         if spec.agent == "native_engineer":

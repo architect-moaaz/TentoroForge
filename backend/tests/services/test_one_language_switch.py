@@ -78,3 +78,46 @@ def test_a_language_added_is_projected_and_the_screens_still_to_rewrite_are_said
     assert "src/lib/languages.ts" in out["edited_paths"] and "src/app/tokens.css" in out["edited_paths"]
     said = dc.summary_of("edit_product", out)
     assert "switch is in the application's frame" in said and "rewrite" in said
+
+
+# -- the drawn design's words (wzml1sa6, 2026-10-31) -------------------------
+# Switched to Arabic, the DITANS sidebar, headings and labels stayed English:
+# a drawn screen says its words as drawn, not through `t()`.
+
+def test_the_drawn_words_reach_the_app_in_each_other_language(tmp_path):
+    doc = _doc("en", ["ar"])
+    doc["product"]["words"] = {"ar": {"Smart Tools": "الأدوات الذكية"}}
+    out = lang.project_languages(doc, tmp_path)
+    assert "public/words/ar.json" in out["files"]
+    assert (tmp_path / "public/words/ar.json").read_text("utf-8") == '{"Smart Tools": "الأدوات الذكية"}'
+    del doc["product"]["words"]
+    lang.project_languages(doc, tmp_path)
+    assert not (tmp_path / "public/words/ar.json").exists(), "a table the Blueprint no longer holds goes"
+
+
+def test_every_text_is_shown_from_the_word_table_and_put_back():
+    i18n = (TEMPLATES / "sdk/i18n.tsx").read_text()
+    assert "export function DrawnWords()" in i18n
+    assert "/words/${encodeURIComponent(tag)}.json" in i18n
+    assert '"placeholder", "title", "alt", "aria-label"' in i18n, "hints and read-aloud words too"
+    assert "translate='no'" in i18n, "what is marked not to be translated is left"
+    assert "__reactFiber$" in i18n, "a part React has not hydrated is not changed under it"
+
+
+def test_the_words_of_a_drawn_screen_are_what_it_shows():
+    from services.drawn.words import _code_words
+
+    code = '''"use client";
+export default function V(props: { done: boolean; row: { status: string } }) {
+  return (
+    <div className="flex flex-row" data-layer="Header">
+      <p className="text-[14px]">Smart   Tools</p>
+      <p>{props.done ? "Done" : "Open"}</p>
+      <input placeholder="Search jobs" />
+      {props.row.status === "verified" && <p>Verified organisation</p>}
+      <p>{props.row.status}</p>
+    </div>
+  );
+}
+'''
+    assert _code_words([code]) == {"Smart Tools", "Done", "Open", "Search jobs", "Verified organisation"}

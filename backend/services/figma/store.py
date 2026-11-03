@@ -114,6 +114,8 @@ def source_record(ref: DesignReference, *, name: str = "",
                 "name": s.name,
                 "looksLikeScreen": s.looks_like_screen,
                 **({"group": s.group} if getattr(s, "group", "") else {}),
+                **({"portal": s.portal} if getattr(s, "portal", "") else {}),
+                **({"width": round(s.width)} if getattr(s, "width", 0) else {}),
                 **({"links": links} if (links := _frame_links(ref, s)) else {}),
             }
             for s in ref.screens

@@ -253,6 +253,22 @@ export const Product = z.object({
       "language. Empty for a single-language app.",
     )
     .default([]),
+  /**
+   * The words a drawn design shows, in each of `languages`. A page written
+   * as code says every string in every language (`t({ en, ar })`); a screen
+   * converted from a drawing says its words as drawn, so the DITANS sidebar,
+   * headings and labels stayed English when the person chose Arabic
+   * (wzml1sa6, 2026-10-31). Keyed by language, then by the text exactly as
+   * the screen shows it (spaces squeezed); projected to
+   * `public/words/<tag>.json`, which the frame's `DrawnWords` reads.
+   */
+  words: z
+    .record(z.string(), z.record(z.string(), z.string()))
+    .describe(
+      "{language tag: {text as the drawn screens show it: the same text in that language}} — " +
+      "the drawn design's words in each of `languages`.",
+    )
+    .optional(),
 });
 
 // ===========================================================================
@@ -1379,6 +1395,125 @@ export const PageCode = z.object({
 });
 
 /**
+ * DRAWN VIEWS — A DESIGN CONVERTED TO REACT, BEFORE ANYTHING IS INFERRED FROM IT.
+ *
+ * A design connected as the specification is the page's markup, not a brief
+ * for a writer: one pilot's page writer, shown the frames and held to them,
+ * still re-authored every screen and drifted (D3, 2026-10-28). So each drawn
+ * frame is converted to a React view that only displays — its example
+ * content turned into typed props, its buttons into handlers — and never
+ * rewritten. What the view needs is its CONTRACT: the records it shows, the
+ * forms it collects and the actions it offers. The data model and the
+ * processes are generated to back that contract, and the page is attached to
+ * them by a binder that writes `load.ts` and wiring around the view
+ * (`services/drawn`).
+ */
+export const DrawnField = z.object({
+  /** The prop's key, camelCase: `seatsUsed`. */
+  name: z.string().min(1),
+  /** What the screen calls it: "Seats". */
+  label: z.string().default(""),
+  type: z.enum(["string", "text", "number", "money", "percent", "date", "datetime", "boolean",
+                "enum", "email", "phone", "url", "image", "id"]).default("string"),
+  /** For `enum`: the values the drawing shows (the pills, the chips). */
+  options: z.array(z.string()).optional(),
+  /** Several of the options at once — a list ("pick up to 3"). Chips drawn as
+   *  one value let a second country unselect the first (DITANS QA D-09). */
+  many: z.boolean().optional(),
+  /** A field the form must be given. */
+  required: z.boolean().optional(),
+});
+
+export const DrawnSlot = z.object({
+  /** The prop's key: `tenants`, `selectedTenant`, `promoForm`. */
+  name: z.string().min(1),
+  /** `list`: rows of records; `record`: one record; `form`: what a person
+   *  enters; `value`: one figure or line the screen shows. */
+  kind: z.enum(["list", "record", "form", "value"]),
+  /** What the screen calls it: "Tenants", "Entitlements". */
+  label: z.string().default(""),
+  /** What one row, the record or the form holds. Empty for a `value`. */
+  fields: z.array(DrawnField).default([]),
+  /** For a `value`: its type. */
+  type: DrawnField.shape.type.optional(),
+});
+
+export const DrawnAction = z.object({
+  /** The handler prop: `onNewTenant`, `onAddOverride`. */
+  name: z.string().regex(/^on[A-Z]\w*$/),
+  /** The words on what is pressed: "New tenant". */
+  label: z.string().default(""),
+  /** `navigate`: to another screen; `open`: a dialog, drawer or tab of this
+   *  one; `submit`: sends a form; `run`: does something to a record. */
+  kind: z.enum(["navigate", "open", "submit", "run"]),
+  /** For `navigate` / `open`: the frame it leads to, when the prototype says. */
+  target: z.string().optional(),
+  /** For `navigate`: the screen of this app it opens (`/plans`), bound by hand
+   *  when the prototype links nowhere — a shell's "Help" or "New job" did
+   *  nothing because only menu rows were ever bound (DITANS QA D-68, 2026-11-02). */
+  href: z.string().optional(),
+  /** The slot it acts on: the list whose row it is on, the form it submits. */
+  on: z.string().optional(),
+});
+
+export const DrawnContract = z.object({
+  data: z.array(DrawnSlot).default([]),
+  actions: z.array(DrawnAction).default([]),
+});
+
+export const DrawnView = z.object({
+  /** A frame's reference (`1:2`, `FIGMA-002/1:2`), `shell`, or `component:<Name>`. */
+  key: z.string().min(1),
+  kind: z.enum(["screen", "shell", "component"]),
+  /** The React component's name: `TenantsEntitlementsView`. */
+  name: z.string().min(1),
+  /** The frame it was converted from (a screen's own; a shell's or a
+   *  component's first). */
+  frame: z.string().optional(),
+  /** The component file, as written — the markup is the drawing's. */
+  code: z.string().min(1),
+  contract: DrawnContract.default({ data: [], actions: [] }),
+  /** The drawing's own example content, in the contract's shape: what the
+   *  view renders with before there is data, and the app's first sample rows. */
+  sample: z.record(z.string(), z.unknown()).default({}),
+  /** A shell's own read, written like a page's `load.ts`: `export async
+   *  function load(ctx: PageContext)` returning the shell's records and values
+   *  for the signed-in person (`{ user: {...}, organization: {...} }`). A slot
+   *  it returns shows that; a slot it leaves out shows the drawing's sample.
+   *  Without one, every visitor saw the design's sample person and
+   *  organisation in the sidebar (wzml1sa6, 2026-10-30). */
+  load: z.string().optional(),
+  /** A hash of the deterministic conversion the view was made from, so a
+   *  frame changed in Figma is seen as changed. */
+  source: z.string().optional(),
+  /** The product it frames (a shell) or is drawn in (a screen): the frame's
+   *  `portal`. A design of several products has a shell for each. */
+  portal: z.string().optional(),
+  /** A shared component's file format (`drawn.components.FORMAT`): a build
+   *  writes the files again when it changes. */
+  format: z.number().int().optional(),
+  ...artifactBase,
+});
+
+/**
+ * ONE SCREEN DRAWN TWICE: for a phone and for a desktop. A design that draws a
+ * product's app and its web version draws the same screens at both sizes —
+ * the job search at 393 pixels and at 1440 — and they are one page, showing
+ * the phone drawing on a phone and the desktop one elsewhere, on the same
+ * records and processes. Which drawings are the same screen is decided once,
+ * from what each shows, and kept here.
+ */
+export const DrawnPair = z.object({
+  /** Natural key — the phone drawing's frame reference. */
+  phone: z.string().min(1),
+  /** The desktop drawing of the same screen. */
+  wide: z.string().min(1),
+  /** What makes them the same screen, in a sentence. */
+  because: z.string().default(""),
+  ...artifactBase,
+});
+
+/**
  * A page as the phone shows it: one native screen per page, written as React
  * Native against the app's native SDK and kit (`templates/native`), beside the
  * web page's `PageCode`. One-to-one by design — the same Blueprint page, so the
@@ -1961,13 +2096,26 @@ export const WorkflowStep = z.object({
        * into a variable or a log. `in`: as a bearer token (default), a
        * header called `name`, a query parameter called `name`, or HTTP basic
        * (the secret holds `user:password`).
+       *
+       * Or, for a system the runtime signs for itself (Mews), the PROVIDER
+       * (`{provider: "mews"}`): the runtime adds the host and the credentials.
+       * `property` picks which of the application's Mews properties the call
+       * is for — a template to its id, Mews enterprise id or name
+       * (`{{booking.propertyId}}`); the runtime reads that property's token
+       * itself, so it never reaches the step.
        */
       auth: z
-        .object({
-          secretRef: z.string(),
-          in: z.enum(["bearer", "header", "query", "basic"]).default("bearer"),
-          name: z.string().optional(),
-        })
+        .union([
+          z.object({
+            secretRef: z.string(),
+            in: z.enum(["bearer", "header", "query", "basic"]).default("bearer"),
+            name: z.string().optional(),
+          }),
+          z.object({
+            provider: z.string(),
+            property: z.string().optional(),
+          }),
+        ])
         .optional(),
       /** On a human step: minutes until it is overdue. */
       dueIn: z.number().int().positive().optional(),
@@ -2047,6 +2195,13 @@ export const Workflow = z.object({
     entity: EntityId.optional(),
     /** For a field input: string, number, boolean, date, enum, text, … */
     type: z.string().optional(),
+    /**
+     * An enum input's own values — a decision's choices. Undeclared, they
+     * were dropped on save and the SDK took the values of a column of the same
+     * name: DITANS's merge decision offered "linked" where its steps checked
+     * "link", and a sanctions decision offered the match's status values.
+     */
+    options: z.array(z.string()).optional(),
     required: z.boolean().default(true),
     description: z.string().default(""),
   })).default([]),
@@ -2390,6 +2545,14 @@ export const Security = z.object({
    */
   signupRole: RoleId.optional(),
   /**
+   * EVERY ROLE A PERSON MAY GIVE THEMSELVES when they create their own
+   * account, for an application with several ways in (DITANS: a professional,
+   * an employer, an agency). The signup page names one of them; any other
+   * role named at signup is refused and the person gets `signupRole`. Back
+   * office roles are never here: a role not listed can only be given.
+   */
+  signupRoles: z.array(RoleId).optional(),
+  /**
    * HOW PEOPLE SIGN IN. `password`: email and password (the default).
    * `magicLink`: a one-time link sent to the address, good for fifteen
    * minutes, used once. `sso`: the identity providers an organisation signs
@@ -2546,6 +2709,15 @@ export const DesignSourceFrame = z.object({
    * put in that module, so a large design builds module by module.
    */
   group: z.string().optional(),
+  /**
+   * THE PRODUCT IT IS DRAWN IN: the top-level Figma section that holds it.
+   * One file may draw several products side by side — a candidate app, a
+   * recruiter portal, an admin back office — each with its own frame, menu
+   * and people. Absent for a frame placed straight on its page.
+   */
+  portal: z.string().optional(),
+  /** The frame's drawn width, in pixels: a phone screen or a desktop one. */
+  width: z.number().optional(),
   /**
    * WHERE THE PROTOTYPE GOES FROM HERE: each link the designer wired from this
    * frame to another of the design's frames, how it opens (`overlay` — over
@@ -3376,6 +3548,10 @@ export const Blueprint = z.object({
   pageCode: z.array(PageCode).default([]),
   /** One native screen per page, when `mobile.native.enabled` (see `NativeCode`). */
   nativeCode: z.array(NativeCode).default([]),
+  /** A design held as the specification, converted to React (see `DrawnView`). */
+  drawnViews: z.array(DrawnView).default([]),
+  /** Phone and desktop drawings of one screen (see `DrawnPair`). */
+  drawnPairs: z.array(DrawnPair).default([]),
   /** The frame files this application owns (see `FrameCode`). */
   frameCode: z.array(FrameCode).default([]),
 

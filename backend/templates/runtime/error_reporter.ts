@@ -12,6 +12,7 @@
  * Configuration comes from env vars at startup:
  *   FORGE_URL         — e.g. http://localhost:6500 (backend base URL)
  *   FORGE_PROJECT_ID  — the uuid of THIS generated app's project row
+ *   FORGE_REPORT_KEY  — proves the report is this app's own (the inbox feeds Smith)
  *   FORGE_SLOW_MS     — what "slow" means here (default 2000)
  *
  * The first two are seeded by the generator into .env / .env.local when the
@@ -105,6 +106,7 @@ export interface SlowResponseReport {
 
 const FORGE_URL = process.env.FORGE_URL ?? "";
 const FORGE_PROJECT_ID = process.env.FORGE_PROJECT_ID ?? "";
+const FORGE_REPORT_KEY = process.env.FORGE_REPORT_KEY ?? "";
 
 /** What this application calls slow, in milliseconds. Declared rather than
  *  discovered: a threshold that moved with the measurement would make every
@@ -122,7 +124,7 @@ function send(url: string, payload: unknown): void {
   try {
     fetch(url, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", "x-forge-report-key": FORGE_REPORT_KEY },
       body: JSON.stringify(payload),
       // Keep the request alive past page unload / route change so a crash on
       // navigation still gets reported.

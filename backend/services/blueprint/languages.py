@@ -73,13 +73,38 @@ def project_languages(doc: dict, app_root: str | Path) -> dict[str, Any]:
             f"export const PRIMARY: string = {json.dumps(tags[0])};\n\n"
             "export const LANGUAGES: { tag: string; dir: \"ltr\" | \"rtl\" }[] = "
             f"{json.dumps(rows, indent=2, ensure_ascii=False)};\n")
+    files = _project_words(doc, Path(app_root), tags)
     try:
         if path.read_text("utf-8") == text:
-            return {"files": []}
+            return {"files": files}
     except OSError:
         pass
     path.write_text(text, "utf-8")
-    return {"files": ["src/lib/languages.ts"]}
+    return {"files": ["src/lib/languages.ts", *files]}
+
+
+def _project_words(doc: dict, root: Path, tags: list[str]) -> list[str]:
+    """`public/words/<tag>.json` for each other language `product.words`
+    holds — the drawn design's words, read by `@/sdk/i18n`'s `DrawnWords`."""
+    words = (doc.get("product") or {}).get("words") or {}
+    out: list[str] = []
+    for tag in tags[1:]:
+        table = words.get(tag) or next((v for k, v in words.items() if base(k) == base(tag)), None)
+        rel = f"public/words/{tag}.json"
+        path = root / rel
+        if not table:
+            path.unlink(missing_ok=True)
+            continue
+        text = json.dumps(table, ensure_ascii=False, sort_keys=True)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            if path.read_text("utf-8") == text:
+                continue
+        except OSError:
+            pass
+        path.write_text(text, "utf-8")
+        out.append(rel)
+    return out
 
 
 def page_rule(doc: dict) -> str:

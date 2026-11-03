@@ -171,9 +171,11 @@ def test_handle_db_migrate_refuses_without_database_url(monkeypatch, tmp_path):
 
 def test_handle_db_migrate_runs_drizzle_push(monkeypatch, tmp_path):
     (tmp_path / "drizzle.config.ts").write_text("export default {};", encoding="utf-8")
-    monkeypatch.setenv("DATABASE_URL", "postgresql://x@y/z")
+    (tmp_path / ".env.local").write_text("DATABASE_URL=postgresql://app@localhost/app\n", encoding="utf-8")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://forge@localhost/platform")
 
     calls: list[list[str]] = []
+    envs: list[dict] = []
     class FakeProc:
         returncode = 0
         stdout = "ok\n"
@@ -181,6 +183,7 @@ def test_handle_db_migrate_runs_drizzle_push(monkeypatch, tmp_path):
 
     def fake_run(cmd, cwd=None, env=None, capture_output=None, text=None, timeout=None):
         calls.append(cmd)
+        envs.append(env)
         return FakeProc()
 
     monkeypatch.setattr("services.journey_verifier.deterministic_handlers.subprocess.run", fake_run)
@@ -188,6 +191,16 @@ def test_handle_db_migrate_runs_drizzle_push(monkeypatch, tmp_path):
     assert result.ok is True
     assert result.fixed is True
     assert calls[0] == ["npx", "drizzle-kit", "push"]
+    assert envs[0]["DATABASE_URL"] == "postgresql://app@localhost/app", "the app's database, never the platform's"
+
+
+def test_handle_db_migrate_never_pushes_into_the_platforms_database(monkeypatch, tmp_path):
+    (tmp_path / "drizzle.config.ts").write_text("export default {};", encoding="utf-8")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://forge@localhost/platform")
+    monkeypatch.setattr("services.journey_verifier.deterministic_handlers.subprocess.run",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("pushed")))
+    result = handle_db_migrate(_cf(class_name="db-schema-mismatch"), tmp_path)
+    assert result.ok is False and "DATABASE_URL" in result.summary
 
 
 # ── handle_rewire_datasource ───────────────────────────────────────────────

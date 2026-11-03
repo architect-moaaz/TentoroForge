@@ -8,8 +8,24 @@ from PIL import Image
 
 @pytest.fixture
 def client():
+    """Signed in: the extract routes fetch and decode for a person, never for anyone."""
+    from types import SimpleNamespace
+    import uuid
+
+    from auth import get_current_user
     from main import app
-    return TestClient(app)
+
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=uuid.uuid4(), email="a@example.com")
+    yield TestClient(app)
+    app.dependency_overrides.pop(get_current_user, None)
+
+
+def test_the_extract_routes_want_a_sign_in():
+    from main import app
+
+    nobody = TestClient(app)
+    assert nobody.post("/api/brand/extract/url", json={"url": "https://acme.com"}).status_code in (401, 403)
+    assert nobody.post("/api/brand/extract/logo", files={"logo": ("l.png", b"x", "image/png")}).status_code in (401, 403)
 
 
 def _make_red_png_bytes() -> bytes:

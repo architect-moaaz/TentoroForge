@@ -2,7 +2,7 @@
 import * as React from "react";
 import { Minus, Plus, Maximize2 } from "lucide-react";
 
-const ZOOM_STEPS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2] as const;
+const ZOOM_STEPS: readonly number[] = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2];
 
 export interface ZoomControlsProps {
   zoom: number;

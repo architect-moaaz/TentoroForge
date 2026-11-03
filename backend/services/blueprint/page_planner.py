@@ -2056,13 +2056,20 @@ def _screen_frames(doc: dict, *, specification: bool) -> list[dict]:
     than enforced at extraction (§49), and a component or a colour swatch is
     not a page even in a file that IS the specification.
     """
+    from services.drawn.pairs import wide_of
+    from services.figma.store import frame_ref
+
+    # A PHONE DRAWING OF A DESKTOP SCREEN IS THAT SCREEN'S PAGE, not a page:
+    # it is shown there on a phone (`drawn.pairs`), so it is no slot.
+    twinned = set(wide_of(doc)) if specification else set()
     out: list[dict] = []
     for source in doc.get("designSources") or []:
         is_spec = str(source.get("treatAs") or "evidence") == "specification"
         if is_spec is not specification:
             continue
         frames = [f for f in source.get("frames") or []
-                  if f.get("looksLikeScreen", True) and f.get("nodeId")]
+                  if f.get("looksLikeScreen", True) and f.get("nodeId")
+                  and frame_ref(str(source.get("id") or ""), str(f["nodeId"])) not in twinned]
         if not specification:
             frames = identified_frames(frames)
         for frame in frames:
@@ -2184,6 +2191,19 @@ def frame_slots(frames: list[dict], *, sole: bool = True, doc: dict | None = Non
                 entry.pop("kind")
                 if entry not in reached.setdefault(to, []):
                     reached[to].append(entry)
+    # A HEADING EVERY FRAME SHARES IS THE CHROME'S, NOT THE SCREEN'S. The
+    # heading read off each D6 frame was its sidebar's logo, "Ditans Health",
+    # on all of them, and three screens would have been routed as one name.
+    from collections import Counter
+    shared = Counter(str(f.get("shows") or "").strip() for f in frames)
+    # Nor one three frames share: DITANS's 589 frames drew six products, so
+    # no logo reached half of them, and 81 screens whose heading read
+    # "DITANS" or "Ditans Health" were told that was what they were — the
+    # writer could not tell them apart and left them on no page (2026-10-30).
+    # A screen and one state of it may share a heading; three screens are
+    # not named by it.
+    chrome = {h for h, n in shared.items() if h and (n >= 3 or (n >= 2 and n >= len(frames) * 0.5))}
+    products = sorted({str(f.get("portal") or "") for f in frames} - {""})
     slots: list[dict] = []
     for frame in frames:
         # A SECOND DESIGN'S FRAME NAMES ITS DESIGN. Node ids repeat across
@@ -2196,6 +2216,8 @@ def frame_slots(frames: list[dict], *, sole: bool = True, doc: dict | None = Non
         # /users/new: 14 of 15 wrong. The heading read off the frame is its
         # identity, and the slot says so ahead of the layer name.
         shows = str(frame.get("shows") or "").strip()
+        if shows in chrome:
+            shows = ""
         identity = shows or name
         slot = {
             "feature": node_id,
@@ -2206,7 +2228,9 @@ def frame_slots(frames: list[dict], *, sole: bool = True, doc: dict | None = Non
                        "prompt": ("The screen whose heading reads \u201c%s\u201d." % shows
                                   if shows else "The screen drawn as \u201c%s\u201d." % name)}],
             "prompt": why + (" Its heading reads \u201c%s\u201d: that is what it "
-                             "is, so its route and name say that." % shows if shows else ""),
+                             "is, so its route and name say that." % shows if shows else "")
+                      + (" The designer named the frame \u201c%s\u201d." % name
+                         if shows and name != node_id and name.lower() != shows.lower() else ""),
         }
         if shows:
             slot["shows"] = shows
@@ -2227,6 +2251,15 @@ def frame_slots(frames: list[dict], *, sole: bool = True, doc: dict | None = Non
         # section is a Billing screen; the architect made one module per
         # group (`modules[].designGroup`), and the page goes in it — which is
         # what lets a design of hundreds of screens be built a module at a time.
+        # THE PRODUCT IT IS DRAWN IN IS WHO IT IS FOR. A design that draws a
+        # candidate app, a recruiter portal and an admin back office side by
+        # side draws each for its own people, in its own frame.
+        portal = str(frame.get("portal") or "").strip()
+        if portal and len(products) > 1:
+            slot["portal"] = portal
+            slot["prompt"] += (" It is drawn in \u201c%s\u201d, one of the %d products the design draws side "
+                               "by side for different people: its page is for the people that product is for "
+                               "(`users`)." % (portal, len(products)))
         group = str(frame.get("group") or "").strip()
         if group:
             slot["group"] = group

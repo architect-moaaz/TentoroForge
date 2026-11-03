@@ -25,6 +25,8 @@ function AdminPeoplePageInner() {
   const [page, setPage] = useState(1);
   const [disabling, setDisabling] = useState<AdminPerson | null>(null);
   const [removing, setRemoving] = useState<AdminPerson | null>(null);
+  const [resetting, setResetting] = useState<AdminPerson | null>(null);
+  const [resetUrl, setResetUrl] = useState("");
   const people = useQuery({ queryKey: adminKeys.people(q, page), queryFn: () => adminApi.people(q, page) });
 
   useEffect(() => {
@@ -44,6 +46,10 @@ function AdminPeoplePageInner() {
       refresh(); setRemoving(null);
     },
     onError: (e) => fail(e, "Not removed"),
+  });
+  const resetLink = useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) => adminApi.resetLink(id, reason),
+    onSuccess: (r) => { setResetUrl(r.reset_url); refresh(); }, onError: (e) => fail(e, "No link issued"),
   });
   const enable = useMutation({ mutationFn: adminApi.enable, onSuccess: () => { toast.success("Login enabled"); refresh(); }, onError: (e) => fail(e, "Not enabled") });
   const grant = useMutation({ mutationFn: adminApi.grant, onSuccess: () => { toast.success("Super admin granted"); refresh(); }, onError: (e) => fail(e, "Not granted") });
@@ -78,7 +84,8 @@ function AdminPeoplePageInner() {
                      onRevoke={(p) => { if (window.confirm(`Revoke ${p.email}'s super admin role?`)) revoke.mutate(p.id); }}
                      onImpersonate={onImpersonate}
                      onWatchLive={(p) => router.push(`/admin/live?user=${p.id}`)}
-                     onRemove={setRemoving} />
+                     onRemove={setRemoving}
+                     onResetLink={(p) => { setResetUrl(""); setResetting(p); }} />
       </div>
       {pages > 1 && (
         <div className="flex items-center justify-end gap-2 text-xs">
@@ -92,6 +99,20 @@ function AdminPeoplePageInner() {
                           prompt="The login is removed for good and their session ends at once. Apps they made stay with their organisation and pass to another owner or admin. Someone who is the only owner of an organisation cannot be removed until its ownership moves or it is purged."
                           expected={removing?.email ?? ""} confirmText="Remove login" pending={remove.isPending}
                           onConfirm={() => removing && remove.mutate({ id: removing.id, email: removing.email })} />
+      {resetUrl && resetting && (
+        <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-200">
+          <div className="mb-1 font-medium">Reset link for {resetting.email}: works once, for 30 minutes. Send it only to them.</div>
+          <div className="flex items-center gap-2">
+            <code className="flex-1 truncate rounded bg-white/60 px-2 py-1 font-mono dark:bg-slate-900/60">{resetUrl}</code>
+            <Button size="sm" variant="outline" onClick={() => { void navigator.clipboard?.writeText(resetUrl); toast.success("Copied"); }}>Copy</Button>
+            <Button size="sm" variant="ghost" onClick={() => { setResetUrl(""); setResetting(null); }}>Done</Button>
+          </div>
+        </div>
+      )}
+      <ReasonDialog open={!!resetting && !resetUrl} onOpenChange={(v) => !v && setResetting(null)} title={`Reset link for ${resetting?.email}`}
+                    description="A link that sets a new password for this login. It goes on the record with your reason."
+                    confirmText="Issue link" pending={resetLink.isPending}
+                    onConfirm={(reason) => resetting && resetLink.mutate({ id: resetting.id, reason })} />
       <ReasonDialog open={!!disabling} onOpenChange={(v) => !v && setDisabling(null)} title={`Disable ${disabling?.email}`}
                     description="Their next request is refused, signing in is refused, and so is a refresh; enabling restores everything."
                     confirmText="Disable login" danger pending={disable.isPending}

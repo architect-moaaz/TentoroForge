@@ -19,6 +19,7 @@ from services.proc_compat import tool
 import logging
 import os
 import re
+import threading
 import uuid
 from pathlib import Path
 from typing import Any
@@ -163,6 +164,9 @@ def clone(app_root: str | Path) -> tuple[str, str]:
 
 
 def drop(name: str) -> None:
+    held = _held.__dict__.get("cons", {}).pop(url_for(name), None)
+    if held is not None and not held.closed:
+        held.close()
     con = _connect()
     try:
         with con.cursor() as cur:
@@ -171,17 +175,46 @@ def drop(name: str) -> None:
         con.close()
 
 
+#: ONE CONNECTION PER DATABASE AND THREAD. A trial reads every table before and
+#: after a run — some five hundred statements — and each opened its own
+#: connection (locally, its own `docker exec psql`): 85 seconds a workflow on
+#: DITANS's 120 tables (wzml1sa6, 2026-10-31). A connection that broke (the
+#: copy dropped, the server gone) is opened again once.
+_held = threading.local()
+
+
+def _held_connection(url: str, fresh: bool = False) -> Any:
+    import psycopg2
+    cons = _held.__dict__.setdefault("cons", {})
+    con = cons.get(url)
+    if fresh or con is None or con.closed:
+        if con is not None and not con.closed:
+            con.close()
+        con = cons[url] = psycopg2.connect(url, connect_timeout=10)
+        con.autocommit = True
+    return con
+
+
+def query_url(url: str, sql: str) -> list[list[str]]:
+    """Rows of `sql` on the database at `url`, every value as text (as `psql -tA` gave)."""
+    import psycopg2
+    for attempt in (1, 2):
+        con = _held_connection(url, fresh=attempt == 2)
+        try:
+            with con.cursor() as cur:
+                cur.execute(sql)
+                if cur.description is None:          # a statement that returns no rows
+                    return []
+                return [["" if v is None else str(v) for v in row] for row in (cur.fetchall() or [])]
+        except (psycopg2.OperationalError, psycopg2.InterfaceError):
+            if attempt == 2:
+                raise
+    return []
+
+
 def query(name: str, sql: str) -> list[list[str]]:
-    """Rows of `sql` on one database, every value as text (as `psql -tA` gave)."""
-    con = _connect(name)
-    try:
-        with con.cursor() as cur:
-            cur.execute(sql)
-            if cur.description is None:          # a statement that returns no rows
-                return []
-            return [["" if v is None else str(v) for v in row] for row in (cur.fetchall() or [])]
-    finally:
-        con.close()
+    """Rows of `sql` on one database of the apps server."""
+    return query_url(url_for(name), sql)
 
 
-__all__ = ["SERVER_ENV", "server", "name_for", "url_for", "ensure", "clone", "drop", "query"]
+__all__ = ["SERVER_ENV", "server", "name_for", "url_for", "ensure", "clone", "drop", "query", "query_url"]

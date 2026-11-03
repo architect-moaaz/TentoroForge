@@ -24,6 +24,8 @@ const nextConfig: NextConfig = {
     // /api/projects/<id>/... URLs; this rewrite keeps the editor's apiBaseUrl
     // simple and avoids per-request token plumbing on the client.
     return [
+      // A drawn app's pictures (`/drawn/…`) are asked for at the preview's own
+      // origin now and answered there (routers/preview_proxy.py).
       {
         source: "/api/projects/:path*",
         destination: `${FASTAPI_URL}/api/projects/:path*`,

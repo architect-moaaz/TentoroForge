@@ -195,6 +195,16 @@
           },
           "description": "BCP-47 tags of the OTHER languages people can switch the interface to, beside `locale` — ['hi'] for an English app that must also be shown in Hindi. Only when the request asks for the interface in more than one language. Empty for a single-language app.",
           "default": []
+        },
+        "words": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "description": "{language tag: {text as the drawn screens show it: the same text in that language}} — the drawn design's words in each of `languages`."
         }
       },
       "additionalProperties": false,
@@ -2156,29 +2166,48 @@
                       "type": "string"
                     },
                     "auth": {
-                      "type": "object",
-                      "properties": {
-                        "secretRef": {
-                          "type": "string"
-                        },
-                        "in": {
-                          "type": "string",
-                          "enum": [
-                            "bearer",
-                            "header",
-                            "query",
-                            "basic"
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "secretRef": {
+                              "type": "string"
+                            },
+                            "in": {
+                              "type": "string",
+                              "enum": [
+                                "bearer",
+                                "header",
+                                "query",
+                                "basic"
+                              ],
+                              "default": "bearer"
+                            },
+                            "name": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "secretRef"
                           ],
-                          "default": "bearer"
+                          "additionalProperties": false
                         },
-                        "name": {
-                          "type": "string"
+                        {
+                          "type": "object",
+                          "properties": {
+                            "provider": {
+                              "type": "string"
+                            },
+                            "property": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "provider"
+                          ],
+                          "additionalProperties": false
                         }
-                      },
-                      "required": [
-                        "secretRef"
-                      ],
-                      "additionalProperties": false
+                      ]
                     },
                     "dueIn": {
                       "type": "integer",
@@ -2248,6 +2277,12 @@
                 },
                 "type": {
                   "type": "string"
+                },
+                "options": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
                 },
                 "required": {
                   "type": "boolean",
@@ -2899,6 +2934,12 @@
           "$ref": "#/properties/roles/items/properties/id",
           "description": "Stable ROLE identifier (§12)"
         },
+        "signupRoles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/properties/roles/items/properties/id"
+          }
+        },
         "signIn": {
           "type": "object",
           "properties": {
@@ -3304,6 +3345,12 @@
                 },
                 "group": {
                   "type": "string"
+                },
+                "portal": {
+                  "type": "string"
+                },
+                "width": {
+                  "type": "number"
                 },
                 "links": {
                   "type": "array",
@@ -4287,6 +4334,255 @@
         "required": [
           "page",
           "screen"
+        ],
+        "additionalProperties": false
+      },
+      "default": []
+    },
+    "drawnViews": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "minLength": 1
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "screen",
+              "shell",
+              "component"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "frame": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "minLength": 1
+          },
+          "contract": {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "list",
+                        "record",
+                        "form",
+                        "value"
+                      ]
+                    },
+                    "label": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "fields": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "label": {
+                            "type": "string",
+                            "default": ""
+                          },
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "string",
+                              "text",
+                              "number",
+                              "money",
+                              "percent",
+                              "date",
+                              "datetime",
+                              "boolean",
+                              "enum",
+                              "email",
+                              "phone",
+                              "url",
+                              "image",
+                              "id"
+                            ],
+                            "default": "string"
+                          },
+                          "options": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "many": {
+                            "type": "boolean"
+                          },
+                          "required": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "name"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "default": []
+                    },
+                    "type": {
+                      "$ref": "#/properties/drawnViews/items/properties/contract/properties/data/items/properties/fields/items/properties/type"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "kind"
+                  ],
+                  "additionalProperties": false
+                },
+                "default": []
+              },
+              "actions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "pattern": "^on[A-Z]\\w*$"
+                    },
+                    "label": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "navigate",
+                        "open",
+                        "submit",
+                        "run"
+                      ]
+                    },
+                    "target": {
+                      "type": "string"
+                    },
+                    "href": {
+                      "type": "string"
+                    },
+                    "on": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "kind"
+                  ],
+                  "additionalProperties": false
+                },
+                "default": []
+              }
+            },
+            "additionalProperties": false,
+            "default": {
+              "data": [],
+              "actions": []
+            }
+          },
+          "sample": {
+            "type": "object",
+            "additionalProperties": {},
+            "default": {}
+          },
+          "load": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "portal": {
+            "type": "string"
+          },
+          "format": {
+            "type": "integer"
+          },
+          "status": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/status"
+          },
+          "requirements": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/requirements"
+          },
+          "decisions": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/decisions"
+          },
+          "confidence": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/confidence"
+          },
+          "syncNote": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/syncNote"
+          }
+        },
+        "required": [
+          "key",
+          "kind",
+          "name",
+          "code"
+        ],
+        "additionalProperties": false
+      },
+      "default": []
+    },
+    "drawnPairs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "phone": {
+            "type": "string",
+            "minLength": 1
+          },
+          "wide": {
+            "type": "string",
+            "minLength": 1
+          },
+          "because": {
+            "type": "string",
+            "default": ""
+          },
+          "status": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/status"
+          },
+          "requirements": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/requirements"
+          },
+          "decisions": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/decisions"
+          },
+          "confidence": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/confidence"
+          },
+          "syncNote": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/syncNote"
+          }
+        },
+        "required": [
+          "phone",
+          "wide"
         ],
         "additionalProperties": false
       },

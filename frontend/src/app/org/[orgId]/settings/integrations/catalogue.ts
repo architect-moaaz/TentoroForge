@@ -25,12 +25,13 @@ export interface IntegrationEntry extends CatalogEntry {
   updated_at: string | null;
 }
 
-export type GroupId = "email" | "ai" | "payments" | "design" | "files" | "domains" | "mobile" | "platform";
+export type GroupId = "email" | "ai" | "payments" | "systems" | "design" | "files" | "domains" | "mobile" | "platform";
 
 export const GROUPS: ReadonlyArray<{ id: GroupId; title: string; blurb: string }> = [
   { id: "email", title: "Email", blurb: "How the apps you build send mail: invitations, reminders, notifications." },
   { id: "ai", title: "AI", blurb: "The model behind every build, and the features inside the apps that use it." },
   { id: "payments", title: "Payments", blurb: "How the apps take money, in test and for real." },
+  { id: "systems", title: "Connected systems", blurb: "Outside systems the apps you build read from and write to, and the keys each one needs." },
   { id: "design", title: "Design & imagery", blurb: "Where a design is read from, and where photographs come from, while an app is built." },
   { id: "files", title: "Files & documents", blurb: "Where uploads live, and how documents are read." },
   { id: "domains", title: "Domains & DNS", blurb: "Lets Forge add the records an app's own domain needs, at your DNS provider." },
@@ -64,6 +65,7 @@ export const PROVIDERS: Record<string, ProviderInfo> = {
              note: "Forge never replaces mail records, and asks before changing anything already there." },
   push: { name: "Web push", purpose: "The keys the apps use to send notifications to installed phones and browsers.", group: "platform",
           note: "Generated per app when absent; set here only to share one identity across apps." },
+  mews: { name: "Mews", purpose: "The apps read and write hotels' reservations, guests and rooms in Mews. The client token is your integration's, set once here. Each hotel's access token is added by the app's administrator on the app's own Mews properties page; set one here only for a single hotel, or as a portfolio token.", group: "systems" },
   figma: { name: "Figma", purpose: "Read a Figma file so an app is built to its design.", group: "design" },
   uxpilot: { name: "UX Pilot", purpose: "Generate page designs with UX Pilot when an app is laid out.", group: "design" },
   s3: { name: "Amazon S3", purpose: "Where the apps keep files people upload.", group: "files" },
@@ -120,9 +122,26 @@ export function groupByProvider<T extends { provider: string }>(rows: T[]): Reco
   return out;
 }
 
-/** Providers in the order the groups list them; one the catalogue does not know goes last, under Platform. */
-export function infoFor(provider: string): ProviderInfo {
-  return PROVIDERS[provider] ?? { name: provider, purpose: "", group: "platform" };
+/** The prefix of the keys an application declares for a system of its own (`app:<integration>`). */
+export const APP_PROVIDER = "app:";
+
+/**
+ * Providers in the order the groups list them; one the catalogue does not know goes last, under Platform.
+ * A system an application declares is named from its keys' labels ("Xero — XERO_API_KEY"), under
+ * Connected systems.
+ */
+export function infoFor(provider: string, entries: ReadonlyArray<{ label: string }> = []): ProviderInfo {
+  if (PROVIDERS[provider]) return PROVIDERS[provider];
+  if (provider.startsWith(APP_PROVIDER)) {
+    const named = entries.map((e) => e.label.split(" — ")[0]).find((n) => n && !n.includes("_"));
+    const slug = provider.slice(APP_PROVIDER.length).replace(/[-_]+/g, " ").trim();
+    return {
+      name: named || slug.replace(/\b\w/g, (c) => c.toUpperCase()) || provider,
+      purpose: "Keys an app you built declared for a system it calls. Each goes to the apps that declare it.",
+      group: "systems",
+    };
+  }
+  return { name: provider, purpose: "", group: "platform" };
 }
 
 
@@ -134,7 +153,7 @@ export function infoFor(provider: string): ProviderInfo {
 export function matches(provider: string, entries: ReadonlyArray<{ key: string; label: string }>, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
-  const info = infoFor(provider);
+  const info = infoFor(provider, entries);
   const group = GROUPS.find((g) => g.id === info.group);
   const hay = [provider, info.name, info.purpose, group?.title ?? "", ...entries.flatMap((e) => [e.key, e.label])]
     .join(" ").toLowerCase();

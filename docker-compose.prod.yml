@@ -103,6 +103,10 @@ services:
       # Where a PUBLISHED app reports its failures to Smith (services/app_reporting):
       # this platform's public address, whose /api/* reaches the backend.
       FORGE_PUBLIC_URL: ${FORGE_PUBLIC_URL:-}
+      # Where previews are served (services/preview_origin): a sub-domain of the
+      # platform's own, routed to this backend. Unset, it is localhost:6500 and
+      # every preview through the platform's address is refused.
+      FORGE_PREVIEW_ORIGIN: ${FORGE_PREVIEW_ORIGIN:-}
       # An app's own addresses: one-click approval at the owner's DNS provider
       # (Domain Connect) and the free <app>.<FORGE_APPS_DOMAIN> address. Empty = off.
       FORGE_DOMAIN_CONNECT_DOMAIN: ${FORGE_DOMAIN_CONNECT_DOMAIN:-}

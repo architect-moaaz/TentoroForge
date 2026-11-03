@@ -105,6 +105,23 @@ MCP_FILES: tuple[str, ...] = (
     "src/app/(dashboard)/connect-ai/page.tsx",
 )
 
+#: Mews properties (templates/runtime → the app), the platform's files. The
+#: workflow runtime imports `src/lib/mews.ts` to sign a Mews call, so that file
+#: is written into every app whose workflows are kept current — a bundler
+#: refuses an import of a file that is not there, called or not. The table, its
+#: admin routes and page are written into every app people sign in to; they
+#: answer only where the definition declares a Mews integration.
+MEWS_LIB = ("mews.ts", "src/lib/mews.ts")
+MEWS_FILES: tuple[tuple[str, str], ...] = (
+    ("db/forge-mews-properties.schema.ts", "src/db/schema/_forge_mews_properties.ts"),
+    ("api-mews/guard.ts", "src/app/api/mews/guard.ts"),
+    ("api-mews/properties/route.ts", "src/app/api/mews/properties/route.ts"),
+    ("api-mews/properties/[id]/route.ts", "src/app/api/mews/properties/[id]/route.ts"),
+    ("api-mews/properties/[id]/check/route.ts", "src/app/api/mews/properties/[id]/check/route.ts"),
+    ("pages/mews-properties/page.tsx", "src/app/(dashboard)/mews-properties/page.tsx"),
+    ("pages/mews-properties/MewsPropertiesPanel.tsx", "src/app/(dashboard)/mews-properties/MewsPropertiesPanel.tsx"),
+)
+
 #: The signup route: the platform's, with the app's account types written in.
 SIGNUP_ROUTE = "src/app/api/auth/signup/route.ts"
 
@@ -274,6 +291,24 @@ def refresh_engine(app_root: str | Path, doc: dict | None = None, *, complete: b
             continue
         shutil.copyfile(src, dst)
         changed.append(rel)
+    # MEWS PROPERTIES. The library wherever the workflow runtime is (it imports
+    # it); the table, routes and page where people sign in and the app has what
+    # the routes read (the admin role, the platform roles).
+    mews_wanted: list[tuple[str, str]] = []
+    if (root / "src" / "lib" / "workflows").is_dir():
+        mews_wanted.append(MEWS_LIB)
+    if signs_in and (root / "src" / "lib" / "account.ts").is_file() and (root / "src" / "lib" / "tenancy.ts").is_file():
+        mews_wanted += MEWS_FILES
+    for tmpl, rel in mews_wanted:
+        src, dst = _TEMPLATE_DIR / tmpl, root / rel
+        try:
+            if not src.is_file() or (dst.is_file() and dst.read_bytes() == src.read_bytes()):
+                continue
+        except OSError:
+            pass
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, dst)
+        changed.append(rel)
     # THE WORKFLOW ROUTES ARE WRITTEN BY CODE, not copied from a file, so the
     # lists above never carried them: an app kept the route it was built with.
     # TCommerce's kept one that gave a signed-out shopper no guest token, so the
@@ -388,7 +423,7 @@ def refresh_frame(app_root: str | Path, doc: dict, *, complete: bool = True) -> 
 def _runtime_modules() -> dict[str, str]:
     mods = {"lib/push": "push.ts",
             "db/schema/_forge_push_subscriptions": "db/forge-push-subscriptions.schema.ts"}
-    for tmpl, dst in RUNTIME_FILES:
+    for tmpl, dst in RUNTIME_FILES + (MEWS_LIB, MEWS_FILES[0]):
         mods.setdefault(dst.removeprefix("src/").rsplit(".", 1)[0], tmpl)
     return mods
 

@@ -85,6 +85,7 @@ FigmaErrorKind = Literal[
     "protocol",     # response was not the shape the SDK promises
     "unavailable",  # the MCP SDK is not installed
     "rate_limited", # Figma kept answering 429 after every wait it asked for
+    "no_access",    # Figma's 403/404: this token's account cannot open the file
 ]
 
 #: How deep the REST listing of a whole file reads: pages, their frames and
@@ -102,6 +103,18 @@ class FigmaGatewayError(RuntimeError):
         self.kind = kind
         self.detail = redact(detail)
         super().__init__(f"{kind}: {self.detail}")
+
+
+def _rest_error(exc: Exception, otherwise: FigmaErrorKind, detail: str) -> FigmaGatewayError:
+    """A REST failure, classified. FIGMA SAYS "NOT FOUND" FOR A FILE THE TOKEN
+    CANNOT SEE: a 404 or 403 is not a broken link or a broken server but the
+    wrong account, and is said so (`no_access`) instead of "unreachable"."""
+    status = getattr(exc, "status", 0)
+    if status in (403, 404):
+        return FigmaGatewayError("no_access", f"Figma answered {status}: {detail}")
+    if status == 401:
+        return FigmaGatewayError("auth", f"Figma refused the token (401): {detail}")
+    return FigmaGatewayError(otherwise, detail)
 
 
 @dataclass
@@ -254,9 +267,9 @@ class FigmaGateway:
         except FigmaRateLimited as exc:
             raise FigmaGatewayError("rate_limited", str(exc)) from exc
         except Exception as rest_exc:  # noqa: BLE001 — mapped, not swallowed
-            raise FigmaGatewayError(
-                "unreachable", f"{tool}: MCP {after.kind if after else '-'}; "
-                               f"REST {type(rest_exc).__name__}: {rest_exc}") from rest_exc
+            raise _rest_error(
+                rest_exc, "unreachable", f"{tool}: MCP {after.kind if after else '-'}; "
+                                         f"REST {type(rest_exc).__name__}: {rest_exc}") from rest_exc
         if not self._rest_preferred:
             log.info("[figma] %s %s/%s answered by the REST API after MCP %s; "
                      "REST preferred for the rest of this session",
@@ -324,7 +337,12 @@ class FigmaGateway:
         token = self.resolver.resolve(self.credential.ref)
         if not token:
             raise FigmaGatewayError("auth", f"no Figma token under {self.credential.ref!r}")
-        document = await fetch_figma_node(file_key, node_id, token)
+        try:
+            document = await fetch_figma_node(file_key, node_id, token)
+        except FigmaGatewayError:
+            raise
+        except Exception as exc:  # noqa: BLE001 — mapped, not swallowed
+            raise _rest_error(exc, "unreachable", f"{type(exc).__name__}: {exc}") from exc
         if not document:
             raise FigmaGatewayError("tool_error", f"REST returned no node {node_id!r}")
         return document
@@ -355,8 +373,9 @@ class FigmaGateway:
             self._record("rest_nodes", file_key, None, started, ok=False, error_kind="rate_limited")
             raise FigmaGatewayError("rate_limited", str(exc)) from exc
         except Exception as exc:  # noqa: BLE001 — mapped, not swallowed
-            self._record("rest_nodes", file_key, None, started, ok=False, error_kind="unreachable")
-            raise FigmaGatewayError("unreachable", f"{type(exc).__name__}: {exc}") from exc
+            err = _rest_error(exc, "unreachable", f"{type(exc).__name__}: {exc}")
+            self._record("rest_nodes", file_key, None, started, ok=False, error_kind=err.kind)
+            raise err from exc
         self._record("rest_nodes", file_key, f"{len(node_ids)} frames", started, ok=True)
         return out
 
@@ -378,8 +397,9 @@ class FigmaGateway:
             self._record("rest_images", file_key, None, started, ok=False, error_kind="rate_limited")
             raise FigmaGatewayError("rate_limited", str(exc)) from exc
         except Exception as exc:  # noqa: BLE001
-            self._record("rest_images", file_key, None, started, ok=False, error_kind="tool_error")
-            raise FigmaGatewayError("tool_error", f"{type(exc).__name__}: {exc}") from exc
+            err = _rest_error(exc, "tool_error", f"{type(exc).__name__}: {exc}")
+            self._record("rest_images", file_key, None, started, ok=False, error_kind=err.kind)
+            raise err from exc
         self._record("rest_images", file_key, f"{len(node_ids)} frames", started, ok=True)
         return await download_images(urls)
 

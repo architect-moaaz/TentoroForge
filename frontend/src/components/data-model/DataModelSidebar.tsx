@@ -67,7 +67,7 @@ export function DataModelSidebar({
               </span>
             )}
             <span className="ml-auto text-[10px] text-muted-foreground">
-              {table.columns.length}
+              {table.columns?.length ?? 0}
             </span>
           </button>
         ))}

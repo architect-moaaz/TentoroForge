@@ -1,5 +1,10 @@
 """The action classifier asks once per (label, vocabulary), not once per page.
 
+The classifier moved to `figma_action_llm.classify_action` so the REST path
+could use it too — it had been private to the JSX transformer, which is why
+REST-derived pages had buttons that declared no action. The memo moved with
+it; `jsx_to_schema._ACTION_MEMO` is the same dict under the old name.
+
 It is a real model call per button, made inside the transform. A design's
 rail is the same buttons on every screen and the fan-out composes twelve
 screens at once, so one label was classified fifteen times in parallel and the
@@ -21,8 +26,8 @@ def _counting(calls):
 def test_the_same_label_under_the_same_vocabulary_is_asked_once(monkeypatch):
     calls: list[str] = []
     monkeypatch.setattr(figma_action_llm, "classify_figma_action_llm", _counting(calls))
-    monkeypatch.setattr(jsx_to_schema, "_figma_llm_enabled", lambda: True)
-    jsx_to_schema._ACTION_MEMO.clear()
+    monkeypatch.setattr("services.figma_llm_ctx.figma_llm_enabled", lambda: True)
+    figma_action_llm._ACTION_MEMO.clear()
     set_figma_llm_context(routes=["/"], workflows=["FLOW-001"])
     try:
         for _ in range(15):
@@ -38,8 +43,8 @@ def test_a_different_vocabulary_is_a_different_question(monkeypatch):
     inherit an old answer."""
     calls: list[str] = []
     monkeypatch.setattr(figma_action_llm, "classify_figma_action_llm", _counting(calls))
-    monkeypatch.setattr(jsx_to_schema, "_figma_llm_enabled", lambda: True)
-    jsx_to_schema._ACTION_MEMO.clear()
+    monkeypatch.setattr("services.figma_llm_ctx.figma_llm_enabled", lambda: True)
+    figma_action_llm._ACTION_MEMO.clear()
     try:
         set_figma_llm_context(routes=["/"], workflows=None)
         jsx_to_schema._classify_button_action_with_llm("Cases", "", "")
@@ -53,7 +58,7 @@ def test_a_different_vocabulary_is_a_different_question(monkeypatch):
 
 def test_a_cached_answer_is_a_copy():
     """A caller that mutates its result must not poison the next page."""
-    jsx_to_schema._ACTION_MEMO.clear()
+    figma_action_llm._ACTION_MEMO.clear()
     jsx_to_schema._ACTION_MEMO[("x", "", "", (), ())] = {"navigate": "/"}
     reset_figma_llm_context()
     a = jsx_to_schema._classify_button_action_with_llm("x", "", "")

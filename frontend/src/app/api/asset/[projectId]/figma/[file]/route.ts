@@ -52,7 +52,7 @@ export async function GET(
             ? "image/webp"
             : "application/octet-stream";
 
-  return new NextResponse(data, {
+  return new NextResponse(new Uint8Array(data), {
     status: 200,
     headers: {
       "Content-Type": contentType,

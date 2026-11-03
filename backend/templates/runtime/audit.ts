@@ -159,10 +159,20 @@ function legacyHash(facts: { at: string; actorId: string | null; action: string;
 }
 
 let _guarded = false;
+let _guarding: Promise<void> | null = null;
 
-/** The table refuses change and erasure; retention has one door. Idempotent. */
+/** The table refuses change and erasure; retention has one door. Idempotent.
+ *  ONCE, HOWEVER MANY ASK AT ONCE: two first requests each dropped and created
+ *  the trigger, and one answered "already exists" or a deadlock (DITANS trial
+ *  copy, 2026-10-31). The second waits for the first; `CREATE OR REPLACE` keeps
+ *  two servers on one database from colliding too. */
 export async function ensureGuard(executor: any = db): Promise<void> {
   if (_guarded) return;
+  if (!_guarding) _guarding = _ensureGuard(executor).finally(() => { _guarding = null; });
+  return _guarding;
+}
+
+async function _ensureGuard(executor: any): Promise<void> {
   try {
     await executor.execute(sql`
       CREATE OR REPLACE FUNCTION forge_audit_is_append_only() RETURNS trigger AS $fn$
@@ -171,14 +181,12 @@ export async function ensureGuard(executor: any = db): Promise<void> {
       END
       $fn$ LANGUAGE plpgsql;
     `);
-    await executor.execute(sql`DROP TRIGGER IF EXISTS forge_audit_no_change ON forge_audit`);
     await executor.execute(sql`
-      CREATE TRIGGER forge_audit_no_change BEFORE UPDATE OR DELETE ON forge_audit
+      CREATE OR REPLACE TRIGGER forge_audit_no_change BEFORE UPDATE OR DELETE ON forge_audit
       FOR EACH ROW EXECUTE FUNCTION forge_audit_is_append_only()
     `);
-    await executor.execute(sql`DROP TRIGGER IF EXISTS forge_audit_no_truncate ON forge_audit`);
     await executor.execute(sql`
-      CREATE TRIGGER forge_audit_no_truncate BEFORE TRUNCATE ON forge_audit
+      CREATE OR REPLACE TRIGGER forge_audit_no_truncate BEFORE TRUNCATE ON forge_audit
       FOR EACH STATEMENT EXECUTE FUNCTION forge_audit_is_append_only()
     `);
     await executor.execute(sql`

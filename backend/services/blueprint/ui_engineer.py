@@ -599,6 +599,13 @@ What a finished page looks like:
 - REAL CONTENT, REAL STATES. Every list has an empty state that says what to do next
   (and offers the action). Every record page handles a missing optional field with
   a quiet em dash, not "null". Long text truncates with a title attribute.
+- A NEWCOMER HAS NOTHING YET. The person who signed up a minute ago has no
+  records, may belong to no group, and any field typed `| null` may be empty.
+  `load` returns `null` only for a record named in the address that does not
+  exist — never because the person has nothing yet (that answers "not found").
+  When the person's own group or record is missing, show the step that gets them
+  one; never fall back to another person's or another group's rows, and never
+  call a method on a value that may be null.
 - NUMBERS WITH CONTEXT. A figure is a label, a number and, where the data allows, a
   comparison or a sparkline, laid out as the rhythm's `figures` says. Money is
   formatted with its currency; dates with
@@ -2540,7 +2547,11 @@ def settle_code_pages(svc: Any, app_root: str | Path, client: Any = None,
     pages = {str(p.get("id")): p for p in doc.get("pages") or []}
 
     def check(row: dict) -> tuple[dict, list[str]]:
-        return row, typecheck(doc, root, str(row["page"]), str(row["load"]), str(row["view"]))
+        # WITH ITS PARTS: a split screen's frame and a drawn page's view import
+        # `./parts/x`; compiled without them every such page "failed" here and
+        # went back to its writer, who repainted the drawing (d6drawn, 2026-10-28).
+        return row, typecheck(doc, root, str(row["page"]), str(row["load"]), str(row["view"]),
+                              parts=dict(row.get("parts") or {}) or None)
 
     with cf.ThreadPoolExecutor(6) as pool:
         failing = [(r, e) for r, e in pool.map(carrying(check), rows) if e]
@@ -2555,8 +2566,14 @@ def settle_code_pages(svc: Any, app_root: str | Path, client: Any = None,
             return pid, None, errors
         note = ("It compiled when you wrote it, but not in the finished application. The "
                 "TypeScript compiler (strict) says:\n" + "\n".join(f"- {e}" for e in errors[:40]))
+        from services.drawn import binder as drawn_binder
         try:
-            body, spent = compose_page(doc, pages[pid], root, client, feedback=note, current=row)
+            if drawn_binder.applies(doc, pages[pid]):
+                # A drawn page goes back to its binder: the page writer would draw it anew.
+                body, spent = drawn_binder.bind(doc, pages[pid], root, client, feedback=note)
+                body.pop("seed", None)
+            else:
+                body, spent = compose_page(doc, pages[pid], root, client, feedback=note, current=row)
         except CompileError as exc:
             return pid, None, [str(exc)]
         if usage is not None:

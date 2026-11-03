@@ -181,6 +181,20 @@ function resolveIdentifier(name: string, ctx: Context): unknown {
   if ((name === "$today" || name === "$now") && !(name in ctx)) {
     return name === "$today" ? calendarToday() : new Date().toISOString();
   }
+  // THE PERSON RUNNING IT, BY THE NAME STEPS USE. A step's value `$user.id` was
+  // the signed-in person, but an expression read `$user` as an unknown
+  // variable: every guard `candidate.id = $user.id` was false, and 39 of
+  // DITANS's processes refused the very owner they protect (wzml1sa6,
+  // 2026-10-31). `$user` is the acting user the run holds; a variable of that
+  // name, if a process has one, still wins.
+  if ((name === "$user" || name.startsWith("$user.")) && !("$user" in ctx)) {
+    let who: unknown = (ctx as Record<string, unknown>).user ?? (ctx as Record<string, unknown>).__user ?? null;
+    for (const part of name.split(".").slice(1)) {
+      if (who == null || typeof who !== "object") return null;
+      who = (who as Record<string, unknown>)[part];
+    }
+    return who === undefined ? null : who;
+  }
   // Handle dotted names: "customer.age"
   const parts = name.split(".");
   let current: unknown = ctx;

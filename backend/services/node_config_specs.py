@@ -28,6 +28,7 @@ Design: docs/superpowers/specs/2026-07-22-integrations-settings.md.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Iterable
 
 
@@ -565,6 +566,51 @@ NODE_CONFIG_SPECS: dict[str, list[ConfigKey]] = {
             required=True,
             help_url="https://unsplash.com/documentation#creating-a-developer-account",
             platform_only=True,
+        ),
+    ],
+
+    # --- Mews (hotel property management) ------------------------------ #
+    # An app's `http_call` step with `auth: {"provider": "mews"}` reaches the
+    # Connector API: the runtime posts to the demo or live host and puts the
+    # two tokens and the client name in the body, which is where Mews reads
+    # them (templates/runtime/workflows/index.ts). Copied into the apps.
+    "__mews__": [
+        ConfigKey(
+            key="MEWS_CLIENT_TOKEN",
+            provider="mews",
+            label="Client token",
+            kind="password",
+            required=True,
+            help_url="https://docs.mews.com/connector-api/guidelines/authentication",
+        ),
+        ConfigKey(
+            key="MEWS_ACCESS_TOKEN",
+            provider="mews",
+            # Optional: an application with many hotels keeps each one's token on
+            # its own Mews properties page. Set here for one hotel, or as the
+            # portfolio token properties without a token of their own are reached with.
+            label="Access token (one hotel, or a portfolio token)",
+            kind="password",
+            required=False,
+            help_url="https://docs.mews.com/connector-api/guidelines/authentication",
+        ),
+        ConfigKey(
+            key="MEWS_CLIENT",
+            provider="mews",
+            label="Client name (your integration's name and version)",
+            kind="text",
+            required=False,
+            default="Tentoro Forge 1.0.0",
+        ),
+        ConfigKey(
+            key="MEWS_ENVIRONMENT",
+            provider="mews",
+            label="Environment",
+            kind="select",
+            required=False,
+            default="demo",
+            options=("demo", "production"),
+            help_url="https://docs.mews.com/connector-api/guidelines/environments",
         ),
     ],
 

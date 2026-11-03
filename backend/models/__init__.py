@@ -42,6 +42,8 @@ from models.features import FeatureSetting
 from models.webhook import Webhook
 from models.environment import Environment
 from models.platform_integration import PlatformIntegration
+from models.person_connection import PersonConnection
+from models.run_job import RunJob
 from models.platform_mcp_server import PlatformMcpServer
 from models.mobile_build import MobileBuild
 from models.verify_run import VerifyRun
@@ -97,6 +99,8 @@ __all__ = [
     "Environment",
     "PageDefinition",
     "PlatformIntegration",
+    "PersonConnection",
+    "RunJob",
     "PlatformMcpServer",
     "MobileBuild",
     "VerifyRun",

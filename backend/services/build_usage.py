@@ -297,6 +297,75 @@ def spent(usage: Any, *, elapsed_s: float = 0.0) -> None:
     scope = _SCOPE.get()
     if scope is not None and usage is not None:
         scope.spent.append((usage, elapsed_s))
+    budget = _BUDGET.get()
+    if budget is not None and usage is not None:
+        try:
+            budget.add(estimate_cost_usd(getattr(usage, "model", None), usage.as_ledger_dict()))
+        except Exception:  # noqa: BLE001 — accounting never fails a call
+            logger.debug("[build-usage] budget add failed", exc_info=True)
+
+
+# --------------------------------------------------------------------------- #
+# A run's ceiling
+# --------------------------------------------------------------------------- #
+# THE CHECK BEFORE WORK WAS THE ONLY ONE. A build or a turn may start when the
+# organisation's balance and every limit cover what it is expected to cost
+# (`services.credits.gate`); once started, retries, observer rounds and
+# repairs stacked with nothing to stop them, and a Smith turn can make a
+# hundred calls where the gate assumed $0.60 (audit, 2026-11-01). A run now
+# carries what the gate found was left — the balance, or the nearest limit —
+# and the first call made after the run has spent it is refused.
+
+class RunBudgetSpent(RuntimeError):
+    """The run has spent what its organisation's balance and limits allow."""
+
+
+class RunBudget:
+    __slots__ = ("limit_usd", "spent_usd", "_lock")
+
+    def __init__(self, limit_usd: float):
+        import threading
+
+        self.limit_usd = float(limit_usd)
+        self.spent_usd = 0.0
+        self._lock = threading.Lock()
+
+    def add(self, cost: float) -> None:
+        with self._lock:
+            self.spent_usd += float(cost or 0.0)
+
+    def check(self) -> None:
+        if self.spent_usd >= self.limit_usd:
+            raise RunBudgetSpent(
+                f"This stopped after spending ${self.spent_usd:.2f}, all that the organisation's balance "
+                f"and spending limits allowed when it started (${self.limit_usd:.2f}). Add credit or raise "
+                "the limit, then ask again to carry on.")
+
+
+_BUDGET: contextvars.ContextVar[RunBudget | None] = contextvars.ContextVar("forge_run_budget", default=None)
+
+
+@contextmanager
+def run_budget(limit_usd: float | None):
+    """Every model call inside counts against `limit_usd`; None is no ceiling.
+    A run inside another (a turn a build starts) is the outer run's spend."""
+    if limit_usd is None or _BUDGET.get() is not None:
+        yield _BUDGET.get()
+        return
+    budget = RunBudget(limit_usd)
+    token = _BUDGET.set(budget)
+    try:
+        yield budget
+    finally:
+        _BUDGET.reset(token)
+
+
+def check_budget() -> None:
+    """Raise `RunBudgetSpent` when the run in progress has spent its ceiling.
+    Called by the model client before every call."""
+    budget = _BUDGET.get()
+    if budget is not None:
+        budget.check()
 
 
 def claim(usage: Any) -> None:

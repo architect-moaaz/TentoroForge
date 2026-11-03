@@ -8,15 +8,15 @@ chain this rebuild exists to replace, and nothing in the API layer imported
 from __future__ import annotations
 
 
-def test_the_new_route_is_registered_beside_the_legacy_one():
-    """Beside, not instead. The old path keeps working while this is proven,
-    and a caller can tell from the URL which engine it asked for."""
+def test_the_blueprint_route_is_served_and_the_legacy_one_is_not():
+    """The legacy /generate stood beside the Blueprint route while the engine
+    was proven. Nothing live calls it any more, and it started model work
+    with no spend gate, so it is no longer served (audit, 2026-11-01)."""
     import main
 
     paths = {r.path for r in main.app.routes if hasattr(r, "path")}
     assert "/api/projects/{project_id}/generate/blueprint" in paths
-    assert "/api/projects/{project_id}/generate" in paths, (
-        "the legacy endpoint must not be removed by wiring the new one")
+    assert "/api/projects/{project_id}/generate" not in paths
 
 
 def test_the_router_drives_the_blueprint_engine_not_the_chain():
@@ -77,7 +77,7 @@ def test_define_only_stops_before_the_expensive_half():
 
     src = inspect.getsource(blueprint_generate.generate_via_blueprint)
     assert "define_only" in src and "domain_nodes()" in src
-    assert domain_nodes() == ["requirements", "domain_reference"]
+    assert domain_nodes() == ["drawn_views", "drawn_pairs", "drawn_flow", "requirements", "domain_reference"]  # a drawn design is converted first; with none, each is a no-op
 
 
 def test_every_path_into_the_dag_uses_the_same_definition_of_the_gate():

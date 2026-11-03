@@ -338,6 +338,19 @@ def inject_runtime(output_dir: str, app_name: str | None = None, domain: str | N
         except Exception as e:
             errors.append(f"Failed to copy sensitive-crypto: {e}")
 
+    # Mews properties: the hotels an application reaches in Mews, each with its
+    # own sealed access token. The workflow runtime's http_call imports it to
+    # sign a Mews call; the /api/mews/properties routes and the page read it.
+    # Copied into every app; it answers only where the Blueprint declares a
+    # Mews integration (`mewsOn`, read from connected.ts's DECLARED).
+    mews_src = _TEMPLATE_DIR / "mews.ts"
+    if mews_src.exists():
+        try:
+            shutil.copy2(mews_src, src_lib / "mews.ts")
+            copied.append("src/lib/mews.ts")
+        except Exception as e:
+            errors.append(f"Failed to copy mews: {e}")
+
     # Embedding fill + query client. The data engine and the workflow runtime
     # import it unconditionally; with no embedding field in the app's
     # manifest every call is a no-op.
@@ -1060,6 +1073,31 @@ def _inject_file_storage(output_path: Path) -> list[str]:
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(standin_page, dst)
         written.append("src/app/pay/stand-in/page.tsx")
+    # 5a-v. forge_mews_properties: the hotels the application reaches in Mews,
+    #        managed by its administrator — the routes, their guard, the page.
+    mews_schema = _TEMPLATE_DIR / "db" / "forge-mews-properties.schema.ts"
+    if mews_schema.exists() and schema_dir.exists():
+        shutil.copy2(mews_schema, schema_dir / "_forge_mews_properties.ts")
+        written.append("src/db/schema/_forge_mews_properties.ts")
+        barrel = schema_dir / "index.ts"
+        if barrel.exists():
+            txt = barrel.read_text(encoding="utf-8")
+            if "_forge_mews_properties" not in txt:
+                barrel.write_text(txt.rstrip() + '\nexport { forgeMewsProperties } from "./_forge_mews_properties";\n', encoding="utf-8")
+    for rel_src, rel_dst in (
+        (("api-mews", "guard.ts"), "src/app/api/mews/guard.ts"),
+        (("api-mews", "properties", "route.ts"), "src/app/api/mews/properties/route.ts"),
+        (("api-mews", "properties", "[id]", "route.ts"), "src/app/api/mews/properties/[id]/route.ts"),
+        (("api-mews", "properties", "[id]", "check", "route.ts"), "src/app/api/mews/properties/[id]/check/route.ts"),
+        (("pages", "mews-properties", "page.tsx"), "src/app/(dashboard)/mews-properties/page.tsx"),
+        (("pages", "mews-properties", "MewsPropertiesPanel.tsx"), "src/app/(dashboard)/mews-properties/MewsPropertiesPanel.tsx"),
+    ):
+        src_file = _TEMPLATE_DIR.joinpath(*rel_src)
+        if src_file.exists():
+            dst = output_path / rel_dst
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src_file, dst)
+            written.append(rel_dst)
     money = output_path / "src" / "lib" / "money.ts"
     if money.parent.exists() and not money.exists():
         money.write_text("// Written by the Blueprint projection (project_money). The currency money is kept and shown in.\n"
@@ -3202,9 +3240,11 @@ def _ensure_env_file(output_path: Path, project_id: str | None = None) -> None:
 
     if env_file.exists():
         # Re-generation path — upsert reporter keys, leave the rest alone.
+        from services.app_reporting import KEY_ENV, report_key
         _upsert_env_keys(env_file, {
             "FORGE_URL": forge_url,
             "FORGE_PROJECT_ID": forge_project_id,
+            **({KEY_ENV: report_key(forge_project_id)} if forge_project_id else {}),
         })
         # THE PUSH KEYS, once: an app assembled before push existed gets its
         # pair now; one that has a pair keeps it (a new pair would orphan
@@ -3218,6 +3258,8 @@ def _ensure_env_file(output_path: Path, project_id: str | None = None) -> None:
 
     # Use a concrete port: postgres-js can't expand shell vars at runtime.
     db_port = "5432"
+    from services.app_reporting import report_key
+    forge_report_key = report_key(forge_project_id) if forge_project_id else ""
 
     import base64
     import secrets
@@ -3257,6 +3299,7 @@ VAPID_SUBJECT={vapid["VAPID_SUBJECT"]}
 # silently no-ops (see src/lib/error_reporter.ts).
 FORGE_URL={forge_url}
 FORGE_PROJECT_ID={forge_project_id}
+FORGE_REPORT_KEY={forge_report_key}
 
 # AI workflow nodes (ai_generate/classify/extract/decide). Set your key to enable
 # real inference; without it, AI nodes return deterministic mock output.
@@ -3369,6 +3412,10 @@ def _upsert_env_keys(env_file: Path, updates: dict[str, str]) -> None:
         logger.info("Upserted %d key(s) in %s", len(updates), env_file)
 
 
+#: A uuid as Postgres spells it — anything else is a short id to resolve.
+_UUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+
+
 def _fetch_project_rules_sync(project_id: str) -> list[dict[str, Any]]:
     """Read a project's active rules straight from the project_rules table.
 
@@ -3393,10 +3440,25 @@ def _fetch_project_rules_sync(project_id: str) -> list[dict[str, Any]]:
     conn = psycopg2.connect(url)
     try:
         cur = conn.cursor()
+        # A SHORT ID IS NOT A UUID. `project_rules.project_id` is a uuid
+        # column, and the Blueprint path passes `application.id` — the short
+        # id, "kkb5mzo3". Postgres then rejects the whole query ("invalid
+        # input syntax for type uuid"), the caller logs a warning and falls
+        # back to the registry, and every editor-authored rule — which lives
+        # ONLY in this table — is silently left out of the built app
+        # (kkb5mzo3, 2026-11-02). Resolve it rather than refuse it: the short
+        # id identifies the project just as well, one lookup away.
+        key = str(project_id or "")
+        if not _UUID.fullmatch(key):
+            cur.execute("SELECT id FROM projects WHERE short_id = %s", (key,))
+            row = cur.fetchone()
+            if not row:
+                return []
+            key = str(row[0])
         cur.execute(
             "SELECT id, name, rule_type, model_name, field_name, config, is_active "
             "FROM project_rules WHERE project_id = %s AND is_active = true",
-            (project_id,),
+            (key,),
         )
         out: list[dict[str, Any]] = []
         for row in cur.fetchall():

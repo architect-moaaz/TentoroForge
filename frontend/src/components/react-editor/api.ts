@@ -116,6 +116,28 @@ export function assetObjectUrl(projectId: string, path: string): Promise<string>
   return p;
 }
 
+/** A picture as a data URL, for a page on the preview's origin: a blob URL is
+ *  this origin's, and a page on another one may not open it. */
+const assetDataUrls = new Map<string, Promise<string>>();
+export function assetDataUrl(projectId: string, path: string): Promise<string> {
+  const key = `${projectId}:${path}`;
+  let p = assetDataUrls.get(key);
+  if (!p) {
+    p = assetObjectUrl(projectId, path)
+      .then((url) => fetch(url))
+      .then((r) => r.blob())
+      .then((blob) => new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ""));
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(blob);
+      }));
+    assetDataUrls.set(key, p);
+    p.catch(() => assetDataUrls.delete(key));
+  }
+  return p;
+}
+
 export const editorApi = {
   uploadAsset: async (projectId: string, file: globalThis.File): Promise<{ url: string; path: string; type: string }> => {
     const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;

@@ -69,6 +69,16 @@ def test_the_websites_own_preview_is_left_as_it_was():
     assert "sandbox" not in r.headers["content-security-policy"] and "x-frame-options" not in r.headers
 
 
+def test_the_preview_loads_the_apps_own_fonts_and_the_platform_does_not():
+    """DITANS (2026-10-30): its tokens import Inter from Google Fonts; refused
+    in the preview, every drawn screen fell back to a serif."""
+    csp = _client().get("/api/projects/abc/preview/serve/").headers["content-security-policy"]
+    assert "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com" in csp
+    assert "font-src 'self' data: https://fonts.gstatic.com" in csp
+    own = _client().get("/api/projects/abc/settings").headers["content-security-policy"]
+    assert "fonts.googleapis.com" not in own and "fonts.gstatic.com" not in own
+
+
 # ---- the editor's frame ----------------------------------------------------------------------------------------------------------
 
 def test_the_editors_frame_is_sandboxed_and_never_given_the_platforms_origin():

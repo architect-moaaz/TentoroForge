@@ -700,7 +700,31 @@ function prepRow(table: any, row: Record<string, unknown>, ids: Record<string, s
         }
       }
     }
+    // A KEY IS A KEY, WHATEVER IT IS CALLED. A uuid column whose name does not
+    // end in `Id` — `createdBy`, `nationalisationTargetSetBy` — was handed the
+    // label "Created By 1", and Postgres refused every row of DITANS's legal
+    // entities and talent pools, and with them every facility, unit and
+    // position below (wzml1sa6, 2026-10-31). What is not a uuid is left
+    // empty; a required one takes a person below.
+    if (tcol && /uuid/i.test(String(tcol.columnType ?? "")) && val != null
+        && !(typeof val === "string" && UUID_RE.test(val))) {
+      val = prop === "id" ? mintToken(String(val)) : null;
+    }
+    // A WHOLE NUMBER IS WHOLE: 74.63 in an integer column refused the row.
+    if (tcol && /PgInteger|PgSmallInt|PgBigInt/i.test(String(tcol.columnType ?? "")) && val != null
+        && val !== "" && Number.isFinite(Number(val)) && !Number.isInteger(Number(val))) {
+      val = Math.round(Number(val));
+    }
     out[prop] = val;
+  }
+  // A REQUIRED KEY THAT NAMES A PERSON BY ANOTHER NAME (`createdBy`, `setBy`):
+  // a login, as an `…Id` owner column gets below.
+  for (const k of Object.keys(table)) {
+    const c: any = (table as any)[k];
+    if (out[k] != null || /(Id|_id)$/.test(k) || !c?.notNull || c?.hasDefault || c?.primary) continue;
+    if (!/uuid/i.test(String(c?.columnType ?? ""))) continue;
+    const people = ids["users"] || ids["user"];
+    if (people?.length) out[k] = people[i % people.length];
   }
   // Fill foreign keys (xxxId / xxx_id) with a real id from the referenced table.
   // The parent pool is keyed by the inserted table's normalized name; a column's

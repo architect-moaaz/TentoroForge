@@ -181,8 +181,15 @@ class DagNode:
     key: str
     agent: str
     depends_on: frozenset[str] = frozenset()
-    #: Blueprint sections this node is responsible for producing. Used by §72
-    #: to decide which nodes an incremental change needs to re-run.
+    #: What this node writes. A bare section (`pages`) makes the node that
+    #: section's OWNER; `section/part` (`pages/contract`) is a part of a
+    #: section another node owns, and is written only because that owner
+    #: names it in its `delegates`. One writer per section: the owner writes
+    #: everything its delegates do not (see :func:`write_overlaps`).
+    #:
+    #: The scheduler reads :attr:`sections` — resume, §72's impact and the
+    #: observer think in whole sections, so a delegate is re-run, judged and
+    #: ordered with its owner exactly as when both named the bare section.
     produces: frozenset[str] = frozenset()
     note: str = ""
     kind: str = "agent"
@@ -208,6 +215,20 @@ class DagNode:
     #: a resumed build does not re-run the node over a document written
     #: before the section existed.
     defaulted: frozenset[str] = frozenset()
+    #: The parts of an owned section this node leaves to another, as
+    #: ``(("section/part", node key), …)``. Each named node declares the part
+    #: in its `produces`, and nothing else writes it.
+    delegates: tuple[tuple[str, str], ...] = ()
+
+    @property
+    def sections(self) -> frozenset[str]:
+        """The whole sections this node writes in, owned or delegated."""
+        return frozenset(section_of(p) for p in self.produces)
+
+
+def section_of(path: str) -> str:
+    """`pages/contract` is in `pages`; `data.entities` is a section of its own."""
+    return path.split("/", 1)[0]
 
 
 #: The reason a run reports when a person stopped it (`should_stop`).
@@ -215,14 +236,36 @@ STOPPED_BY_PERSON = "stopped by the person"
 
 
 def _n(key, agent, depends_on=(), produces=(), note="", kind="agent",
-       fanout="", optional=False, whole=False, defaulted=()) -> DagNode:
+       fanout="", optional=False, whole=False, defaulted=(), delegates=()) -> DagNode:
     return DagNode(key, agent, frozenset(depends_on), frozenset(produces),
-                   note, kind, fanout, optional, whole, frozenset(defaulted))
+                   note, kind, fanout, optional, whole, frozenset(defaulted),
+                   tuple(delegates))
 
 
 #: §28's graph. Tier names follow the PRD's diagram.
 DAG: dict[str, DagNode] = {n.key: n for n in (
-    _n("requirements", "requirement", (), ("requirements",)),
+    # A DESIGN HELD AS THE SPECIFICATION IS BUILT AS DRAWN (`services/drawn`).
+    # Its frames are converted to React views first — the markup is the
+    # drawing's, the example content props, the buttons handlers — and what
+    # each needs (its contract) is what the data model and the processes are
+    # then generated to back. One subject per frame, the shell and the shared
+    # components; an application with no such design has none, and the node
+    # completes without a call.
+    _n("drawn_views", "ui_engineer", (), ("drawnViews",), fanout="drawn_frames",
+       note="the design's frames as React views with contracts"),
+    # The journey the design draws, as a document the requirements are read
+    # from: screens, what each action does and where it leads, what each
+    # screen states as its rules.
+    # A screen drawn for a phone and again for a desktop is one page: which
+    # drawings are the same screen is decided once (`drawn.pairs`).
+    # OPTIONAL: unpaired, a phone drawing is a page of its own. A pairing that
+    # failed held the journey and the requirements back (DITANS, 2026-10-30).
+    _n("drawn_pairs", "ui_engineer", ("drawn_views",), ("drawnPairs",), optional=True,
+       note="the phone and desktop drawings of one screen, paired"),
+    _n("drawn_flow", "ui_engineer", ("drawn_pairs",), (), kind="service",
+       note="the drawn journey, written down for the requirements"),
+    _n("requirements", "requirement", ("drawn_flow",), ("requirements",),
+       delegates=(("requirements/design-evidence", "figma_intelligence"),)),
     # §51 puts Figma Intelligence upstream of domain, page, entity, workflow
     # and requirement inference — it is the evidence those work from, so it
     # runs beside `requirements` rather than after them. §48 bounds what it may
@@ -233,7 +276,11 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # Fans out over connected designs, so a prompt-only application resolves to
     # no subjects and the stage is absent work discovered from the document
     # rather than a flag asking whether to skip.
-    _n("figma_intelligence", "figma_intelligence", (), ("requirements",),
+    #
+    # ITS PART OF `requirements` IS THE ROWS A DESIGN EVIDENCES, each citing
+    # the frame it rests on; `requirements` owns the section and names this
+    # part as left to it.
+    _n("figma_intelligence", "figma_intelligence", (), ("requirements/design-evidence",),
        fanout="design_sources",
        note="§48-§51; design evidence, not design decisions"),
     # THE DOMAIN REFERENCE, FIRST. What a practitioner expects of a product in
@@ -254,11 +301,18 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # that also wrote every field was 88s median and 276s with 28k output
     # tokens on a 21-entity model, and it is the second node on the critical
     # path: everything about data waits on it.
+    # It owns `data.entities` and keeps each row's identity — name, table —
+    # and leaves the rest of the row to the field author (`pin_entity_set`
+    # drops any field it writes; `pin_entity_identity` puts the declared
+    # identity back on the author's reply), and the fields a page asks for to
+    # `content_fields`.
     _n("data_model", "data_model", ("application_model",), ("data.entities",),
+       delegates=(("data.entities/fields", "entity_fields"),
+                  ("data.entities/page-asked-fields", "content_fields")),
        note="the entity set and its relationships; fields come per entity"),
     # One call per declared entity, in parallel, each given the whole entity
     # set by name so a foreign key can name what it points at.
-    _n("entity_fields", "data_model", ("data_model",), ("data.entities",),
+    _n("entity_fields", "data_model", ("data_model",), ("data.entities/fields",),
        fanout="entities", whole=True,
        note="fields, keys, enums, sensitivity and constraints, per entity"),
     # NO `database` NODE. It was one model call that wrote the same four
@@ -272,7 +326,11 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     _n("apis", "api", ("entity_fields", "content_fields", "workflow_steps", "page_details", "analytics"), ("apis",),
        kind="service",
        note="endpoints are implied by entities + workflows + widgets"),
-    _n("backend", "backend", ("apis",), ("codeMap",), kind="projection"),
+    # `codeMap` is a row per artifact, keyed by its id: this projection
+    # records the entities and endpoints, and leaves the pages' rows and the
+    # workflows' rows to the projections that write those files.
+    _n("backend", "backend", ("apis",), ("codeMap",), kind="projection",
+       delegates=(("codeMap/pages", "frontend"), ("codeMap/workflows", "integration"))),
 
     # right branch — experience
     _n("ux_architecture", "solution_architecture", ("application_model",),
@@ -281,12 +339,22 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # It had owners (accessibility, figma_intelligence) but no node, so nobody
     # ever invoked them and `designSystem` stayed empty through every run —
     # which is also what blocks the theme-token projection.
+    #
+    # ONE WRITER. What the design agent proposes is laid under the two design
+    # languages the person chose, read as this node's inputs when its reply
+    # lands (`SETTLE`): the organisation's own (`brand_language`) and the
+    # design connected to this application (`figma.projection`). They were
+    # two service nodes writing the same keys after it, and a person's
+    # restyle written by Smith was re-run over by both on the next change.
     _n("design_system", "accessibility", ("application_model",), ("designSystem",),
+       delegates=(("designSystem/imagery-photos", "imagery"),),
        note="§37; must precede page design so composition has a language"),
     # THE PICTURES THE DESIGN NAMED, FOUND. The design agent writes what each
     # photograph is of; this looks them up (Unsplash, when the platform has a
     # key) so the page authors are handed URLs and credits, not queries.
-    _n("imagery", "accessibility", ("design_system",), ("designSystem",), kind="service",
+    # Its part is the found photograph of each picture — `url`, `thumbUrl`,
+    # `credit`; the `query` and `alt` are the design agent's.
+    _n("imagery", "accessibility", ("design_system",), ("designSystem/imagery-photos",), kind="service",
        note="the design's photographs, found and credited; nothing without a key"),
     # THE PAGE SET IS DECIDED ONCE AND THE CONTRACTS ARE WRITTEN PER FEATURE.
     # This node answers the slot question — which features exist, which are
@@ -305,14 +373,14 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # Whole: a module whose screens were never declared is not a smaller app.
     _n("page_contracts", "page_design", ("ux_architecture", "entity_fields"), ("pages",),
        fanout="page_set", whole=True,
+       delegates=(("pages/contract", "page_details"), ("pages/sign-in", "auth_pages")),
        note="the page set: filled or declined per feature, routes decided"),
     # One call per feature — an entity's pages together, so a list and its
     # detail are written as one flow — each given the declared page set so
     # `navigatesTo` can name any page by an id that already exists.
-    # Produces `pages`, as the single node did; it writes widgets too, but a
-    # produced section is what resume and impact analysis read, and an
-    # application with no dashboard has none.
-    _n("page_details", "page_design", ("page_contracts",), ("pages",),
+    # Its part of `pages` is each declared page's contract — everything but
+    # what the declaration pinned (`pin_page_identity` puts those back).
+    _n("page_details", "page_design", ("page_contracts",), ("pages/contract",),
        fanout="page_features",
        note="the contracts: tasks, states, views, actions, widgets, per feature"),
     # SIGNING IN IS A PAGE. `/login` and `/signup` were template files the
@@ -324,9 +392,13 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # a field its entity lacks (what comes with a tool, its category); it is
     # proposed on the page and added here — before `workflows`, so the form
     # that creates the record asks for it.
-    _n("content_fields", "data_model", ("page_details",), ("data.entities",), kind="service",
+    # Its part of `data.entities` is the fields a page asks for that the
+    # entity lacks: added, never changing a field the author wrote.
+    _n("content_fields", "data_model", ("page_details",), ("data.entities/page-asked-fields",), kind="service",
        note="fields the pages' content plans need, added to their entities"),
-    _n("auth_pages", "page_design", ("page_details",), ("pages",), kind="service",
+    # Its part of `pages` is the `auth` rows, whole; no feature writes them
+    # (`_feature_groups`), and it declares only the ones still missing.
+    _n("auth_pages", "page_design", ("page_details",), ("pages/sign-in",), kind="service",
        note="the sign-in and create-account pages, declared for every app with a login"),
     # THE ANALYTICS ARE DESIGNED ONCE, WITH THE WHOLE APPLICATION IN VIEW.
     # Every page's contract is written and every entity has its fields, so one
@@ -338,36 +410,6 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # `page_code` read what it writes; the Data Engine runs it live.
     _n("analytics", "analytics", ("page_details", "entity_fields", "content_fields", "workflows"), ("widgets",),
        note="KPIs, charts and breakdowns per page, as measures by dimensions"),
-    # §47 — the design language the connected file already states, projected
-    # onto the Blueprint. Deterministic (§116): published variables *are* the
-    # colour system and type scale, so a model asked to "extract" them can only
-    # paraphrase, and every paraphrase is a silent divergence from the design
-    # the user is holding us to.
-    #
-    # After `design_system`, and that ordering is the mechanism rather than a
-    # detail: `designSystem` is a singleton section, so the last writer of a
-    # key wins, and §40/§53 rank an explicit user design above anything the
-    # platform recommends on its own. Precedence by merge order instead of by
-    # asking an agent to defer. Before `page_layouts`, so composition sees it.
-    # THE ORGANISATION'S OWN DESIGN LANGUAGE, when the owner chose it at the
-    # approval gate. Deterministic for the same reason the Figma projection
-    # is: the palette was counted off the company's rendered site and a model
-    # asked to honour a hex can only restate it, while a model asked to
-    # "apply the brand" returns a plausible neighbour of it.
-    #
-    # Between the design agent and the Figma projection, and the ordering is
-    # the precedence. `designSystem` is a singleton, so `upsert` shallow
-    # merges and the last writer of a key wins: the company outranks what the
-    # platform recommended on its own, and a design the user attached to THIS
-    # application outranks the company default, because attaching one is a
-    # statement about this application specifically. A no-op unless
-    # `application.designLanguage` is `company`.
-    _n("brand_design_system", "accessibility", ("design_system",),
-       ("designSystem",), kind="service",
-       note="the organisation's discovered design language, when chosen"),
-    _n("figma_design_system", "figma_intelligence", ("brand_design_system",),
-       ("designSystem",), kind="service",
-       note="§40, §47, §53; explicit design outranks generic recommendation"),
     # §34 — ONE TREE PER PAGE, FROM THE PAGE'S OWN CONTRACT. No model designs
     # a screen. A page's contract already says what it is for, which entity it
     # shows and which workflows launch from it, and the templates in
@@ -384,7 +426,7 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # After `workflow_steps`, not `workflows`: a Form collects a workflow's
     # inputs, and the inputs are written with the steps.
     _n("page_layouts", "page_template",
-       ("page_details", "auth_pages", "content_fields", "analytics", "workflow_steps", "figma_design_system"),
+       ("page_details", "auth_pages", "content_fields", "analytics", "workflow_steps", "design_system"),
        ("pageLayouts",), kind="service",
        note="§34; one tree per page from its contract, no model call"),
     # §34 — THE DESIGNED PAGE. The layout above is every page's floor; this is
@@ -398,7 +440,7 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # degraded, never stopped. `install` because the compiler lives in the
     # app's node_modules; `workflow_steps` because a form collects inputs.
     _n("ui_direction", "ui_director",
-       ("page_details", "design_system", "figma_design_system", "imagery"), ("composition",),
+       ("page_details", "design_system", "imagery"), ("composition",),
        optional=True, note="§34; the whole app's look and conventions, one call"),
     _n("page_code", "ui_engineer",
        ("ui_direction", "page_layouts", "workflow_steps", "install", "app_flows"), ("pageCode",),
@@ -412,7 +454,7 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
        ("ui_direction", "page_layouts", "workflow_steps", "install", "app_flows"), ("nativeCode",),
        fanout="native_pages", optional=True,
        note="one React Native screen per page, against the native SDK and kit (opt-in: mobile.native)"),
-    _n("frontend", "frontend", ("page_layouts", "page_code", "native_code"), ("codeMap",), kind="projection",
+    _n("frontend", "frontend", ("page_layouts", "page_code", "native_code"), ("codeMap/pages",), kind="projection",
        note="pattern templates + page contracts -> engine page schemas"),
 
     # §107 step 16 places workflow and rules alongside backend/API generation;
@@ -433,13 +475,16 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # contract to wire a button, never its steps; `page_layouts` depends on
     # this node and not on `workflow_steps` for exactly that reason.
     _n("workflows", "workflow", ("entity_fields", "page_contracts", "content_fields", "integrations"), ("workflows",),
+       delegates=(("workflows/steps", "workflow_steps"),),
        note="§107 step 16; declares each workflow's identity and contract"),
     # One call per declared workflow, in parallel, each given the node
     # catalog and one workflow to fill in. A step is a catalog node carrying
     # what that node declares it needs, refused at apply otherwise — the same
     # gate as before, now per workflow, so one refused workflow re-asks for
     # one workflow rather than for all thirty-five.
-    _n("workflow_steps", "workflow", ("workflows", "api_reference"), ("workflows",),
+    # Its part is each declared workflow's steps, and an input a step needs
+    # that the declaration lacks (`pin_workflow_identity` keeps the rest).
+    _n("workflow_steps", "workflow", ("workflows", "api_reference"), ("workflows/steps",),
        fanout="workflows",
        note="§107 step 16; one authored step graph per declared workflow"),
     # THE PATHS BETWEEN THE SCREENS. With the screens and the processes
@@ -473,7 +518,7 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # join
     _n("integration", "backend",
        ("backend", "frontend", "workflow_steps", "business_rules", "security", "integrations"),
-       (), kind="projection"),
+       ("codeMap/workflows",), kind="projection"),
     # NO `testing` NODE. It declared tests — names and file paths — that were
     # never written and never run; the one reader counted them against the
     # requirements. About a tenth of a build's spend for a number. Behaviour
@@ -515,6 +560,67 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
 )}
 
 
+def section_writers(nodes: Mapping[str, DagNode] = DAG) -> dict[str, list[tuple[str, str]]]:
+    """``{section: [(node, what it writes there), …]}``, the owner first."""
+    out: dict[str, list[tuple[str, str]]] = {}
+    for key, node in nodes.items():
+        for path in sorted(node.produces):
+            out.setdefault(section_of(path), []).append((key, path))
+    for rows in out.values():
+        rows.sort(key=lambda r: ("/" in r[1], r[1]))
+    return dict(sorted(out.items()))
+
+
+def write_overlaps(nodes: Mapping[str, DagNode] = DAG) -> list[str]:
+    """Every place two nodes would write the same thing. Empty is the rule.
+
+    ONE WRITER PER SECTION. With two, an edit to what one wrote is undone by
+    the other the next time it runs: a restyle Smith wrote into the design
+    language was laid over again by the company's palette, which had been a
+    node of its own after the design agent's. So a section has one owner —
+    the one node that names it bare — and anyone else writes in it only a
+    part the owner names as left to them, which no other node writes.
+    """
+    problems: list[str] = []
+    owners: dict[str, list[str]] = {}
+    parts: dict[str, list[str]] = {}
+    for key, node in nodes.items():
+        for path in node.produces:
+            (parts if "/" in path else owners).setdefault(path, []).append(key)
+    for section, keys in sorted(owners.items()):
+        if len(keys) > 1:
+            problems.append(f"{section}: {', '.join(sorted(keys))} each write the whole section")
+    for path, keys in sorted(parts.items()):
+        if len(keys) > 1:
+            problems.append(f"{path}: written by {', '.join(sorted(keys))}")
+        owner = owners.get(section_of(path)) or []
+        if not owner:
+            problems.append(f"{path}: no node owns {section_of(path)}")
+            continue
+        left_to = dict(nodes[owner[0]].delegates).get(path)
+        for key in keys:
+            if left_to != key:
+                problems.append(f"{path}: {key} writes it, but {owner[0]} does not leave it to {key}")
+    for key, node in nodes.items():
+        given = [path for path, _ in node.delegates]
+        for path in {p for p in given if given.count(p) > 1}:
+            problems.append(f"{key} leaves {path} to more than one node")
+        for path, to in node.delegates:
+            if section_of(path) not in node.produces:
+                problems.append(f"{key} leaves {path} to {to}, but does not own {section_of(path)}")
+            if to not in nodes or path not in nodes[to].produces:
+                problems.append(f"{key} leaves {path} to {to}, which does not write it")
+    named = sorted(parts)
+    for i, a in enumerate(named):
+        for b in named[i + 1:]:
+            if section_of(a) != section_of(b):
+                continue
+            pa, pb = a.split("/", 1)[1].split("."), b.split("/", 1)[1].split(".")
+            if pa[:len(pb)] == pb or pb[:len(pa)] == pa:
+                problems.append(f"{a} and {b} overlap")
+    return problems
+
+
 #: How a fanning-out node finds its subjects. Kept here rather than in the node
 #: so the DAG stays a description of shape, not a place where documents are
 #: read.
@@ -554,10 +660,29 @@ FANOUT: dict[str, Any] = {
     # belongs to no entity (a dashboard, a sign-in, a drawn screen with no
     # primary record) on its own.
     "page_features": lambda doc: page_features(doc),
+    # Every frame of a design held as the specification, then its shell and
+    # its shared components (`services/drawn/convert`).
+    "drawn_frames": lambda doc: _drawn_subjects(doc),
     # The page set: ``[""]`` (one call) unless the drawn screens are too many
     # for one reply, then a module's screens at a time and the rest.
     "page_set": lambda doc: _page_set_parts(doc),
 }
+
+
+def _drawn_subjects(doc: Mapping[str, Any]) -> list[str]:
+    from services.drawn.convert import COMPONENTS_KEY, frame_subjects, shell_subjects
+    frames = frame_subjects(dict(doc))
+    return [*frames, *shell_subjects(dict(doc)), COMPONENTS_KEY] if frames else []
+
+
+def _drawn_present(doc: Mapping[str, Any], subject: str) -> bool:
+    """A frame, the shell or the components are converted once their rows are."""
+    from services.drawn.convert import COMPONENTS_KEY
+    rows = [v for v in doc.get("drawnViews") or [] if isinstance(v, dict)]
+    if subject == COMPONENTS_KEY:
+        from services.drawn.components import FORMAT
+        return any(v.get("kind") == "component" and v.get("format") == FORMAT for v in rows)
+    return any(str(v.get("key")) == subject for v in rows)
 
 
 def _page_set_parts(doc: Mapping[str, Any]) -> list[str]:
@@ -854,6 +979,8 @@ INCREMENTAL_SECTIONS: frozenset[str] = frozenset({
     "requirements", "pages", "components", "widgets", "pageLayouts",
     # A page's code follows its page: adding a page must give it one.
     "pageCode", "nativeCode",
+    # A drawn view is one frame's, converted again when that frame changes.
+    "drawnViews", "drawnPairs",
     "data.entities", "data.relationships",
     "data.constraints", "apis", "workflows", "businessRules", "tests",
     # The paths between the screens follow the screens and the processes.
@@ -876,8 +1003,8 @@ def is_foundational(node: DagNode) -> bool:
     """
     return (
         node.kind == "agent"
-        and bool(node.produces)
-        and not (node.produces & INCREMENTAL_SECTIONS)
+        and bool(node.sections)
+        and not (node.sections & INCREMENTAL_SECTIONS)
     )
 
 
@@ -965,7 +1092,7 @@ def incremental_plan(
     # the node is seeded properly.
     seeds = {
         k for k, n in DAG.items()
-        if n.produces & (written if is_foundational(n) else touched_sections)
+        if n.sections & (written if is_foundational(n) else touched_sections)
     }
     plan: set[str] = set(seeds)
     for s in seeds:
@@ -984,7 +1111,7 @@ def incremental_plan(
     if authored:
         plan -= {
             k for k, n in DAG.items()
-            if n.produces and n.produces <= authored and n.kind == "agent"
+            if n.sections and n.sections <= authored and n.kind == "agent"
         }
 
     order = [k for lvl in levels() for k in lvl]
@@ -1019,7 +1146,7 @@ def _ledger_gated_nodes(nodes: dict[str, DagNode]) -> set[str]:
     with no authored-check that shares all its sections with an INDEPENDENT
     agent node is returned here; for those, the run ledger is the authority.
     """
-    agent = {k: n for k, n in nodes.items() if n.kind == "agent" and n.produces}
+    agent = {k: n for k, n in nodes.items() if n.kind == "agent" and n.sections}
 
     def _depends_via(a: str, b: str, seen: set[str] | None = None) -> bool:
         seen = seen or set()
@@ -1032,11 +1159,11 @@ def _ledger_gated_nodes(nodes: dict[str, DagNode]) -> set[str]:
     for key, node in agent.items():
         if node.fanout and _SUBJECT_AUTHORED.get(node.fanout) is not None:
             continue  # a per-subject authored-check already disambiguates it
-        prod = set(node.produces)
+        prod = set(node.sections)
         for other, on in agent.items():
             if other == key:
                 continue
-            if prod <= set(on.produces) and not _depends_via(key, other) and not _depends_via(other, key):
+            if prod <= set(on.sections) and not _depends_via(key, other) and not _depends_via(other, key):
                 gated.add(key)
                 break
     return gated
@@ -1100,9 +1227,9 @@ def completed_nodes(
     gated = _ledger_gated_nodes(nodes) if confirmed is not None else set()
     done: set[str] = set()
     for key, node in nodes.items():
-        if node.kind != "agent" or not node.produces:
+        if node.kind != "agent" or not node.sections:
             continue
-        if not all(_section(doc, path) for path in node.produces if path not in node.defaulted):
+        if not all(_section(doc, path) for path in node.sections if path not in node.defaulted):
             continue
         # SHARED SECTION, RESUMED RUN: content is not proof THIS node ran (D-07).
         # A ledger-gated node is done only if the ledger recorded it — except a
@@ -1206,6 +1333,7 @@ _SUBJECT_AUTHORED: dict[str, Callable[[Mapping[str, Any], str], bool]] = {
     "page_features": _contracts_present,
     "entities": _fields_present,
     "page_set": _page_set_present,
+    "drawn_frames": _drawn_present,
 }
 
 
@@ -1374,6 +1502,55 @@ def _note(ledger: Any, method: str, *args: Any) -> None:
 Executor = Callable[[TaskSpec], AgentResult]
 
 
+#: Nodes that cannot work without the app's toolchain on disk: they compile
+#: what they write before handing it back.
+NEEDS_TOOLCHAIN: frozenset[str] = frozenset({"page_code", "native_code"})
+
+
+def toolchain_ready(app_root: str | None) -> bool:
+    """Is there a TypeScript compiler under ``app_root``?
+
+    The same question `ui_engineer` asks before it compiles, asked early
+    enough to do something about it."""
+    import shutil
+
+    if not app_root:
+        return False
+    return bool(shutil.which("tsc", path=str(Path(app_root) / "node_modules" / ".bin")))
+
+
+def with_toolchain(order: Sequence[str], app_root: str | None) -> list[str]:
+    """`install` back in the plan when something needs it and it is gone.
+
+    A COMPLETED NODE IS NOT A PRESENT ARTIFACT. `install` produces no
+    Blueprint section, so `completed_nodes` cannot judge it and
+    `incremental_plan` never seeds it — it is foundational, reached only by
+    being written to. That is right until its output stops existing: the app
+    tree is re-projected by `frontend`/`backend`, and `node_modules` does not
+    survive every such rewrite.
+
+    On kkb5mzo3 (2026-11-02) `page_code` ran at 14:05 against a tree with no
+    compiler and failed all 18 pages with "install has not run"; `assemble`
+    reinstalled it at 14:15, ten minutes too late, and the run still reported
+    18 of 19 nodes complete with nothing failed. The graph believed a node
+    whose output had been deleted.
+    """
+    plan = list(order)
+    # NO APP ROOT, NO CLAIM. A caller that projects nowhere (every unit test
+    # of the scheduler, and `--dry-run`) has no tree to inspect and no tree to
+    # install into; adding `install` there only makes it unrunnable and takes
+    # its dependents down with it.
+    if not app_root:
+        return plan
+    if "install" in plan or not any(n in NEEDS_TOOLCHAIN for n in plan):
+        return plan
+    if toolchain_ready(app_root):
+        return plan
+    logger.warning("[run] %s needs a compiler and there is none under %s — running `install` first",
+                   ", ".join(n for n in plan if n in NEEDS_TOOLCHAIN), app_root)
+    return ["install", *plan]
+
+
 def run(
     svc: BlueprintService,
     executor: Executor,
@@ -1418,6 +1595,8 @@ def run(
     loop is testable; with one it is the same loop with a judgement in it.
     """
     order = list(plan) if plan is not None else [k for lvl in levels() for k in lvl]
+    # A node that compiles needs a compiler; see `with_toolchain`.
+    order = with_toolchain(order, app_root)
     in_plan = set(order)
     report = RunReport()
     done: set[str] = set()
@@ -1648,6 +1827,10 @@ def _execute(
             _note(ledger, "node_failed", key,
                   "; ".join(f"{s}: {r}" if s and r else r for s, r in zip(state.failed, reasons) if r)[:600]
                   or f"{len(state.failed)} of {len(state.subjects)} subjects failed")
+        elif key in SETTLE and (failure := _settle_inputs(svc, key)):
+            report.failed.append(key)
+            report.failed_because[key] = failure
+            _note(ledger, "node_failed", key, failure)
         else:
             report.completed.append(key)
             _note(ledger, "node_done", key, len(state.subjects or []))
@@ -1896,11 +2079,20 @@ def _execute(
                             w.rewrite.add(subject)
                     elif _finding_sig(obs.findings[subject]) == _finding_sig(before):
                         w.stuck.add(subject)
+                    elif len(obs.findings[subject]) > len(before):
+                        # WORSE THAN IT WENT IN. page_contracts went 26 -> 28
+                        # -> 32 findings across its two rounds and was marked
+                        # done; RefundExecution went 5 -> 2 -> 4 -> 5
+                        # (kkb5mzo3, 2026-11-02). A rewrite that adds findings
+                        # is trading one gap for another, and the next round
+                        # trades again at full price.
+                        w.stuck.add(subject)
                 w.open[subject] = RepairTask(
                     node=key, agent=DAG[key].agent, subject=subject,
                     feedback=obs.brief(subject),
                 )
                 w.last[subject] = obs
+                w.counts[subject] = len(obs.findings[subject])
             elif subject in w.open and not sweep:
                 w.open.pop(subject)
                 w.stuck.discard(subject)
@@ -1972,7 +2164,7 @@ def _execute(
         with svc.lock:
             try:
                 current = () if subject in w.rewrite else tuple(editable_artifacts(
-                    svc.doc, DAG[key].produces,
+                    svc.doc, DAG[key].sections,
                     w.authored.get(subject, set()),
                     output_dir=getattr(svc, "output_dir", None)))
             except Exception as exc:  # noqa: BLE001 — then it rewrites
@@ -2008,7 +2200,7 @@ def _execute(
             return
         with svc.lock:
             refused, application = _repair_apply(
-                svc, outcome, commit=commit, user_request=user_request)
+                svc, outcome, commit=commit, user_request=user_request, key=key, subject=spec.subject)
             if refused is None:
                 # A REPAIR IS THE WHOLE ANSWER, NOT AN ADDENDUM. Ids come
                 # from natural keys, so a re-authoring that renames a module
@@ -2182,11 +2374,20 @@ class _Watch:
     closed: bool = False
     #: Subject -> identities the node's current answer for it consists of.
     authored: dict[str, set[tuple]] = field(default_factory=dict)
-    #: Subjects a repair round left NO better (finding count did not drop). A
-    #: second identical brief will not help, so they are flagged now instead of
-    #: burning the remaining round — the observer's biggest source of wasted
-    #: re-authoring on hard apps (measured: NKit page_layouts).
+    #: Subjects a repair round left no better, so they are flagged now rather
+    #: than burning the remaining round — the observer's biggest source of
+    #: wasted re-authoring on hard apps (measured: NKit page_layouts).
+    #:
+    #: Two ways to be no better, and they are different claims:
+    #:   * the SAME findings came back (identity) — a second identical brief
+    #:     will not move a defect the agent cannot fix;
+    #:   * MORE findings came back than went in — the rewrite is trading gaps
+    #:     rather than closing them, and another round trades again.
+    #: An answer that merely shifted, same count, keeps its full rounds.
     stuck: set[str] = field(default_factory=set)
+    #: Subject -> how many findings its last verdict carried, to tell a round
+    #: that converged from one that diverged.
+    counts: dict[str, int] = field(default_factory=dict)
     #: Subjects whose last repair was an edit.
     edited: set[str] = field(default_factory=set)
     #: Subjects an edit left with a finding the observer had already sent.
@@ -2264,25 +2465,25 @@ def _watchable(key: str, state: _NodeRun, order: Sequence[str],
     """
     if not _applied(state):
         return False
-    mine = set(DAG[key].produces)
+    mine = set(DAG[key].sections)
     # Only a later AGENT defers the verdict: it is judged in this node's place.
     # A service node (`auth_pages`, `content_fields`) adds derived rows and is
     # never judged, so deferring to one judged nothing — adding `auth_pages`
     # silently took `page_details`, the observer's busiest node, off its watch.
     return not any(
         other != key and other in in_plan and other not in finished
-        and DAG[other].kind == "agent" and DAG[other].produces & mine
+        and DAG[other].kind == "agent" and DAG[other].sections & mine
         for other in order
     )
 
 
 def _pending_sections(in_plan: set[str], settled: set[str]) -> set[str]:
     """Sections a node still to run in this plan will write."""
-    return {s for k in in_plan if k not in settled for s in DAG[k].produces}
+    return {s for k in in_plan if k not in settled for s in DAG[k].sections}
 
 
 def _planned_sections(in_plan: set[str]) -> set[str]:
-    return {s for k in in_plan for s in DAG[k].produces}
+    return {s for k in in_plan for s in DAG[k].sections}
 
 
 def _subject_resolver(node: DagNode, doc: Mapping[str, Any]) -> Any:
@@ -2306,8 +2507,18 @@ def _record_observation(report: RunReport, ledger: Any, obs: Any) -> None:
               obs.critic)
 
 
+def _subject_checks(key: str, outcome: Any, doc: dict, subject: str) -> None:
+    """What only a fan-out subject can be held to: what it was given to
+    answer. A drawn part of the page set places every frame of its slots
+    (`agent_contract.check_part_frames`)."""
+    if key == "page_contracts" and subject:
+        from services.blueprint.agent_contract import check_part_frames
+        check_part_frames(outcome, doc, subject)
+
+
 def _repair_apply(
     svc: BlueprintService, outcome: Any, *, commit: bool, user_request: str,
+    key: str = "", subject: str = "",
 ) -> tuple[str | None, Any]:
     """Apply one repair. ``(None, application)`` when it landed; otherwise
     ``(why it was refused, None)``.
@@ -2321,6 +2532,7 @@ def _repair_apply(
     if outcome is None:
         return "the executor returned nothing", None
     try:
+        _subject_checks(key, outcome, svc.doc, subject)
         application = apply_agent_result(
             svc, outcome, commit=commit, user_request=user_request,
         )
@@ -2490,15 +2702,21 @@ def _call(executor: Executor, spec: TaskSpec) -> Any:
     scheduler's thread. An exception is a classified outcome (§102), not a
     crash; the scheduler decides whether it is a retry or a failure.
     """
+    from services.build_usage import RunBudgetSpent
+
     try:
         return executor(spec)
+    except RunBudgetSpent:
+        # Not the node's failure: the run has spent what it may. Retrying or
+        # repairing would only ask again; the run ends, saying why.
+        raise
     except Exception as exc:  # §102 — a classified outcome, not a crash
         return exc
 
 
 def _sections(node: DagNode) -> set[str]:
     """Top-level sections a node writes — `data.entities` is `data`."""
-    return {p.split(".")[0] for p in node.produces}
+    return {p.split(".")[0] for p in node.sections}
 
 
 def _yields_to(key: str, order: Sequence[str], started: set[str],
@@ -2523,6 +2741,19 @@ def _yields_to(key: str, order: Sequence[str], started: set[str],
                 and _sections(DAG[other]) & mine:
             return True
     return False
+
+
+def _settle_inputs(svc: BlueprintService, key: str) -> str:
+    """Run a node's `SETTLE` step. Returns why it failed, or "" — a node whose
+    own part could not be laid over its reply is not done, like a service
+    node that raised."""
+    try:
+        with svc.lock:
+            SETTLE[key](svc)
+    except Exception as exc:  # noqa: BLE001 — classified, like any node outcome
+        logger.warning("[%s] settling its inputs failed: %s", key, exc)
+        return _reason(exc)
+    return ""
 
 
 def _run_deterministic(
@@ -2643,6 +2874,13 @@ OBSERVER_ROUNDS_BY_NODE: dict[str, int] = {
     # Judged by the compiler and the looks, like `page_code`.
     "native_code": 0,
     "ux_architecture": 0,
+    # A converted drawing is held to the drawing (`drawn.params.check`), not
+    # to requirements that are written after it, from it: judged against them
+    # the Promo codes view was sent back over a link to a screen left out of
+    # the run (d6drawn, 2026-10-28), eight minutes for nothing.
+    "drawn_views": 0,
+    # Its answer can only name drawings that exist, each once (`drawn.pairs`).
+    "drawn_pairs": 0,
 }
 
 
@@ -2962,6 +3200,7 @@ def _apply_subject(
         return _rejected(_reason(outcome))
 
     try:
+        _subject_checks(key, outcome, svc.doc, subject)
         application = apply_agent_result(
             svc, outcome, commit=commit, user_request=user_request,
         )
@@ -3183,6 +3422,7 @@ def _run_agent_subject(
     commit: bool,
     user_request: str,
     report: RunReport,
+    ledger: Any = None,
 ) -> str | None:
     """One agent call (with retries) for one subject.
 
@@ -3440,6 +3680,13 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
         project_native(svc.doc, svc.output_dir)
     except Exception as exc:  # noqa: BLE001 — additive: never the web app's loss
         logger.warning("[frontend] the native project was not written: %s", exc)
+    # A DESIGN BUILT AS DRAWN brings its frame and its pictures (`services.drawn`).
+    # Every app gets the wrapper the layout imports: the drawn frame, or the
+    # pass-through that leaves the application's own.
+    from services.drawn.project import project_drawn
+    out = project_drawn(svc.doc, svc.output_dir, app_root)
+    if out.get("shell") or out.get("assets"):
+        logger.info("[drawn] projected %s", out)
 
 
 def _project_integration(svc: BlueprintService, app_root: str) -> None:
@@ -3717,12 +3964,16 @@ def _compose_page_layouts(svc: BlueprintService) -> None:
 
     have = {str(l.get("page")) for l in svc.doc.get("pageLayouts") or [] if isinstance(l, dict)}
     held = _deferred_pages(svc.doc)
+    from services.drawn import binder as drawn_binder
+
     for page in list(svc.doc.get("pages") or []):
         pid = str(page.get("id") or "")
         if not pid or page.get("status") == "DEPRECATED" or pid in have or pid in held:
             continue
         if page.get("pattern") == "auth":
             continue            # its floor is the template's sign-in page, not a tree
+        if drawn_binder.applies(svc.doc, page):
+            continue            # its views are the drawing's own (`services.drawn`); nothing to lay out
         body = None
         try:
             drawn = figma_layout.compose(svc, page, app_root=Path(svc.output_dir) / "app")
@@ -3781,8 +4032,22 @@ def _add_content_fields(svc: BlueprintService) -> None:
             commit=True)
 
 
+def _write_drawn_flow(svc: BlueprintService) -> None:
+    """The drawn journey, kept as a document for the requirements (`drawn.flow`)."""
+    from services.drawn.flow import write
+
+    out = write(svc)
+    if out:
+        logger.info("[drawn] flow document: %s", out)
+
+
 def _project_design_reference(svc: BlueprintService) -> None:
-    """§47 — the connected design's own tokens. No-op without one."""
+    """§47 — the connected design's own tokens. No-op without one.
+
+    Deterministic (§116): published variables *are* the colour system and
+    type scale, so a model asked to "extract" them can only paraphrase, and
+    every paraphrase is a silent divergence from the design the user is
+    holding us to."""
     from services.figma.projection import apply_design_reference
 
     apply_design_reference(svc)
@@ -3790,6 +4055,11 @@ def _project_design_reference(svc: BlueprintService) -> None:
 
 def _project_company_language(svc: BlueprintService) -> None:
     """The organisation's design language, when this application is built in it.
+
+    Deterministic for the same reason the connected design is: the palette
+    was counted off the company's rendered site, and a model asked to honour
+    a hex can only restate it, while a model asked to "apply the brand"
+    returns a plausible neighbour of it.
 
     Two conditions, both read from the document rather than from a flag: the
     owner answered `company` at the approval gate, and a language was adopted
@@ -3828,13 +4098,34 @@ def _project_company_language(svc: BlueprintService) -> None:
     ).strip()
 
     # A plain merge onto the section, the way the Figma projection writes
-    # its own — `designSystem` is a singleton and the last writer of a key
-    # wins, which is the precedence this node exists to express.
+    # its own — the precedence `_settle_design_system` expresses.
     current = svc.doc.get("designSystem") or {}
     svc.doc["designSystem"] = {**current, **overlay}
     svc.save()
     logger.info("[brand] projected %s over designSystem in %s",
                 ", ".join(sorted(overlay)), svc.output_dir)
+
+
+def _settle_design_system(svc: BlueprintService) -> None:
+    """The design agent's proposal under the design languages the person chose.
+
+    The order is the precedence. The company's language outranks what the
+    platform recommended on its own, and a design the person attached to
+    THIS application outranks the company default, because attaching one is
+    a statement about this application specifically (§40, §53). Each is a
+    shallow merge, so what neither states — accessibility, responsive and
+    interaction rules — stays the agent's.
+    """
+    _project_company_language(svc)
+    _project_design_reference(svc)
+
+
+#: What an agent node reads besides its agent's reply, laid over that reply
+#: once its last subject has landed and before anything that depends on it
+#: starts — the node's own deterministic part, so the section keeps one writer.
+SETTLE: dict[str, Any] = {
+    "design_system": _settle_design_system,
+}
 
 
 def _find_imagery(svc: BlueprintService) -> None:
@@ -3871,8 +4162,7 @@ SERVICE_HANDLERS: dict[str, Any] = {
     "page_layouts": _compose_page_layouts,
     "auth_pages": _declare_auth_pages,
     "content_fields": _add_content_fields,
-    "brand_design_system": _project_company_language,
-    "figma_design_system": _project_design_reference,
+    "drawn_flow": _write_drawn_flow,
     "verification": _run_verification,
     "apis": _derive_apis,
     "memory": _record_memory,

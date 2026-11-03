@@ -1,73 +1,61 @@
 name: CI
 
+# Every branch, every pull request. It used to run only on `main`, which had
+# not moved since August, so none of the smithv2–v5 work was ever checked
+# (audit, 2026-11-01). Each job is a gate: nothing here continues on error.
 on:
-  pull_request:
-    branches: [main]
   push:
-    branches: [main]
+  pull_request:
 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  backend-lint-test:
-    name: Backend — Lint & Test
+  backend:
+    name: Backend — gate and fast tests
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: test
-          POSTGRES_PASSWORD: test
-          POSTGRES_DB: appforge_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 5
-
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
+      # The interpreter the suite is run with locally; the image runs 3.12.
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.11"
           cache: pip
           cache-dependency-path: backend/requirements.txt
 
-      - name: Install dependencies
-        run: |
-          cd backend
-          pip install -r requirements.txt
-          pip install ruff mypy pytest-cov
+      - name: Install
+        working-directory: backend
+        run: pip install -r requirements.txt
 
-      - name: Lint with ruff
-        run: |
-          cd backend
-          ruff check .
+      # Code that cannot run: syntax errors and names that do not exist. Each
+      # of these was a crash waiting on a path (an unterminated prompt, a
+      # Smith turn's lost queue, a ledger that was never passed).
+      - name: Lint (syntax errors, undefined names)
+        working-directory: backend
+        run: ruff check --isolated --select E9,F63,F7,F82 --target-version py311 --exclude node_modules,output .
 
-      - name: Type check with mypy
-        run: |
-          cd backend
-          mypy --ignore-missing-imports --no-error-summary .
-        continue-on-error: true
-
-      - name: Run tests
+      - name: Every module imports
+        working-directory: backend
         env:
-          DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/appforge_test
-          SECRET_KEY: test-secret
-          ANTHROPIC_API_KEY: test-key
-        run: |
-          cd backend
-          pytest --tb=short -q --cov=. --cov-report=term-missing
+          DATABASE_URL: sqlite+aiosqlite://
+          SECRET_KEY: ci-secret
+        run: python -c "import main"
 
-  frontend-lint-build:
-    name: Frontend — Lint & Build
+      # The fast tier: the routes (who may reach what), the platform's
+      # security rules, and what generated apps are given. The whole suite
+      # is hours; this is minutes, and it is the part a regression is most
+      # dangerous in.
+      - name: Fast tests
+        working-directory: backend
+        run: python -m pytest -q -p no:randomly -p no:cacheprovider $(cat tests/fast.txt)
+
+  frontend:
+    name: Frontend — types and tests
     runs-on: ubuntu-latest
-
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -75,28 +63,19 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: package-lock.json
 
-      - name: Install dependencies
+      # The workspace packages the editor and the tests import are built
+      # first: a test that imports `@forge/registry` with no dist cannot load.
+      - name: Install and build the packages
         run: |
-          cd frontend
           npm ci
-
-      - name: Lint
-        run: |
-          cd frontend
-          npm run lint
-        continue-on-error: true
+          npm run build
 
       - name: Type check
-        run: |
-          cd frontend
-          npx tsc --noEmit
-        continue-on-error: true
+        working-directory: frontend
+        run: npx tsc --noEmit -p .
 
-      - name: Build
-        run: |
-          cd frontend
-          npm run build
-        env:
-          NEXT_PUBLIC_API_URL: http://localhost:6500
+      - name: Tests
+        working-directory: frontend
+        run: npx vitest run

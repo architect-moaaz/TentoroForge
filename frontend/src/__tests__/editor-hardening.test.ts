@@ -24,7 +24,7 @@ describe("undo/redo dirty tracking (#8) — an undo/redo after autosave must re-
     expect(S().isDirty).toBe(false);
     S().undo();
     expect(S().isDirty).toBe(true); // undo diverged in-memory from disk → must persist
-    expect(S().artifacts!.pageSchemas.home.root.children[0].props.label).toBe("A");
+    expect(((S().artifacts!.pageSchemas.home.root.children as any[]) as any[])[0].props.label).toBe("A");
   });
 
   it("redo also sets isDirty", () => {
@@ -33,7 +33,7 @@ describe("undo/redo dirty tracking (#8) — an undo/redo after autosave must re-
     S().markClean();
     S().redo();
     expect(S().isDirty).toBe(true);
-    expect(S().artifacts!.pageSchemas.home.root.children[0].props.label).toBe("B");
+    expect(((S().artifacts!.pageSchemas.home.root.children as any[]) as any[])[0].props.label).toBe("B");
   });
 
   it("markClean clears a prior saveError", () => {
@@ -58,12 +58,12 @@ describe("dispatchBatch (#3, #31) — a multi-op gesture is ONE undo step", () =
       { type: "removeNode", pageId: "home", nodeId: "c" },
     ]);
     expect(S().lastError).toBeNull();
-    expect(S().artifacts!.pageSchemas.home.root.children.length).toBe(0);
+    expect((S().artifacts!.pageSchemas.home.root.children as any[]).length).toBe(0);
     S().undo(); // ONE undo
-    const ids = S().artifacts!.pageSchemas.home.root.children.map((c: any) => c.id);
+    const ids = (S().artifacts!.pageSchemas.home.root.children as any[]).map((c: any) => c.id);
     expect(ids).toEqual(["a", "b", "c"]);
     S().redo(); // ONE redo re-applies the whole batch
-    expect(S().artifacts!.pageSchemas.home.root.children.length).toBe(0);
+    expect((S().artifacts!.pageSchemas.home.root.children as any[]).length).toBe(0);
   });
 
   it("batch is all-or-nothing: a bad action commits nothing", () => {
@@ -73,7 +73,7 @@ describe("dispatchBatch (#3, #31) — a multi-op gesture is ONE undo step", () =
     ]);
     expect(S().lastError).toBeTruthy();
     // 'a' must NOT have been removed (transaction rolled back)
-    expect(S().artifacts!.pageSchemas.home.root.children.map((c: any) => c.id)).toEqual(["a", "b", "c"]);
+    expect((S().artifacts!.pageSchemas.home.root.children as any[]).map((c: any) => c.id)).toEqual(["a", "b", "c"]);
   });
 
   it("a corner-resize batch (width+height) is one undo", () => {
@@ -81,9 +81,9 @@ describe("dispatchBatch (#3, #31) — a multi-op gesture is ONE undo step", () =
       { type: "updateStyle", pageId: "home", nodeId: "a", styleKey: "width", value: "200px" },
       { type: "updateStyle", pageId: "home", nodeId: "a", styleKey: "height", value: "100px" },
     ]);
-    expect(S().artifacts!.pageSchemas.home.root.children[0].style).toEqual({ width: "200px", height: "100px" });
+    expect(((S().artifacts!.pageSchemas.home.root.children as any[]) as any[])[0].style).toEqual({ width: "200px", height: "100px" });
     S().undo(); // single undo clears BOTH
-    expect(S().artifacts!.pageSchemas.home.root.children[0].style).toBeUndefined();
+    expect(((S().artifacts!.pageSchemas.home.root.children as any[]) as any[])[0].style).toBeUndefined();
   });
 });
 

@@ -717,12 +717,30 @@ class Observer:
 
 def flag_unrepaired(svc: Any, obs: Observation, subject: str) -> list[str]:
     """§76 — a subject that stayed wrong after every round is flagged with
-    what the observer found. Repairs nothing."""
+    what the observer found. Repairs nothing.
+
+    A finding that names a real artifact marks THAT artifact ``OUT_OF_SYNC``.
+    A finding that names none — which is every finding of a node that writes
+    once, because its subject is ``""`` — is recorded in ``runtime.issues``
+    instead of being dropped.
+
+    IT USED TO BE DROPPED, and that is how a bad build looked clean: on
+    kkb5mzo3 (2026-11-02) `page_contracts` finished with 32 unresolved
+    findings — a page set covering 2 of 18 modules — and `security` with a
+    role granted no permission. Both had an empty subject, so `art` was empty,
+    the loop skipped them, and the run reported `failed: []`. The 87
+    artifact-level findings of the same run were flagged correctly; only the
+    node-level ones vanished, which were the largest.
+    """
     marked: list[str] = []
     seen: set[str] = set()
+    homeless: list[Any] = []
     for f in obs.findings.get(subject, []):
         art = f.artifact_id or subject
-        if not art or art in seen:
+        if not art:
+            homeless.append(f)
+            continue
+        if art in seen:
             continue
         seen.add(art)
         try:
@@ -738,10 +756,38 @@ def flag_unrepaired(svc: Any, obs: Observation, subject: str) -> list[str]:
             )
             marked.append(art)
         except Exception:  # noqa: BLE001 — a finding naming nothing real
+            # Not a real artifact either: it still has to go somewhere.
+            homeless.append(f)
             continue
-    if marked:
+    if homeless:
+        _record_node_issue(svc, obs.node, subject, homeless)
+    if marked or homeless:
         svc.save()
     return marked
+
+
+def _record_node_issue(svc: Any, node: str, subject: str, findings: list[Any]) -> None:
+    """Keep findings that name no artifact, under ``runtime.issues``.
+
+    Same shape as every other entry there (``kind`` + the version and time it
+    was found), so one re-run of a node replaces its own entries and leaves
+    the rest alone — a node that comes back clean stops being listed."""
+    import time as _time
+
+    runtime = svc.doc.setdefault("runtime", {})
+    kept = [i for i in (runtime.get("issues") or [])
+            if not (isinstance(i, dict) and i.get("kind") == "unrepaired"
+                    and i.get("node") == node and (i.get("subject") or "") == (subject or ""))]
+    kept.append({
+        "kind": "unrepaired",
+        "node": node,
+        "subject": subject or "",
+        "count": len(findings),
+        "detail": " | ".join(f"{f.edge}: {f.detail}" for f in findings)[:2000],
+        "version": int(svc.doc.get("version") or 0),
+        "at": _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime()),
+    })
+    runtime["issues"] = kept
 
 
 #: Names the model the observer's critic runs on, when set. The critic reads

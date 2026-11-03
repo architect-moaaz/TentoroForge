@@ -23,13 +23,12 @@ import logging
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Path
+from fastapi import APIRouter, Depends, Path
 from pydantic import BaseModel, Field
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from database import get_db
 from models.project import Project
 from services import incident_ledger
+from services.project_access import app_report, member_project
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["incidents"])
@@ -74,7 +73,7 @@ class IncidentAccepted(BaseModel):
 async def ingest_incident(
     project_id: uuid.UUID = Path(...),
     body: SlowResponseIn = ...,
-    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(app_report),
 ) -> IncidentAccepted:
     """Append one slow-response observation to the project's incident ledger.
 
@@ -82,9 +81,6 @@ async def ingest_incident(
     the endpoint counts it; here the repeats ARE the measurement, and an
     average is only worth as much as the observations behind it.
     """
-    project = await db.get(Project, project_id)
-    if project is None:
-        raise HTTPException(404, "project not found")
     if not project.output_dir:
         # Nothing was ever built, so there is no directory to write beside.
         return IncidentAccepted(recorded=False)
@@ -106,14 +102,11 @@ async def ingest_incident(
 @router.get("/api/projects/{project_id}/incidents")
 async def read_incidents(
     project_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(member_project),
 ) -> dict:
     """What this application has been reporting — crashes grouped, slow
     responses averaged. The same two readings Smith answers from, so a screen
     and a sentence never disagree about what happened."""
-    project = await db.get(Project, project_id)
-    if project is None:
-        raise HTTPException(404, "project not found")
     if not project.output_dir:
         return {"crashes": [], "slow": []}
     return {"crashes": [dict(c) for c in incident_ledger.crashes(project.output_dir)],

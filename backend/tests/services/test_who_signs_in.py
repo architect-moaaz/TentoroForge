@@ -72,6 +72,27 @@ def test_the_signup_role_is_declared_or_the_only_one():
     assert am.signup_role(two) == "Member"
 
 
+def test_a_person_may_give_themselves_only_a_declared_role(tmp_path):
+    # DITANS (2026-10-31): a professional, an employer and an agency each sign
+    # themselves up; the back office's roles can only be given.
+    three = _doc(roles=[{"id": "ROLE-001", "name": "Member"}, {"id": "ROLE-002", "name": "Host"},
+                        {"id": "ROLE-003", "name": "Operations"}])
+    three["security"].update(signupRole="ROLE-001", signupRoles=["ROLE-001", "ROLE-002", "ROLE-404"])
+    assert am.signup_roles(three) == ["Member", "Host"], "declared, by name; an unknown id dropped"
+    assert am.signup_roles(_doc()) == ["Member"], "without a list, the one signup role"
+    am.project_account(three, tmp_path)
+    assert 'SIGNUP_ROLES: string[] = ["Member", "Host"]' in (tmp_path / "src/lib/account.ts").read_text()
+
+
+def test_signup_refuses_a_role_it_does_not_offer():
+    # Before, with no account-type choice the schema let any `accountType`
+    # through and the route gave it: anyone could post "Admin" and hold it.
+    route = (Path(__file__).resolve().parents[2]
+             / "templates/app-foundation/src/app/api/auth/signup/route.ts").read_text()
+    assert "const role = data.accountType || SIGNUP_ROLE" not in route
+    assert "offered.includes(data.accountType)" in route and "SIGNUP_ROLES" in route
+
+
 def test_a_new_account_goes_where_its_prerequisite_is_done():
     assert am.after_signup_route(_doc()) == "/tools"
     assert am.after_signup_route(_doc(businessRules=[KYC])) == "/kyc/new"

@@ -14,8 +14,8 @@ function fixture() {
     navFlow: {
       version: "1.0" as const, initialPage: "home",
       pages: [{ id: "home", route: "/", title: "Home",
-                schemaFile: "src/schemas/home.json", params: [] }],
-      transitions: [], guards: {},
+                schemaFile: "src/schemas/home.json", params: [], shell: true }],
+      transitions: [], guards: {}, auth_routes: [],
     },
     tokens: {
       color: {}, typography: {}, spacing: {}, radius: {},

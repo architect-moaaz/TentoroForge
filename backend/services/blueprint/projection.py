@@ -364,7 +364,46 @@ def _sealed_fields(entity: dict, doc: dict) -> set[str]:
             found_by |= {str(rule.get(k)) for k in ("column", "guestColumn") if rule.get(k)}
     if platform_table(str(entity.get("table") or to_snake(str(entity.get("name") or "")))):
         found_by |= {f for f in fields if re.sub(r"[^a-z]", "", f.lower()) in ("email", "password", "passwordhash")}
+    # AND EVERY COLUMN A WORKFLOW FINDS ROWS BY. DITANS's staff steps look the
+    # signed-in member up by `email = $user.email`; the member's email was
+    # sealed, its plain column empty, and all 66 lookups matched nobody
+    # (wzml1sa6, 2026-10-30).
+    table = str(entity.get("table") or to_snake(str(entity.get("name") or "")))
+    for wf in doc.get("workflows") or []:
+        for step in (wf.get("steps") or []) if isinstance(wf, dict) else []:
+            config = (step.get("config") or {}) if isinstance(step, dict) else {}
+            if str(config.get("table") or "") == table and isinstance(config.get("where"), dict):
+                found_by |= set(config["where"]) & fields
+    # AND EVERY COLUMN A PAGE FINDS ROWS BY. DITANS's pages find the signed-in
+    # member with `list("OrganisationMember", { where: { email } })` — 90
+    # loaders; sealed, the email matched nobody, every member read as "not in
+    # an organisation" and the pages fell back to every organisation's rows
+    # (QA D-65, D-70, D-73, 2026-11-02).
+    found_by |= _page_lookups(doc, str(entity.get("name") or "")) & fields
     return fields - found_by
+
+
+_SDK_LOOKUP = re.compile(r'\b(list|count|first)\(\s*"(\w+)"\s*,\s*\{(\s*where\s*:\s*\{)?([^{}]*)\}')
+
+
+def _page_lookups(doc: dict, entity_name: str) -> set[str]:
+    """The fields of `entity_name` page code filters rows by, through the SDK's
+    `list(E, { where: {…} })` and `count(E, {…})`."""
+    found: set[str] = set()
+    if not entity_name:
+        return found
+    for row in doc.get("pageCode") or []:
+        if not isinstance(row, dict):
+            continue
+        parts = row.get("parts") if isinstance(row.get("parts"), dict) else {}
+        for text in [row.get("load"), row.get("view"), *parts.values()]:
+            if not isinstance(text, str) or entity_name not in text:
+                continue
+            for fn, name, where, body in _SDK_LOOKUP.findall(text):
+                if name != entity_name or (fn == "list" and not where):
+                    continue
+                found |= {m.group(1) for m in re.finditer(r"(?:^|,)\s*(\w+)\s*(?=[:,]|$)", body)}
+    return found
 
 
 def emit_entity_module(entity: dict, doc: dict) -> str:
@@ -3102,6 +3141,15 @@ def project_integrations(doc: dict, app_root: str | Path) -> dict[str, Any]:
     return {"files": [CONNECTED_SERVICES_FILE], "services": len(entries)}
 
 
+#: A page's server reads, by entity name: `list("Candidate", …)`, `count("Job")`.
+_SDK_READ = re.compile(r"""\b(?:list|listPage|record|recordsById|count|total|series|query|near|similar)\(\s*["'](\w+)["']""")
+
+
+def _sdk_reads(load: str) -> set[str]:
+    """The entities a page's load.ts reads through the SDK."""
+    return set(_SDK_READ.findall(load or ""))
+
+
 def entity_access(doc: dict) -> dict[str, dict[str, list[str]]]:
     """Each entity slug -> the roles that may read it and the roles that may
     write it, from the pages that use it.
@@ -3117,6 +3165,7 @@ def entity_access(doc: dict) -> dict[str, dict[str, list[str]]]:
     by_name = {e.get("name"): eid for eid, e in entities.items()}
     slug_of = {eid: str(e.get("table") or str(e.get("name")).lower()) for eid, e in entities.items()}
     layouts = {l.get("page"): l for l in _live(doc.get("pageLayouts"))}
+    codes = {str(r.get("page")): str(r.get("load") or "") for r in doc.get("pageCode") or [] if isinstance(r, dict)}
     readers: dict[str, set[str]] = {eid: set() for eid in entities}
     writers: dict[str, set[str]] = {eid: set() for eid in entities}
     for pg in _live(doc.get("pages")):
@@ -3134,6 +3183,19 @@ def entity_access(doc: dict) -> dict[str, dict[str, list[str]]]:
         for eid in (pg.get("data") or {}).get("supportingEntities") or []:
             if eid in entities:
                 readers[eid] |= roles
+        # WHAT THE PAGE SHOWS AND WHAT ITS CODE READS. A screen's sections
+        # name their records, and a page's load.ts reads through the SDK by
+        # entity name; neither was counted, so DITANS's Enterprise screens
+        # read Candidate, Facility and CredentialHold as nothing — readable by
+        # the Recruiter alone, whose pages declared them (2026-10-30).
+        for section in pg.get("sections") or []:
+            if isinstance(section, dict):
+                eid = by_name.get(section.get("entity"), section.get("entity"))
+                if eid in entities:
+                    readers[eid] |= roles
+        for name in _sdk_reads(codes.get(str(pg.get("id")), "")):
+            if by_name.get(name) in entities:
+                readers[by_name[name]] |= roles
     # Ownership rules are dicts beside prose notes.
     for rule in ((doc.get("security") or {}).get("ownershipRules") or []):
         if isinstance(rule, dict) and rule.get("status") != "DEPRECATED" and by_name.get(rule.get("entity")) in entities:
@@ -3732,9 +3794,18 @@ def sensitive_columns(doc: dict) -> dict[str, dict[str, dict]]:
     permissions instead.
     """
     out: dict[str, dict[str, dict]] = {}
+    # WHO MAY READ THE RECORD MAY READ ITS FIELDS. With no read permission
+    # declared, every reader list came out empty: 207 of DITANS's 249 masked
+    # fields could be read by nobody, an agency's own fees summed "••••" into
+    # "USD NaN", and its members could not be told apart (QA, 2026-11-02).
+    # The roles the access step lets read the record (its pages show it, its
+    # code reads it) are its readers; an anonymous visitor never unmasks.
+    access = entity_access(doc)
+    out_readers = {slug: [r for r in v.get("read") or [] if r != "*"] for slug, v in access.items()}
     for entity in [e for e in ((doc.get("data") or {}).get("entities") or [])
                    if e.get("status") != "DEPRECATED"]:
-        readers = _entity_readers(doc, entity)
+        slug = str(entity.get("table") or str(entity.get("name")).lower())
+        readers = _entity_readers(doc, entity) or out_readers.get(slug, [])
         cols: dict[str, dict] = {}
         # THE COLUMN THE RUNTIME KNOWS, NOT THE FIELD THE BLUEPRINT NAMED. On a
         # platform table the Blueprint's `passwordHash` folds into the

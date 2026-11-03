@@ -54,7 +54,13 @@ def test_dag_is_acyclic_and_layered():
     # entity and page inference — it is evidence those work from.
     # `install` joins it because `npm install` needs nothing an agent writes
     # and used to be the last one to three minutes of every build.
-    assert set(lv[0]) == {"requirements", "figma_intelligence", "install"}
+    # `drawn_views` leads the requirements: a design built as drawn is
+    # converted first and its journey is what the requirements read
+    # (`drawn_flow`, after its phone and desktop drawings are paired,
+    # `drawn_pairs`); with no such design it has no subjects.
+    assert set(lv[0]) == {"drawn_views", "figma_intelligence", "install"}
+    assert "drawn_pairs" in lv[1] and "drawn_flow" in lv[2]
+    assert "requirements" in lv[3]
     flat = [k for level in lv for k in level]
     assert sorted(flat) == sorted(DAG)
 
@@ -102,7 +108,7 @@ def test_nodes_only_claim_to_produce_what_their_agent_may_write():
     from services.blueprint.agent_contract import capability_for
     for node in DAG.values():
         cap = capability_for(node.agent)
-        for section in node.produces:
+        for section in node.sections:
             assert cap.can_write(section), (node.key, node.agent, section)
 
 

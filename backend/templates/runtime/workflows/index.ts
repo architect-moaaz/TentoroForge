@@ -585,7 +585,11 @@ export function _firstPresent(inner: string, ctx: WorkflowExecutionContext): unk
     const part = raw.trim();
     let v: unknown;
     const quoted = part.match(/^"(.*)"$|^'(.*)'$/s);
-    if (quoted) v = quoted[1] ?? quoted[2];
+    // A WRITTEN FALLBACK IS THE VALUE, EVEN EMPTY: `{{description ?? ""}}`
+    // gave null, and a required text column refused DITANS's "Save Job Draft"
+    // for every draft saved without a description (2026-10-31; 84 such
+    // fallbacks in that app).
+    if (quoted) return quoted[1] ?? quoted[2] ?? "";
     else if (/^-?\d+(\.\d+)?$/.test(part)) v = Number(part);
     else if (part === "true" || part === "false") v = part === "true";
     else if (/^[\w.[\]]+$/.test(part)) {
@@ -678,11 +682,28 @@ export function _resolveRef(ref: unknown, ctx: WorkflowExecutionContext): unknow
   // timestamp column still gets a Date from it (`_coerceValue`).
   if (ref === "$today") return _calendarDate(new Date());
   if (ref === "$user.id") return (ctx as any)?.user?.id ?? ctx.variables?.__user?.id ?? ctx.variables?.user?.id ?? null;
+  // THE SIGNED-IN PERSON'S EMAIL: how a staff member's own membership row is
+  // found. A login is not a membership; matched by id, DITANS's 66 staff
+  // workflows found no member and refused every run (2026-10-30).
+  if (ref === "$user.email") return (ctx as any)?.user?.email ?? ctx.variables?.__user?.email ?? ctx.variables?.user?.email ?? null;
   // A signed-out visitor's guest token (the `forge-guest` cookie the execute
   // route hands over): what finds the cart a guest already started.
   if (ref === "$guest") return guestOf(ctx);
   if (ref === "true") return true;
   if (ref === "false") return false;
+  // A DATE COUNTED FROM NOW: `$now + duration("P30D")`. Written as a value —
+  // how a step says "thirty days from now" — it was stored as that text, and a
+  // timestamp column refused it (`value.toISOString is not a function`; DITANS
+  // "Build CV", 2026-10-31). An expression on `$now` / `$today` is evaluated.
+  if (/^\s*\$(now|today)\s*[-+]/.test(ref)) {
+    try {
+      const v = evaluateExpression(ref, (ctx.variables ?? {}) as Record<string, unknown>);
+      if (v !== null && v !== undefined) return v;
+    } catch { /* left as written */ }
+  }
+  // A FRESH IDENTIFIER INSIDE A VALUE: `/cvs/$uuid.pdf` was stored with the
+  // word `$uuid` in it. Each one is a new identifier.
+  if (ref.includes("$uuid")) ref = ref.replace(/\$uuid\b/g, () => crypto.randomUUID());
   if (ref.includes("{{")) {
     // SOLE-TEMPLATE SHORT-CIRCUIT: when the string is a single `{{path}}`
     // with nothing else around it, return the RAW resolved value (object,
@@ -787,7 +808,13 @@ function _coerceValue(v: unknown, col?: unknown): unknown {
   // An empty form field arrives as "" — Postgres rejects that for non-text
   // columns ("invalid input syntax for type integer/uuid: \"\""). Treat a blank
   // optional field as NULL.
-  if (v === "") return null;
+  // …EXCEPT WHERE NULL CANNOT GO: a required text column takes the empty text
+  // it was given (`{{description ?? ""}}` on a draft job, DITANS 2026-10-31);
+  // null there was a certain failure.
+  if (v === "") {
+    const c = col as { notNull?: unknown; columnType?: unknown } | undefined;
+    return c?.notNull && /^Pg(Text|Varchar|Char)$/.test(String(c?.columnType ?? "")) ? "" : null;
+  }
   // Float → int coercion for integer columns. Firecrawl / AI extractors
   // routinely return prices as `479.99` even when the column is INTEGER
   // (whole-dollars convention on retail apps). Postgres rejects with
@@ -1175,7 +1202,13 @@ export function _buildWhere(
           const raw = _resolveRef(op.value, ctx);
           const list = Array.isArray(op.value) ? op.value.map((x: unknown) => _resolveRef(x, ctx)) : raw;
           if (op.name === "in" || op.name === "notIn") {
-            const vals = (Array.isArray(list) ? list : [list]).filter((x) => x !== "" && x != null)
+            // ONE OF THESE RECORDS: `positionId in {{find_positions.output}}`
+            // handed the rows themselves, and Postgres got "[object Object]"
+            // for a uuid (DITANS "Apply Hiring Freeze", 2026-10-31). A record
+            // in the list stands for its id.
+            const vals = (Array.isArray(list) ? list : [list])
+              .map((x) => (x && typeof x === "object" && !(x instanceof Date) && "id" in (x as any) ? (x as any).id : x))
+              .filter((x) => x !== "" && x != null)
               .map((x) => _coerceValue(x, table[field]));
             if (!vals.length) return op.name === "in" ? sql`false` : undefined;
             return op.name === "in" ? inArray(table[field], vals as any[]) : notInArray(table[field], vals as any[]);
@@ -1467,7 +1500,7 @@ export function registerDefaultActions(): void {
       // is given — walks into this object; `inserted` stays for the older
       // `{{insert_case.inserted.id}}`. Returning only `{ inserted: row }` left
       // the case number's audit entry with a null case id.
-      await _flushRuleEffects(ctx, row);
+      await _flushRuleEffects(ctx, row, (config as any).table);
       if (row && typeof row === "object") return { ...(row as Record<string, unknown>), inserted: row };
       return { inserted: row ?? true };
     } catch (err) {
@@ -1613,7 +1646,7 @@ export function registerDefaultActions(): void {
       // was a NUMBER — so binding either one silently set no variable.
       // `updated` is now the object the contract describes; the flat aliases
       // stay so existing workflows that read {{n.output.count}} keep working.
-      await _flushRuleEffects(ctx, Array.isArray(rows) ? rows[0] : rows);
+      await _flushRuleEffects(ctx, Array.isArray(rows) ? rows[0] : rows, (config as any).table);
       return {
         updated: { count, rows },
         updatedRows: rows,
@@ -1814,7 +1847,34 @@ export function registerDefaultActions(): void {
       // nowhere else — not a variable, not the log. Templates cannot reach
       // the environment, so this is the only way a key enters a call.
       const auth = (config as any).auth;
-      if (auth && typeof auth === "object" && auth.secretRef) {
+      let sentBody = resolvedBody;
+      let method = String(config.method || "GET");
+      // MEWS SIGNS IN THE BODY. Its Connector API takes no header: every call
+      // is a POST whose JSON carries `ClientToken`, `AccessToken` and `Client`,
+      // to a host that differs between the demo and live environments. The
+      // step names the provider and the path — and, when the application
+      // serves several hotels, the property (`auth.property`, a template to
+      // its id, enterprise id or name). The runtime adds the rest: the
+      // organisation's client token, and the property's own access token,
+      // opened here from `forge_mews_properties` and nowhere else (src/lib/mews).
+      // A step that calls a Mews host directly is signed the same way, on the
+      // property's host: Mews reads no header, so its old `secretRef` bearer
+      // could never have been accepted (forge-v3's Case Management apps,
+      // 2026-11-03), and a token belongs to one environment.
+      const MEWS_HOST = /^https:\/\/api\.mews(-demo)?\.com(?=\/|$)/;
+      if ((auth && typeof auth === "object" && String(auth.provider || "") === "mews") || MEWS_HOST.test(url)) {
+        const mews: any = await import("../mews");
+        const ref = auth && typeof auth === "object" && auth.property ? _resolveRef(String(auth.property), ctx) : undefined;
+        let creds: any;
+        try {
+          creds = await mews.credentialsFor(ref);
+        } catch (err) {
+          return { error: String((err as Error)?.message || err), status: 0, ok: false };
+        }
+        url = url.startsWith("/") ? creds.host + url : url.replace(MEWS_HOST, creds.host);
+        sentBody = mews.signedBody(sentBody, creds);
+        method = "POST";
+      } else if (auth && typeof auth === "object" && auth.secretRef) {
         const name = String(auth.secretRef);
         const value = process.env[name];
         if (!value) return { error: `${name} is not set in this environment`, status: 0, ok: false };
@@ -1830,13 +1890,13 @@ export function registerDefaultActions(): void {
       const timeoutMs = Number((config as any).timeoutMs ?? 30_000) || 30_000;
       const timeout = setTimeout(() => controller.abort(), timeoutMs);
       const res = await fetch(url, {
-        method: String(config.method || "GET"),
+        method,
         headers,
-        body: resolvedBody === undefined ? undefined
-          : asForm && resolvedBody && typeof resolvedBody === "object"
-            ? new URLSearchParams(Object.entries(resolvedBody as Record<string, unknown>)
+        body: sentBody === undefined ? undefined
+          : asForm && sentBody && typeof sentBody === "object"
+            ? new URLSearchParams(Object.entries(sentBody as Record<string, unknown>)
                 .map(([k, v]) => [k, typeof v === "string" ? v : JSON.stringify(v)])).toString()
-            : JSON.stringify(resolvedBody),
+            : JSON.stringify(sentBody),
         signal: controller.signal,
       });
       clearTimeout(timeout);
@@ -2295,13 +2355,33 @@ export function registerDefaultActions(): void {
  * A workflow already started by a rule is not started again from inside its
  * own run — a rule whose workflow writes the same record would otherwise
  * start it forever.
+ *
+ * THE RECORD IS THE INPUT IT IS FOR. Its fields were spread into the input,
+ * but a workflow reads its record by the name it declares — `consent`, `job`
+ * — so DITANS's "consent withdrawn → delete-your-copies tasks" started its
+ * workflow, which answered "needs consent", every time (wzml1sa6,
+ * 2026-10-31). Given the record's table, the declared record input of that
+ * table gets the record's id.
  */
 const _startedByRule = new Set<string>();
+
+async function _ruleRecordInputs(
+  key: string, table: string | undefined, id: unknown,
+): Promise<Record<string, unknown>> {
+  if (!table || id === undefined || id === null || id === "") return {};
+  await loadWorkflows();
+  const out: Record<string, unknown> = {};
+  for (const ri of workflowCache.get(key)?.recordInputs ?? []) {
+    if (ri?.table === table) out[ri.name] = id;
+  }
+  return out;
+}
 
 export async function runRuleEffects(
   effects: Array<{ type: string; workflow?: string; message?: string }> | undefined,
   record: Record<string, unknown> | null | undefined,
   user?: WorkflowExecutionContext["user"],
+  table?: string,
 ): Promise<void> {
   const rec: Record<string, unknown> = record && typeof record === "object" ? record : {};
   for (const eff of effects ?? []) {
@@ -2314,7 +2394,8 @@ export async function runRuleEffects(
         }
         _startedByRule.add(key);
         try {
-          const run = await triggerWorkflow(key, { ...rec, record: rec, recordId: rec.id }, user);
+          const run = await triggerWorkflow(
+            key, { ...rec, record: rec, recordId: rec.id, ...(await _ruleRecordInputs(key, table, rec.id)) }, user);
           if (run.status === "failed") console.warn(`[rules] workflow ${key} started by a rule failed: ${run.error ?? ""}`);
         } finally {
           _startedByRule.delete(key);
@@ -2333,9 +2414,10 @@ export async function runRuleEffects(
 }
 
 /** The effects the rules of a write asked for, run once the write has landed. */
-async function _flushRuleEffects(ctx: any, row: unknown): Promise<void> {
+async function _flushRuleEffects(ctx: any, row: unknown, table?: string): Promise<void> {
   const effects = ctx?.__ruleEffects;
   if (!effects || !effects.length) return;
   delete ctx.__ruleEffects;
-  await runRuleEffects(effects, (row && typeof row === "object" ? row : {}) as Record<string, unknown>, ctx?.user);
+  await runRuleEffects(effects, (row && typeof row === "object" ? row : {}) as Record<string, unknown>, ctx?.user,
+                       table);
 }

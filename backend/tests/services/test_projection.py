@@ -1029,3 +1029,21 @@ def test_a_module_with_no_table_declares_nothing():
     from services.blueprint.projection import parse_table_columns
 
     assert parse_table_columns('export * from "./nurse";\n') == ("", ())
+
+
+def test_a_role_reads_what_its_pages_show_and_what_their_code_reads():
+    """DITANS (2026-10-30): drawn Enterprise screens named Candidate and
+    CredentialHold in their sections, and their load.ts read Facility; none
+    of it counted, so those reads came back empty for the Enterprise User."""
+    from services.blueprint.projection import entity_access
+
+    doc = {"roles": [{"id": "ROLE-007", "name": "Enterprise User"}],
+           "data": {"entities": [{"id": "ENTITY-001", "name": "Candidate", "table": "candidates"},
+                                 {"id": "ENTITY-002", "name": "Facility", "table": "facilities"},
+                                 {"id": "ENTITY-003", "name": "Note", "table": "notes"}]},
+           "pages": [{"id": "PAGE-001", "route": "/e", "access": "role_restricted", "users": ["ROLE-007"],
+                      "sections": [{"key": "people", "entity": "ENTITY-001"}]}],
+           "pageCode": [{"page": "PAGE-001", "load": 'const f = await list("Facility", { limit: 5 });'}]}
+    access = entity_access(doc)
+    assert access["candidates"]["read"] == ["Enterprise User"] and access["facilities"]["read"] == ["Enterprise User"]
+    assert "notes" not in access

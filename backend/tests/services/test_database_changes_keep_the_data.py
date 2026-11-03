@@ -94,3 +94,21 @@ def test_renaming_a_field_writes_its_rename_for_the_database(tmp_path, monkeypat
     assert json.loads((app / "src/db/migrations.json").read_text())["columns"] == [
         {"table": "orders", "from": "customer_name", "to": "customer"}]
     assert "with its data" in field_change.summary_of("rename_field", out)
+
+
+def test_a_field_that_stops_being_sealed_keeps_its_values():
+    """ade9d58f stopped sealing the columns workflows find rows by; push then
+    dropped `<col>_encrypted`, and DITANS's copies lost every report's reporter
+    and had registration numbers replaced by blanks (2026-11-01). The values
+    are decrypted into place first, before a required column is filled or a
+    unique added, and taken back from forge_retired.rows when an earlier push
+    already dropped them; with no key, the push is refused and nothing moves."""
+    src = (DB / "prepare-schema.ts").read_text()
+    main = src[src.index("async function main"):]
+    order = [main.index(s) for s in ("applyRenames(sql)", "unsealReleased(sql, blocked)",
+                                     "if (blocked.length) throw new Blocked()", "addRequired(sql, blocked)")]
+    assert order == sorted(order)
+    body = src[src.index("async function unsealReleased"):src.index("async function convertTypes")]
+    for part in ("forge_retired.rows", "decryptSensitive", "SENSITIVE_ENCRYPTION_KEY", "IS NULL OR",
+                 "blocked.push", "sql.begin"):
+        assert part in body or part in src[src.index("async function loadDecrypt"):], part

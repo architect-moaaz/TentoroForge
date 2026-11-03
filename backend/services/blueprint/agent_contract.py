@@ -37,7 +37,7 @@ import logging
 import re
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, Mapping
 
 from services.blueprint.service import ARTIFACT_SECTIONS, BlueprintService
 
@@ -55,7 +55,8 @@ WRITABLE_SECTIONS: frozenset[str] = frozenset(
     | {"data.entities", "data.relationships", "data.constraints",
        "navigation", "designSystem", "security",
        "runtime", "database", "deployment", "product", "codeMap",
-       "pageLayouts", "pageCode", "nativeCode", "composition", "completeness",
+       "pageLayouts", "pageCode", "nativeCode", "composition", "completeness", "drawnViews",
+       "drawnPairs",
        "domainReference", "mobile"}
 )
 
@@ -310,7 +311,10 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
     # the compiler: a page is type-checked before it is proposed.
     "ui_engineer": _cap(
         "ui_engineer",
-        {"pageCode"},
+        # …and the design's screens as React views (`drawn_views`): the same
+        # engineer, converting a drawing rather than writing a page.
+        # …and which phone and desktop drawings are one screen (`drawn_pairs`).
+        {"pageCode", "drawnViews", "drawnPairs"},
         tools={"blueprint:read", "page_contract:read", "design_system:read",
                "sdk:read", "tsc:check"},
     ),
@@ -779,7 +783,21 @@ def check_workflow_triggers(result: "AgentResult", doc: dict | None = None) -> N
                     problems.append(f"{name}/{key}: nothing listens for `payment.succeeded` from {pays[0].get('name')} — declare "
                                     "a workflow with a `webhook` trigger on it that records the outcome")
             auth = cfg.get("auth")
-            if auth is not None:
+            # A SYSTEM THE RUNTIME SIGNS FOR ITSELF (`services.signed_services`)
+            # is named by its provider; the step carries no secret of its own.
+            via = str(auth.get("provider") or "").strip().lower() if isinstance(auth, dict) else ""
+            if via:
+                from services.signed_services import SIGNED, has_properties, signed
+                if not signed(via):
+                    problems.append(f"{name}/{key}: `auth.provider` {via!r} is not a system the runtime signs for "
+                                    f"itself ({', '.join(sorted(SIGNED))}); name the secret as `secretRef` instead")
+                elif not any(str(i.get("provider") or "").strip().lower() == via for i in live_integrations):
+                    problems.append(f"{name}/{key}: calls {SIGNED[via]['name']}, and no integration has "
+                                    f"`provider: \"{via}\"`; declare it first")
+                elif auth.get("property") not in (None, "") and not has_properties(via):
+                    problems.append(f"{name}/{key}: `auth.property` picks one of the application's "
+                                    f"{SIGNED[via]['name']} properties, and {SIGNED[via]['name']} has none; leave it out")
+            elif auth is not None:
                 ref = str((auth or {}).get("secretRef") or "") if isinstance(auth, dict) else ""
                 if not ref:
                     problems.append(f"{name}/{key}: `config.auth` names the secret as `secretRef` (a NAME an integration declares)")
@@ -1556,6 +1574,54 @@ def check_design_modules(result: "AgentResult", doc: dict | None = None) -> None
         raise InvalidDesignModules(_all_of(problems))
 
 
+class RouteParamsClash(AuthorRefusal):
+    """Two routes name the same dynamic segment differently."""
+
+
+def check_route_params(result: "AgentResult", doc: dict | None = None) -> None:
+    """One path, one name for its dynamic segment.
+
+    Next refuses to start when `/interviews/[applicationId]/plan` and
+    `/interviews/[interviewId]/debrief` sit side by side ("You cannot use
+    different slug names for the same dynamic path"): DITANS's whole build
+    reached assembly and failed to boot on that one page (2026-10-30). A
+    proposed route is held to the names the other live pages already use."""
+    from services.blueprint.ids import page_key
+
+    def slots(route: str) -> list[tuple[str, str]]:
+        segs = route.strip("/").split("/")
+        out = []
+        for i, seg in enumerate(segs):
+            m = re.fullmatch(r"\[(?:\.\.\.)?(\w+)\]", seg)
+            if m:
+                out.append(("/" + "/".join(segs[:i]), m.group(1)))
+        return out
+
+    bodies = [p.body for p in result.proposals
+              if p.section == "pages" and isinstance(p.body, dict) and p.body.get("route")]
+    if not bodies:
+        return
+    restated = {page_key(str(b["route"])) for b in bodies}
+    named: dict[str, tuple[str, str]] = {}
+    for page in (doc or {}).get("pages") or []:
+        if isinstance(page, dict) and page.get("status") != "DEPRECATED" and page.get("route") \
+                and page_key(str(page["route"])) not in restated:
+            for prefix, name in slots(str(page["route"])):
+                named.setdefault(prefix, (name, str(page["route"])))
+    problems = []
+    for body in bodies:
+        route = str(body["route"])
+        for prefix, name in slots(route):
+            held = named.get(prefix)
+            if held and held[0] != name:
+                problems.append(f"pages: {route} names the segment after {prefix} `[{name}]`, but {held[1]} names it "
+                                f"`[{held[0]}]` — one path has one name for it: use `[{held[0]}]`, or another path")
+            else:
+                named.setdefault(prefix, (name, route))
+    if problems:
+        raise RouteParamsClash(_all_of(problems))
+
+
 class DrawnScreensShareARoute(AuthorRefusal):
     """Two drawn screens given one route."""
 
@@ -1653,6 +1719,53 @@ def check_frame_placement(result: "AgentResult", doc: dict | None = None) -> Non
                 problems.append(f"pages: frame {f} is placed on {held[f]} and again on {route} — a drawing is "
                                 "built once: keep it on the page it belongs to and take it off the other")
             held.setdefault(f, route)
+    if problems:
+        raise InvalidFramePlacement(_all_of(problems))
+
+
+def check_part_frames(result: "AgentResult", doc: dict, subject: str) -> None:
+    """A drawn part places every frame it was given, on a page built from one.
+
+    The part is asked a module's drawn screens as slots, each page carrying
+    the `figmaFrame` of its main one, and may set a frame aside only by name
+    in `issues`. Fifteen DITANS parts (2026-10-30) answered with pages and no
+    frames at all: 81 drawn screens sat on no page, and 58 pages would have
+    been written anew instead of built as drawn — and
+    :func:`check_frame_placement` let them by, since a reply that places
+    nothing places nothing twice. A part's slots are what it is for, so a
+    page with no frame, or a frame on no page, is refused back to it."""
+    from services.blueprint.page_planner import DRAWN_PART, page_frames, page_set_parts
+
+    if not subject.startswith(DRAWN_PART):
+        return
+    slots = page_set_parts(doc).get(subject) or []
+    named = {str(s.get("figmaFrame")): str(s.get("name") or s.get("shows") or "") for s in slots
+             if s.get("figmaFrame")}
+    if not named:
+        return
+    bodies = [p.body for p in result.proposals
+              if p.section == "pages" and isinstance(p.body, dict) and p.body.get("route")]
+    from services.blueprint.ids import page_key
+
+    restated = {page_key(str(b["route"])) for b in bodies}
+    placed: set[str] = set()      # what another page already holds stays placed
+    for page in doc.get("pages") or []:
+        if isinstance(page, dict) and page.get("status") != "DEPRECATED" \
+                and page_key(str(page.get("route") or "")) not in restated:
+            placed |= page_frames(page)
+    problems: list[str] = []
+    for body in bodies:
+        frames = page_frames(body)
+        if not frames:
+            problems.append(f"pages: {body['route']} has no `figmaFrame` — every page of this part is "
+                            "built from one of its slots: set its main slot's `figmaFrame`, or drop the page")
+        placed |= frames
+    aside = " ".join(str(i) for i in result.issues)
+    for frame, name in named.items():
+        if frame in placed or frame in aside or (name and name in aside):
+            continue
+        problems.append(f"slots: frame {frame} (“{name}”) is on no page — make it a page's `figmaFrame`, "
+                        "put it in a page's `frames`, or set it aside in `issues` with why it is no screen")
     if problems:
         raise InvalidFramePlacement(_all_of(problems))
 
@@ -2917,7 +3030,7 @@ def apply_agent_result(
                   check_mobile, check_requirements, check_business_rules, check_entity_fields,
                   check_page_content, check_page_access, check_role_doors, check_navigation,
                   check_analytics, check_flows, check_security, check_design_modules,
-                  check_drawn_routes, check_frame_placement):
+                  check_drawn_routes, check_frame_placement, check_route_params):
         run(check, result, svc.doc)
     if refusals:
         raise refusals[0] if len(refusals) == 1 else SeveralRefusals(refusals)

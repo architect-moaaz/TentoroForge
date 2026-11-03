@@ -36,6 +36,11 @@ logger = logging.getLogger(__name__)
 TOKEN_KEY = "FIGMA_TOKEN"
 ENDPOINT_KEY = "FIGMA_MCP_URL"
 PROVIDER = "figma"
+#: The acting person's own token (Connect Figma, `services.figma.oauth`) and the
+#: name of the Figma account it belongs to. Never a stored key: `config_for`
+#: adds them for the read in hand.
+PERSON_TOKEN_KEY = "FIGMA_PERSON_TOKEN"
+PERSON_ACCOUNT_KEY = "FIGMA_PERSON_ACCOUNT"
 
 
 class MappingResolver:
@@ -69,9 +74,14 @@ def token_resolver(values: dict[str, str], ref_name: str = "") -> tuple[str, Map
     keeps the organisation's token as `FIGMA_TOKEN`, so a token saved under
     Settings → Integrations was never found and the person was told "no Figma
     token in environment variable 'FIGMA_ACCESS_TOKEN'" (forge-v3, 2026-10-22).
-    With none anywhere, the error names where to add it."""
+    With none anywhere, the error names where to add it.
+
+    THE PERSON'S OWN TOKEN FIRST. A person who connected Figma reads the files
+    their account opens; the shared token opens only its owner's, which is how
+    a client's project read as "not found" (2026-10-29)."""
     ref = (ref_name or TOKEN_KEY).strip()
-    token = (values.get(ref) or values.get(TOKEN_KEY) or os.environ.get(ref) or "").strip()
+    token = (values.get(PERSON_TOKEN_KEY) or values.get(ref) or values.get(TOKEN_KEY)
+             or os.environ.get(ref) or "").strip()
     if not token:
         return TOKEN_KEY, MappingResolver({})
     return ref, MappingResolver({ref: token})
@@ -164,7 +174,8 @@ async def _session_on_this_loop() -> AsyncIterator[Any]:
 
 def config_for(output_dir: str | Path, provider: str = PROVIDER) -> dict[str, str]:
     """Settings for ``provider`` (Figma by default) for the org owning this
-    project, environment as fallback.
+    project, environment as fallback — and, for Figma, the acting person's own
+    token when they have connected their account (`PERSON_TOKEN_KEY`).
 
     Never raises: a project with no database row, a database that is down, or
     an organisation that has configured nothing all mean "fall back", and a
@@ -184,6 +195,13 @@ def config_for(output_dir: str | Path, provider: str = PROVIDER) -> dict[str, st
             from_env = (os.environ.get(key) or "").strip()
             if from_env:
                 values[key] = from_env
+    if provider == PROVIDER:
+        from services.figma.oauth import person_token
+
+        mine = person_token()
+        if mine is not None:
+            values[PERSON_TOKEN_KEY] = mine.token
+            values[PERSON_ACCOUNT_KEY] = mine.account
     return values
 
 

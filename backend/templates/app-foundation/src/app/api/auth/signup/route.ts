@@ -4,8 +4,11 @@ import { db } from "@/db";
 import { users } from "@/db/schema/user";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
+import * as accountModule from "@/lib/account";
 import { ACCOUNT, ACCOUNT_INITIAL, SIGNUP_ROLE } from "@/lib/account";
 import { accountTable } from "@/lib/account-table";
+import { sealSensitive } from "@/lib/data-engine";
+import { ensureDataEngineInitialized } from "@/lib/data-init";
 
 // The account types signup offers. Empty by default (single-account app);
 // the Blueprint assembly step overwrites this line with the derived options
@@ -14,6 +17,10 @@ import { accountTable } from "@/lib/account-table";
 // literal, and the empty default keeps single-account apps unchanged.
 const ACCOUNT_TYPES: { value: string }[] = [];
 const ACCOUNT_TYPE_VALUES = ACCOUNT_TYPES.map((t) => t.value);
+/** Every role a person may give themselves (`security.signupRoles`). An app
+ *  projected before the list existed has none, and only SIGNUP_ROLE is given. */
+const SIGNUP_ROLES: string[] =
+  ((accountModule as unknown as { SIGNUP_ROLES?: string[] }).SIGNUP_ROLES) ?? [];
 
 const signupSchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -96,7 +103,12 @@ export async function POST(request: Request) {
     // The role: the one chosen, else the one self-registered people get —
     // auth folds `accountType` into the session role, and without one a new
     // person held a role no page or workflow names.
-    const role = data.accountType || SIGNUP_ROLE || undefined;
+    // ONLY A ROLE THE APP OFFERS. With no choice offered the schema let any
+    // `accountType` through, and a stranger could post "Admin" and hold it
+    // (DITANS, 2026-10-31): a role named here must be one signup offers.
+    const offered = [...ACCOUNT_TYPE_VALUES, ...SIGNUP_ROLES];
+    const chosen = data.accountType && offered.includes(data.accountType) ? data.accountType : undefined;
+    const role = chosen || SIGNUP_ROLE || undefined;
 
     // AN ORGANISATION AT SIGNUP, when the application has several and lets a
     // new person start one: the tenant row, the first membership (in the
@@ -133,7 +145,20 @@ export async function POST(request: Request) {
           }
           if (Object.keys(own).length) await tx.update(users).set(own as any).where(eq(users.id, created.id));
         } else {
-          await tx.insert(accountTable).values({ ...account.values, id: created.id });
+          // SEALED AS IT IS WRITTEN, like every write through the engine. Left
+          // in the clear, a new person's sensitive fields waited for the next
+          // start's seal pass — on a deployed app, the next deploy (DITANS QA,
+          // 2026-11-02). Without a key the values stay plain, as before.
+          const values: Record<string, unknown> = { ...account.values, id: created.id };
+          try {
+            // The record types first: without them the engine cannot tell which
+            // columns hold a seal, and leaves every value as written.
+            await ensureDataEngineInitialized();
+            await sealSensitive(ACCOUNT.entity, values);
+          } catch (e) {
+            console.warn("[signup] sensitive fields left unsealed:", String((e as Error)?.message ?? e).slice(0, 200));
+          }
+          await tx.insert(accountTable).values(values as any);
         }
       }
       if (tpolicy.kind === "organisation" && orgName && tpolicy.signup !== "joins_by_invite") {

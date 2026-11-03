@@ -3,14 +3,14 @@ import { api } from "@/lib/api";
 
 interface PreviewState {
   port: number | null;
-  // The RELATIVE backend proxy path (/api/projects/{short_id}/preview/serve)
-  // the iframe must load. `http://localhost:{port}` is the backend's internal
-  // port — unreachable from a hosted client browser, so the Preview tab went
-  // blank (DEFECT-E-01). The proxy path is reachable on both localhost and
-  // hosted (next.config rewrites it to the backend) and is auth-free. The
-  // backend returns it from start/status; the client cannot rebuild it because
-  // it is keyed by short_id while the client only holds the project UUID.
+  // The backend proxy path (/api/projects/{short_id}/preview/serve), not the
+  // dev server's internal port, which a hosted browser cannot reach
+  // (DEFECT-E-01). The backend returns it from start/status: it is keyed by
+  // short_id while the client only holds the project UUID.
   servePath: string | null;
+  // The same path at the preview's own origin, which is what a frame loads:
+  // the app's code is never run at the platform's (services/preview_origin.py).
+  serveUrl: string | null;
   isStarting: boolean;
   error: string | null;
 }
@@ -19,6 +19,7 @@ export function usePreview(projectId: string) {
   const [state, setState] = useState<PreviewState>({
     port: null,
     servePath: null,
+    serveUrl: null,
     isStarting: false,
     error: null,
   });
@@ -26,10 +27,11 @@ export function usePreview(projectId: string) {
   const startPreview = useCallback(async () => {
     setState((s) => ({ ...s, isStarting: true, error: null }));
     try {
-      const result = await api.post<{ port: number; servePath?: string }>(
+      const result = await api.post<{ port: number; servePath?: string; serveUrl?: string }>(
         `/api/projects/${projectId}/preview/start`,
       );
-      setState({ port: result.port, servePath: result.servePath ?? null, isStarting: false, error: null });
+      setState({ port: result.port, servePath: result.servePath ?? null, serveUrl: result.serveUrl ?? null,
+                 isStarting: false, error: null });
       return result.port;
     } catch (err) {
       setState((s) => ({
@@ -44,7 +46,7 @@ export function usePreview(projectId: string) {
   const stopPreview = useCallback(async () => {
     try {
       await api.post(`/api/projects/${projectId}/preview/stop`);
-      setState({ port: null, servePath: null, isStarting: false, error: null });
+      setState({ port: null, servePath: null, serveUrl: null, isStarting: false, error: null });
     } catch {
       // ignore
     }
@@ -52,11 +54,12 @@ export function usePreview(projectId: string) {
 
   const checkStatus = useCallback(async () => {
     try {
-      const result = await api.get<{ running: boolean; port: number | null; servePath?: string }>(
+      const result = await api.get<{ running: boolean; port: number | null; servePath?: string; serveUrl?: string }>(
         `/api/projects/${projectId}/preview/status`,
       );
       if (result.running && result.port) {
-        setState({ port: result.port, servePath: result.servePath ?? null, isStarting: false, error: null });
+        setState({ port: result.port, servePath: result.servePath ?? null, serveUrl: result.serveUrl ?? null,
+                   isStarting: false, error: null });
       }
     } catch {
       // ignore

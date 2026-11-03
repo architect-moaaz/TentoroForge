@@ -127,6 +127,25 @@ def summarise(ref: Any, record: dict) -> str:
     return "\n".join(lines)
 
 
+def no_access_message(values: dict[str, str]) -> str:
+    """Figma answered 404 or 403: the account Forge read with cannot open the file.
+
+    Figma says "not found" for a file the token's account cannot see, so the
+    link is usually fine and the account is wrong (2026-10-29: a client's whole
+    project, shared with the tester and not with the shared token's owner)."""
+    from services.figma.integrations import PERSON_ACCOUNT_KEY, PERSON_TOKEN_KEY
+
+    if values.get(PERSON_TOKEN_KEY):
+        who = values.get(PERSON_ACCOUNT_KEY) or "your connected account"
+        return (f"Figma says this file does not exist for the Figma account you connected ({who}), "
+                f"which usually means that account cannot open it. Connect Figma again with the "
+                f"account that can open this file (the Connect Figma button beside the link), or ask "
+                f"the file's owner to share it with {who}, then send the link again.")
+    return ("Figma says this file does not exist for the account Forge reads with, which usually "
+            "means that account cannot open it. Connect the Figma account that can open this file "
+            "(the Connect Figma button beside the link), then send the link again.")
+
+
 def source_id_for(doc: dict, target: Any) -> str:
     """The id this link is connected under.
 
@@ -222,8 +241,9 @@ def connect(output_dir: Any, *, figma_url: str, token_env: str,
         # Names the reference, never the value — that is the whole point of the
         # credential being a reference.
         raise FigmaConnectError(
-            f"I could not read a Figma token from {ref_name}: {exc}. Export it "
-            f"in the environment the backend runs in, then ask me again."
+            f"I could not read a Figma token from {ref_name}: {exc}. Connect "
+            f"Figma with the account that can open the file (the Connect Figma "
+            f"button beside the link), then ask me again."
         ) from exc
     except FigmaGatewayError as exc:
         # A READ CUT OFF PART WAY IS KEPT. Every screen read so far is on
@@ -234,6 +254,8 @@ def connect(output_dir: Any, *, figma_url: str, token_env: str,
                 f"screens ({exc.kind}). What was read is kept — ask me to connect the same "
                 f"link again in a few minutes and I'll carry on from there."
             ) from exc
+        if exc.kind == "no_access":
+            raise FigmaConnectError(no_access_message(values)) from exc
         # `.detail` is already redacted by the gateway.
         raise FigmaConnectError(f"Figma {exc.kind}: {exc.detail}") from exc
 

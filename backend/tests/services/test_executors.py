@@ -23,6 +23,7 @@ from services.blueprint.executors import (
     NODE_TASKS,
     PROPOSAL_SCHEMA,
     MalformedEnvelope,
+    OpenAICompatibleModel,
     build_prompt,
     context_for,
     make_executor,
@@ -920,7 +921,7 @@ def test_every_agent_can_see_what_its_upstream_produces():
         visible = {s.split(".")[0] for s in cap.reads | cap.writes}
         visible |= {"application", "product", "schemaVersion", "version", "state"}
         for dep in node.depends_on:
-            for produced in DAG[dep].produces:
+            for produced in DAG[dep].sections:
                 top = produced.split(".")[0]
                 if top in visible or (key, top) in _DELIBERATE_BLIND_SPOTS:
                     continue
@@ -1613,7 +1614,10 @@ def test_headroom_goes_only_to_nodes_measured_at_the_ceiling():
                                        "security", "workflows", "requirements",
                                        "business_rules", "analytics", "workflow_steps",
                                        "domain_reference",
-                                       "page_code", "native_code"}   # a page's two whole files
+                                       "page_code", "native_code",   # a page's two whole files
+                                       # measured at the ceiling on DITANS (2026-10-30): a dense
+                                       # screen's bindings, and 194 phones against 381 desktops
+                                       "drawn_views", "drawn_pairs"}
 
 
 def test_raising_the_ceiling_did_not_disturb_effort():

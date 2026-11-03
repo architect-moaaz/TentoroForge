@@ -32,7 +32,7 @@ function makeArtifacts(): Artifacts {
     navFlow: {
       version: "1.0" as const,
       initialPage: "home",
-      pages: [{ id: "home", route: "/", title: "Home", schemaFile: "src/schemas/home.json", params: [], shell: false }],
+      pages: [{ id: "home", route: "/", title: "Home", schemaFile: "src/schemas/home.json", params: [], shell: true }],
       transitions: [],
       guards: {},
       auth_routes: [],

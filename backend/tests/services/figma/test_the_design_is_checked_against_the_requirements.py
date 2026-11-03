@@ -108,6 +108,27 @@ def test_the_check_reads_the_stored_frames_and_the_live_requirements(tmp_path):
     assert "REQ-100" not in seen["user"] and seen["schema"] is cv.SCHEMA
 
 
+def test_an_answer_that_ran_out_of_room_says_so_and_is_not_a_parser_bug(tmp_path):
+    """A cut-off reply must be reported as cut off.
+
+    kkb5mzo3 (157 requirements, 18 frames, 2026-11-02) logged
+    `JSONDecodeError: Unterminated string ... char 17701` and told the person
+    the design could not be checked. The answer had simply run out of room:
+    the schema writes a row per requirement, and on the adaptive path the
+    token cap covers the thinking too. Saying "ran out of room" is what sends
+    the next reader to the cap instead of to the parser."""
+    doc = _doc(tmp_path)
+    truncated = json.dumps(_reply())[:-40]          # stops mid-string, as a cut-off reply does
+
+    with pytest.raises(cv.CoverageUnavailable) as e:
+        cv.check(doc, tmp_path, lambda **_: truncated)
+    said = str(e.value)
+    assert "ran out of room" in said, said
+    assert str(len(truncated)) in said.replace(",", ""), "the length is the evidence; say it"
+    assert "Nothing is wrong with your design" in said
+    assert "could not check" not in said, "the vague message is for a provider that failed, not for this"
+
+
 def test_a_check_that_cannot_be_made_says_so_instead_of_passing_the_design(tmp_path):
     doc = _doc(tmp_path)
 

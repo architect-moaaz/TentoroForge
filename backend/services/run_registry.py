@@ -23,16 +23,29 @@ which did, and survives to be audited afterwards. This answers one question —
 
 from __future__ import annotations
 
+import functools
 import json
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Any, Callable
 
-#: project_id -> live snapshot. Written from the stream's `emit`, read by the
-#: run endpoint. Single-process, single event loop: no lock needed, and one
-#: would only hide a threading assumption that is not true here.
+#: project_id -> live snapshot. Written from the stream's `emit` — which runs
+#: on the build's and the checks' worker threads, not only the event loop — and
+#: read by the run endpoint. Every change and every read holds `_LOCK`: a
+#: build's counts and a person's Stop arriving together lost one (audit,
+#: 2026-11-01).
 _RUNS: dict[str, dict[str, Any]] = {}
+_LOCK = threading.RLock()
+
+
+def _locked(fn: Callable[..., Any]) -> Callable[..., Any]:
+    @functools.wraps(fn)
+    def run(*args: Any, **kwargs: Any) -> Any:
+        with _LOCK:
+            return fn(*args, **kwargs)
+    return run
 
 
 #: The file a person's Stop leaves beside the application's ledgers. A FILE,
@@ -42,6 +55,7 @@ _RUNS: dict[str, dict[str, Any]] = {}
 STOP_FILE = Path(".forge") / "runs" / "STOP"
 
 
+@_locked
 def request_stop(project_id: str, output_dir: str | Path) -> None:
     """The person pressed Stop: the build in flight ends at its next step,
     the checks at their next page, and what is built is handed over."""
@@ -67,6 +81,7 @@ def clear_stop(output_dir: str | Path) -> None:
         pass
 
 
+@_locked
 def begin(project_id: str, *, phase: str, output_dir: str | Path | None = None) -> None:
     """A run has started for this project. Replaces any previous entry — but
     keeps the checks still running after the last hand-over, which are
@@ -91,6 +106,7 @@ def begin(project_id: str, *, phase: str, output_dir: str | Path | None = None) 
     }
 
 
+@_locked
 def checking(project_id: str, *, phase: str = "checking") -> None:
     """The application is handed over and its checks are running: the panel
     says so without saying "building", and the input stays open."""
@@ -98,6 +114,7 @@ def checking(project_id: str, *, phase: str = "checking") -> None:
     run["checks"] = {"active": True, "phase": phase, "startedAt": time.time(), "scorecard": {}}
 
 
+@_locked
 def checks_done(project_id: str, status: str = "done") -> None:
     run = _RUNS.get(str(project_id))
     if run is None or not isinstance(run.get("checks"), dict):
@@ -127,6 +144,7 @@ MOMENTS = frozenset({"node:subject", "observer:verdict", "observer:repair", "obs
 MOMENTS_KEPT = 600
 
 
+@_locked
 def note(project_id: str, event: str, data: dict[str, Any]) -> None:
     """Fold one stream event into the snapshot.
 
@@ -216,6 +234,7 @@ def _counts(run: dict[str, Any], data: dict[str, Any]) -> None:
             run[key] = data[key]
 
 
+@_locked
 def finish(project_id: str, status: str, *, detail: str | None = None) -> None:
     """The run ended. Kept briefly so a client that reloads at the finish line
     sees an outcome rather than silence."""
@@ -229,6 +248,7 @@ def finish(project_id: str, status: str, *, detail: str | None = None) -> None:
         run["error"] = detail
 
 
+@_locked
 def active_projects() -> list[str]:
     """The projects with a turn in flight — a DAG running, or a chat turn
     still writing its answer after the DAG ended.
@@ -403,11 +423,21 @@ def stopped_line(run: dict[str, Any]) -> str:
 
 def _process_started(pid: int) -> float | None:
     """When process `pid` began (epoch seconds), or None when there is no
-    such process or it cannot be read (outside Linux)."""
+    such process or it cannot be read."""
     try:
         ticks = int(open(f"/proc/{pid}/stat").read().rsplit(")", 1)[1].split()[19])
         boot = next(int(line.split()[1]) for line in open("/proc/stat") if line.startswith("btime "))
         return boot + ticks / os.sysconf("SC_CLK_TCK")
+    except Exception:  # noqa: BLE001
+        pass
+    # NOT LINUX: NO /proc. On a Mac every running build read as dead, and a
+    # backend restart closed DITANS's live D4 build as "lost", telling its
+    # owner to press Build — a second build beside the first (2026-10-30).
+    try:
+        import subprocess
+        out = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True,
+                             timeout=5, env={**os.environ, "LC_ALL": "C"}).stdout.strip()
+        return time.mktime(time.strptime(out, "%a %b %d %H:%M:%S %Y")) if out else None
     except Exception:  # noqa: BLE001
         return None
 
@@ -501,6 +531,29 @@ def close_orphaned_ledgers(root: str | Path) -> list[str]:
                           still_open=lambda p: not _writer_alive(p)):
                 closed.append(path.stem)
                 CLOSED_PATHS.append(str(path))
+    return closed
+
+
+def close_dead_ledgers(output_dir: str | Path) -> list[str]:
+    """Close this application's ledgers whose writer is gone — another
+    process's, never this one's. What `close_orphaned_ledgers` does at a
+    restart, for one application while the platform runs: a build picked up
+    again after its worker died (`jobs.recover`) would otherwise read the
+    dead run as in flight. Not told: the job that resumes says so."""
+    closed: list[str] = []
+    me = os.getpid()
+    for path in Path(output_dir).glob(".forge/runs/*.jsonl"):
+        try:
+            with path.open("r", encoding="utf-8") as fh:
+                pid = int(json.loads(fh.readline() or "{}").get("pid") or 0)
+        except (OSError, ValueError, TypeError):
+            continue
+        if pid == me:
+            continue
+        if close_once(path, {"event": "run:crashed", "error": "the process working on it went away",
+                             "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())},
+                      still_open=lambda p: not _writer_alive(p)):
+            closed.append(path.stem)
     return closed
 
 
@@ -620,6 +673,7 @@ def _epoch(at: Any) -> float | None:
         return None
 
 
+@_locked
 def snapshot(project_id: str) -> dict[str, Any]:
     """What to tell a client that just loaded the page.
 

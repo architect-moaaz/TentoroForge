@@ -29,8 +29,7 @@ import { useEditorStore } from "@/lib/editor-store";
 // ---- jsdom polyfills the renderer/react need --------------------------------
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 if (typeof window !== "undefined" && !window.matchMedia) {
-  // @ts-expect-error minimal polyfill
-  window.matchMedia = (query: string) => ({
+  (window as any).matchMedia = (query: string) => ({
     matches: false, media: query, onchange: null,
     addListener() {}, removeListener() {},
     addEventListener() {}, removeEventListener() {}, dispatchEvent() { return false; },
@@ -137,7 +136,7 @@ describe("drop → commit — every component adds cleanly via insertNode", () =
       if (!drop.ok) { failures.push(`${entry.name}: validateDrop → ${drop.reason}`); continue; }
       const node = buildDroppedNode(entry.name);
       const before = currentHome().root.children.length;
-      store.dispatch({ type: "insertNode", pageId: "home", parentId: "root", index: before, node });
+      store.dispatch({ type: "insertNode", pageId: "home", parentId: "root", index: before, node: node as any });
       const err = useEditorStore.getState().lastError;
       const after = currentHome().root.children.length;
       if (err) failures.push(`${entry.name}: commit rejected → ${err}`);
@@ -161,7 +160,7 @@ describe("drop → render — every component renders selectably", () => {
       if (!validateDrop("Container", entry.name).ok) continue;
       const node = buildDroppedNode(entry.name);
       const idx = currentHome().root.children.length;
-      store.dispatch({ type: "insertNode", pageId: "home", parentId: "root", index: idx, node });
+      store.dispatch({ type: "insertNode", pageId: "home", parentId: "root", index: idx, node: node as any });
       inserted.push({ name: entry.name, id: node.id });
     }
 

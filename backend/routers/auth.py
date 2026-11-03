@@ -201,16 +201,18 @@ async def forgot_password(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    """Issue a password-reset link.
+    """Send a password-reset link to the account's own address.
 
-    Always returns 200 with the same generic message — never leaks
-    whether the account exists. When email is not yet wired, and the
-    ``FORGE_RESET_URL_IN_RESPONSE`` env flag is truthy, the reset URL is
-    also returned in the body so the operator can hand it to the user
-    manually. Once an email provider is wired, drop that env flag.
+    Always returns 200 with the same generic message — never leaks whether
+    the account exists. The link goes only to the inbox: anyone can ask for
+    any address, so a link in the answer was a takeover of any login,
+    super admins included (audit, 2026-11-01). Where the platform sends no
+    mail, a super admin issues a link from the cockpit
+    (`POST /api/admin/people/{id}/reset-link`); on a development platform
+    the mail, link and all, is written to the log.
     """
     generic = ForgotPasswordResponse(
-        message="If an account exists for that email, a reset link has been generated.",
+        message="If an account exists for that email, a reset link has been sent to it.",
     )
 
     result = await db.execute(
@@ -218,21 +220,16 @@ async def forgot_password(
     )
     user = result.scalar_one_or_none()
     if not user:
-        # Silent no-op — same response shape as the found case, no timing
-        # tell (bcrypt above didn't run so timing is minimally different;
-        # a fake bcrypt could be added if that matters).
         logger.info("[forgot-password] no user for email; returning generic response")
         return generic
 
     token = create_password_reset_token(user.id)
     reset_url = _build_reset_url(request, token)
-    logger.info(
-        "[forgot-password] generated reset link for user_id=%s (email not wired — link surfaced via API response)",
-        user.id,
-    )
+    from services.email_service import send_email
 
-    if os.environ.get("FORGE_RESET_URL_IN_RESPONSE", "1") not in ("0", "false", "False", ""):
-        return ForgotPasswordResponse(message=generic.message, reset_url=reset_url)
+    sent = await send_email(user.email, "password_reset", {"reset_url": reset_url, "name": user.name or ""})
+    logger.info("[forgot-password] reset link for user_id=%s %s", user.id, "sent" if sent else "NOT sent (no mail provider)")
+
     return generic
 
 

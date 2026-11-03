@@ -28,6 +28,7 @@ from models.auth import PlatformUser
 from models.project import Project
 from models.verify_run import VerifyRun
 from services.forge_verify_client import ForgeVerifyClient, ForgeVerifyError
+from services.project_access import member_project, ticket_project
 from services.interaction_extractor import extract_interactions
 
 router = APIRouter(prefix="/api/projects/{project_id}/verify", tags=["verify"])
@@ -60,13 +61,6 @@ class VerifyRunOut(BaseModel):
         from_attributes = True
 
 
-async def _load_project(db: AsyncSession, project_id: uuid.UUID) -> Project:
-    project = (await db.execute(
-        select(Project).where(Project.id == project_id),
-    )).scalar_one_or_none()
-    if not project:
-        raise HTTPException(404, f"project {project_id} not found")
-    return project
 
 
 def _preview_base_url(project: Project) -> str:
@@ -84,6 +78,7 @@ async def start_verify(
     body: VerifyRunRequest,
     db: AsyncSession = Depends(get_db),
     user: PlatformUser = Depends(get_current_user),
+    project: Project = Depends(member_project),
 ) -> VerifyRun:
     """User-invoked Self-Verify Pass.
 
@@ -93,7 +88,6 @@ async def start_verify(
     row inside its background task and streams progress via the SSE
     endpoint keyed on runner_run_id.
     """
-    project = await _load_project(db, project_id)
     # Peek at interactions so the 422 fires synchronously before we
     # commit a placeholder row the user would see stuck at 'pending'.
     interactions = extract_interactions(project.output_dir or "", scope=body.scope)
@@ -131,7 +125,7 @@ async def list_verify(
     project_id: uuid.UUID,
     limit: int = Query(default=25, le=100),
     db: AsyncSession = Depends(get_db),
-    _user: PlatformUser = Depends(get_current_user),
+    _project: Project = Depends(member_project),
 ) -> list[VerifyRun]:
     q = (
         select(VerifyRun)
@@ -143,7 +137,7 @@ async def list_verify(
 
 
 @router.get("/events")
-async def stream_verify_events(project_id: uuid.UUID):
+async def stream_verify_events(project_id: uuid.UUID, _project: Project = Depends(ticket_project)):
     """JV-21 — Live SSE stream of in-flight verify events for a project.
 
     IMPORTANT: this route MUST be declared before ``/{run_id}`` — FastAPI
@@ -157,10 +151,10 @@ async def stream_verify_events(project_id: uuid.UUID):
     verify_end. A client opens this on chip mount, closes it on
     ``verify_end`` or unmount.
 
-    Auth: intentionally NOT gated on ``get_current_user`` — EventSource
-    cannot cleanly send auth headers cross-origin, and the existing
-    project-scoped stream at ``/api/projects/{id}/events`` follows the
-    same pattern. Knowing the project UUID is the gate.
+    Auth: EventSource cannot send a header, so it opens with a stream
+    ticket a member asked for (`POST /api/projects/{id}/stream-ticket`,
+    `services.project_access`). Knowing the project id used to be the gate,
+    and the id is in every preview address.
 
     Uses ``EventSourceResponse`` from sse_starlette (same as
     ``/api/projects/{id}/events``) — it flushes headers on connect and
@@ -202,7 +196,7 @@ async def cancel_verify(
     project_id: uuid.UUID,
     run_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user: PlatformUser = Depends(get_current_user),
+    _project: Project = Depends(member_project),
 ) -> dict:
     """JV-27/#4 — user-invoked cancel for an in-flight verify run.
 
@@ -276,7 +270,7 @@ async def get_verify(
     project_id: uuid.UUID,
     run_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user: PlatformUser = Depends(get_current_user),
+    _project: Project = Depends(member_project),
 ) -> VerifyRun:
     row = (await db.execute(
         select(VerifyRun).where(
@@ -295,6 +289,7 @@ async def verify_deployment(
     fix: bool = Query(default=True),
     db: AsyncSession = Depends(get_db),
     user: PlatformUser = Depends(get_current_user),
+    project: Project = Depends(member_project),
 ) -> VerifyRun:
     """SV-8 — verify a specific deployment against its Vercel URL.
 
@@ -305,7 +300,6 @@ async def verify_deployment(
     """
     from services.self_verify_pass import resolve_deploy_base_url
 
-    project = await _load_project(db, project_id)
     # Resolve early so a bad deployment_id 4xxs before we commit a row.
     await resolve_deploy_base_url(db, project.id, deployment_id)
     interactions = extract_interactions(project.output_dir or "")
@@ -391,7 +385,7 @@ async def stream_verify(
     project_id: uuid.UUID,
     run_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user: PlatformUser = Depends(get_current_user),
+    _project: Project = Depends(member_project),
 ) -> StreamingResponse:
     row = (await db.execute(
         select(VerifyRun).where(

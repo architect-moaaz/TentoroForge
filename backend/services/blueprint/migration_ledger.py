@@ -262,8 +262,11 @@ LEDGER: tuple[Entry, ...] = (
     _e(127, "substrate_brief_writer", "emitter"),
     _e(150, "scorecard", "emitter", note="keep — the fleet scoreboard depends on it"),
     _e(60, "figma_overlay_strip", "dead", note="artifact of the split Figma pipeline (§5)"),
-    _e(101, "mobile_scaffold", "dead", note="§106 native mobile is a V1 non-goal"),
-    _e(103, "mobile_branding", "dead", note="§106"),
+    # §106 rules out a NATIVE rewrite as a V1 goal, not a phone app: both of these are called for real, from
+    # `native_build.prepare_shell` — the Expo WebView shell written from the Blueprint (name, brand colour, bundle
+    # id, icons) when a PWA is published (`mobile_autobuild`) or a build is asked for.
+    _e(101, "mobile_scaffold", "emitter", note="the WebView shell, written from the Blueprint"),
+    _e(103, "mobile_branding", "emitter", note="that shell's icons and splash, from designSystem"),
     _e(21, "payment_feature", "constraint", "integrations", review=True),
     _e(98, "commerce_placement", "constraint", "product.capabilities", review=True),
     _e(39, "apply_hints_to_pages", "constraint", "pages", review=True),

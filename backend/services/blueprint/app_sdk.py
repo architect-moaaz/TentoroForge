@@ -194,8 +194,15 @@ def emit_schema(doc: dict) -> str:
         out.append(f"/** {e.get('name')}{' — ' + desc if desc else ''} */")
         out.append(f"export interface {name} {{")
         cols = entity_columns(e, doc)
+        # A SEALED FIELD MAY BE EMPTY, WHATEVER IT REQUIRES: its plain column is
+        # optional (projection.emit_entity_module) and a reader it leaves out
+        # gets no value. Typed `string`, a page wrote `name.split(…)` and
+        # crashed for every new account (DITANS QA, 2026-11-02); typed
+        # `| null`, the writer's type check makes it say what an empty one shows.
+        from services.blueprint.projection import _sealed_fields
+        sealed = _sealed_fields(e, doc)
         for f in cols:
-            required = bool(f.get("required") or f.get("primaryKey"))
+            required = bool(f.get("required") or f.get("primaryKey")) and str(f.get("name")) not in sealed
             note = str(f.get("description") or "").strip().replace("*/", "")
             if is_image_field(f):
                 note = (note + " " if note else "") + "A stored image's id — show it with <img src={fileUrl(row." + str(f["name"]) + ")} />."
@@ -282,6 +289,11 @@ def input_type(doc: dict, wf: dict, inp: dict) -> str:
     is the record's id."""
     if inp.get("kind") == "record":
         return "string"
+    # AN INPUT'S OWN VALUES WIN: a decision's choices are the workflow's, not
+    # those of whatever column happens to share its name.
+    own = inp.get("options") or inp.get("enumValues")
+    if own:
+        return ts_type({"type": "string", "enumValues": own})
     name = str(inp.get("name") or "")
     for e in _step_entities(doc, wf):
         col = next((f for f in e.get("fields") or [] if f.get("name") == name), None)
@@ -663,10 +675,14 @@ def page_module(doc: dict, page: dict, row: dict) -> str:
         public_route_segments(page) is not None or not str(page.get("route") or "/").strip("/"))
     # A public page renders as the public route file it replaces does — in
     # the public frame, with no rail into a product the visitor cannot reach.
-    frame_open = "<PublicPageFrame><PageFrame" if public else "<PageFrame"
-    frame_close = "</PageFrame></PublicPageFrame>" if public else "</PageFrame>"
+    # A DRAWN PUBLIC PAGE IS ITS OWN WHOLE SCREEN. Its frame carries the
+    # header the designer drew; the generic public frame put a second bar
+    # above it listing every public page by name (DITANS sign-up, 2026-10-31).
+    framed = public and not page.get("figmaFrame")
+    frame_open = "<PublicPageFrame><PageFrame" if framed else "<PageFrame"
+    frame_close = "</PageFrame></PublicPageFrame>" if framed else "</PageFrame>"
     frame_import = ('import { PublicPageFrame } from "@/components/PublicPageFrame";\n'
-                    if public else "")
+                    if framed else "")
     root = code_page_dir(page) == ROOT_DIR
     if str(page.get("pattern") or "") == "auth":
         # A sign-in screen is the whole screen: no rail, no public header, no

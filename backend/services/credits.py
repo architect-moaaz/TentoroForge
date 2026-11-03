@@ -221,6 +221,25 @@ async def refusal(db: AsyncSession, *, org_id: Any, user_email: str, project_sho
                           project=str(project_short_id or ""), policy=policy, projects=projects, names=names)
 
 
+async def headroom(db: AsyncSession, *, org_id: Any, user_email: str, project_short_id: str = "") -> float | None:
+    """What work for this organisation, person and app may spend now
+    (`spending.headroom`) — the ceiling a run carries. None when nothing
+    bounds it, or when it cannot be read: the ceiling, like the gate, never
+    breaks the work it guards."""
+    import logging
+
+    from services.build_usage import read_ledger
+
+    try:
+        policy = await load_policy(db)
+        projects, _names = await projects_known(db)
+        return spending.headroom(read_ledger(), org=str(org_id or ""), user=str(user_email or ""),
+                                 project=str(project_short_id or ""), policy=policy, projects=projects)
+    except Exception:  # noqa: BLE001
+        logging.getLogger(__name__).warning("[spend] the run's ceiling could not be read", exc_info=True)
+        return None
+
+
 async def gate(db: AsyncSession, *, org_id: Any, user_email: str, project_short_id: str = "",
                estimate: float | None = None, turn: bool = False) -> None:
     """NOTHING STARTS THAT THE ORGANISATION CANNOT PAY FOR. A five-module
@@ -242,4 +261,4 @@ async def gate(db: AsyncSession, *, org_id: Any, user_email: str, project_short_
 
 
 __all__ = ["projects_known", "load_policy", "entries_of", "limits_for", "all_limits", "add_entry", "set_limits",
-           "org_standing", "all_org_balances", "refusal", "gate"]
+           "org_standing", "all_org_balances", "refusal", "headroom", "gate"]

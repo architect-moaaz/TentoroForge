@@ -32,6 +32,8 @@ import { PersonaChrome } from "./PersonaChrome";
 import { RouteBreadcrumb, type RouteNode } from "./RouteBreadcrumb";
 import { AppNavigator } from "@/components/AppNavigator";
 import { BrandMark, BRAND_LOGO } from "@/components/BrandMark";
+import DrawnShell, { DRAWN_SHELL } from "@/components/DrawnShell";
+import { loadShell } from "@/components/DrawnShellLoad";
 import { schemas } from "@/schemas/registry";
 
 // The app shell renders the generated SideNav: a collapsible rail that expands on
@@ -1071,6 +1073,21 @@ export default async function DashboardLayout({
       <script dangerouslySetInnerHTML={{ __html: activeTracker }} />
     </>
   );
+  // THE DESIGN'S OWN FRAME. A design built as drawn draws its sidebar and top
+  // bar; they are converted once (`services/drawn`) and every page is shown in
+  // them, with the application's notifications and account menu where the
+  // drawing puts its bell. Without one, `DRAWN_SHELL` is false.
+  if (DRAWN_SHELL) {
+    // WHO IS SIGNED IN, as each shell's own read finds them: the drawing's
+    // sample person and organisation stood in every sidebar (wzml1sa6).
+    const shellData = await loadShell();
+    return (
+      <ShellStateProvider>
+        {trackerTag}
+        <DrawnShell controls={cluster} role={role} data={shellData}>{children}</DrawnShell>
+      </ShellStateProvider>
+    );
+  }
   // PB-6: persona-pills frame — the Claude-yoga-demo top-strip. When the
   // deterministic shell picker (services/shell_templates.select_frame) chose
   // "persona-pills" (i.e. 2-4 personas in nav-flow.personas, attached by
