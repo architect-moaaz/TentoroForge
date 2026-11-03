@@ -198,3 +198,54 @@ def test_rebuilding_a_version_does_not_disturb_the_history(svc):
 
     assert svc.doc["changeHistory"] == unchanged, (
         "a replay read the records; it must not have written to them")
+
+
+# --- a file is only deleted when a replay has earned it --------------------
+#
+# Measured on the UAT host before this guard existed: of 669 adjacent versions
+# across the live applications, 511 did NOT replay — every one versioned
+# before the diffs were detached above. Thinning on the policy alone would
+# have deleted history nothing could bring back.
+
+def test_a_snapshot_the_history_cannot_rebuild_is_kept(svc):
+    for n in range(1, BlueprintService.BASE_EVERY + 6):
+        _change(svc, n)
+    thinned = [v for v in svc.recoverable_versions() if not svc.version_path(v).is_file()]
+    assert thinned, "nothing was thinned, so the guard is untested"
+
+    # Corrupt one diff the way the aliasing bug did — values from a later change.
+    victim = thinned[len(thinned) // 2]
+    for rec in svc.doc["changeHistory"]:
+        if int(rec.get("version") or 0) == victim:
+            rec["blueprintDiff"] = [
+                {"op": "add", "path": "/product/objectives/0", "value": "from the future"}]
+    svc.save()
+
+    # A later change prunes again; the unrebuildable version must survive it.
+    before = svc.snapshot()
+    svc.doc["product"]["objectives"] = ["something else"]
+    svc.commit(user_request="one more", before=before)
+
+    rebuilt_wrong = []
+    for v in svc.versions():
+        try:
+            if svc._replay_to(v) != svc._stored_snapshot(v):
+                rebuilt_wrong.append(v)
+        except FileNotFoundError:
+            continue
+    assert all(svc.version_path(v).is_file() for v in rebuilt_wrong), (
+        "a snapshot whose replay disagrees with it was deleted anyway")
+
+
+def test_a_diff_that_touches_the_history_does_not_break_a_replay(svc):
+    # `revert` rewrites changeHistory before committing, so its diff carries
+    # ops against a list a stripped snapshot does not have.
+    for n in range(1, 4):
+        _change(svc, n)
+    target = int(svc.doc["version"])
+    before = svc.snapshot()
+    svc.doc["product"]["objectives"] = ["after an undo"]
+    svc.doc["changeHistory"] = list(before.get("changeHistory") or [])
+    svc.commit(user_request="undo: something", before=before)
+
+    assert svc.document_at(target)["version"] == target

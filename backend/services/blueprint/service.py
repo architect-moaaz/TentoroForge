@@ -736,31 +736,57 @@ class BlueprintService:
             )
         return hist[start + 1:end + 1]
 
-    def _snapshot_at(self, version: int) -> dict:
-        path = self.version_path(version)
-        if path.is_file():
-            doc = json.loads(path.read_text("utf-8"))
-            # Snapshots written before the history was left out still carry it.
-            doc.pop("changeHistory", None)
-            return doc
+    def _stored_snapshot(self, version: int) -> dict:
+        """A snapshot file's document body, history dropped either way."""
+        doc = json.loads(self.version_path(version).read_text("utf-8"))
+        # Snapshots written before the history was left out still carry it.
+        doc.pop("changeHistory", None)
+        return doc
+
+    def _replay_to(self, version: int) -> dict:
+        """Rebuild `version` from the nearest earlier snapshot and the diffs.
+
+        Ignores any file at `version`, so it can be used to check one.
+        """
         kept = [v for v in self.versions() if v < version]
         if not kept:
             raise FileNotFoundError(f"no snapshot for version {version}")
-        base = kept[-1]
-        doc = json.loads(self.version_path(base).read_text("utf-8"))
-        doc.pop("changeHistory", None)
-        for rec in self._records_after(base, version):
-            patch = rec.get("blueprintDiff") or []
-            if patch:
-                # The PATCH is copied, not the document: `apply_patch` plants
-                # an op's `value` object straight into the result, so applying
-                # the history's own patch in place would hand the rebuilt
-                # document a subtree that belongs to the record — and the next
-                # op would mutate the record. The document is the big one, so
-                # it is the one that gets mutated in place.
-                doc = jsonpatch.apply_patch(
-                    doc, json.loads(json.dumps(patch)), in_place=True)
+        doc = self._stored_snapshot(kept[-1])
+        for rec in self._records_after(kept[-1], version):
+            patch = [op for op in (rec.get("blueprintDiff") or [])
+                     if not str(op.get("path") or "").startswith("/changeHistory")]
+            if not patch:
+                continue
+            # The history is not what is being rebuilt — `document_at` puts the
+            # current one back — and `revert` rewrites `changeHistory` before
+            # committing, so its diff carries ops against a list this base does
+            # not have. Those ops are dropped above rather than applied.
+            #
+            # The PATCH is copied, not the document: `apply_patch` plants an
+            # op's `value` object straight into the result, so applying the
+            # history's own patch in place would hand the rebuilt document a
+            # subtree that belongs to the record — and the next op would mutate
+            # the record. The document is the big one, so it is the one that
+            # gets mutated in place.
+            doc = jsonpatch.apply_patch(
+                doc, json.loads(json.dumps(patch)), in_place=True)
+        # The diffs are made before `commit` bumps, so none of them carries the
+        # version; it is stamped here so a rebuilt document compares equal to
+        # the stored snapshot of the same version.
+        doc["version"] = version
         return doc
+
+    def _snapshot_at(self, version: int) -> dict:
+        if self.version_path(version).is_file():
+            return self._stored_snapshot(version)
+        try:
+            return self._replay_to(version)
+        except FileNotFoundError:
+            raise
+        except Exception as exc:  # a diff that will not apply is not a snapshot
+            raise FileNotFoundError(
+                f"version {version} could not be rebuilt from the history: {exc}"
+            ) from exc
 
     def document_at(self, version: int, *, with_history: bool = True) -> dict:
         """The document as it stood at `version` — read, or replayed.
@@ -794,10 +820,21 @@ class BlueprintService:
         return sorted(v for v in set(kept) | named if v >= floor)
 
     def prune_versions(self) -> list[int]:
-        """Thin the snapshots to the recent window plus sparse bases.
+        """Drop the snapshots the history can demonstrably rebuild.
 
-        Returns the versions whose files were removed. Nothing stops being
-        restorable: :meth:`document_at` replays what is no longer on disk.
+        Returns the versions whose files were removed.
+
+        A FILE IS ONLY DELETED WHEN A REPLAY REPRODUCES IT. Being outside the
+        recent window is what makes a snapshot a candidate; reproducing it is
+        what makes deleting it safe. The two are separate because the recorded
+        diffs cannot simply be trusted: on applications versioned before the
+        diffs were detached from the document, 511 of 669 adjacent versions did
+        not replay — a later change had mutated the subtree an earlier diff
+        pointed at. Thinning on the policy alone would have deleted history
+        that nothing could bring back.
+
+        So old applications keep their snapshots until their diffs are sound,
+        and new ones thin from the start, with no flag to say which is which.
         """
         kept = self.versions()
         if len(kept) <= self.KEEP_RECENT:
@@ -807,6 +844,11 @@ class BlueprintService:
         dropped = []
         for v in kept:
             if v in keep:
+                continue
+            try:
+                if self._replay_to(v) != self._stored_snapshot(v):
+                    continue
+            except Exception:  # noqa: BLE001 — unrebuildable: the file stays
                 continue
             try:
                 self.version_path(v).unlink()
