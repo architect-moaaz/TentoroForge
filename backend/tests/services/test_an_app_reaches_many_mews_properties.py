@@ -91,11 +91,12 @@ def test_every_app_gets_the_table_the_routes_the_page_and_the_library(tmp_path):
     for rel in ("src/lib/mews.ts", "src/db/schema/_forge_mews_properties.ts", "src/app/api/mews/guard.ts",
                 "src/app/api/mews/properties/route.ts", "src/app/api/mews/properties/[id]/route.ts",
                 "src/app/api/mews/properties/[id]/check/route.ts", "src/app/api/mews/stays/route.ts",
+                "src/app/api/mews/stays/suggest/route.ts", "src/db/schema/_forge_mews_stays.ts",
                 "src/app/(dashboard)/mews-properties/page.tsx",
                 "src/app/(dashboard)/mews-properties/MewsPropertiesPanel.tsx"):
         assert (root / rel).is_file(), rel
     barrel = (root / "src" / "db" / "schema" / "index.ts").read_text("utf-8")
-    assert barrel.count("forgeMewsProperties") == 1
+    assert barrel.count("forgeMewsProperties") == 1 and barrel.count("forgeMewsStays") == 1
     inject_runtime(str(root))
     assert (root / "src" / "db" / "schema" / "index.ts").read_text("utf-8").count("forgeMewsProperties") == 1, "idempotent"
     manifest = json.loads((root / "contracts" / "runtime-injection-manifest.json").read_text("utf-8"))

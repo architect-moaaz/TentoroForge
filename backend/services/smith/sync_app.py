@@ -82,6 +82,9 @@ RUNTIME_FILES: tuple[tuple[str, str], ...] = (
     ("sensitive-crypto.ts", "src/lib/sensitive-crypto.ts"),
     ("push.ts", "src/lib/push.ts"),
     ("tenancy.ts", "src/lib/tenancy.ts"),
+    # The tick that runs what is due — and keeps the Mews stays a desk
+    # searches fresh. An app kept the one it was built with.
+    ("api-cron/route.ts", "src/app/api/cron/tick/route.ts"),
 )
 
 #: Sign-in logic every app runs, the platform's: where a signed-in person
@@ -119,6 +122,8 @@ MEWS_FILES: tuple[tuple[str, str], ...] = (
     ("api-mews/properties/[id]/route.ts", "src/app/api/mews/properties/[id]/route.ts"),
     ("api-mews/properties/[id]/check/route.ts", "src/app/api/mews/properties/[id]/check/route.ts"),
     ("api-mews/stays/route.ts", "src/app/api/mews/stays/route.ts"),
+    ("api-mews/stays/suggest/route.ts", "src/app/api/mews/stays/suggest/route.ts"),
+    ("db/forge-mews-stays.schema.ts", "src/db/schema/_forge_mews_stays.ts"),
     ("pages/mews-properties/page.tsx", "src/app/(dashboard)/mews-properties/page.tsx"),
     ("pages/mews-properties/MewsPropertiesPanel.tsx", "src/app/(dashboard)/mews-properties/MewsPropertiesPanel.tsx"),
 )
