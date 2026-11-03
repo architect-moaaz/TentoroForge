@@ -37,3 +37,25 @@ def test_a_restricted_page_that_names_nobody_lets_the_administrator_launch_as_it
     assert [r["route"] for r in role_routes(doc)] == ["/admin/orders", "/admin/products"], \
         "the page gate reads it the same way"
     assert all(v for v in roles.values())
+
+
+def test_an_unscoped_role_reads_only_what_its_permissions_let_it():
+    """kkb5mzo3 (2026-11-03): Management was left unscoped on RefundCase so its
+    cross-property reports counted every hotel, and the data API handed it
+    every individual case — REQ-072 keeps it at aggregate level. Where a read
+    permission is declared, unscoped widens what a holder sees; it is not a
+    grant. Where none is declared, unscoped still grants as before."""
+    doc = {"roles": [{"id": "ROLE-001", "name": "Requester", "permissions": ["PERM-009"]},
+                     {"id": "ROLE-012", "name": "Management", "permissions": []},
+                     {"id": "ROLE-005", "name": "Owner", "permissions": ["PERM-009"]}],
+           "permissions": [{"id": "PERM-009", "name": "Read refund case", "action": "read", "subject": "ENTITY-004"}],
+           "data": {"entities": [{"id": "ENTITY-004", "name": "RefundCase", "table": "refund_cases"},
+                                 {"id": "ENTITY-013", "name": "AuditEvent", "table": "audit_events"}]},
+           "security": {"ownershipRules": [
+               {"entity": "RefundCase", "kind": "scope", "column": "propertyId", "unscopedRoles": ["Owner", "Management"]},
+               {"entity": "AuditEvent", "kind": "scope", "column": "caseId", "unscopedRoles": ["Management"]}]},
+           "pages": [{"id": "PAGE-002", "route": "/cases", "access": "role_restricted", "users": ["ROLE-001"],
+                      "data": {"primaryEntity": "ENTITY-004"}}]}
+    access = entity_access(doc)
+    assert access["refund_cases"]["read"] == ["Owner", "Requester"], "Management holds no read permission"
+    assert access["audit_events"]["read"] == ["Management"], "no read permission declared: unscoped still grants"

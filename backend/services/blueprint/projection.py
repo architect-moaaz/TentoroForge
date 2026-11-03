@@ -3218,9 +3218,24 @@ def entity_access(doc: dict) -> dict[str, dict[str, list[str]]]:
             if by_name.get(name) in entities:
                 readers[by_name[name]] |= roles
     # Ownership rules are dicts beside prose notes.
+    # UNSCOPED IS HOW FAR, NOT WHETHER. A role a rule leaves unscoped reads
+    # every property's rows in what it may read — its aggregate reports
+    # included — but where the Blueprint declares who may read the entity
+    # (a `read` permission), that list decides. kkb5mzo3's Management was
+    # unscoped on RefundCase for its cross-property reports and so was
+    # handed every case through the data API, against REQ-072 (2026-11-03).
+    permitted: dict[str, set[str]] = {}
+    for perm in _live(doc.get("permissions")):
+        subject = perm.get("subject") or perm.get("entity")
+        eid = by_name.get(subject, subject)
+        if eid in entities and str(perm.get("action") or "").lower() == "read":
+            holders = {str(r.get("name")) for r in _live(doc.get("roles")) if perm.get("id") in (r.get("permissions") or [])}
+            permitted.setdefault(eid, set()).update(holders)
     for rule in ((doc.get("security") or {}).get("ownershipRules") or []):
         if isinstance(rule, dict) and rule.get("status") != "DEPRECATED" and by_name.get(rule.get("entity")) in entities:
-            readers[by_name[rule["entity"]]] |= {str(r) for r in (rule.get("unscopedRoles") or [])}
+            eid = by_name[rule["entity"]]
+            unscoped = {str(r) for r in (rule.get("unscopedRoles") or [])}
+            readers[eid] |= unscoped & permitted[eid] if eid in permitted else unscoped
     # NO PAGE DECLARES IT: NOT LISTED. An entry with two empty lists refused
     # every role, the administrator's included, while the file and the data
     # route both say an entity left out is open to any signed-in role. A page
