@@ -362,6 +362,10 @@ def _sealed_fields(entity: dict, doc: dict) -> set[str]:
     for rule in ((doc.get("security") or {}).get("ownershipRules") or []):
         if isinstance(rule, dict) and str(rule.get("entity") or "").lower() in keys:
             found_by |= {str(rule.get(k)) for k in ("column", "guestColumn") if rule.get(k)}
+        # The membership record a "member" rule reads is searched by the
+        # member's email or id on every scoped read.
+        if isinstance(rule, dict) and str(rule.get("members") or "").lower() in keys:
+            found_by |= {str(rule.get(k)) for k in ("memberEmailColumn", "memberUserColumn") if rule.get(k)}
     if platform_table(str(entity.get("table") or to_snake(str(entity.get("name") or "")))):
         found_by |= {f for f in fields if re.sub(r"[^a-z]", "", f.lower()) in ("email", "password", "passwordhash")}
     # AND EVERY COLUMN A WORKFLOW FINDS ROWS BY. DITANS's staff steps look the
@@ -4102,6 +4106,15 @@ def ownership_rules(doc: dict) -> dict[str, list[dict]]:
             target = by_key.get(_canonical_key(str(item["through"])))
             rule["through"] = str((target.get("table") or to_snake(target.get("name") or ""))
                                   if target else item["through"])
+        # AN ORGANISATION'S ROWS ARE ITS MEMBERS'. The membership record and
+        # its columns; the record is written as its TABLE, like `through`.
+        if rule["scope"] == "member" and item.get("members"):
+            target = by_key.get(_canonical_key(str(item["members"])))
+            rule["members"] = str((target.get("table") or to_snake(target.get("name") or ""))
+                                  if target else item["members"])
+            for key in ("memberColumn", "memberEmailColumn", "memberUserColumn"):
+                if item.get(key):
+                    rule[key] = str(item[key])
         # Key the rule under every spelling of the entity it actually resolves
         # to, so an SSR source asking for `rentPayments` and a route asking for
         # `rent-payments` both find it. An unresolved entity is still emitted
@@ -4164,8 +4177,9 @@ def render_ownership_rules_module(manifest: dict[str, list[dict]]) -> str:
         "  column: string;\n"
         '  /** "scope" -> also filters reads and writes; "attribution" -> fill only. */\n'
         '  kind: "scope" | "attribution";\n'
-        '  /** "user" -> the actor\'s id; "workspace" -> their workspace/tenant id. */\n'
-        '  scope: "user" | "workspace";\n'
+        '  /** "user" -> the actor\'s id; "workspace" -> their workspace/tenant id;\n'
+        '   *  "member" -> an organisation the actor has a row of `members` in. */\n'
+        '  scope: "user" | "workspace" | "member";\n'
         "  /** Roles exempt: they read unscoped, and may write the column themselves. */\n"
         "  unscopedRoles: string[];\n"
         "  /** For scope \"workspace\": the users column whose value is the actor's workspace. */\n"
@@ -4179,6 +4193,12 @@ def render_ownership_rules_module(manifest: dict[str, list[dict]]) -> str:
         "  /** \"everyone\": anyone reads every row, signed in or not; the column still\n"
         "   *  decides who may change or remove it. Absent: reads are scoped like writes. */\n"
         '  reads?: "scoped" | "everyone";\n'
+        "  /** For scope \"member\": the membership table, its organisation column, and\n"
+        "   *  the column matching the actor (their email, or their user id). */\n"
+        "  members?: string;\n"
+        "  memberColumn?: string;\n"
+        "  memberEmailColumn?: string;\n"
+        "  memberUserColumn?: string;\n"
         "}\n\n"
         "export const OWNERSHIP_RULES: Record<string, OwnershipRule[]> = "
         f"{json.dumps(manifest, indent=2, sort_keys=True)};\n\n"

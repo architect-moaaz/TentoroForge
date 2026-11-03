@@ -1844,6 +1844,23 @@ def ownership_findings(security: dict, doc: dict) -> list[str]:
                 f"record it references, name that reference as `column` and the referenced entity as "
                 f"`through`")
             continue
+        # A MEMBER SCOPE READS A MEMBERSHIP RECORD: it, the column naming the
+        # organisation and the one naming the person must all exist, or every
+        # row compares to nothing.
+        if str(r.get("scope") or "user") == "member" and r.get("kind", "scope") != "attribution":
+            members = find(str(r.get("members") or ""))
+            if members is None:
+                problems.append(f"{named}.{column}: a member scope names `members`, the record of who belongs to "
+                                f"which organisation — {r.get('members')!r} is not one the data model has")
+            else:
+                have = _field_names(members)
+                if str(r.get("memberColumn") or "") not in have:
+                    problems.append(f"{named}.{column}: `memberColumn` must be the field of {members.get('name')} "
+                                    f"naming the organisation, not {r.get('memberColumn')!r}")
+                who = [str(r.get(k) or "") for k in ("memberEmailColumn", "memberUserColumn") if r.get(k)]
+                if not who or any(w not in have for w in who):
+                    problems.append(f"{named}.{column}: name the field of {members.get('name')} holding the "
+                                    f"member's sign-in email (`memberEmailColumn`) or user id (`memberUserColumn`)")
         guest = str(r.get("guestColumn") or "")
         if guest and guest not in _field_names(entity):
             problems.append(f"ownership rule for {entity.get('name')}: guestColumn {guest!r} is not a field of "

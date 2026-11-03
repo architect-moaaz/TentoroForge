@@ -3023,9 +3023,10 @@
                     "type": "string",
                     "enum": [
                       "user",
-                      "workspace"
+                      "workspace",
+                      "member"
                     ],
-                    "description": "What `column` is compared to: the acting user's own id, or the workspace/tenant id their session carries.",
+                    "description": "What `column` is compared to: the acting user's own id, the workspace/tenant id their session carries, or (\"member\") the organisations the actor is a member of, read from the membership record named in `members`.",
                     "default": "user"
                   },
                   "unscopedRoles": {
@@ -3039,6 +3040,22 @@
                   "actorColumn": {
                     "type": "string",
                     "description": "For scope \"workspace\": the column on the users table whose value is the actor's workspace — homePropertyId, organisationId, tenantId. The session carries that column and the engine compares `column` to it. Omit for scope \"user\", where the actor's id is the value."
+                  },
+                  "members": {
+                    "type": "string",
+                    "description": "For scope \"member\": the entity recording who belongs to which organisation (OrganisationMember, TeamMember). The actor reaches a row when `column` is an organisation they have a row in."
+                  },
+                  "memberColumn": {
+                    "type": "string",
+                    "description": "For scope \"member\": the column of the `members` entity holding the organisation a member belongs to (organisationId)."
+                  },
+                  "memberEmailColumn": {
+                    "type": "string",
+                    "description": "For scope \"member\": the column of the `members` entity holding the member's sign-in email. Give this or memberUserColumn."
+                  },
+                  "memberUserColumn": {
+                    "type": "string",
+                    "description": "For scope \"member\": the column of the `members` entity holding the member's user id. Give this or memberEmailColumn."
                   },
                   "through": {
                     "type": "string",

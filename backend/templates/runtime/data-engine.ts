@@ -506,6 +506,62 @@ function actorValue(rule: OwnershipRule, ctx: DataEngineContext): unknown {
 }
 
 /**
+ * WHERE A "member" RULE READS WHO BELONGS: the membership table, its
+ * organisation column and the column naming the person. `null` when the
+ * Blueprint and the schema have drifted, which fails closed like a missing
+ * column.
+ */
+function memberSource(rule: OwnershipRule): { table: PgTableWithColumns<any>; org: any; who: any; byEmail: boolean } | null {
+  const members = rule.members ? getEntity(rule.members) : undefined;
+  const t = members?.table as any;
+  const org = rule.memberColumn ? t?.[rule.memberColumn] : undefined;
+  const who = rule.memberUserColumn ? t?.[rule.memberUserColumn]
+    : rule.memberEmailColumn ? t?.[rule.memberEmailColumn] : undefined;
+  if (!members || org === undefined || who === undefined) {
+    console.error(
+      `[data-engine] a member rule reads ${rule.members}.${rule.memberColumn} by ` +
+      `${rule.memberUserColumn ?? rule.memberEmailColumn}, which the schema does not carry — ` +
+      `returning no rows rather than every row.`,
+    );
+    return null;
+  }
+  return { table: members.table, org, who, byEmail: !rule.memberUserColumn };
+}
+
+/** The actor's own membership rows: by their sign-in email (any case) or their
+ *  id. `null` with nobody signed in — a visitor belongs to no organisation. */
+function memberMatch(src: { who: any; byEmail: boolean }, ctx: DataEngineContext): SQL | null {
+  const user = ctx.user as { id?: unknown; email?: unknown } | undefined;
+  if (src.byEmail) {
+    const email = typeof user?.email === "string" ? user.email.trim() : "";
+    return email ? sql`lower(${src.who}) = lower(${email})` : null;
+  }
+  return user?.id ? eq(src.who, user.id as any) : null;
+}
+
+/** The organisations the actor is a member of, under a "member" rule. */
+async function memberOrganisations(rule: OwnershipRule, ctx: DataEngineContext): Promise<string[]> {
+  const src = memberSource(rule);
+  const match = src ? memberMatch(src, ctx) : null;
+  if (!src || !match) return [];
+  const rows = await db.select({ v: src.org }).from(src.table).where(match);
+  return [...new Set(rows.map((r: any) => r.v).filter((v: unknown) => v !== null && v !== undefined && v !== "").map(String))];
+}
+
+/**
+ * A FOUNDING MEMBER. Whoever registers an organisation is its first member
+ * before they are anyone's member: their membership row names an
+ * organisation they do not yet belong to. It is admitted while that
+ * organisation has no member at all — never into one that has.
+ */
+async function foundsOrganisation(rule: OwnershipRule, entity: { table: PgTableWithColumns<any> }, value: unknown): Promise<boolean> {
+  const src = memberSource(rule);
+  if (!src || src.table !== entity.table) return false;
+  const [any] = await db.select({ v: src.org }).from(src.table).where(eq(src.org, value as any)).limit(1);
+  return !any;
+}
+
+/**
  * The WHERE conditions that limit `entityName` to the rows this actor may reach.
  *
  * Every read and every write funnels through this engine: the catch-all API
@@ -575,6 +631,26 @@ function scopeConditions(
         continue;
       }
       if (inner.where) conds.push(inArray(col, db.select({ id: inner.id }).from(inner.table).where(inner.where)));
+      continue;
+    }
+    if (rule.scope === "member") {
+      // AN ORGANISATION'S ROWS ARE ITS MEMBERS'. The row's organisation must be
+      // one the actor has a membership row in; someone in none reaches none —
+      // a new employer's Home listed every organisation's offers (DITANS QA
+      // D-59, 2026-11-02).
+      const src = memberSource(rule);
+      const match = src ? memberMatch(src, ctx) : null;
+      if (!src || !match) {
+        conds.push(sql`false`);
+        continue;
+      }
+      // ONE ID, TWO TYPES. DITANS's jobs keep the organisation as text and
+      // its memberships as a uuid; compared as they are, Postgres refused
+      // (`text = uuid`) and every employer's job list was an error. Columns
+      // of different types are compared as text.
+      const differ = String(col?.columnType ?? "") !== String(src.org?.columnType ?? "");
+      const mine = db.select({ v: differ ? sql`${src.org}::text` : src.org }).from(src.table).where(match);
+      conds.push(inArray(differ ? sql`${col}::text` : col, mine));
       continue;
     }
     const actor = actorValue(rule, ctx);
@@ -1143,6 +1219,22 @@ export async function create(
     if (rule.guestColumn && rule.guestColumn in entity.table && !ctx.user?.id && ctx.guest) {
       cleanData[rule.guestColumn] = ctx.guest;
     }
+    if (rule.scope === "member") {
+      // A new record's own id is its own; an organisation anyone may register.
+      if (rule.column === "id") continue;
+      const mine = await memberOrganisations(rule, ctx);
+      const given = cleanData[rule.column];
+      if (given === undefined || given === null || given === "") {
+        // FILED IN THE ONE ORGANISATION THEY ARE IN; asked which, of several.
+        if (mine.length === 1) cleanData[rule.column] = mine[0];
+        else if (mine.length > 1 && rule.kind !== "attribution") {
+          throw new ValidationError([`Say which ${rule.column} this ${entityName} belongs to — one of yours.`]);
+        }
+      } else if (!mine.includes(String(given)) && !(await foundsOrganisation(rule, entity, given))) {
+        throw new ValidationError([`That ${rule.column} is not an organisation you are a member of.`]);
+      }
+      continue;
+    }
     const actor = actorValue(rule, ctx);
     // No actor value to write: leave what the tenancy fill above put there
     // rather than nulling a NOT NULL column. A scope column's read path
@@ -1264,6 +1356,15 @@ export async function update(
   for (const rule of ownershipRulesFor(entityName)) {
     if (rule.kind === "attribution" || rule.through || !(rule.column in cleanData)) continue;
     if (ctx.user?.role && (rule.unscopedRoles || []).includes(ctx.user.role)) continue;
+    if (rule.scope === "member") {
+      // MOVED ONLY BETWEEN THE ORGANISATIONS THEY ARE IN; left where it was, fine.
+      const value = cleanData[rule.column];
+      if (String(value) === String((existing as any)[rule.column])) continue;
+      if (!(await memberOrganisations(rule, ctx)).includes(String(value))) {
+        throw new ValidationError([`That ${rule.column} is not an organisation you are a member of.`]);
+      }
+      continue;
+    }
     const actor = actorValue(rule, ctx);
     if (Array.isArray(actor) && !actor.map(String).includes(String(cleanData[rule.column]))) {
       throw new ValidationError([`That ${rule.column} is not one of yours.`]);
