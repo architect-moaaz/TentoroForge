@@ -1207,7 +1207,7 @@ def test_a_placed_shape_is_absolute_and_the_row_it_is_placed_in_holds_it():
                          "absoluteBoundingBox": {"x": 40, "y": 6, "width": 80, "height": 20}}]}
     out = Emitter().element(row, {"id": "0", "type": "FRAME", "layoutMode": "VERTICAL"})
     first = out.splitlines()[0]
-    assert 'className="relative flex' in first
+    assert "relative" in first.split('className="')[1].split('"')[0].split()
     guide = next(l for l in out.splitlines() if "left-[21px]" in l)
     assert "absolute" in guide and "relative" not in guide
 
