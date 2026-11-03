@@ -517,22 +517,54 @@ async function _enrich(call: (op: string, body: Record<string, unknown>) => Prom
     }
     return rows;
   };
-  const [customers, rooms, payments] = await Promise.all([
+  // A PAYMENT TAKEN ON THE GUEST'S BILL is the account's, not the
+  // reservation's: Mews returned the card charge a desk processed on the bill
+  // (kkb5mzo3, Zedwell demo, 2026-11-03) for the guest's account and not for
+  // the reservation, so the stay looked unpaid. The account's payments are
+  // asked for too (a hundred accounts a call) and stand in when the
+  // reservation has none of its own.
+  const accountPayments = async () => {
+    const rows: any[] = [];
+    for (const part of chunks(accountIds, 100)) {
+      const a = await call("payments/getAll", { AccountIds: part, Limitation: { Count: 1000 } });
+      rows.push(...(a?.Payments ?? []));
+    }
+    return rows;
+  };
+  const [customers, rooms, payments, ofAccounts] = await Promise.all([
     accountIds.length ? all("customers/getAll", "CustomerIds", accountIds, "Customers", { Extent: { Customers: true } }) : [],
     roomIds.length ? all("resources/getAll", "ResourceIds", roomIds, "Resources") : [],
     reservationIds.length ? all("payments/getAll", "ReservationIds", reservationIds, "Payments") : [],
+    accountIds.length ? accountPayments() : [],
   ]);
   const customer = new Map<string, any>(customers.map((c: any) => [c.Id, c]));
   const room = new Map<string, any>(rooms.map((r: any) => [r.Id, r]));
   const paid = new Map<string, any[]>();
+  const seenPayment = new Set<string>();
   for (const p of payments) {
     if (!p?.ReservationId) continue;
+    seenPayment.add(String(p.Id));
     paid.set(p.ReservationId, [...(paid.get(p.ReservationId) ?? []), p]);
+  }
+  // An account's payment without a reservation goes to that guest's stay
+  // whose arrival is nearest the moment it was charged — one stay, never all.
+  const unplaced = new Map<string, any[]>();
+  const at = (v: unknown) => Date.parse(String(v || "")) || 0;
+  for (const p of ofAccounts) {
+    if (!p?.AccountId || seenPayment.has(String(p.Id))) continue;
+    if (p.ReservationId) {
+      if (reservationIds.includes(p.ReservationId)) paid.set(p.ReservationId, [...(paid.get(p.ReservationId) ?? []), p]);
+      continue;
+    }
+    const when = at(p.ChargedUtc) || at(p.CreatedUtc);
+    const stay = reservations.filter((r) => r.AccountId === p.AccountId)
+      .sort((a, b) => Math.abs(at(a.ScheduledStartUtc) - when) - Math.abs(at(b.ScheduledStartUtc) - when))[0];
+    if (stay) unplaced.set(stay.Id, [...(unplaced.get(stay.Id) ?? []), p]);
   }
   return reservations.map((r) => {
     const c = customer.get(r.AccountId);
     const name = c ? [c.FirstName, c.LastName].filter(Boolean).join(" ").trim() : "";
-    const payment = _payment(paid.get(r.Id) ?? []);
+    const payment = _payment(paid.get(r.Id) ?? []) ?? _payment(unplaced.get(r.Id) ?? []);
     return {
       reservationId: String(r.Id),
       confirmationNumber: r.Number ? String(r.Number) : null,
