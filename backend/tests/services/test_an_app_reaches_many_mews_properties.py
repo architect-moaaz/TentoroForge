@@ -90,7 +90,8 @@ def test_every_app_gets_the_table_the_routes_the_page_and_the_library(tmp_path):
     inject_runtime(str(root))
     for rel in ("src/lib/mews.ts", "src/db/schema/_forge_mews_properties.ts", "src/app/api/mews/guard.ts",
                 "src/app/api/mews/properties/route.ts", "src/app/api/mews/properties/[id]/route.ts",
-                "src/app/api/mews/properties/[id]/check/route.ts", "src/app/(dashboard)/mews-properties/page.tsx",
+                "src/app/api/mews/properties/[id]/check/route.ts", "src/app/api/mews/stays/route.ts",
+                "src/app/(dashboard)/mews-properties/page.tsx",
                 "src/app/(dashboard)/mews-properties/MewsPropertiesPanel.tsx"):
         assert (root / rel).is_file(), rel
     barrel = (root / "src" / "db" / "schema" / "index.ts").read_text("utf-8")
