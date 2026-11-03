@@ -117,6 +117,16 @@ async function tableExists(sql: Sql, table: string): Promise<boolean> {
   return r.length > 0;
 }
 
+/** The SQL type of every column the schema declares on one table. */
+function declaredColumns(table: string): Map<string, string> {
+  for (const value of Object.values(schema as Record<string, unknown>)) {
+    if (!is(value, PgTable)) continue;
+    const config = getTableConfig(value as PgTable);
+    if (config.name === table) return new Map(config.columns.map((c) => [c.name, c.getSQLType()]));
+  }
+  return new Map();
+}
+
 async function columnsOf(sql: Sql, table: string): Promise<Map<string, { type: string; nullable: boolean }>> {
   const rows = await sql<{ column_name: string; data_type: string; is_nullable: string }[]>`
     SELECT column_name, data_type, is_nullable FROM information_schema.columns
@@ -423,11 +433,27 @@ async function main() {
         WHERE conrelid = ${`public.${quote(table)}`}::regclass AND contype IN ('u', 'p')
       `;
       const have = new Set(present.map((row) => row.conname));
+      const columnsHere = await columnsOf(sql, table);
+      const declared = declaredColumns(table);
       for (const unique of uniques) {
         if (have.has(unique.name)) continue;
+        // A UNIQUE ON A COLUMN THE DATABASE HAS NOT GOT YET (kkb5mzo3,
+        // 2026-11-03: Guest.mewsCustomerId). Push would add the column and its
+        // constraint together and ask the truncate question on a table with
+        // rows, so the column is added here first, as push would make it —
+        // empty, which no uniqueness can fault.
+        for (const name of unique.columns) {
+          if (columnsHere.has(name) || !declared.has(name)) continue;
+          await sql.unsafe(`ALTER TABLE ${quote(table)} ADD COLUMN ${quote(name)} ${declared.get(name)}`);
+          columnsHere.set(name, { nullable: true } as never);
+          console.log(`[prepare-schema] ${table}: added column ${name} for ${unique.name}`);
+        }
         const columns = unique.columns.map(quote).join(", ");
+        // Empty values never collide: Postgres's UNIQUE admits any number of
+        // NULLs, and a column just added above holds nothing else.
+        const filled = unique.columns.map((c) => `${quote(c)} IS NOT NULL`).join(" AND ");
         const duplicates = await sql.unsafe(
-          `SELECT ${columns}, count(*)::int AS n FROM ${quote(table)} `
+          `SELECT ${columns}, count(*)::int AS n FROM ${quote(table)} WHERE ${filled} `
           + `GROUP BY ${columns} HAVING count(*) > 1 LIMIT 3`,
         );
         if (duplicates.length) {
