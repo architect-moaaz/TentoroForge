@@ -139,6 +139,27 @@ def phone_routes(doc: dict) -> list[str]:
                    if page_frames(p) & twins or str(p.get("figmaFrame") or "") in narrow})
 
 
+def bare_routes(doc: dict, output_dir: str | Path) -> list[str]:
+    """The pages whose drawing has no shell around it — onboarding with its own
+    brand panel, a step drawn full screen. Framed in the portal's sidebar and
+    top bar, DITANS's profile builder came out squeezed beside a menu its
+    drawing never had (D2, 2026-11-03)."""
+    from services.drawn.convert import _spec_frames, framing
+
+    framed = {ref.split("/")[-1]: f for ref, f in framing(doc, output_dir).items()}
+    # Only where the portal HAS a shell is a frame without it drawn bare; a
+    # portal drawn with none (a phone app) keeps the frame its people get.
+    shelled = {str(v.get("portal") or "") for v in doc.get("drawnViews") or []
+               if isinstance(v, dict) and v.get("kind") == "shell"}
+    portal_of = {str(f["nodeId"]): str(f.get("portal") or "") for _s, f in _spec_frames(doc)}
+    out = set()
+    for p in _live_pages(doc):
+        ref = str(p.get("figmaFrame") or "").split("/")[-1]
+        if framed.get(ref) is False and portal_of.get(ref, "") in shelled:
+            out.add(str(p["route"]))
+    return sorted(out)
+
+
 def _by_frame(doc: dict) -> dict[str, str]:
     """Each drawn frame -> the route of the page it became."""
     from services.blueprint.page_planner import page_frames
@@ -244,7 +265,8 @@ def _props(shell: dict, routes: dict[str, str] | None = None) -> str:
 
 
 def _wrapper(shells: list[tuple[dict, list[dict]]], routes: list[list[str]], roles: dict[str, str],
-             phone: list[str], app_name: str = "", actions: list[dict[str, str]] | None = None) -> str:
+             phone: list[str], app_name: str = "", actions: list[dict[str, str]] | None = None,
+             bare: list[str] | None = None) -> str:
     """The wrapper the layout renders: the frame for this page, bound, inside
     `DrawnFrame` — the drawer the sidebar becomes on a narrow screen, and the
     design's words in the chosen language."""
@@ -291,7 +313,9 @@ def _wrapper(shells: list[tuple[dict, list[dict]]], routes: list[list[str]], rol
         f"const FIRST = {json.dumps(str(shells[0][0]['key']))};\n"
         f"const ROUTES: [string, string][] = {json.dumps(routes, indent=2)};\n"
         f"const ROLES: Record<string, string> = {json.dumps(roles, indent=2, ensure_ascii=False)};\n"
-        f"const PHONE: string[] = {json.dumps(phone, indent=2)};\n\n"
+        f"const PHONE: string[] = {json.dumps(phone, indent=2)};\n"
+        "// Drawn without the shell: shown as drawn, nothing around them.\n"
+        f"const BARE: string[] = {json.dumps(bare or [], indent=2)};\n\n"
         "function matches(route: string, path: string): boolean {\n"
         "  const pattern = \"^\" + route.replace(/\\[\\.\\.\\.[^\\]]+\\]/g, \".+\").replace(/\\[[^\\]]+\\]/g, \"[^/]+\") + \"/?$\";\n"
         "  return new RegExp(pattern).test(path);\n"
@@ -300,7 +324,7 @@ def _wrapper(shells: list[tuple[dict, list[dict]]], routes: list[list[str]], rol
         "                                            data?: Record<string, Record<string, unknown>> }) {\n"
         "  const path = usePathname() || \"/\";\n"
         "  const phone = useIsPhone();\n"
-        "  if (phone && PHONE.some((r) => matches(r, path))) return <><DrawnWords />{props.children}</>;\n"
+        "  if ((phone && PHONE.some((r) => matches(r, path))) || BARE.some((r) => matches(r, path))) return <><DrawnWords />{props.children}</>;\n"
         "  const drawn = ROUTES.find(([r]) => matches(r, path));\n"
         "  const wanted = drawn ? drawn[1] : ROLES[props.role ?? \"\"] ?? FIRST;\n"
         "  const key = FRAMES[wanted] ? wanted : FIRST;\n"
@@ -358,7 +382,8 @@ def project_drawn(doc: dict, output_dir: str | Path, app_root: str | Path) -> di
     roles = role_portals(doc, routes)
     wrapper.write_text(_wrapper(bound, routes, roles, phone_routes(doc),
                                  str((doc.get("application") or {}).get("name") or ""),
-                                 [action_routes(doc, shell) for shell, _nav in bound]), encoding="utf-8")
+                                 [action_routes(doc, shell) for shell, _nav in bound],
+                                 bare_routes(doc, output_dir)), encoding="utf-8")
     reads = _shell_loads(shells, drawn)
     (root / SHELL_LOAD).write_text(_shell_loader(reads), encoding="utf-8")
     return {"assets": copied, "shell": True, "shells": len(shells), "nav": sum(len(n) for _s, n in bound),
