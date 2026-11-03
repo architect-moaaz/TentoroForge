@@ -194,8 +194,15 @@ def emit_schema(doc: dict) -> str:
         out.append(f"/** {e.get('name')}{' — ' + desc if desc else ''} */")
         out.append(f"export interface {name} {{")
         cols = entity_columns(e, doc)
+        # A SEALED FIELD MAY BE EMPTY, WHATEVER IT REQUIRES: its plain column is
+        # optional (projection.emit_entity_module) and a reader it leaves out
+        # gets no value. Typed `string`, a page wrote `name.split(…)` and
+        # crashed for every new account (DITANS QA, 2026-11-02); typed
+        # `| null`, the writer's type check makes it say what an empty one shows.
+        from services.blueprint.projection import _sealed_fields
+        sealed = _sealed_fields(e, doc)
         for f in cols:
-            required = bool(f.get("required") or f.get("primaryKey"))
+            required = bool(f.get("required") or f.get("primaryKey")) and str(f.get("name")) not in sealed
             note = str(f.get("description") or "").strip().replace("*/", "")
             if is_image_field(f):
                 note = (note + " " if note else "") + "A stored image's id — show it with <img src={fileUrl(row." + str(f["name"]) + ")} />."

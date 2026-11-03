@@ -297,7 +297,12 @@ async function _encryptSensitiveOnWrite(
   const tbl: any = getEntity(entityName)?.table;
   for (const col of keys) {
     if (!(col in data) || guestCols.has(col)) continue;
-    if (tbl && !(`${col}_encrypted` in tbl)) continue;
+    // AND ONLY WHERE THE TABLE IS KNOWN. Sign-up sealed before the record
+    // types were registered, the table was not found, and a new person's email
+    // went into columns the table does not have: every sign-up failed with
+    // `null value in column "email"` (DITANS, found by Smith's newcomers check,
+    // 2026-11-02). An unknown table leaves the value as written.
+    if (!tbl || !(`${col}_encrypted` in tbl)) continue;
     const raw = data[col];
     // Empty / undefined = "keep existing" on update, "no value" on create.
     // Either way, we must not overwrite _encrypted / _mask with an empty
@@ -363,7 +368,15 @@ async function _maskOrUnmaskOnRead<T extends Record<string, any>>(
     const encKey = `${col}_encrypted`;
     const maskKey = `${col}_mask`;
     const allowed = _canReaderUnmask(spec, ctx.user?.role);
-    if (!(encKey in record) && !(maskKey in record)) {
+    // A ROW NOT SEALED YET IS STILL HELD IN THE CLEAR. Sign-up wrote a new
+    // professional's name in the plain column and the seal pass only runs at
+    // the next start; this read took the empty `_encrypted` and returned
+    // null, so every new account had no name — the CV builder crashed on
+    // `fullName.split` and onboarding showed the name field empty (DITANS
+    // QA, 2026-11-02). A plain value with no seal beside it is read as one.
+    const unsealed = record[encKey] == null && record[col] != null && record[col] !== "";
+    if (unsealed) delete (record as any)[encKey];
+    if (unsealed || (!(encKey in record) && !(maskKey in record))) {
       // STORED IN THE CLEAR, STILL SENSITIVE. A column the manifest names
       // but that was written without the encrypt-at-rest siblings — the
       // platform's bcrypt `password`, a row loaded by SQL — used to fall

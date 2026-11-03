@@ -116,23 +116,30 @@ async def list_integrations(
         (r.provider, r.key): r for r in rows
     }
 
+    # THE NAMES THE ORG'S APPS DECLARE ARE LISTED TOO. They could be saved and
+    # were carried to the apps, but this list — the one the settings page draws
+    # its cards from — walked the registry alone, so a system an app declared
+    # (Mews, Xero) had no card and nowhere to type its key.
+    from services.declared_secrets import declared_keys_for_org
+    entries = [e for provider in all_providers() for e in keys_for_provider(provider)]
+    entries += await declared_keys_for_org(db, org_id)
+
     out: list[IntegrationEntry] = []
-    for provider in all_providers():
-        for entry in keys_for_provider(provider):
-            row = by_key.get((entry.provider, entry.key))
-            out.append(IntegrationEntry(
-                provider=entry.provider,
-                key=entry.key,
-                label=entry.label,
-                kind=entry.kind,
-                required=entry.required,
-                default=entry.default,
-                help_url=entry.help_url,
-                options=list(entry.options) if entry.options else None,
-                is_set=bool(row and row.value_ct),
-                updated_at=row.updated_at.isoformat() if row and row.updated_at else None,
-                platform_only=entry.platform_only,
-            ))
+    for entry in entries:
+        row = by_key.get((entry.provider, entry.key))
+        out.append(IntegrationEntry(
+            provider=entry.provider,
+            key=entry.key,
+            label=entry.label,
+            kind=entry.kind,
+            required=entry.required,
+            default=entry.default,
+            help_url=entry.help_url,
+            options=list(entry.options) if entry.options else None,
+            is_set=bool(row and row.value_ct),
+            updated_at=row.updated_at.isoformat() if row and row.updated_at else None,
+            platform_only=entry.platform_only,
+        ))
     return out
 
 

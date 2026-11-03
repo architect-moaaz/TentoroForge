@@ -107,6 +107,9 @@ export function declaredTypes(): Map<string, Map<string, string>> {
 
 const blockedTypes: string[] = [];
 
+/** Thrown to stop the remaining steps once something is refused. */
+class Blocked extends Error {}
+
 type Sql = ReturnType<typeof postgres>;
 
 async function tableExists(sql: Sql, table: string): Promise<boolean> {
@@ -255,6 +258,96 @@ async function keepRetired(sql: Sql, renamed: Set<string>): Promise<string[]> {
   return kept;
 }
 
+/** The app's decrypt, with its key read the way the seed reads it; null when either is missing. */
+async function loadDecrypt(): Promise<((blob: string) => Promise<string>) | null> {
+  for (const name of [".env.local", ".env"]) {
+    if (process.env.SENSITIVE_ENCRYPTION_KEY) break;
+    try {
+      const m = fs.readFileSync(name, "utf8").match(/^SENSITIVE_ENCRYPTION_KEY=(.+)$/m);
+      if (m && m[1].trim()) process.env.SENSITIVE_ENCRYPTION_KEY = m[1].trim().replace(/^["']|["']$/g, "");
+    } catch { /* no such file */ }
+  }
+  if (!process.env.SENSITIVE_ENCRYPTION_KEY) return null;
+  try {
+    return (await import("../lib/sensitive-crypto")).decryptSensitive;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A FIELD THAT STOPS BEING SEALED KEEPS ITS VALUES. A sealed field's value
+ * lives only in `<column>_encrypted`; its plain column is NULL or ''. When the
+ * definition stops sealing it (a column a workflow finds rows by can never be
+ * sealed, ade9d58f), push drops `<column>_encrypted` and the app reads an
+ * empty column: DITANS's copies lost every report's reporter, and a newly
+ * required registration number was filled with placeholders before push ran
+ * (2026-11-01). So each such value is decrypted into its plain column here,
+ * BEFORE required columns are filled or uniques added. A value an earlier
+ * push already dropped is taken back from `forge_retired.rows`. With no key
+ * to decrypt them, nothing is changed and the push is refused in words.
+ */
+async function unsealReleased(sql: Sql, blocked: string[]): Promise<string[]> {
+  // EMPTY IS NULL OR ''. DITANS's sealed emails sat beside a plain '' (a
+  // required column filled with a blank), not NULL.
+  const empty = (c: string, raw = false) => {
+    const ref = raw ? c : quote(c);
+    return `(${ref} IS NULL OR ${ref}::text = '')`;
+  };
+  const done: string[] = [];
+  let decrypt: ((blob: string) => Promise<string>) | null | undefined;
+  const [{ retired }] = await sql`SELECT to_regclass('forge_retired.rows') IS NOT NULL AS retired`;
+  for (const value of Object.values(schema as Record<string, unknown>)) {
+    if (!is(value, PgTable)) continue;
+    const config = getTableConfig(value as PgTable);
+    const t = config.name;
+    if (!(await tableExists(sql, t))) continue;
+    const declared = new Set(config.columns.map((c) => c.name));
+    const present = await columnsOf(sql, t);
+    if (!present.has("id")) continue;
+    const candidates = new Set([...present.keys()].filter((c) => c.endsWith("_encrypted")));
+    if (retired) {
+      const was = await sql<{ column_name: string }[]>`
+        SELECT DISTINCT column_name FROM forge_retired.rows
+        WHERE table_name = ${t} AND column_name LIKE '%\\_encrypted'`;
+      for (const { column_name } of was) candidates.add(column_name);
+    }
+    for (const enc of candidates) {
+      const col = enc.slice(0, -"_encrypted".length);
+      if (!col || !declared.has(col) || declared.has(enc) || !present.has(col)) continue;
+      const rows: { id: string; blob: string }[] = present.has(enc)
+        ? await sql.unsafe(`SELECT id::text AS id, ${quote(enc)} AS blob FROM ${quote(t)} `
+          + `WHERE ${quote(enc)} IS NOT NULL AND ${empty(col)}`)
+        : await sql.unsafe(`SELECT DISTINCT ON (r.row->>'id') r.row->>'id' AS id, r.row->>'value' AS blob `
+          + `FROM forge_retired.rows r JOIN ${quote(t)} x ON x.id::text = r.row->>'id' `
+          + `WHERE r.table_name = $1 AND r.column_name = $2 AND r.row->>'value' IS NOT NULL `
+          + `AND ${empty(`x.${quote(col)}`, true)} ORDER BY r.row->>'id', r.retired_at DESC`, [t, enc]);
+      if (!rows.length) continue;
+      if (decrypt === undefined) decrypt = await loadDecrypt();
+      if (!decrypt) {
+        blocked.push(`${t}.${col} is no longer encrypted, and ${rows.length} record(s) hold its value only `
+          + "encrypted; SENSITIVE_ENCRYPTION_KEY (or src/lib/sensitive-crypto.ts) is missing, so they cannot be "
+          + "decrypted and the push would leave them empty");
+        continue;
+      }
+      try {
+        await sql.begin(async (tx) => {
+          for (const r of rows) {
+            await tx.unsafe(`UPDATE ${quote(t)} SET ${quote(col)} = $1 WHERE id::text = $2 AND ${empty(col)}`,
+              [await decrypt!(r.blob), r.id]);
+          }
+        });
+      } catch (err) {
+        blocked.push(`${t}.${col} is no longer encrypted, and its ${rows.length} encrypted value(s) could not be `
+          + `decrypted (${String((err as Error).message).split("\n")[0]}); the push would leave them empty`);
+        continue;
+      }
+      done.push(`${t}.${col}: ${rows.length} value(s)` + (present.has(enc) ? "" : " (from forge_retired.rows)"));
+    }
+  }
+  return done;
+}
+
 async function convertTypes(sql: ReturnType<typeof postgres>): Promise<number> {
   let converted = 0;
   for (const [table, cols] of declaredTypes()) {
@@ -308,8 +401,13 @@ async function main() {
   let renamed: string[] = [];
   let required: string[] = [];
   let retired: string[] = [];
+  let unsealed: string[] = [];
   try {
     renamed = await applyRenames(sql);
+    unsealed = await unsealReleased(sql, blocked);
+    // Nothing else may touch the rows while a value is still only encrypted:
+    // a required column would be filled with a blank over it.
+    if (blocked.length) throw new Blocked();
     converted = await convertTypes(sql);
     blocked.push(...blockedTypes);
     required = await addRequired(sql, blocked);
@@ -353,10 +451,13 @@ async function main() {
       const renamedTables = new Set<string>();
       retired = await keepRetired(sql, renamedTables);
     }
+  } catch (err) {
+    if (!(err instanceof Blocked)) throw err;
   } finally {
     await sql.end();
   }
   for (const r of renamed) console.log(`[prepare-schema] renamed ${r}, data kept`);
+  for (const r of unsealed) console.log(`[prepare-schema] no longer encrypted, decrypted into place: ${r}`);
   for (const r of required) console.log(`[prepare-schema] required ${r}`);
   for (const r of retired) console.log(`[prepare-schema] kept before removal: ${r} (forge_retired.rows)`);
   if (blocked.length) {
@@ -367,9 +468,10 @@ async function main() {
     );
     process.exit(1);
   }
-  console.log(added || converted || renamed.length || required.length || retired.length
+  console.log(added || converted || renamed.length || unsealed.length || required.length || retired.length
     ? `[prepare-schema] ${added} constraint(s) added, ${converted} column(s) converted, `
-      + `${renamed.length} renamed, ${required.length} required column(s) filled, ${retired.length} removal(s) kept`
+      + `${renamed.length} renamed, ${unsealed.length} decrypted, ${required.length} required column(s) filled, `
+      + `${retired.length} removal(s) kept`
     : "[prepare-schema] nothing to add");
 }
 

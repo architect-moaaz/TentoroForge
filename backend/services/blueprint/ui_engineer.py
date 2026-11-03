@@ -589,6 +589,13 @@ What a finished page looks like:
 - REAL CONTENT, REAL STATES. Every list has an empty state that says what to do next
   (and offers the action). Every record page handles a missing optional field with
   a quiet em dash, not "null". Long text truncates with a title attribute.
+- A NEWCOMER HAS NOTHING YET. The person who signed up a minute ago has no
+  records, may belong to no group, and any field typed `| null` may be empty.
+  `load` returns `null` only for a record named in the address that does not
+  exist — never because the person has nothing yet (that answers "not found").
+  When the person's own group or record is missing, show the step that gets them
+  one; never fall back to another person's or another group's rows, and never
+  call a method on a value that may be null.
 - NUMBERS WITH CONTEXT. A figure is a label, a number and, where the data allows, a
   comparison or a sparkline, laid out as the rhythm's `figures` says. Money is
   formatted with its currency; dates with

@@ -374,7 +374,36 @@ def _sealed_fields(entity: dict, doc: dict) -> set[str]:
             config = (step.get("config") or {}) if isinstance(step, dict) else {}
             if str(config.get("table") or "") == table and isinstance(config.get("where"), dict):
                 found_by |= set(config["where"]) & fields
+    # AND EVERY COLUMN A PAGE FINDS ROWS BY. DITANS's pages find the signed-in
+    # member with `list("OrganisationMember", { where: { email } })` — 90
+    # loaders; sealed, the email matched nobody, every member read as "not in
+    # an organisation" and the pages fell back to every organisation's rows
+    # (QA D-65, D-70, D-73, 2026-11-02).
+    found_by |= _page_lookups(doc, str(entity.get("name") or "")) & fields
     return fields - found_by
+
+
+_SDK_LOOKUP = re.compile(r'\b(list|count|first)\(\s*"(\w+)"\s*,\s*\{(\s*where\s*:\s*\{)?([^{}]*)\}')
+
+
+def _page_lookups(doc: dict, entity_name: str) -> set[str]:
+    """The fields of `entity_name` page code filters rows by, through the SDK's
+    `list(E, { where: {…} })` and `count(E, {…})`."""
+    found: set[str] = set()
+    if not entity_name:
+        return found
+    for row in doc.get("pageCode") or []:
+        if not isinstance(row, dict):
+            continue
+        parts = row.get("parts") if isinstance(row.get("parts"), dict) else {}
+        for text in [row.get("load"), row.get("view"), *parts.values()]:
+            if not isinstance(text, str) or entity_name not in text:
+                continue
+            for fn, name, where, body in _SDK_LOOKUP.findall(text):
+                if name != entity_name or (fn == "list" and not where):
+                    continue
+                found |= {m.group(1) for m in re.finditer(r"(?:^|,)\s*(\w+)\s*(?=[:,]|$)", body)}
+    return found
 
 
 def emit_entity_module(entity: dict, doc: dict) -> str:
@@ -3765,9 +3794,18 @@ def sensitive_columns(doc: dict) -> dict[str, dict[str, dict]]:
     permissions instead.
     """
     out: dict[str, dict[str, dict]] = {}
+    # WHO MAY READ THE RECORD MAY READ ITS FIELDS. With no read permission
+    # declared, every reader list came out empty: 207 of DITANS's 249 masked
+    # fields could be read by nobody, an agency's own fees summed "••••" into
+    # "USD NaN", and its members could not be told apart (QA, 2026-11-02).
+    # The roles the access step lets read the record (its pages show it, its
+    # code reads it) are its readers; an anonymous visitor never unmasks.
+    access = entity_access(doc)
+    out_readers = {slug: [r for r in v.get("read") or [] if r != "*"] for slug, v in access.items()}
     for entity in [e for e in ((doc.get("data") or {}).get("entities") or [])
                    if e.get("status") != "DEPRECATED"]:
-        readers = _entity_readers(doc, entity)
+        slug = str(entity.get("table") or str(entity.get("name")).lower())
+        readers = _entity_readers(doc, entity) or out_readers.get(slug, [])
         cols: dict[str, dict] = {}
         # THE COLUMN THE RUNTIME KNOWS, NOT THE FIELD THE BLUEPRINT NAMED. On a
         # platform table the Blueprint's `passwordHash` folds into the

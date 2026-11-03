@@ -70,8 +70,13 @@ TRIALS: tuple[tuple[str, str, dict[str, str]], ...] = (
      "with `[id]` opens the first record. `sign_in: true` instead signs in "
      "through the sign-in page's own form, as the administrator, and shows "
      "where that lands — the only way to see where a sign-in takes someone. "
-     "On a copy of the data.",
-     {"route": "string", "as": "string", "press": "string", "sign_in": "boolean"}),
+     "`look: true` is your EYES on the screen: what the browser measured (a pressable thing showing the "
+     "arrow instead of the hand, a drawn control nothing handles, a menu or panel cut off or covered when "
+     "it opens, a screen that scrolls sideways), the screen's picture beside its drawing with how much "
+     "of it matches, and what is visibly wrong by eye. Use it when the complaint is about what someone "
+     "SEES (\"the menu is hidden\", \"the cursor does not change\", \"it does not look like the design\"), "
+     "and after a change to how a screen looks. On a copy of the data.",
+     {"route": "string", "as": "string", "press": "string", "sign_in": "boolean", "look": "boolean"}),
 )
 
 TRIALS = TRIALS + (
@@ -94,12 +99,20 @@ TRIALS = TRIALS + (
      "process refuses the case the rule forbids), `pages` (open and press every "
      "control on the screens named in `routes`, as `as`), `guards` (every fix "
      "made before on this app: the try that failed and then passed, run again), "
-     "or `all` (routes, access, rules and guards). `routes` narrows routes/pages to those screens (a route "
-     "or a page name); `entities` narrows access to those record types. Lines "
+     "`workflows` (EVERY process a person starts, run on the copy with inputs from its real records — "
+     "slow: minutes per dozen; `workflows` narrows it to those names), `drawing` (in an app drawn from a "
+     "design: drawn screens no page shows, pages showing no drawing), `words` (every drawn word in every "
+     "language the app is shown in), `logins` (every demo person signs in, belongs to an organisation when "
+     "the app has them, and lands where they may), `newcomers` (a brand-new person of every role that signs "
+     "up, with no organisation and no records yet, opens every screen of their menu: a crash, a 'not found' "
+     "or a refusal is a line — what a tester meets first and the demo people never see), `looks` (the measured look — cursor, dead drawn controls, "
+     "cut-off menus — of the screens in `routes`, or of every screen, a dozen a call), "
+     "or `all` (routes, access, rules, guards, drawing, words, logins and newcomers). `routes` narrows routes/pages/looks "
+     "to those screens (a route or a page name); `entities` narrows access to those record types. Lines "
      "marked ✗ are what is not right, with the reason; read them before "
      "deciding what to change, and run the same check again after changing it. "
      "On a copy of the data.",
-     {"what": "string", "routes": "array", "entities": "array", "as": "string"}),
+     {"what": "string", "routes": "array", "entities": "array", "workflows": "array", "as": "string"}),
 )
 
 TRIAL_NAMES: frozenset[str] = frozenset(name for name, _d, _a in TRIALS)
@@ -692,26 +705,14 @@ def _server_back(app: Any, timeout: float | None = None) -> bool:
     return False
 
 
-def open_page(bench: Bench, doc: dict, route: str, as_: str, sign_in: bool = False,
-              press: bool = False) -> str:
-    """The page as a browser sees it. `press` presses every control from a
-    fresh load as well — what the after-change check does; for a look at a
-    page it cost Mark 8 four minutes an open (6 opens, 24 of 32 minutes,
-    2026-10-16), so it is asked for, not assumed."""
-    from services.blueprint.page_review import BROKEN_OUTCOMES, ReviewUnavailable, run_shots
-
-    route = (route or "").strip()
-    if sign_in:
-        return _sign_in(bench, doc, route, as_)
-    if not route.startswith("/"):
-        return "`route` is a screen's path, starting with `/`."
+def _entry(bench: Bench, doc: dict, route: str, as_: str) -> tuple[dict | None, dict, str]:
+    """`(page, the screenshot script's entry, who)` for opening `route` as `as_`."""
     pages = [p for p in doc.get("pages") or [] if isinstance(p, dict)]
     page = next((p for p in pages if str(p.get("route") or "") == route), None)
     ents = {str(e.get("id")): e for e in (doc.get("data") or {}).get("entities") or []}
     ent = ents.get(str(((page or {}).get("data") or {}).get("primaryEntity") or ""))
-    app = bench.app()
     as_ = as_ or default_person(doc, route=route)
-    who, jar = _session(app, doc, as_, bench.guest)
+    who, jar = _session(bench.app(), doc, as_, bench.guest)
     role, is_admin = _role(doc, as_)
     entry: dict[str, Any] = {"id": str((page or {}).get("id") or "trial"), "route": route,
                              "entity": (ent or {}).get("name"), "as": who}
@@ -723,12 +724,32 @@ def open_page(bench: Bench, doc: dict, route: str, as_: str, sign_in: bool = Fal
             entry["anonymous"] = True
     elif not is_admin:
         entry["cookies"] = jar
+    return page, entry, who
+
+
+def open_page(bench: Bench, doc: dict, route: str, as_: str, sign_in: bool = False,
+              press: bool = False, look: bool = False) -> str:
+    """The page as a browser sees it. `press` presses every control from a
+    fresh load as well — what the after-change check does; for a look at a
+    page it cost Mark 8 four minutes an open (6 opens, 24 of 32 minutes,
+    2026-10-16), so it is asked for, not assumed. `look` adds what a person
+    SEES: what the browser measured (`look_lines`) and the picture, beside its
+    drawing when it has one, judged by eye (`_seen`)."""
+    from services.blueprint.page_review import BROKEN_OUTCOMES, ReviewUnavailable, run_shots
+
+    route = (route or "").strip()
+    if sign_in:
+        return _sign_in(bench, doc, route, as_)
+    if not route.startswith("/"):
+        return "`route` is a screen's path, starting with `/`."
+    app = bench.app()
+    page, entry, who = _entry(bench, doc, route, as_)
     bench.server_said()
     shots_dir = Path(bench.output_dir) / ".forge" / "trials" / "shots"
     printed: list[str] = []
     notes: list[str] = []
     try:
-        shot = run_shots(app, [entry], shots_dir, probe=press, states=False)[0]
+        shot = run_shots(app, [entry], shots_dir, probe=press, states=False, **({"look": True} if look else {}))[0]
         # A RESTARTING SERVER IS NOT A BROKEN PAGE. `next dev` restarts itself
         # near its heap limit; the request in flight dies with a connection
         # error and the page "says it is loading". Three pages were rewritten
@@ -741,7 +762,7 @@ def open_page(bench: Bench, doc: dict, route: str, as_: str, sign_in: bool = Fal
                 return scrub(f"{route} as {who}: {SERVER_RESTARTED}; it had not answered again after "
                              f"{int(RESTART_WAIT_S)}s. Try it again in a moment — do not change the page for this.")
             notes.append(SERVER_RESTARTED + "; opened again once it was back")
-            shot = run_shots(app, [entry], shots_dir, probe=press, states=False)[0]
+            shot = run_shots(app, [entry], shots_dir, probe=press, states=False, **({"look": True} if look else {}))[0]
             before = bench.restarts
             printed += bench.server_said()
             if _server_gone(shot, bench.restarts > before):
@@ -772,6 +793,9 @@ def open_page(bench: Bench, doc: dict, route: str, as_: str, sign_in: bool = Fal
             verdict = BROKEN_OUTCOMES.get(str(c.get("outcome")), str(c.get("outcome")))
             out.append(f"  {c.get('kind')} \"{c.get('label')}\": {verdict}"
                        + (f" ({detail})" if detail else ""))
+    if look:
+        out += look_lines(shot.get("look") or {})
+        out += _seen(bench, doc, page, shot, route)
     text = " ".join(str(shot.get("text") or "").split())
     out.append(f"text on the page: {text[:BODY_SHOWN]}" if text else "the page shows no text")
     said = printed + bench.server_said()
@@ -779,6 +803,157 @@ def open_page(bench: Bench, doc: dict, route: str, as_: str, sign_in: bool = Fal
         out.append("the server printed:")
         out += [f"  {l}" for l in said]
     return scrub("\n".join(out))
+
+
+# ── the look: what a person sees ────────────────────────────────────────────
+
+#: How many of each kind of measured fault are named; the rest are counted.
+LOOK_NAMED = 10
+
+#: What the vision reviewer is asked when Smith looks at a screen. The
+#: measured faults are what it cannot miss; this is for what no measure finds.
+_LOOK_SYSTEM = ("You look at one screen of a web application the way its owner would, and say what is visibly "
+                "wrong: text cut off or overlapping, a panel or menu hidden behind something, controls that do "
+                "not look pressable, empty areas where content belongs, words in the wrong language, broken "
+                "images, misaligned columns. When the first image is a DRAWN | BUILT pair, the drawing is the "
+                "standard for the LAYOUT: name each place the built screen differs from it — a missing section or "
+                "control, other colours, another order, other labels on controls and headings. The drawing's "
+                "names, numbers, dates and counts are sample data and the built screen shows the app's real "
+                "rows: a different person, total or menu entry the app really has is not a fault. A raw id "
+                "where a name belongs, an empty value, a contradiction on the screen itself are. Say only what "
+                "the picture shows; do not guess at code. Return JSON.")
+_LOOK_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["faults"],
+                "properties": {"faults": {"type": "array", "items": {
+                    "type": "object", "additionalProperties": False, "required": ["where", "problem"],
+                    "properties": {"where": {"type": "string"}, "problem": {"type": "string"}}}}}}
+
+
+def _named(items: list[dict], *, extra: str = "") -> str:
+    """`"Saved searches" ×3, "Filters" (frame)…` — each once, with its count."""
+    shown = [f"\"{i.get('label')}\"" + (f" ×{i['n']}" if int(i.get("n") or 1) > 1 else "")
+             + (" (frame)" if i.get("where") == "frame" else "")
+             + (f" [drawn as \"{i['layer']}\"]" if extra and i.get("layer") else "")
+             for i in items[:LOOK_NAMED]]
+    rest = sum(int(i.get("n") or 1) for i in items[LOOK_NAMED:])
+    return ", ".join(shown) + (f" and {rest} more" if rest else "")
+
+
+def look_lines(measured: dict) -> list[str]:
+    """What the browser measured on a screen, as lines marked ✗ — or one line
+    saying nothing measured is wrong. Facts about boxes and handlers, never a
+    judgement: each names the thing a person would press or see."""
+    if not measured:
+        return []
+    if measured.get("error"):
+        return [f"the look could not measure this screen: {measured['error']}"]
+    out: list[str] = []
+    no_hand = measured.get("noHand") or []
+    if no_hand:
+        total = sum(int(i.get("n") or 1) for i in no_hand)
+        out.append(f"{CHECK_RED} {total} pressable thing(s) show the arrow, not the hand, when pointed at: "
+                   + _named(no_hand) + ". One shared cause is likely (a drawn component, a shared class) — "
+                   "fix it there, not screen by screen.")
+    drawn = measured.get("drawnDead") or []
+    if drawn:
+        out.append(f"{CHECK_RED} drawn as a control, and nothing handles a press on it: " + _named(drawn, extra="layer")
+                   + ". A person presses these and nothing happens.")
+    dead = measured.get("dead") or []
+    if dead:
+        out.append(f"{CHECK_RED} shows the hand, and nothing handles a press on it: " + _named(dead))
+    for o in measured.get("opened") or []:
+        what = f"pressing \"{o.get('opener')}\"" + (" in the frame" if o.get("where") == "frame" else "") \
+            + (f" opens \"{o.get('text')}\"" if o.get("text") else " opens a panel")
+        if o.get("clippedBy"):
+            out.append(f"{CHECK_RED} {what}, and only {o.get('shown')}% of it shows: it is cut off by "
+                       f"{o['clippedBy']}")
+        if o.get("coveredBy"):
+            out.append(f"{CHECK_RED} {what}, and it is covered by {o['coveredBy']}")
+    if measured.get("wider"):
+        out.append(f"{CHECK_RED} the screen is {measured['wider']}px wider than the window: it scrolls sideways")
+    opened_ok = [o for o in measured.get("opened") or [] if not o.get("clippedBy") and not o.get("coveredBy")]
+    if not out:
+        out.append("✓ nothing measured is wrong: every pressable thing shows the hand, every drawn control "
+                   "does something" + (f", and the {len(opened_ok)} panel(s) its controls open show whole"
+                                       if opened_ok else ""))
+    return ["what the browser measured:"] + [f"  {l}" for l in out]
+
+
+def _drawing(doc: dict, page: dict | None, output_dir: str) -> tuple[Any, str]:
+    """The drawing a screen was made from, as a picture to compare with —
+    `(image, said)`; `(None, "")` for a screen nobody drew. The whole frame
+    when the app draws its own shell, since the screenshot holds it too."""
+    if not page or not page.get("figmaFrame"):
+        return None, ""
+    try:
+        from PIL import Image
+
+        from services.blueprint.page_look import _drawn_crop
+        from services.figma.react_reference import reference_for
+        ref, said = reference_for(doc, page, output_dir)
+        if not ref or not (ref.get("images") or [None])[0]:
+            return None, said or "its drawing is not stored here, so it was not compared"
+        drawn_shell = any(isinstance(v, dict) and v.get("kind") == "shell" and v.get("status") != "DEPRECATED"
+                          for v in doc.get("drawnViews") or [])
+        image = Image.open(ref["images"][0]).convert("RGB") if drawn_shell else _drawn_crop(ref)
+        return image, ""
+    except Exception as exc:  # noqa: BLE001 — a drawing helps the look, it never stops it
+        return None, f"its drawing could not be read ({type(exc).__name__})"
+
+
+def _seen(bench: Bench, doc: dict, page: dict | None, shot: dict, route: str) -> list[str]:
+    """The screenshot beside its drawing (measured likeness), and what a
+    vision reviewer says is visibly wrong. Lines for the observation."""
+    from PIL import Image
+
+    file = shot.get("file")
+    if not file or not Path(file).exists():
+        return ["no picture of the screen was taken, so it was not looked at"]
+    out: list[str] = [f"picture of the screen: {file}"]
+    built = Image.open(file).convert("RGB")
+    drawn, said = _drawing(doc, page, bench.output_dir)
+    images = [str(file)]
+    if said:
+        out.append(f"the drawing: {said}")
+    if drawn is not None:
+        from services.blueprint.page_look import PIXEL_PASS, pixel_likeness, side_by_side
+        pixel = pixel_likeness(drawn, built)
+        pair = side_by_side(drawn, built, Path(file).with_name(Path(file).stem + ".beside-drawing.png"))
+        images = [str(pair)]
+        out.append(f"{'✓' if pixel >= PIXEL_PASS else CHECK_RED} likeness to its drawing: {round(pixel * 100)}% of the "
+                   f"colour blocks match ({round(PIXEL_PASS * 100)}% is the bar); side by side: {pair}")
+    try:
+        from services.blueprint.executors import tiered_router
+        critic = tiered_router().for_task("page_look", "page_reviewer")
+        if not getattr(critic, "accepts_images", False):
+            return out
+        t0 = time.monotonic()
+        reply = critic(system=_LOOK_SYSTEM, user=(
+            f"The screen {route}" + (" — first image: the drawing (left) beside the built screen (right)."
+                                     if drawn is not None else ".")
+            + " List what is visibly wrong, most important first; an empty list when nothing is."),
+            schema=_LOOK_SCHEMA, images=images)
+        _spent(bench, reply, time.monotonic() - t0)
+        faults = (json.loads(getattr(reply, "text", reply)) or {}).get("faults") or []
+    except Exception as exc:  # noqa: BLE001 — eyes help; a failed look is said, not raised
+        out.append(f"the screen could not be looked at by eye ({type(exc).__name__})")
+        return out
+    if faults:
+        out.append("what is visibly wrong, by eye:")
+        out += [f"  {CHECK_RED} {f.get('where')}: {f.get('problem')}" for f in faults[:12]]
+    else:
+        out.append("✓ by eye, nothing on the screen looks wrong" + (" or unlike its drawing" if drawn is not None else ""))
+    return out
+
+
+def _spent(bench: Bench, reply: Any, elapsed: float) -> None:
+    """The look's model call, on the app's bill like every other."""
+    try:
+        from services.blueprint.executors import RunUsage
+        from services.blueprint.service import BlueprintService
+        usage = RunUsage.for_app(BlueprintService.load(output_dir=bench.output_dir), phase="change")
+        usage.record(node="page_look", agent="page_reviewer", usage=getattr(reply, "usage", None), elapsed_s=elapsed)
+    except Exception:  # noqa: BLE001 — accounting never fails a look
+        logger.warning("[trials] the look's spend was not recorded", exc_info=True)
 
 
 def _sign_in(bench: Bench, doc: dict, route: str, as_: str) -> str:
@@ -907,7 +1082,7 @@ def _check_lines(kind: str, result: dict, *, holds: str) -> list[str]:
     untried = list(result.get("untried") or [])
     skipped = list(result.get("skipped") or [])
     if total == 0 and not skipped:
-        return [f"checks · {kind}: nothing to check"]
+        return [f"checks · {kind}: nothing to check" + (f" — {result['note']}" if result.get("note") else "")]
     head = f"checks · {kind}: {n_green} of {total} {holds}"
     if red:
         head += f", {len(red)} not right"
@@ -926,7 +1101,8 @@ def _check_lines(kind: str, result: dict, *, holds: str) -> list[str]:
     return lines
 
 
-def run_checks(bench: Bench, doc: dict, what: str, routes: list, entities: list, as_: str) -> str:
+def run_checks(bench: Bench, doc: dict, what: str, routes: list, entities: list, as_: str,
+               workflows: list | None = None) -> str:
     """The build's own checks, run on the bench, reported as one observation.
 
     A fault a check can see used to be found by Smith one `open_page` at a
@@ -935,11 +1111,14 @@ def run_checks(bench: Bench, doc: dict, what: str, routes: list, entities: list,
     rule; this is that knowledge offered as one try.
     """
     from services.blueprint import access_check, route_check, rule_trials
+    from services.smith import app_checks
     what = (what or "all").strip().lower()
-    kinds = {"all": ("routes", "access", "rules", "guards"), "routes": ("routes",), "access": ("access",),
-             "rules": ("rules",), "pages": ("pages",), "guards": ("guards",)}.get(what)
+    kinds = {"all": ("routes", "access", "rules", "guards", "drawing", "words", "logins", "newcomers"),
+             **{k: (k,) for k in ("routes", "access", "rules", "pages", "guards", "workflows", "drawing", "words",
+                                  "logins", "newcomers", "looks")}}.get(what)
     if kinds is None:
-        raise ValueError(f"`what` is one of routes, access, rules, pages, all — not {what!r}")
+        raise ValueError(f"`what` is one of routes, access, rules, pages, guards, workflows, drawing, words, "
+                         f"logins, newcomers, looks, all — not {what!r}")
     if "pages" in kinds and not routes:
         raise ValueError("`pages` presses the screens named in `routes`; name at least one")
     lines: list[str] = []
@@ -958,6 +1137,21 @@ def run_checks(bench: Bench, doc: dict, what: str, routes: list, entities: list,
             elif kind == "rules":
                 lines += _check_lines("rules", rule_trials.refuse_rules(doc, bench, _rules_client()),
                                       holds="rules refuse their refused case")
+            elif kind == "workflows":
+                lines += _check_lines("workflows", app_checks.workflows(bench, doc, bench.output_dir, workflows),
+                                      holds="processes run through and are seen by who ran them")
+            elif kind == "drawing":
+                lines += _check_lines("drawing", app_checks.drawing(doc), holds="drawn screens and screens match")
+            elif kind == "words":
+                lines += _check_lines("words", app_checks.words(doc), holds="languages show every drawn word")
+            elif kind == "logins":
+                lines += _check_lines("logins", app_checks.logins(bench, doc),
+                                      holds="demo people sign in, belong and land")
+            elif kind == "newcomers":
+                lines += _check_lines("newcomers", app_checks.newcomers(bench, doc),
+                                      holds="a new person of every role opens their whole menu")
+            elif kind == "looks":
+                lines += app_checks.looks(bench, doc, [str(r) for r in routes], as_)
             elif kind == "guards":
                 from services.smith import guards as _guards
                 lines += _guards.run(bench, doc, only_routes=[str(r) for r in routes] or None)["lines"]
@@ -1018,11 +1212,14 @@ def _run(name: str, args: dict, as_: str, *, bench: Bench, doc: dict) -> str:
             routes = routes if isinstance(routes, list) else [routes]
             entities = args.get("entities") or []
             entities = entities if isinstance(entities, list) else [entities]
-            return run_checks(bench, doc, str(args.get("what") or "all"), routes, entities, as_)
+            flows = args.get("workflows") or []
+            flows = flows if isinstance(flows, list) else [flows]
+            return run_checks(bench, doc, str(args.get("what") or "all"), routes, entities, as_, flows)
         if name == "open_page":
             sign_in = str(args.get("sign_in") or "").strip().lower() in ("true", "1", "yes")
             press = str(args.get("press") or "").strip().lower() in ("all", "true", "1", "yes", "every")
-            return open_page(bench, doc, str(args.get("route") or ""), as_, sign_in=sign_in, press=press)
+            look = str(args.get("look") or "").strip().lower() in ("true", "1", "yes")
+            return open_page(bench, doc, str(args.get("route") or ""), as_, sign_in=sign_in, press=press, look=look)
     except TrialUnavailable as exc:
         return str(exc)
     except ValueError as exc:

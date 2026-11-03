@@ -1075,3 +1075,99 @@ def test_the_bar_holding_the_account_menu_does_not_clip_it():
     assert problems == [] and "{props.controls}" in out["code"]
     assert '<div className="flex h-[72px]" data-layer="Top bar">' in out["code"], "the bar no longer clips"
     assert '<div className="flex w-full overflow-hidden">' in out["code"], "the shell still clips a wide page"
+
+
+STEPS = """export default function StepsView() {
+  return (
+    <div className="flex flex-col" data-layer="Your setup">
+      <div className="flex flex-row bg-[#eaf0ff]" data-layer="Step">
+        <p className="text-[12px] text-[#0443fa]">✓</p>
+        <p className="text-[13px]">Organisation type</p>
+      </div>
+      <div className="flex flex-row bg-[#ffffff]" data-layer="Step">
+        <p className="text-[12px] text-[#6b6e76]">2</p>
+        <p className="text-[13px]">Organisation details</p>
+      </div>
+      <div className="flex flex-row bg-[#ffffff]" data-layer="Step">
+        <p className="text-[12px] text-[#6b6e76]">3</p>
+        <p className="text-[13px]">Documents</p>
+      </div>
+    </div>
+  );
+}
+"""
+
+
+def test_a_look_gives_a_row_its_colours_not_its_words():
+    """DITANS QA D-28/D-34 (2026-11-02): a stepper looked by status read
+    "Organisation type" with a ✓ on every step — each look kept row one's words."""
+    answer = {"contract": {"data": [{"name": "steps", "kind": "list", "label": "Steps", "fields": [
+                  {"name": "label", "label": "Step", "type": "string"},
+                  {"name": "mark", "label": "Mark", "type": "string"},
+                  {"name": "status", "label": "Status", "type": "enum", "options": ["done", "upcoming"]}]}],
+                  "actions": []},
+              "lists": [{"prop": "steps", "rows": ["2", "5", "8"], "looks": [
+                  {"field": "status", "by": [{"value": "done", "row": "2"}, {"value": "upcoming", "row": "5"}]}]}],
+              "values": [], "inputs": [], "shows": []}
+    out, problems = P.apply(STEPS, json.loads(json.dumps(answer)), "StepsView")
+    assert out is None and any("reads “Organisation type” but “Organisation details”" in p for p in problems), problems
+    answer["values"] = [{"node": "3", "expr": "row.mark"}, {"node": "4", "expr": "row.label"}]
+    out, problems = P.apply(STEPS, answer, "StepsView")
+    assert problems == [], problems
+    assert "Organisation type" not in out["code"] and "{row.label}" in out["code"]
+
+
+CHIPS = """export default function CountriesView() {
+  return (
+    <div className="flex flex-row gap-x-[8px]" data-layer="Target countries">
+      <div className="px-[12px] bg-[#0443fa]" data-layer="Chip"><p className="text-[13px] text-[#ffffff]">UAE</p></div>
+      <div className="px-[12px] bg-[#0443fa]" data-layer="Chip"><p className="text-[13px] text-[#ffffff]">Saudi</p></div>
+      <div className="px-[12px] bg-[#ffffff]" data-layer="Chip"><p className="text-[13px] text-[#1e1e20]">Qatar</p></div>
+    </div>
+  );
+}
+"""
+
+
+def test_chips_drawn_with_several_chosen_hold_a_list_and_every_chip_shows_its_choice():
+    """DITANS QA D-09 (2026-11-02): a second country unselected the first, and a
+    chip given no selected look of its own never looked chosen."""
+    answer = {"contract": {"data": [{"name": "prefs", "kind": "form", "label": "Preferences", "fields": [
+                  {"name": "countries", "label": "Target countries", "type": "enum",
+                   "options": ["UAE", "Saudi", "Qatar"], "many": True}]}], "actions": []},
+              "lists": [], "values": [], "shows": [],
+              "inputs": [{"node": "2", "form": "prefs", "field": "countries", "kind": "choice", "value": "UAE",
+                          "on_look": "2", "off_look": "4"},
+                         {"node": "3", "form": "prefs", "field": "countries", "kind": "choice", "value": "Saudi"},
+                         {"node": "4", "form": "prefs", "field": "countries", "kind": "choice", "value": "Qatar"}]}
+    out, problems = P.apply(CHIPS, answer, "CountriesView")
+    assert problems == [], problems
+    code = out["code"]
+    for country in ("UAE", "Saudi", "Qatar"):   # each chip shows whether it is chosen, own look or not
+        assert f'.includes("{country}" as never) ? (\n' in code, country
+    assert '.filter((x) => x !== "Saudi") : [...' in code
+    assert out["sample"]["prefs"]["countries"] == ["UAE", "Saudi"]
+    assert "countries?: (" in code or "countries: (" in code
+
+
+PHONE = """export default function JobView() {
+  return (
+    <div className="flex flex-col" data-layer="Job">
+      <div className="flex flex-row h-[44px]" data-layer="Status bar"><p className="text-[15px]">9:41</p></div>
+      <p className="text-[18px]">Staff Nurse</p>
+    </div>
+  );
+}
+"""
+
+
+def test_what_is_not_the_app_is_left_out():
+    """DITANS QA D-19 (2026-11-02): a phone's status bar rendered inside a job's page."""
+    answer = {"contract": {"data": [{"name": "job", "kind": "record", "label": "Job", "fields": [
+                  {"name": "title", "label": "Title", "type": "string"}]}], "actions": []},
+              "lists": [], "values": [{"node": "3", "expr": "props.job.title"}], "inputs": [], "shows": [],
+              "leave_out": ["2"]}
+    out, problems = P.apply(PHONE, answer, "JobView")
+    assert problems == [], problems
+    assert "9:41" not in out["code"] and "{props.job.title}" in out["code"]
+    assert "leave_out" in P.REPLY_SCHEMA["properties"] and "status bar" in P.SYSTEM

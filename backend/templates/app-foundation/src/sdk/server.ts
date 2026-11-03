@@ -127,6 +127,10 @@ function plain<E extends EntityName>(entity: E, row: Record<string, unknown>): E
     if (v === undefined) out[k] = null;
     else if (v instanceof Date) out[k] = v.toISOString();
     else if (numeric.has(k) && typeof v === "string" && v !== "" && !Number.isNaN(Number(v))) out[k] = Number(v);
+    // A NUMBER THIS READER MAY NOT SEE IS NO NUMBER. The engine masks it as
+    // "••••••••"; added up, an agency's fees printed "USD NaN" (DITANS QA,
+    // 2026-11-02). Empty is what a page can count with.
+    else if (numeric.has(k) && typeof v === "string") out[k] = null;
     else out[k] = v;
   }
   return out as Entities[E];

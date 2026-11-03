@@ -90,8 +90,11 @@ async def get_platform_patches(
     hidden drift: a patch retires itself when the platform has the fix."""
     from services.project_paths import OUTPUT_ROOT
     from services.smith.file_edit import open_patches
+    from services.smith.platform_faults import open_faults
     patches = open_patches(OUTPUT_ROOT)
-    return {"count": len(patches), "patches": patches}
+    # WHAT SMITH FOUND WRONG IN WHAT FORGE WRITES, beside what it patched.
+    faults = open_faults(OUTPUT_ROOT)
+    return {"count": len(patches), "patches": patches, "faults": faults}
 
 
 @router.get("/api/spend/report")

@@ -1417,6 +1417,9 @@ export const DrawnField = z.object({
                 "enum", "email", "phone", "url", "image", "id"]).default("string"),
   /** For `enum`: the values the drawing shows (the pills, the chips). */
   options: z.array(z.string()).optional(),
+  /** Several of the options at once — a list ("pick up to 3"). Chips drawn as
+   *  one value let a second country unselect the first (DITANS QA D-09). */
+  many: z.boolean().optional(),
   /** A field the form must be given. */
   required: z.boolean().optional(),
 });
@@ -1445,6 +1448,10 @@ export const DrawnAction = z.object({
   kind: z.enum(["navigate", "open", "submit", "run"]),
   /** For `navigate` / `open`: the frame it leads to, when the prototype says. */
   target: z.string().optional(),
+  /** For `navigate`: the screen of this app it opens (`/plans`), bound by hand
+   *  when the prototype links nowhere — a shell's "Help" or "New job" did
+   *  nothing because only menu rows were ever bound (DITANS QA D-68, 2026-11-02). */
+  href: z.string().optional(),
   /** The slot it acts on: the list whose row it is on, the form it submits. */
   on: z.string().optional(),
 });
@@ -2089,13 +2096,26 @@ export const WorkflowStep = z.object({
        * into a variable or a log. `in`: as a bearer token (default), a
        * header called `name`, a query parameter called `name`, or HTTP basic
        * (the secret holds `user:password`).
+       *
+       * Or, for a system the runtime signs for itself (Mews), the PROVIDER
+       * (`{provider: "mews"}`): the runtime adds the host and the credentials.
+       * `property` picks which of the application's Mews properties the call
+       * is for — a template to its id, Mews enterprise id or name
+       * (`{{booking.propertyId}}`); the runtime reads that property's token
+       * itself, so it never reaches the step.
        */
       auth: z
-        .object({
-          secretRef: z.string(),
-          in: z.enum(["bearer", "header", "query", "basic"]).default("bearer"),
-          name: z.string().optional(),
-        })
+        .union([
+          z.object({
+            secretRef: z.string(),
+            in: z.enum(["bearer", "header", "query", "basic"]).default("bearer"),
+            name: z.string().optional(),
+          }),
+          z.object({
+            provider: z.string(),
+            property: z.string().optional(),
+          }),
+        ])
         .optional(),
       /** On a human step: minutes until it is overdue. */
       dueIn: z.number().int().positive().optional(),

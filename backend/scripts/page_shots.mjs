@@ -3,7 +3,7 @@
 //
 //   node page_shots.mjs <config.json>
 //   config = { baseUrl, email, password, outDir, width?, height?, probe?,
-//              states?, pages: [{ id, route, entity?, cookies?, anonymous?, group? }] }
+//              states?, look?, pages: [{ id, route, entity?, cookies?, anonymous?, group? }] }
 //
 // `states: false` skips the empty and missing-record openings (Smith's
 // `open_page` asks how ONE page behaves, not how it degrades). A page with
@@ -416,6 +416,185 @@ async function press(context, url, control, firstIndex = null) {
 }
 
 // ---------------------------------------------------------------------------
+// The look (`look: true`)
+// ---------------------------------------------------------------------------
+
+// WHAT A PERSON SEES THAT THE TEXT DOES NOT SAY. A drawn screen presses with
+// a `div` and its handler, not a <button>: `controls()` never counted one, so
+// forty filter chips that did nothing, an arrow cursor over every drawn
+// control and an account menu cut off by the bar that holds it were all
+// invisible to every check (DITANS, 2026-10-31). Measured here from what
+// React itself holds — the element's own props — and from the boxes the
+// browser drew, never from what the code says it should be.
+const MAX_OPENERS = 8;
+
+const MEASURE = () => {
+  const W = innerWidth, H = innerHeight;
+  const propsOf = (el) => {
+    const k = Object.keys(el).find((x) => x.startsWith("__reactProps$"));
+    return k ? el[k] : null;
+  };
+  // A handler that only stops the press travelling further is not a control,
+  // and neither is one that does nothing at all: a drawn shell's "New task"
+  // was wired to `() => {}` and pressed like a button (DITANS, 2026-10-31).
+  const real = (fn) => typeof fn === "function"
+    && !/^\(?\s*\w*\s*\)?\s*=>\s*\{?\s*\w+\.stopPropagation\(\)\s*;?\s*\}?\s*$/.test(String(fn))
+    && !/^(?:function\s*\w*\s*)?\([^)]*\)\s*(?:=>\s*)?\{\s*\}$/.test(String(fn).trim());
+  const handles = (el) => {
+    const p = propsOf(el);
+    return !!p && ["onClick", "onMouseDown", "onPointerDown", "onMouseUp", "onPointerUp"].some((k) => real(p[k]));
+  };
+  const NATIVE = "button, a[href], summary, select, label, [role='button'], [role='tab'], [role='menuitem'], "
+    + "[role='option'], [role='checkbox'], [role='radio'], [role='switch'], input, textarea";
+  const pressable = (el) => el.matches(NATIVE) || handles(el);
+  const up = (el, test) => { for (let n = el; n && n !== document.body; n = n.parentElement) if (test(n)) return n; return null; };
+  const down = (el, test) => [...el.querySelectorAll("*")].some(test);
+  const seen = (el) => {
+    const r = el.getBoundingClientRect();
+    if (r.width < 2 || r.height < 2) return false;
+    const s = getComputedStyle(el);
+    return s.visibility !== "hidden" && s.display !== "none" && Number(s.opacity) > 0.05;
+  };
+  const label = (el) => (el.getAttribute("aria-label") || el.innerText || el.getAttribute("title")
+    || el.getAttribute("alt") || "").replace(/\s+/g, " ").trim().slice(0, 50)
+    || (el.getAttribute("data-layer") ? `(drawn "${el.getAttribute("data-layer")}")` : `(${el.tagName.toLowerCase()} with no words)`);
+  // The frame is what is around the screen: outside <main> when there is one
+  // (a drawn shell draws its bars as plain boxes), else a header, nav or aside.
+  const hasMain = !!document.querySelector("main");
+  const place = (el) => (up(el, (n) => n.matches("main")) ? "page"
+    : hasMain || up(el, (n) => n.matches("header, nav, aside")) ? "frame" : "page");
+  const path = (el) => {
+    const parts = [];
+    for (let n = el; n && n !== document.body; n = n.parentElement) {
+      parts.unshift(`${n.tagName.toLowerCase()}:nth-child(${[...n.parentElement.children].indexOf(n) + 1})`);
+    }
+    return "body > " + parts.join(" > ");
+  };
+  const CONTROL = /button|btn|\bchip|\btabs?\b|toggle|select|dropdown|filter|checkbox|radio|switch|\blink\b|\bpill|trigger|menu ?item|\bcta\b/i;
+  const tally = (list, item) => {
+    const key = `${item.where}|${item.label}`;
+    const had = list.find((x) => `${x.where}|${x.label}` === key);
+    if (had) had.n += 1; else list.push({ ...item, n: 1 });
+  };
+  const noHand = [], dead = [], drawnDead = [], openers = [];
+  for (const el of document.querySelectorAll("body *")) {
+    if (!seen(el)) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width * r.height > W * H * 0.5) continue;           // a backdrop, a whole-screen wrapper
+    const s = getComputedStyle(el);
+    const handled = handles(el);
+    const disabled = el.disabled || el.getAttribute("aria-disabled") === "true" || s.pointerEvents === "none";
+    if (disabled) continue;
+    if ((handled || el.matches("button, a[href], summary, [role='button'], [role='tab'], [role='menuitem']"))
+        && !el.matches("input, textarea, select, label") && !el.querySelector("input, textarea, select")
+        && s.cursor !== "pointer") {
+      tally(noHand, { label: label(el), where: place(el) });
+    }
+    const ownHand = s.cursor === "pointer" && (!el.parentElement || getComputedStyle(el.parentElement).cursor !== "pointer");
+    if (ownHand && !pressable(el) && !up(el.parentElement || el, pressable) && !down(el, pressable)) {
+      tally(dead, { label: label(el), where: place(el) });
+    }
+    const layer = el.getAttribute("data-layer") || "";
+    if (CONTROL.test(layer) && !pressable(el) && !up(el, pressable) && !down(el, pressable)
+        && !up(el.parentElement || el, (n) => CONTROL.test(n.getAttribute("data-layer") || ""))) {
+      tally(drawnDead, { label: label(el), where: place(el), layer });
+    }
+    if (handled && !el.matches("a[href], input, textarea, select") && !up(el, (n) => n.matches("a[href], form"))
+        && (el.hasAttribute("aria-haspopup") || el.hasAttribute("aria-expanded") || place(el) === "frame")) {
+      openers.push({ label: label(el), where: place(el), path: path(el), menu: el.hasAttribute("aria-haspopup") || el.hasAttribute("aria-expanded") });
+    }
+  }
+  // Menus first, then the frame's own presses, a few of each.
+  openers.sort((a, b) => Number(b.menu) - Number(a.menu));
+  const wide = document.documentElement.scrollWidth - W;
+  return { noHand, dead, drawnDead, openers, wider: wide > 2 ? wide : 0 };
+};
+
+// What one press opened, and whether a person can see all of it.
+const OPENED = () => {
+  const W = innerWidth, H = innerHeight;
+  const seen = (el) => {
+    const r = el.getBoundingClientRect();
+    if (r.width < 2 || r.height < 2) return false;
+    const s = getComputedStyle(el);
+    return s.visibility !== "hidden" && s.display !== "none" && Number(s.opacity) > 0.05;
+  };
+  const fresh = [...document.querySelectorAll("body *")].filter((el) => !el.hasAttribute("data-forge-seen") && seen(el));
+  const set = new Set(fresh);
+  const tops = fresh.filter((el) => !set.has(el.parentElement))
+    .filter((el) => { const r = el.getBoundingClientRect(); return r.width * r.height >= 400; });
+  const say = (el) => {
+    const cls = (el.getAttribute("class") || "").split(/\s+/).filter((c) => /overflow|^h-|max-h|^z-|clip/.test(c)).slice(0, 4).join(" ");
+    const layer = el.getAttribute("data-layer");
+    return `<${el.tagName.toLowerCase()}${layer ? ` "${layer}"` : ""}${cls ? ` class="${cls}"` : ""}>`;
+  };
+  const out = [];
+  for (const n of tops.slice(0, 3)) {
+    const R = n.getBoundingClientRect();
+    let V = { l: Math.max(R.left, 0), t: Math.max(R.top, 0), r: Math.min(R.right, W), b: Math.min(R.bottom, H) };
+    let by = R.left < 0 || R.top < 0 || R.right > W || R.bottom > H ? "the edge of the screen" : "";
+    const pos = getComputedStyle(n).position;
+    const cb = pos === "absolute" ? n.offsetParent : null;
+    for (let a = n.parentElement; a && a !== document.documentElement; a = a.parentElement) {
+      const s = getComputedStyle(a);
+      if (pos === "fixed" && s.transform === "none" && s.filter === "none" && s.contain === "none") continue;
+      if (cb && !(a === cb || a.contains(cb))) continue;
+      if (s.overflowX === "visible" && s.overflowY === "visible") continue;
+      const A = a.getBoundingClientRect();
+      const before = (V.r - V.l) * (V.b - V.t);
+      V = { l: Math.max(V.l, A.left), t: Math.max(V.t, A.top), r: Math.min(V.r, A.right), b: Math.min(V.b, A.bottom) };
+      if (V.r < V.l) V.r = V.l;
+      if (V.b < V.t) V.b = V.t;
+      if (!by && (V.r - V.l) * (V.b - V.t) < before - 1) by = say(a);
+    }
+    const shown = Math.round(100 * Math.max(0, (V.r - V.l) * (V.b - V.t)) / (R.width * R.height));
+    let covered = 0, coverer = null;
+    if (V.r > V.l && V.b > V.t) {
+      for (const fx of [0.2, 0.5, 0.8]) for (const fy of [0.2, 0.5, 0.8]) {
+        const hit = document.elementFromPoint(V.l + (V.r - V.l) * fx, V.t + (V.b - V.t) * fy);
+        if (hit && hit !== n && !n.contains(hit)) { covered += 1; coverer = coverer || hit; }
+      }
+    }
+    out.push({ text: (n.innerText || "").replace(/\s+/g, " ").trim().slice(0, 80), shown,
+               clippedBy: shown < 90 ? by : "", coveredBy: covered >= 3 ? say(coverer) : "" });
+  }
+  return out;
+};
+
+async function look(context, url) {
+  const m = await open(context, url);
+  let found;
+  try {
+    found = await m.page.evaluate(MEASURE);
+  } finally {
+    await m.page.close();
+  }
+  found.opened = [];
+  for (const o of found.openers.slice(0, MAX_OPENERS)) {
+    const page = await context.newPage();
+    try {
+      await page.goto(cfg.baseUrl + url, { waitUntil: "load", timeout: 60000 });
+      await page.waitForTimeout(700);
+      const at = page.url();
+      await page.evaluate(() => {
+        for (const el of document.querySelectorAll("body *")) {
+          const r = el.getBoundingClientRect();
+          if (r.width >= 2 && r.height >= 2 && getComputedStyle(el).visibility !== "hidden") el.setAttribute("data-forge-seen", "");
+        }
+      });
+      await page.locator(o.path).first().click({ timeout: 5000 });
+      await page.waitForTimeout(700);
+      if (page.url() !== at) continue;                         // it went somewhere: not an opener
+      const shows = await page.evaluate(OPENED);
+      for (const s of shows) found.opened.push({ opener: o.label, where: o.where, ...s });
+    } catch { /* a press that could not be made is the press check's business */ }
+    finally { await page.close(); }
+  }
+  delete found.openers;
+  return found;
+}
+
+// ---------------------------------------------------------------------------
 
 const out = [];
 const pressedIn = new Set();          // `${group}|${control}` — a screen's control is pressed once
@@ -495,6 +674,7 @@ async function visit(p) {
   let found = [];
   if (cfg.probe) found = await controls(main.page).catch(() => []);
   await main.page.close();
+  if (cfg.look) result.look = await look(who.ctx, url).catch((e) => ({ error: String(e?.message || e).slice(0, 200) }));
 
   if (cfg.states === false) {
     // asked about the page as it is, not about its degraded states

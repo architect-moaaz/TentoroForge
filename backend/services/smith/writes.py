@@ -155,6 +155,21 @@ WRITES = WRITES + (
 )
 
 
+WRITES = WRITES + (
+    ("edit_pages",
+     "CHANGE several screens at once, each inside the layout it has, to ONE brief — the same fault or the "
+     "same ask on many screens: \"every filter on these screens filters nothing\", \"the hand cursor on "
+     "every pressable thing\", \"call them Candidates everywhere\". `routes`: the screens, or [\"all\"]; "
+     "`having`: optional text from the code — only the screens whose code contains it are changed (the "
+     "copies `grep` found). The brief names the change in the code's terms, once; each screen's writer "
+     "makes it in that screen, in parallel, compiled, all landing as ONE version. A screen whose writer "
+     "found nothing to change is said, not counted as done. Not for a redesign (`rewrite_pages`) and not "
+     "for one screen (`write_page_code`). When the cause is ONE shared file (a drawn component every screen "
+     "imports, a helper), change that file instead — one edit, not forty.",
+     {"routes": "array", "brief": "string", "having": "string"}),
+)
+
+
 def _frame_files_said() -> str:
     from services.smith.frame_change import FRAME_PARTS
     return "; ".join(f"`{f}` — {what}" for f, what in FRAME_PARTS.items())
@@ -166,11 +181,45 @@ WRITES = WRITES + (
      "however small: \"centre the menu\", \"a search box in the top bar\", \"move "
      "the bell to the left\", \"a footer with our address\", \"bigger logo in the "
      "header\". `file` is the frame file the ask is about (read it first with "
-     "`read_file` under `app/`): " + _frame_files_said() + ". `brief` names the change "
+     "`read_file` under `app/`): " + _frame_files_said() + "; in an application DRAWN from a design, "
+     "each portal's drawn shell `src/components/drawn/<Name>Shell.tsx` (its bars, the account menu's place, "
+     "its buttons) and the drawn components every screen shares under `src/components/drawn/` — a fault on "
+     "every screen of a drawn app is often one of these. `brief` names the change "
      "in the code's terms. Edited, compiled, committed as one version; from then on "
      "that file is the application's own. To switch the KIND of frame (side rail, "
      "top bar, bottom dock, its tone) use `write_section` on `designSystem`.",
      {"file": "string", "brief": "string"}),
+)
+
+WRITES = WRITES + (
+    ("bind_menu",
+     "Which screen each entry of a DRAWN menu opens, in an application drawn from a design (one menu per "
+     "portal). `shell`: the portal or shell's name. With no `entries`, says what every entry opens now and "
+     "which lead nowhere — read it before binding. `entries`: [{label, route}] — the entry as the menu "
+     "says it, the screen's route (empty `route`: back to what the drawing links). One version; the menu is "
+     "projected again. An entry whose screen does not exist yet needs that screen first.",
+     {"shell": "string", "entries": "array"}),
+)
+
+WRITES = WRITES + (
+    ("translate_words",
+     "Translate every word the DRAWN screens show that a language lacks — in an application drawn from a "
+     "design and shown in more than one language (`run_checks words` says how many). `language`: the tag "
+     "(\"ar\"); left out, every language besides the app's own. Batches in parallel, one version, projected. "
+     "A word translated wrongly is changed with `edit_definition` on `product`.",
+     {"language": "string"}),
+)
+
+WRITES = WRITES + (
+    ("report_platform_fault",
+     "File a fault in what FORGE writes — not in this application's own code — for the platform's people, "
+     "BESIDE fixing the app's copy. The sign: the file says it is generated (\"Edit the Blueprint, not this "
+     "file\") and no part of the definition expresses the fix; or the same fault sits in code every drawn "
+     "screen, every page wrapper or every app gets from the platform. `summary`: what is wrong, one sentence. "
+     "`path`: the file under `app/` where it shows (it names the part of Forge that writes it). `evidence`: "
+     "the try or check that shows it. `proposal`: the change Forge should make, in its terms. `app_fix`: what "
+     "you changed in this app meanwhile. Changes nothing in the app.",
+     {"summary": "string", "path": "string", "evidence": "string", "proposal": "string", "app_fix": "string"}),
 )
 
 WRITE_NAMES: frozenset[str] = frozenset(name for name, _d, _a in WRITES)
@@ -413,6 +462,54 @@ def rewrite_pages(output_dir: str, routes: list[str], brief: str, *, reasoning: 
             "version": out.get("version")}
 
 
+def edit_pages(output_dir: str, routes: list[str], brief: str, *, having: str = "", reasoning: Any = None) -> dict:
+    """Several coded pages changed at once to one brief (`compose.relayout_pages`, `whole=False`)."""
+    from services.blueprint.app_sdk import code_page_files
+    from services.blueprint.service import BlueprintService
+    from services.smith.compose import code_row, relayout_pages
+
+    brief = (brief or "").strip()
+    if not brief:
+        return _finding("`edit_pages` needs `brief`: the change, in the code's terms.")
+    try:
+        svc = BlueprintService.load(output_dir=str(output_dir))
+    except FileNotFoundError:
+        return _finding("This project has no Blueprint, so there are no screens to change.")
+    live = [p for p in svc.doc.get("pages") or [] if isinstance(p, dict) and p.get("status") != "DEPRECATED"
+            and code_row(svc.doc, str(p.get("id"))) is not None]
+    wanted = [str(r).strip() for r in routes or [] if str(r).strip()]
+    if not wanted or any(r.lower() in ("all", "*", "every") for r in wanted):
+        wanted = [str(p.get("route")) for p in live]
+    having = (having or "").strip()
+    if having:
+        # THE COPIES, NOT A GUESS AT THEM: only the screens whose code holds the text.
+        by_route = {str(p.get("route")): code_row(svc.doc, str(p.get("id"))) for p in live}
+        holds = {r for r, row in by_route.items() if row is not None
+                 and any(having in str(code) for code in code_page_files(svc.doc, row).values())}
+        wanted = [r for r in wanted if r in holds]
+        if not wanted:
+            return _finding(f"No screen's code contains `{having}`, so none was changed. `grep` shows where it is.")
+    if not wanted:
+        return _finding("No screen of this application is written as code, so none can be changed this way.")
+    try:
+        out = relayout_pages(svc, wanted, app_root=str(Path(output_dir) / "app"), request=brief,
+                             reasoning=reasoning, whole=False)
+    except Exception as exc:  # noqa: BLE001 — a tool degrades, it does not crash
+        logger.exception("[smith] edit_pages failed")
+        return _finding(f"The screens were not changed — {type(exc).__name__}: {exc}")
+    done, failed, unchanged = out.get("done") or [], out.get("failed") or {}, out.get("unchanged") or {}
+    said = (f"Changed {len(done)} screen(s) (version {out.get('version')}): " + ", ".join(f"`{r}`" for r in done) + "."
+            if done else "")
+    if unchanged:
+        said += (" " if said else "") + f"Left as they were ({len(unchanged)}): " + "; ".join(
+            f"{r} — {why[:160]}" for r, why in sorted(unchanged.items())) + "."
+    finding = "; ".join(f"{r} was not changed: {why}" for r, why in sorted(failed.items()))
+    if not done:
+        return _finding(finding or said or "No screen was changed.")
+    return {"applied": True, "said": said, "finding": finding, "touched": list(out.get("committed") or []),
+            "version": out.get("version")}
+
+
 def write_phone_screens(output_dir: str, routes: list[str] | None = None, brief: str = "", *, reasoning: Any = None) -> dict:
     """The phone's screens of a native app written (`compose.native_pass`): the pages that have none, or the named ones."""
     from services.blueprint.service import BlueprintService
@@ -543,7 +640,7 @@ WRITES = WRITES + (
 #: `requested`, on every write that changes code or the definition: true only
 #: when the person asked for this change itself. Until a try has run in the
 #: turn, a write without it is sent to reproduce first (`smith4.turn`).
-_REQUESTED = {"edit_file", "edit_definition", "write_page_code", "rewrite_pages", "write_frame",
+_REQUESTED = {"edit_file", "edit_definition", "write_page_code", "rewrite_pages", "edit_pages", "bind_menu", "write_frame",
               "write_section", "set_field"}
 WRITES = tuple((n, d + " `requested: true` only when they asked for this change itself — never when "
                 "they reported something not working.", {**a, "requested": "boolean"})
@@ -639,7 +736,7 @@ def run(name: str, args: dict, *, output_dir: str, reasoning: Any = None) -> dic
     """Carry out one write. The result's `finding` is the observation when an
     oracle refused; `said` is what the person is told."""
     args = {k: v for k, v in (args or {}).items() if v not in (None, "")}
-    if name in ("write_page_code", "rewrite_pages", "write_frame") and args.get("brief"):
+    if name in ("write_page_code", "rewrite_pages", "edit_pages", "write_frame") and args.get("brief"):
         from services.smith.asked import with_their_words
         args["brief"] = with_their_words(str(args["brief"]))
     if name == "write_page_code":
@@ -655,6 +752,22 @@ def run(name: str, args: dict, *, output_dir: str, reasoning: Any = None) -> dic
         return rewrite_pages(output_dir, list(routes) if isinstance(routes, list) else
                              ([str(routes)] if routes else []), str(args.get("brief") or ""),
                              reasoning=reasoning)
+    if name == "report_platform_fault":
+        from services.smith.platform_faults import report
+        return report(output_dir, str(args.get("summary") or ""), path=str(args.get("path") or ""),
+                      evidence=str(args.get("evidence") or ""), proposal=str(args.get("proposal") or ""),
+                      app_fix=str(args.get("app_fix") or ""))
+    if name == "translate_words":
+        from services.smith.translate import translate_words
+        return translate_words(output_dir, str(args.get("language") or ""), reasoning=reasoning)
+    if name == "bind_menu":
+        from services.smith.drawn_menu import bind_menu
+        entries = args.get("entries")
+        return bind_menu(output_dir, str(args.get("shell") or ""), entries if isinstance(entries, list) else [])
+    if name == "edit_pages":
+        routes = args.get("routes")
+        return edit_pages(output_dir, list(routes) if isinstance(routes, list) else ([str(routes)] if routes else []),
+                          str(args.get("brief") or ""), having=str(args.get("having") or ""), reasoning=reasoning)
     if name == "write_phone_screens":
         routes = args.get("routes")
         return write_phone_screens(output_dir, list(routes) if isinstance(routes, list) else
@@ -682,5 +795,5 @@ def run(name: str, args: dict, *, output_dir: str, reasoning: Any = None) -> dic
     raise KeyError(name)
 
 
-__all__ = ["WRITES", "WRITE_NAMES", "SECTION_NODE", "SECTION_WORDS", "run", "rewrite_pages", "write_phone_screens", "set_field",
+__all__ = ["WRITES", "WRITE_NAMES", "SECTION_NODE", "SECTION_WORDS", "run", "edit_pages", "rewrite_pages", "write_phone_screens", "set_field",
            "verify_pages", "write_page_code", "write_section"]
