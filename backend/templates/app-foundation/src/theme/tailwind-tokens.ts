@@ -37,6 +37,17 @@ function spacingScale(
   return out;
 }
 
+// Depth is the design's, per app, not one fixed library ramp. `shadow-sm/md/lg/xl`
+// resolve to the `--shadow-*` the projector writes from designSystem.elevation,
+// with the library value baked in as the fallback so a shadow still renders
+// before a design fills it (or when there is no design). See look_scale.py.
+const shadowVar = (key: string, fallback: string) => `var(--shadow-${key}, ${fallback})`;
+const boxShadow: Record<string, string> = Object.fromEntries(
+  Object.entries(tokens.shadow as Record<string, string>).map(
+    ([k, v]) => [k, shadowVar(k, v)],
+  ),
+);
+
 export const tailwindTokens: {
   colors: Record<string, string | Record<string, string>>;
   spacing: Record<string, string>;
@@ -48,5 +59,5 @@ export const tailwindTokens: {
   spacing: spacingScale(tokens.spacing),
   fontSize: tokens.typography.scale,
   borderRadius: tokens.radius,
-  boxShadow: tokens.shadow,
+  boxShadow,
 };
