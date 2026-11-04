@@ -322,6 +322,27 @@ DIRECTION_SCHEMA: dict[str, Any] = {
 # What the engineer is told
 # ---------------------------------------------------------------------------
 
+def _app_kit_block(doc: dict) -> str:
+    """THIS application's own parts, above the house kit — because they come
+    first. The kit engineer wrote them from the same direction and rhythm this
+    page is held to, so a page that builds its own panel beside them is a page
+    that disagrees with every other page of the product."""
+    from services.blueprint.component_kit import kit_vocabulary
+
+    vocabulary = kit_vocabulary(doc)
+    if not vocabulary:
+        return ""
+    return (
+        "# This product's own parts — compose from these first\n"
+        "Written once for THIS application, from the same direction and rhythm you are held\n"
+        "to, and used by every other page. They carry the product's colours, depth and\n"
+        "spacing already, so reach for one before building the same thing again: a page that\n"
+        "draws its own panel beside these is the page that does not match the rest.\n"
+        "Where none fits, write your own markup in the token classes as usual.\n"
+        f"```ts\n{vocabulary}\n```\n"
+    )
+
+
 def _kit_exports() -> str:
     lines = []
     for f in sorted(_UI_KIT.glob("*.tsx")):
@@ -697,7 +718,8 @@ view.tsx — "use client" on the first line.
   Imports that resolve in this application:
     react, next/link, next/navigation (useRouter, useSearchParams, usePathname),
     lucide-react (icons), clsx, tailwind-merge, class-variance-authority, sonner (toast),
-    the @radix-ui primitives the kit is built on, the UI kit and the library below (optional),
+    the @radix-ui primitives the kit is built on, this product's own parts under
+    "@/components/app/*" (listed below, when it has any), the UI kit and the library below (optional),
     @dnd-kit/core + @dnd-kit/sortable (drag a card across a board, reorder a list — the move
     itself still runs a workflow), motion/react (`motion.div`, `AnimatePresence`: a panel
     sliding in, a row arriving), "@/sdk/map" (MapView: places as pins, a path as a line —
@@ -878,6 +900,7 @@ This application's entities, workflows and pages:
 {sdk_reference(doc)}
 ```
 
+{_app_kit_block(doc)}
 # Ready-made parts — there if one fits, never required
 A UI kit (shadcn, themed by the app's tokens). Use a part when it is exactly what the page needs;
 otherwise write the element yourself in Tailwind — your own button, badge, table or panel is as

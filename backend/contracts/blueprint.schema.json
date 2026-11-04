@@ -4266,6 +4266,55 @@
       "additionalProperties": false,
       "default": {}
     },
+    "componentKit": {
+      "type": "object",
+      "properties": {
+        "rationale": {
+          "type": "string",
+          "default": ""
+        },
+        "palette": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        },
+        "parts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "file": {
+                "type": "string"
+              },
+              "purpose": {
+                "type": "string",
+                "default": ""
+              },
+              "exports": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "code": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "file",
+              "code"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        }
+      },
+      "additionalProperties": false,
+      "default": {}
+    },
     "pageCode": {
       "type": "array",
       "items": {

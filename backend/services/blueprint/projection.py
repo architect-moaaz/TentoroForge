@@ -2286,6 +2286,13 @@ def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
     from services.blueprint import look_scale
     lines += look_scale.look_vars(design)
 
+    # AND THE KIT'S OWN COLOURS, the tints and washes between the roles. They
+    # live here rather than in the kit's files so a part names one as
+    # `bg-[var(--kit-wash)]` and the whole kit rethemes from the Blueprint —
+    # the bargain that lets the kit name colours at all (`component_kit`).
+    from services.blueprint.component_kit import palette_vars
+    lines += palette_vars(doc)
+
     out = Path(app_root) / "src" / "app"
     out.mkdir(parents=True, exist_ok=True)
     header = ("/* Generated from the Living Blueprint (designSystem).\n"

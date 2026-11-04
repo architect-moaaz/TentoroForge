@@ -1371,6 +1371,49 @@ export const FrameCode = z.object({
   code: z.string(),
 });
 
+/**
+ * ONE PART OF THIS APPLICATION'S OWN COMPONENT KIT — its page head, its stat
+ * card, its list row, its status pill, written once for this product and
+ * composed by every page.
+ *
+ * Every page used to be designed alone by a writer optimising for correctness,
+ * so consistency could only happen by luck and each page re-decided what a
+ * panel looks like. Measured against a hand-designed application (Criterion
+ * CARES, 2026-11-04): its kit is 34 exports imported by 14 of its 22 pages, and
+ * the one move that turned it from plain to designed. The pipeline had no stage
+ * that did this and no generated application had a single shared component.
+ */
+export const KitPart = z.object({
+  /** Natural key — the file's name under `src/components/app/`, e.g. `Panel.tsx`. */
+  file: z.string(),
+  /** What this part is for, in one line. */
+  purpose: z.string().default(""),
+  /** The names it exports, so a page writer can be handed the kit's vocabulary. */
+  exports: z.array(z.string()).default([]),
+  /** The whole file. */
+  code: z.string(),
+});
+
+/**
+ * The kit itself: the application's own parts, and the colours they are drawn
+ * in.
+ *
+ * `palette` is the one place those colours live. A page is held to the semantic
+ * token classes and may never name a colour; the kit MAY, because a kit is one
+ * file set that can be read, contrast-checked and rethemed at once — but only
+ * through here. The projector writes each entry as `--kit-<name>` beside the
+ * design tokens and as a `C` constant for inline styles, so a part says
+ * `bg-[var(--kit-wash)]`, never a hex of its own. This is the same bargain the
+ * drawn-page path already makes: your own values, enumerated in advance.
+ */
+export const ComponentKit = z.object({
+  /** Why the kit is shaped this way — the register and rhythm it serves. */
+  rationale: z.string().default(""),
+  /** Name → `#rrggbb`. Tints, washes and inks this product needs beyond the roles. */
+  palette: z.record(z.string(), z.string()).default({}),
+  parts: z.array(KitPart).default([]),
+});
+
 export const PageCode = z.object({
   /** Natural key — the page this code renders. */
   page: PageId,
@@ -3631,6 +3674,9 @@ export const Blueprint = z.object({
   /** §34 — the whole app sketched once: per-page skeletons and the
    *  conventions every page inherits. Authored by A2UI before any page is. */
   composition: Composition.default({}),
+  /** §34 — this application's own component kit, composed by every page
+   *  (see `ComponentKit`). Written after the direction and before any page. */
+  componentKit: ComponentKit.default({}),
   /** §34 — pages written as React against the library and the typed SDK.
    *  Takes precedence over the page's `pageLayouts` tree when both exist. */
   pageCode: z.array(PageCode).default([]),

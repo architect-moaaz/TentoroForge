@@ -500,8 +500,11 @@ def test_foundational_nodes_are_classified_by_what_they_produce():
     # `ui_direction` sets the whole app's look — frame, like the design system.
     # `domain_reference` is what the frame is held to: re-run it and the
     # frame is re-authored against it.
+    # `component_kit` with them: the parts every page is built from are the
+    # frame made concrete, so adding one page must not re-author them.
     assert frame == {"application_model", "design_system", "integrations",
-                     "ux_architecture", "ui_direction", "domain_reference"}
+                     "ux_architecture", "ui_direction", "domain_reference",
+                     "component_kit"}
 
 
 def test_service_and_projection_nodes_are_never_foundational():

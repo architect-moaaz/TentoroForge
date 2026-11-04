@@ -4384,6 +4384,9 @@ MAX_TOKENS_BY_NODE: dict[str, int] = {
     "page_code": 64000,
     # The same page for the phone: one screen's thinking and its whole file.
     "native_code": 64000,
+    # Eight to twelve whole component files in ONE reply, and a compile round
+    # re-sends all of them — more in a call than any single page writes.
+    "component_kit": 64000,
 }
 
 
@@ -4927,6 +4930,19 @@ def make_executor(
             return AgentResult(task_id=spec.task_id, agent=spec.agent, confidence=0.9,
                                proposals=[ArtifactProposal(section="composition",
                                                            natural_key="composition", body=body)])
+        if spec.agent == "kit_engineer":
+            from services.blueprint import component_kit
+            t0 = time.monotonic()
+            tell(reasoning, "Building this product's own set of parts.", "step", spec.node)
+            # The files are written where they live, not into a scratch tree:
+            # the pages composed next import them, and they must be on disk for
+            # `ui_engineer.typecheck` to resolve `@/components/app/*` at all.
+            body, u = component_kit.compose_kit(
+                doc, client, Path(svc.output_dir) / "app")
+            record(u, time.monotonic() - t0)
+            return AgentResult(task_id=spec.task_id, agent=spec.agent, confidence=0.9,
+                               proposals=[ArtifactProposal(section="componentKit",
+                                                           natural_key="componentKit", body=body)])
         page = next((p for p in doc.get("pages") or [] if str(p.get("id")) == spec.subject), None)
         if page is None:
             raise ValueError(f"{spec.subject} is not a page of this application")
@@ -5217,7 +5233,7 @@ def make_executor(
             return _convert_drawn(spec)
         if spec.node == "drawn_pairs":
             return _pair_drawn(spec)
-        if spec.agent in ("ui_director", "ui_engineer"):
+        if spec.agent in ("ui_director", "ui_engineer", "kit_engineer"):
             return _compose_ui(spec)
         if spec.agent == "native_engineer":
             return _compose_native(spec)
