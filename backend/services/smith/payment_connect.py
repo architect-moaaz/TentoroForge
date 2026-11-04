@@ -15,7 +15,8 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 SERVES = "take_payment"
-LIVE_KEY: dict[str, str] = {"stripe": "STRIPE_SECRET_KEY"}
+LIVE_KEY: dict[str, str] = {"stripe": "STRIPE_SECRET_KEY", "razorpay": "RAZORPAY_KEY_SECRET",
+                            "paypal": "PAYPAL_CLIENT_SECRET"}
 FROM_KEY = ""
 EVENTS = ["payment.succeeded", "payment.failed", "refund.succeeded", "account.updated"]
 
@@ -33,6 +34,12 @@ class PaymentService:
 SERVICES: tuple[PaymentService, ...] = (
     PaymentService("Stripe", "stripe", ("stripe",), ("STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PUBLISHABLE_KEY"),
                    "STRIPE_WEBHOOK_SECRET", "Hosted checkout; Connect Express for split payouts."),
+    PaymentService("Razorpay", "razorpay", ("razorpay", "razor pay"),
+                   ("RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET", "RAZORPAY_WEBHOOK_SECRET"),
+                   "RAZORPAY_WEBHOOK_SECRET", "Checkout for India: UPI, cards, netbanking, wallets; subscriptions."),
+    PaymentService("PayPal", "paypal", ("paypal", "pay pal"),
+                   ("PAYPAL_CLIENT_ID", "PAYPAL_CLIENT_SECRET", "PAYPAL_WEBHOOK_ID", "PAYPAL_ENV"),
+                   "PAYPAL_WEBHOOK_ID", "PayPal checkout and subscriptions, worldwide."),
 )
 CHOICES: tuple[str, ...] = tuple(s.name for s in SERVICES)
 

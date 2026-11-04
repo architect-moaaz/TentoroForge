@@ -2517,6 +2517,20 @@ def integration_adapters(node: str) -> str:
     return "\n\n" + adapter_lines()
 
 
+def payments_hold(doc: dict, node: str) -> str:
+    """What the owner decided about money (`payments`), for the agents whose
+    work it shapes — so none of them declares a gateway the owner did not
+    choose, writes a checkout into an app that takes no money, or hand-builds
+    a pricing page the runtime already ships."""
+    from services.payments.app_payments import agent_note
+    try:
+        note = agent_note(doc, node)
+    except Exception:  # noqa: BLE001 — a note that cannot be written is no note
+        logger.warning("[executors] payments note for %s could not be written", node, exc_info=True)
+        return ""
+    return f"\n\n{note}" if note else ""
+
+
 def reference_hold(doc: dict, node: str) -> str:
     """The paragraph that holds a model node to the domain reference: every
     item of its kind answered by name or declined with a reason. Empty when
@@ -2606,7 +2620,7 @@ def _build_prompt(
         reply_rules=(DATA_MODEL_REPLY_RULES if node in SCHEMA_BY_NODE
                      else ENVELOPE_RULES),
         task=NODE_TASKS.get(node, f"Produce the {node} artifacts this stage owns.")
-             + reference_hold(doc, node) + integration_adapters(node),
+             + reference_hold(doc, node) + integration_adapters(node) + payments_hold(doc, node),
     )
     if inline_shapes:
         shapes = {k: v for k, v in writable_shapes(agent).items() if k in writes}

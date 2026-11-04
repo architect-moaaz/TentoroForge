@@ -59,6 +59,9 @@ ENGINE_DIRS: dict[str, str] = {
     "workflows": "src/lib/workflows",
     "rules": "src/lib/rules",
     "events": "src/lib/events",
+    # The payment gateways, the ledger and subscriptions: a fix to how a
+    # payment is believed reaches every app on its next sync.
+    "payments": "src/lib/payments",
 }
 
 
@@ -69,6 +72,10 @@ RUNTIME_FILES: tuple[tuple[str, str], ...] = (
     ("db/forge-files.schema.ts", "src/db/schema/_forge_files.ts"),
     # The notification's `link` column (where the record it is about lives).
     ("db/forge-notifications.schema.ts", "src/db/schema/_forge_notifications.ts"),
+    # The bus a refresh brings writes `dedupe_key` (one delivery, one event):
+    # the table it writes to is declared with it, or a push takes the column
+    # away again and every event after it is lost.
+    ("db/forge-events.schema.ts", "src/db/schema/_forge_events.ts"),
     # The engine's reads (labels on a chart's groups) and the seed (a login
     # per role) are the platform's logic, copied verbatim into every app.
     ("data-engine.ts", "src/lib/data-engine.ts"),
@@ -309,6 +316,15 @@ def refresh_engine(app_root: str | Path, doc: dict | None = None, *, complete: b
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(src, dst)
         changed.append(rel)
+    # THE PAYMENT FILES AND THE APP'S PAYMENTS CONFIG, the platform's: the
+    # routes and pages a gateway sends people back to, and what the owner
+    # chose (`services.payments.app_payments`).
+    if (root / "package.json").is_file():
+        try:
+            from services.payments.app_payments import install_runtime as _install_payments
+            changed += _install_payments(root, doc)
+        except Exception:  # noqa: BLE001 — the rest of the sync stands
+            logger.exception("[engine] the payment files could not be refreshed")
     # THE WORKFLOW ROUTES ARE WRITTEN BY CODE, not copied from a file, so the
     # lists above never carried them: an app kept the route it was built with.
     # TCommerce's kept one that gave a signed-out shopper no guest token, so the

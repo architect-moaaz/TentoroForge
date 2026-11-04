@@ -2912,6 +2912,181 @@
       },
       "default": []
     },
+    "payments": {
+      "type": "object",
+      "properties": {
+        "needed": {
+          "type": "boolean"
+        },
+        "models": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "one_time",
+              "subscription"
+            ]
+          },
+          "default": []
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 400,
+          "default": ""
+        },
+        "decidedBy": {
+          "type": "string",
+          "enum": [
+            "forge",
+            "person",
+            "smith"
+          ]
+        },
+        "gateways": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "gateway": {
+                "type": "string",
+                "minLength": 1
+              },
+              "provider": {
+                "type": "string",
+                "enum": [
+                  "stripe",
+                  "razorpay",
+                  "paypal"
+                ]
+              },
+              "label": {
+                "type": "string",
+                "default": ""
+              },
+              "coverage": {
+                "type": "string",
+                "enum": [
+                  "domestic",
+                  "international",
+                  "both"
+                ],
+                "default": "both"
+              },
+              "homeCountry": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "currencies": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[A-Z]{3}$"
+                },
+                "default": []
+              }
+            },
+            "required": [
+              "gateway",
+              "provider"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        },
+        "plans": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,39}$",
+                "description": "Stable slug: 'pro', 'team-yearly'."
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60
+              },
+              "description": {
+                "type": "string",
+                "maxLength": 300,
+                "default": ""
+              },
+              "interval": {
+                "type": "string",
+                "enum": [
+                  "day",
+                  "week",
+                  "month",
+                  "year"
+                ]
+              },
+              "intervalCount": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 12,
+                "default": 1
+              },
+              "prices": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 10000000
+                },
+                "propertyNames": {
+                  "pattern": "^[A-Z]{3}$"
+                }
+              },
+              "trialDays": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 365,
+                "default": 0
+              },
+              "features": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "maxLength": 120
+                },
+                "maxItems": 20,
+                "default": []
+              },
+              "highlighted": {
+                "type": "boolean",
+                "default": false
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "interval",
+              "prices"
+            ],
+            "additionalProperties": false
+          },
+          "maxItems": 8,
+          "default": []
+        },
+        "access": {
+          "type": "string",
+          "enum": [
+            "app",
+            "none"
+          ],
+          "default": "none"
+        },
+        "basis": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "default": {}
+    },
     "security": {
       "type": "object",
       "properties": {

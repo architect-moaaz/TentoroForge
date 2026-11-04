@@ -79,6 +79,22 @@ def _filter_headers(headers) -> list[tuple[str, str]]:
     return [(k, v) for k, v in items if k.lower() not in _HOP_BY_HOP]
 
 
+def _forwarded(headers: list[tuple[str, str]], request: Request) -> list[tuple[str, str]]:
+    """WHERE THE PERSON IS, for an app that builds an address from the request.
+    `Host` is a hop's, so the app saw only `localhost:<its port>`: a gateway's
+    return after a payment, and next-auth's redirect after a sign-in, sent the
+    person to an address that is not public (on the server, nothing at all).
+    An outer proxy's own values stand."""
+    have = {k.lower() for k, _ in headers}
+    out = list(headers)
+    host = request.headers.get("host")
+    if host and "x-forwarded-host" not in have:
+        out.append(("x-forwarded-host", host))
+    if "x-forwarded-proto" not in have:
+        out.append(("x-forwarded-proto", request.url.scheme))
+    return out
+
+
 def _elsewhere() -> HTTPException:
     return HTTPException(status_code=404, detail=(
         f"A preview opens only at its own address ({preview_origin.origin()}), never at the platform's."))
@@ -123,7 +139,7 @@ async def _proxy(request: Request, project_id: str, path: str, *, upstream_path:
     if request.url.query:
         upstream_url = f"{upstream_url}?{request.url.query}"
 
-    fwd_headers = _filter_headers(request.headers)
+    fwd_headers = _forwarded(_filter_headers(request.headers), request)
     page = _a_page(request)
     if page:
         # Plain bytes, so the loader can go in.

@@ -23,4 +23,4 @@ export const PROVIDER_VERIFIERS: Record<string, Verifier> = {};
 /** A payment provider's signed call is verified AND settled by its adapter
  *  (`payments/index.ts`): the ledger moves and the normalised event goes on
  *  the bus. The webhook route hands these providers over whole. */
-export const PAYMENT_PROVIDERS = new Set(["stripe"]);
+export const PAYMENT_PROVIDERS = new Set(["stripe", "razorpay", "paypal"]);

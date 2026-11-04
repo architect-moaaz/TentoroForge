@@ -44,6 +44,7 @@ from models.environment import Environment
 from models.platform_integration import PlatformIntegration
 from models.person_connection import PersonConnection
 from models.run_job import RunJob
+from models.payment_gateway import PaymentGateway, PaymentGatewayWebhook
 from models.platform_mcp_server import PlatformMcpServer
 from models.mobile_build import MobileBuild
 from models.verify_run import VerifyRun
@@ -101,6 +102,8 @@ __all__ = [
     "PlatformIntegration",
     "PersonConnection",
     "RunJob",
+    "PaymentGateway",
+    "PaymentGatewayWebhook",
     "PlatformMcpServer",
     "MobileBuild",
     "VerifyRun",

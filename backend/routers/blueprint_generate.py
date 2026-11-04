@@ -1994,7 +1994,7 @@ async def smith_chat(
         if event == "message":
             _remember(loop, project_id, "assistant", str(data.get("text") or ""),
                       {k: v for k, v in data.items()
-                       if k in ("options", "diffSummary", "status", "intent", "secret")
+                       if k in ("options", "diffSummary", "status", "intent", "secret", "paymentChoice")
                        and v},
                       lock=memory_lock)
         # The telemetry is still not written to the transcript — it would make
@@ -2298,6 +2298,15 @@ async def smith_chat(
                         "status": "asked"})
                     return {"status": "asked"}
 
+                # HOW IT TAKES MONEY, BEFORE IT IS BUILT. An app that sells
+                # something waits for its owner to choose the gateways (the
+                # dialog opens on this message); one that takes no money builds.
+                from services.payments.app_payments import build_question as _payment_question
+                _asked = _payment_question(svc)
+                if _asked is not None:
+                    emit("message", _asked)
+                    return {"status": "asked"}
+
                 # VERIFICATION IS THE USER'S CALL, NOT AN AUTOMATIC COST. `_run_dag`
                 # offers it beside the completion line for every approved build
                 # (see there), so a build that outran its turn still delivers the
@@ -2357,6 +2366,11 @@ async def smith_chat(
                         "options": ["Build it again anyway", "Show me the screens",
                                     "Nothing, I'll change something first"],
                         "status": "asked"})
+                    return {"status": "asked"}
+                from services.payments.app_payments import build_question as _payment_question
+                _asked = _payment_question(svc)
+                if _asked is not None:
+                    emit("message", _asked)
                     return {"status": "asked"}
                 emit("message", {"text": "Building it now — this takes a few minutes."})
                 return _run_dag(str(output_dir), app_root, req.message,

@@ -3091,7 +3091,20 @@ def project_integrations(doc: dict, app_root: str | Path) -> dict[str, Any]:
         "",
         "export const CONNECTED_SERVICES: Record<string, ConnectedService> = {",
     ]
+    # ONE SERVICE PER ACTION. An app paid into several gateways has an
+    # integration row for each, all serving `take_payment`; written as they
+    # came, the object literal held the key twice and the last silently won.
+    # The owner's first-chosen gateway answers for the action, as it is the
+    # default in the app's payments config (which routes payers between them);
+    # otherwise the first declared.
+    default = next((str(g.get("provider")) for g in ((doc.get("payments") or {}).get("gateways") or [])
+                    if isinstance(g, dict)), "")
+    by_action: dict[str, dict[str, Any]] = {}
     for entry in entries:
+        kept = by_action.get(entry["action"])
+        if kept is None or (entry["provider"] == default and kept["provider"] != default):
+            by_action[entry["action"]] = entry
+    for entry in by_action.values():
         lines.append(f"  {json.dumps(entry['action'])}: " + json.dumps({
             "name": entry["name"], "provider": entry["provider"],
             "keys": entry["keys"], "liveKey": entry["liveKey"],
@@ -4514,6 +4527,9 @@ def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
         lines.append(f'//   public: {r.route}{"/*" if r.subtree else ""}  (the platform\'s: {r.why})')
     gated_by_role = role_routes(doc)
     public_lines = [f'  new RegExp({json.dumps(rx)}),  // {why}' for rx, why in public]
+    # A SUBSCRIPTION OPENS THE APP when its payments say so (`payments.access`).
+    from services.payments.app_payments import middleware_gate
+    gate_head, gate_body = middleware_gate(doc)
     role_lines = [
         f'  {{ route: new RegExp({json.dumps(_route_regex(r["route"]))}), roles: {json.dumps(r["roles"])} }},'
         for r in gated_by_role
@@ -4553,8 +4569,9 @@ def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
         'const refuse = (status: 401 | 403, code: string, message: string) =>',
         '  NextResponse.json({ error: { code, message } }, { status });',
         '',
+        *gate_head,
         'export default withAuth(',
-        '  function middleware(req) {',
+        ('  async function middleware(req) {' if gate_body else '  function middleware(req) {'),
         '    const path = req.nextUrl.pathname;',
         '    if (isPublic(path)) return NextResponse.next();',
         '    const token = req.nextauth.token as { role?: unknown } | null;',
@@ -4566,6 +4583,7 @@ def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
         '        return NextResponse.redirect(new URL("/403", req.url));',
         '      }',
         '    }',
+        *gate_body,
         '    return NextResponse.next();',
         '  },',
         '  {',

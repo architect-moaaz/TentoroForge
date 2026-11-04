@@ -100,3 +100,18 @@ async def test_a_named_preview_origin_serves_nothing_but_previews(monkeypatch, u
     async with await _client(**{"x-forwarded-host": "forge.test", "x-forwarded-for": "203.0.113.9"}) as c:
         assert (await c.get("/api/auth/me")).status_code in (401, 403)
         assert (await c.get("/api/projects/abc123/preview/serve/")).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_the_app_is_told_the_address_the_person_is_at(upstream):
+    """A payment's return and a sign-in's redirect are built from the request: the
+    app hears the preview's public host and scheme, not its own port; an outer
+    proxy's values stand."""
+    async with await _client() as c:
+        await c.get("/api/projects/abc123/preview/serve/billing", headers={"sec-fetch-dest": "document"})
+    assert upstream[-1].headers["x-forwarded-host"] == "localhost:6500"
+    assert upstream[-1].headers["x-forwarded-proto"] == "http"
+    assert upstream[-1].url.host == "localhost" and upstream[-1].url.port == 4999
+    async with await _client(**{"x-forwarded-proto": "https"}) as c:
+        await c.get("/api/projects/abc123/preview/serve/billing", headers={"sec-fetch-dest": "document"})
+    assert upstream[-1].headers["x-forwarded-proto"] == "https", "the outer proxy's scheme stands"

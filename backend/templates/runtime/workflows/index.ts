@@ -1947,7 +1947,10 @@ export function registerDefaultActions(): void {
       const base = (process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/$/, "");
       const successPath = String(_resolveRef(cfg.successPage, ctx) ?? "/");
       const cancelPath = String(_resolveRef(cfg.cancelPage, ctx) ?? successPath);
-      const { adapter, secrets, live, notice } = await pay.adapterFor();
+      // THE PAYER'S GATEWAY: by the currency they pay in and, when the request
+      // said, where they are (`payments/routing.ts`).
+      const country = (ctx.variables as any).__country ? String((ctx.variables as any).__country) : null;
+      const { adapter, secrets, live, notice } = await pay.gatewayFor({ currency, country });
       const user = (ctx as any)?.user;
       const paymentId = await pay.ledgerInsert({ provider: adapter.provider, provider_ref: null, amount_minor: amountMinor, currency,
         entity: ref?.entity ? String(ref.entity) : null, entity_id: ref?.id != null ? String(ref.id) : null,
@@ -1956,7 +1959,9 @@ export function registerDefaultActions(): void {
         metadata: { workflow: String((ctx as any)?.workflowId ?? ""), ...(ref?.entity ? { entity: String(ref.entity) } : {}), ...(ref?.id != null ? { entityId: String(ref.id) } : {}) } });
       const out = await adapter.createCheckout({ paymentId, amountMinor, currency, description: cfg.description ? String(_resolveRef(cfg.description, ctx) ?? "") : undefined,
         lineItems: lines.length ? lines : undefined, customerEmail: cfg.customerEmail ? String(_resolveRef(cfg.customerEmail, ctx) ?? "") : (user?.email ? String(user.email) : undefined),
-        successUrl: `${origin}${base}${successPath}?payment=${paymentId}`, cancelUrl: `${origin}${base}${cancelPath}?payment=${paymentId}&cancelled=1`,
+        // BACK THROUGH THE APP, WHICH ASKS THE GATEWAY: the return confirms the
+        // payment (and captures PayPal's) before the person reaches the page.
+        successUrl: `${origin}${base}/api/pay/return?payment=${paymentId}`, cancelUrl: `${origin}${base}/api/pay/return?payment=${paymentId}&cancelled=1`,
         metadata: { paymentId, ...(ref?.entity ? { entity: String(ref.entity) } : {}), ...(ref?.id != null ? { entityId: String(ref.id) } : {}) },
         transfer: cfg.transfer && typeof cfg.transfer === "object" ? _resolveValueMap(cfg.transfer, ctx) as any : undefined }, secrets, origin);
       await pay.ledgerSet(paymentId, { provider_ref: out.providerRef });
@@ -1976,11 +1981,15 @@ export function registerDefaultActions(): void {
       if (!row) return { error: `refund_payment: no payment '${id}' on the ledger` };
       if (row.status !== "succeeded" && row.status !== "partially_refunded") return { error: `refund_payment: the payment is ${row.status}, not paid` };
       const amount = (config as any).amount != null ? Number(_resolveRef((config as any).amount, ctx)) : undefined;
+      // REFUNDED WHERE IT WAS PAID: the gateway that took it, with its own keys.
       const adapter = pay.ADAPTERS[row.provider] ?? pay.ADAPTERS.stand_in;
-      const { secrets } = await pay.adapterFor();
-      const out = await adapter.refund({ providerRef: String(row.provider_ref), amountMinor: amount ? pay.toMinor(amount, row.currency) : undefined }, secrets);
+      const secrets = row.provider === "stand_in" ? { secret: "" } : await pay.secretsFor(row.provider);
+      if (!secrets) return { error: `refund_payment: ${row.provider}'s keys are not set here` };
+      const out = await adapter.refund({ providerRef: String(row.provider_ref), amountMinor: amount ? pay.toMinor(amount, row.currency) : undefined,
+        currency: row.currency, metadata: row.metadata ?? {} }, secrets);
       if (row.provider === "stand_in" || out.status === "succeeded") {
-        await pay.settle(String(row.metadata?.integration ?? row.provider), { type: "refund.succeeded", providerRef: String(row.provider_ref),
+        const slug = pay.gateways().find((g: any) => g.provider === row.provider)?.integration ?? String(row.metadata?.integration ?? row.provider);
+        await pay.settle(slug, { type: "refund.succeeded", providerRef: String(row.provider_ref),
           paymentId: row.id, amountMinor: amount ? pay.toMinor(amount, row.currency) : Number(row.amount_minor), currency: row.currency, metadata: {} });
       }
       return { refundId: out.refundId, status: out.status, paymentId: row.id };

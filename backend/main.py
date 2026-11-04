@@ -56,6 +56,7 @@ from routers.plan_adjust import router as plan_adjust_router
 from routers.mobile_builds import router as mobile_builds_router
 from routers.platform_integrations import router as platform_integrations_router
 from routers.figma_oauth import router as figma_oauth_router
+from routers.payment_gateways import router as payment_gateways_router
 from routers.platform_mcp_servers import router as platform_mcp_servers_router
 from routers.preview_proxy import router as preview_proxy_router
 from routers.phone_preview import router as phone_preview_router
@@ -227,6 +228,7 @@ app.include_router(plan_adjust_router)
 app.include_router(mobile_builds_router)
 app.include_router(platform_integrations_router)
 app.include_router(figma_oauth_router)
+app.include_router(payment_gateways_router)
 app.include_router(platform_mcp_servers_router)
 app.include_router(preview_proxy_router)
 app.include_router(phone_preview_router)
