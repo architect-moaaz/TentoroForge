@@ -2098,6 +2098,48 @@ def derive_shell(doc: dict) -> dict[str, str]:
     return {"chrome": chrome, "auth": auth, "tone": tone, "density": density}
 
 
+#: Where the sign-in and sign-up pages read their composition and their words.
+AUTH_IDENTITY_PATH = "src/contracts/auth-identity.ts"
+
+
+def _write_auth_identity(doc: dict, app_root: str | Path, shell: dict,
+                         copy: dict[str, str]) -> str:
+    """``src/contracts/auth-identity.ts`` — the sign-in screen, re-projected.
+
+    A MODULE AND NOT A SUBSTITUTION, BECAUSE A SUBSTITUTION HAPPENS ONCE. The
+    page used to hold `__AUTH_LAYOUT__` and `__AUTH_HEADLINE__` literals that
+    the injector replaced at generation time; once replaced the placeholder is
+    gone, so a design changed later had nothing left to write to and the first
+    screen kept its first value for good — Mark 8's design-dna says
+    `centered-minimal` and its login page still says `split-editorial`.
+    Rewritten here on every projection, like `tokens.css` and `brand.ts`.
+
+    TypeScript rather than JSON because both readers carry "use client" and
+    cannot read a file at render time (the same reason as `brand.ts`).
+
+    `{app}` is resolved here, where the application's name is known, so the
+    page holds finished sentences and not a template to fill in.
+    """
+    name = str((doc.get("application") or {}).get("name") or "").strip()
+    said = {k: (v.replace("{app}", name) if name else v) for k, v in copy.items()}
+    body = {"layout": str(shell.get("auth") or ""),
+            "headline": said.get("headline", ""), "subhead": said.get("subhead", ""),
+            "title": said.get("title", ""), "sub": said.get("sub", "")}
+    out = Path(app_root) / AUTH_IDENTITY_PATH
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(
+        "// Written from the Living Blueprint on every projection — edit the\n"
+        "// Blueprint, not this file. Self-contained, like the scaffold's copy\n"
+        "// of it: the type lives here too, so overwriting this one file cannot\n"
+        "// leave the pages that import it without one.\n"
+        "export type AuthIdentity = {\n"
+        "  layout: string;\n  headline: string;\n  subhead: string;\n"
+        "  title: string;\n  sub: string;\n};\n\n"
+        f"export const AUTH_IDENTITY: AuthIdentity = {json.dumps(body, indent=2, sort_keys=True)};\n",
+        "utf-8")
+    return AUTH_IDENTITY_PATH
+
+
 def project_shell_identity(doc: dict, app_root: str | Path) -> dict[str, Any]:
     """Write the frame the shell and the sign-in page read (see
     :data:`SHELL_IDENTITY_PATH`). Idempotent: rewritten from the Blueprint on
@@ -2109,8 +2151,21 @@ def project_shell_identity(doc: dict, app_root: str | Path) -> dict[str, Any]:
             "layout": {"chrome": shell["chrome"], "auth": shell["auth"], "tone": shell["tone"],
                        "density": shell["density"]},
             "skin": ""}
+    # WHAT THE SIGN-IN SCREEN SAYS, WHERE THE SIGN-IN SCREEN CAN READ IT. The
+    # injector has always looked for `authCopy` here (`_substitute_auth_copy`)
+    # and nothing on this path ever wrote it, so every application greeted its
+    # users with wording built from its own name. Only the strings the design
+    # actually stated are passed on: an empty one would override the fallback
+    # with nothing.
+    stated = (doc.get("designSystem") or {}).get("authCopy") or {}
+    copy = {k: " ".join(str(stated.get(k) or "").split())
+            for k in ("headline", "subhead", "title", "sub")
+            if str(stated.get(k) or "").strip()}
+    if copy:
+        body["authCopy"] = copy
+    _write_auth_identity(doc, app_root, shell, copy)
     out.write_text(json.dumps(body, indent=2) + "\n", "utf-8")
-    return {"files": [SHELL_IDENTITY_PATH], **shell}
+    return {"files": [SHELL_IDENTITY_PATH, AUTH_IDENTITY_PATH], **shell}
 
 
 def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:

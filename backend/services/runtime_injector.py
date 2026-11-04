@@ -3065,10 +3065,18 @@ def _substitute_auth_copy(output_path: Path, app_name: str | None,
         headline, subhead = "Welcome back", "Sign in to continue."
 
     form_title, form_sub = "Welcome back", f"Sign in to {name}" if name != "App" else "Sign in to continue"
+    # ALL FOUR, NOT TWO. The brand half of the sign-in page — the large words
+    # beside the form — was built from the application's name and could not be
+    # overridden at all, so writing the design's own voice into `authCopy`
+    # still left "Welcome to {app}" set in display type above it.
     try:
         dna = json.loads((output_path / "src" / "contracts" / "design-dna.json")
                          .read_text(encoding="utf-8"))
         ac = dna.get("authCopy") or {}
+        if ac.get("headline"):
+            headline = str(ac["headline"]).replace("{app}", name)
+        if ac.get("subhead"):
+            subhead = str(ac["subhead"]).replace("{app}", name)
         if ac.get("title"):
             form_title = str(ac["title"]).replace("{app}", name)
         if ac.get("sub"):

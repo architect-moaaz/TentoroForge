@@ -3024,6 +3024,32 @@ export const DesignSystem = z.object({
    * application's initial rather than an empty box.
    */
   logo: BrandLogo.optional(),
+  /**
+   * What the sign-in screen says, in this product's own voice.
+   *
+   * The sign-in page is the first screen anyone sees and it was the last one
+   * anybody wrote: every generated app greeted its users with "Welcome to
+   * {app}" beside "Welcome back / Sign in to {app}", because the only words
+   * the page could reach were built from the application's name. A table of
+   * per-archetype greetings was written to end that (`services.design_dna`)
+   * and the Blueprint path never wrote it, so the greeting stayed. It is the
+   * fastest same-generator tell there is, and the cheapest to lose.
+   *
+   * Four strings, because the page has two halves: `headline` and `subhead`
+   * carry the brand panel — what this product IS, to someone who has not
+   * signed in yet — and `title` and `sub` sit over the form. `{app}` in any
+   * of them is replaced with the application's name. Left empty, the old
+   * built-from-the-name wording stands, so nothing regresses.
+   */
+  authCopy: z
+    .object({
+      headline: z.string().default(""),
+      subhead: z.string().default(""),
+      title: z.string().default(""),
+      sub: z.string().default(""),
+    })
+    .partial()
+    .optional(),
 });
 
 // ===========================================================================

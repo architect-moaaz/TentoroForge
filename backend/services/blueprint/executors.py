@@ -1537,7 +1537,17 @@ NODE_TASKS: dict[str, str] = {
         "with quiet `tight` type; a playful one is `layered` depth with `expressive` motion; a "
         "utility console is `flat` with `tight` type and `subtle` or `none` motion. Choose them "
         "together, as one considered thing — this, with the palette and the faces, is what stops "
-        "every generated application from reading at the same depth and rhythm."
+        "every generated application from reading at the same depth and rhythm.\n\n"
+        "THE SIGN-IN SCREEN SAYS WHAT THIS PRODUCT IS, AND IT IS THE ONE SCREEN EVERY USER SEES. "
+        "Write `authCopy` — four short strings in the register you just named. `headline` and "
+        "`subhead` carry the brand half: what this product is FOR, said to someone who has not "
+        "signed in yet and may not know. `title` and `sub` sit over the form itself. Write "
+        "`{app}` where the application's name belongs and it is filled in. Every generated "
+        "application so far has opened on \"Welcome to {app}\" above \"Welcome back / Sign in to "
+        "{app}\" — words built from the name because nothing else was written, and the quickest "
+        "way to recognise that two products came out of one generator. A booking app and a "
+        "finance console do not greet a person the same way: say something only THIS product "
+        "could say, in its own voice, and keep the headline short enough to set large."
     ),
     "requirements": (
         "Extract the application's requirements from the description. Each is one "

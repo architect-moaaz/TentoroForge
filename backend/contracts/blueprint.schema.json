@@ -3754,6 +3754,28 @@
             "file"
           ],
           "additionalProperties": false
+        },
+        "authCopy": {
+          "type": "object",
+          "properties": {
+            "headline": {
+              "type": "string",
+              "default": ""
+            },
+            "subhead": {
+              "type": "string",
+              "default": ""
+            },
+            "title": {
+              "type": "string",
+              "default": ""
+            },
+            "sub": {
+              "type": "string",
+              "default": ""
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false,
