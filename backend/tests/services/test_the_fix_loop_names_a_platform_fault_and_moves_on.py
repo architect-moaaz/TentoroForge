@@ -23,7 +23,11 @@ def _wire(monkeypatch, svc, reds, answers):
 
     def run_turn(pid, output_dir, ask, **k):
         asked.append(ask)
-        answer = answers.pop(0) if answers else {"answer": "nothing", "edited_paths": []}
+        # The answer belongs to the red it is about, not to the order the repairs
+        # run in: page repairs run in parallel, and keying on the turn's order
+        # handed the engine's answer to whichever thread asked first.
+        cause = next((c for c in answers if c in ask), None)
+        answer = answers.pop(cause) if cause else {"answer": "nothing", "edited_paths": []}
         # A turn that reaches into the engine leaves a platform patch on record.
         for path in answer.get("patched", []):
             from services.smith import file_edit
@@ -41,10 +45,10 @@ def test_a_platform_fault_is_said_recorded_marked_and_left_alone(tmp_path, monke
     sc.seed_from_boot(svc)
     reds = {"pages": [sc.item("PAGE-002", "Transaction History", "it shows 'NaN'", "PAGE-002"),
                       sc.item("PAGE-003", "Calendar", "button errors", "PAGE-003")]}
-    # The first repair edits the engine; the second edits the app and still fails.
-    answers = [{"answer": "Changed the platform's `src/lib/data-engine.ts` for this app: Dates to strings.",
-                "edited_paths": ["src/lib/data-engine.ts"], "patched": ["src/lib/data-engine.ts"]},
-               {"answer": "Rewrote /calendar", "edited_paths": ["src/app/(dashboard)/calendar/view.tsx"]}]
+    # Transaction History's repair edits the engine; Calendar's edits the app and still fails.
+    answers = {"PAGE-002": {"answer": "Changed the platform's `src/lib/data-engine.ts` for this app: Dates to strings.",
+                            "edited_paths": ["src/lib/data-engine.ts"], "patched": ["src/lib/data-engine.ts"]},
+               "PAGE-003": {"answer": "Rewrote /calendar", "edited_paths": ["src/app/(dashboard)/calendar/view.tsx"]}}
     # The app's classifier: the engine's file is the platform's, a page file is the app's.
     monkeypatch.setattr("services.smith.file_edit.classify",
                         lambda doc, rel: {"kind": "platform"} if rel.startswith("src/lib/") else {"kind": "page"})
