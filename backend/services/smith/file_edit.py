@@ -161,6 +161,22 @@ def patches_by(turn: str) -> Iterator[None]:
         _TURN.reset(token)
 
 
+def current_turn() -> str:
+    """The repair turn whose patches are being made here, or "" outside one."""
+    return _TURN.get()
+
+
+def another_turns(patch: dict, turn: str | None) -> bool:
+    """Whether this patch is some OTHER repair's. The repairs run side by side
+    on one application, so a patch stamped with a turn that is not this one is
+    not this one's — not to name as the platform's fault, and not to settle at
+    the end of the turn. A patch naming no turn is nobody else's by this test:
+    the record it was already in tells it apart, as every patch was told apart
+    before turns were stamped."""
+    other = str(patch.get("turn") or "")
+    return bool(turn and other and other != str(turn))
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -588,5 +604,5 @@ def edit_definition(output_dir: str, section: str, find: str, replace: str, why:
             "finding": "", "touched": [f"app/{m}" for m in moved] or [f"definition:{s}" for s in sections]}
 
 
-__all__ = ["amending", "classify", "edit_definition", "edit_file", "load_patches", "open_patches",
-           "patches_by", "platform_text", "reapply", "settle"]
+__all__ = ["amending", "another_turns", "classify", "current_turn", "edit_definition", "edit_file",
+           "load_patches", "open_patches", "patches_by", "platform_text", "reapply", "settle"]

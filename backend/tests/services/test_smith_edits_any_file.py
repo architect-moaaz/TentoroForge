@@ -239,6 +239,27 @@ def test_a_change_not_tried_since_is_not_done(tmp_path, tries):
     assert chooser.seen[3][-1].said == TRY_AFTER
 
 
+def test_a_turn_settles_its_own_patches_and_not_a_sibling_repairs(tmp_path, tries):
+    """The repairs run side by side on one application. A patch the repair
+    next door is still proving was settled here on a try that was not its
+    own — kept on this turn's proof, or its engine edit taken back from
+    under it while that repair was still working."""
+    _repo(tmp_path)
+    engine = _app(tmp_path, ENGINE, "const v = read(path);\n")
+    file_edit._save_patches(str(tmp_path), [
+        {"id": "sibling", "kind": "platform", "path": "src/sdk/client.tsx", "status": "pending",
+         "turn": "PAGE-003:beefcafe", "find": "a", "replace": "b", "at": file_edit._now()}])
+    tries += [_FAILS, "Add to Cart (FLOW-001) run as Customer: HTTP 200"]
+    steps = [_TRY, _edit(ENGINE), _TRY] + [{"tool": "done", "args": {}}] * 3
+    with file_edit.patches_by("PAGE-002:0ddba11"):
+        _turn(tmp_path, _Chooser(*steps))
+    by_id = {p["id"]: p for p in file_edit.load_patches(tmp_path)}
+    assert by_id.pop("sibling")["status"] == "pending"        # still the other repair's to settle
+    (mine,) = by_id.values()
+    assert mine["status"] == "active" and mine["turn"] == "PAGE-002:0ddba11"
+    assert engine.read_text() == "const v = evaluate(path);\n"
+
+
 @pytest.mark.parametrize("after,kept", [("Add to Cart (FLOW-001) run as Customer: HTTP 200", True),
                                         (None, False)])
 def test_a_platform_patch_stays_only_when_a_try_after_it_passed(tmp_path, tries, after, kept):

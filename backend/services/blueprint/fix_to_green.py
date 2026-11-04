@@ -513,16 +513,6 @@ def ask_for(group: dict, doc: dict) -> str:
             "holds for them. Nobody is waiting to answer questions: decide from the definition and act.")
 
 
-def _its_own(patch: dict, turn: str | None) -> bool:
-    """Whether this patch could be `turn`'s. One that names another repair's
-    turn is not: page repairs run side by side, and a sibling's patch landing
-    between a repair's first look at the record and its last was read as that
-    repair's own. A patch naming no turn is left to the `before` record, which
-    is how every patch was told apart before turns were stamped."""
-    other = str(patch.get("turn") or "")
-    return not (turn and other and other != str(turn))
-
-
 def platform_fault(output_dir: str, result: Any, *, before: set[str] | None = None,
                    turn: str | None = None) -> str | None:
     """The engine file a repair turn had to change — the fault is the
@@ -538,10 +528,10 @@ def platform_fault(output_dir: str, result: Any, *, before: set[str] | None = No
     if not isinstance(result, dict):
         return None
     try:
-        from services.smith.file_edit import load_patches
+        from services.smith.file_edit import another_turns, load_patches
         made = [p for p in load_patches(output_dir)
                 if p.get("kind") == "platform" and str(p.get("id")) not in (before or set())
-                and _its_own(p, turn)]
+                and not another_turns(p, turn)]
     except Exception:  # noqa: BLE001 — unknown is not a platform fault
         logger.debug("[fix-to-green] could not read the platform patches", exc_info=True)
         return None
