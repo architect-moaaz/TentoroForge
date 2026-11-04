@@ -187,11 +187,33 @@ def project_component_kit(doc: dict, app_root: str | Path) -> list[str]:
 # What the kit is held to
 # --------------------------------------------------------------------------- #
 
+def undeclared_colours(doc: dict, parts: list[dict]) -> list[str]:
+    """Parts that name a `--kit-*` the palette does not declare.
+
+    This costs the part, where the other findings do not, because the other
+    findings still DRAW. A raw hex renders — it is only unthemeable. A var with
+    no declaration and no fallback makes the whole property invalid at computed
+    time, so the rule is dropped and the text keeps whatever it inherited: a
+    label that should be red is simply not. The kit asked for
+    `--kit-paid` and `--kit-wash` with neither in its own palette
+    (Claimsdesk, 2026-11-04), and they were kept as style findings.
+    """
+    named = {_kebab(k) for k in palette_of(doc)}
+    out = []
+    for part in parts:
+        name, code = _filename(part), str(part.get("code") or "")
+        for used in sorted(set(_KIT_VAR.findall(code))):
+            if used not in named:
+                out.append(f"{name}: uses `--kit-{used}`, which `palette` does not declare, so "
+                           "it resolves to nothing and the rule is dropped. Declare it or use "
+                           "one you did.")
+    return out
+
+
 def findings(doc: dict, parts: list[dict]) -> list[str]:
     """What the compiler cannot see and the kit's own bargain forbids."""
     from services.blueprint.ui_engineer import escaped_in_jsx_text
     out: list[str] = []
-    named = {_kebab(k) for k in palette_of(doc)}
     for part in parts:
         name, code = _filename(part), str(part.get("code") or "")
         for token in sorted(set(_SCAFFOLD_TOKEN.findall(code))):
@@ -201,9 +223,6 @@ def findings(doc: dict, parts: list[dict]) -> list[str]:
             out.append(f"{name}: names the colour `{hexed}`. The kit's colours live in "
                        "`palette`, and reach the code as `var(--kit-<name>)` in a class or "
                        "`C.<name>` from ./palette — so the whole kit can be rethemed at once.")
-        for used in sorted(set(_KIT_VAR.findall(code))):
-            if used not in named:
-                out.append(f"{name}: uses `--kit-{used}`, which `palette` does not declare.")
         if escaped_in_jsx_text(code):
             out.append(f"{name}: a `\\uXXXX` escape in JSX text or an attribute string is shown "
                        "literally — write the character itself (— · ₹), or {\"\\u2014\"} in braces.")
@@ -349,10 +368,37 @@ def kit_prompts(doc: dict) -> tuple[str, str]:
         "produce a tasteful default. You get the tints, washes and inks in between — but they "
         "are declared once, in `palette`, and reached as `var(--kit-<name>)` inside a class or "
         "`C.<name>` from `./palette`. A `#hex` written anywhere in a part is refused.\n\n"
-        "Sizes, radii, spacing, gradients, letter-spacing and hand-built shadows ARE yours "
-        "here — that is most of what makes a surface look drawn rather than defaulted. Use the "
-        "design's own scale where it fits (`text-display/h1/h2/h3/body/caption`, `shadow-sm` to "
-        "`shadow-xl`, `rounded-lg`), and your own exact values where the design wants them."
+        "THE DESIGN SYSTEM DECIDED A FEW THINGS. YOU DECIDE THE REST, AND THE REST IS MOST OF "
+        "IT. Honour what it owns, because those carry the register across the whole app: the "
+        "type roles (`text-display/h1/h2/h3/body/caption`), the depth ramp (`shadow-sm` to "
+        "`shadow-xl`), the corner (`rounded-sm/md/lg`) and the colour roles. Everything else "
+        "about a surface is an unmade decision and it is yours — reaching for the nearest stock "
+        "utility is not a neutral choice, it is the choice that makes every product look alike.\n\n"
+        "SPACE IS THE CLEAREST CASE, AND THE ONE MOST OFTEN DEFAULTED. `p-3`, `p-4`, `gap-2` "
+        "are Tailwind's ladder, not this product's: a kit built from them is spaced like every "
+        "other application on the web, whatever its palette. This design states its own — "
+        "`p-card` (what a card holds its contents at), `gap-section` (what separates two "
+        "sections), `p-row` (a compact row's padding) — and where those do not say it, write "
+        "the exact value the part wants (`px-[18px]`, `gap-[6px]`). Pick the few numbers this "
+        "product is built on, deliberately, and use them everywhere.\n\n"
+        "For each part, decide and be able to say why:\n"
+        "- its inner padding, and whether the top differs from the bottom;\n"
+        "- the rhythm of space between the things inside it, and what that spacing says about "
+        "which of them belong together;\n"
+        "- its ground — the design's surface, or a wash of your own from `palette`;\n"
+        "- its edge: a hairline all round, one weighted edge, a rule under the heading only, "
+        "or nothing at all and space doing the work;\n"
+        "- how a label reads against its value — size, weight, case, tracking, colour — and the "
+        "same answer in every part that has one;\n"
+        "- what it looks like when it is interactive: hover, focus, the row that is selected.\n\n"
+        "Then look at the parts together. One corner family, one padding rhythm, one way a "
+        "label is set, one way an edge is drawn — repeated across every part, that IS the "
+        "product's look. A part that is only stock utility classes has made none of these "
+        "decisions and will not agree with the ones that did.\n\n"
+        "None of this means more ornament. A dense console earns its character from exact "
+        "values — a tighter inner padding, a crisper edge, a smaller and wider-tracked label — "
+        "as surely as a spacious one earns it from air and depth. Spend the decisions where "
+        "this product's register wants them."
     )
 
     look = {k: ds.get(k) for k in ("register", "visualPersonality", "informationDensity",
@@ -375,7 +421,9 @@ def kit_prompts(doc: dict) -> tuple[str, str]:
         "these, and the count is how many of its fourteen kit-using pages imported each:\n"
         + "\n".join(f"- {what} ({n} pages)" for what, n in _PARTS_SEEN)
         + "\nThat is what pages ask for, not a list to copy — name and shape yours for this "
-        "product, add what it needs and leave out what it does not.\n\n"
+        "product, add what it needs and leave out what it does not. Each line names a JOB, "
+        "not a shape: two products' panels hold the same kind of thing and should not look "
+        "the same. Decide what each one is, in this product's language, before you write it.\n\n"
         "AND THE WORDS AND NUMBERS, which matter as much. In that same application the "
         "formatters were imported as often as the components, because what makes a product "
         "feel made is every screen saying the same thing the same way: its money, its dates "
@@ -383,6 +431,9 @@ def kit_prompts(doc: dict) -> tuple[str, str]:
         "and the tone that status is drawn in, how long is left and whether that is urgent. "
         "Write the ones THIS product's records need, from the records above.\n\n"
         "HOW TO WRITE THEM\n"
+        "- Before the first file, settle the decisions the whole kit shares — the padding "
+        "rhythm, how an edge is drawn, how a small label is set — and then hold every part to "
+        "them. They are what make eleven files read as one hand.\n"
         "- One file per part, named for it: `Panel.tsx`, `PageHead.tsx`, `format.ts`.\n"
         "- Plain React and Tailwind. A part is given what to draw as props; it never loads "
         "data, imports `@/sdk/server` or calls `fetch`.\n"
@@ -392,9 +443,12 @@ def kit_prompts(doc: dict) -> tuple[str, str]:
         "- Real <button>/<a>, labels, `aria-label` on an icon-only control, visible focus.\n"
         "- Mobile first: nothing overflows at 375px.\n"
         "- Every exported name listed in `exports`, so the page writer can be handed them.\n\n"
-        "Return `palette` — the handful of colours this product needs beyond its roles, each "
-        "`{name, value}` with value a `#rrggbb` — then "
-        "`parts`, and a one-paragraph `rationale` saying what language these parts are in."
+        "Return `palette` — the colours this product needs that its roles do not already give "
+        "it, each `{name, value}` with value a `#rrggbb`. The washes a section sits on, the "
+        "ink a small label is set in, the tone of each state a record can be in: the in-between "
+        "colours a considered product has and a default one does not. Then `parts`, and a "
+        "`rationale` that names the decisions every part shares — the padding rhythm, the edge, "
+        "how a label is set — so the next person can hold a new part to them."
     )
     return system, user
 
@@ -436,12 +490,14 @@ def compose_kit(doc: dict, client: Any, app_root: str | Path,
 
         probe = {**doc, "componentKit": body}
         style = findings(probe, body["parts"])
+        unrenderable = undeclared_colours(probe, body["parts"])
         project_component_kit(probe, app_root)
         broke: list[str] = []
         try:
             broke = typecheck(app_root)
         except (RuntimeError, subprocess.SubprocessError, OSError) as exc:  # noqa: BLE001
             logger.warning("[component_kit] not compiled: %s", exc)
+        broke += unrenderable
         errors = style + broke
         if not errors:
             return body, last
@@ -472,7 +528,9 @@ def _without_the_broken(doc: dict, body: dict, errors: list[str],
     were before this node existed.
     """
     named = {_filename(p) for p in body["parts"]}
-    blamed = {e.split("(", 1)[0] for e in errors if e.split("(", 1)[0] in named}
+    blamed = {head for e in errors
+              for head in (re.split(r"[(:]", e, maxsplit=1)[0].strip(),)
+              if head in named}
     if not blamed:
         # The compiler is unhappy with something we cannot attribute to a part;
         # we cannot cut precisely, so we do not ship a kit at all.

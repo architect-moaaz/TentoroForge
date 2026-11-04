@@ -175,10 +175,31 @@ def _finding(code, doc=None):
                                   [{"file": "X.tsx", "code": code}])
 
 
-def test_a_colour_the_palette_does_not_declare_is_refused():
+def test_a_hex_of_its_own_is_refused_but_still_draws():
     assert any("#efe6f8" in f for f in _finding('<p className="bg-[#efe6f8]" />'))
-    assert any("--kit-plum" in f for f in _finding('<p className="bg-[var(--kit-plum)]" />'))
     assert _finding('<p className="bg-[var(--kit-wash)]" />') == []
+
+
+def test_a_colour_the_palette_does_not_declare_costs_the_part():
+    """The severities were the wrong way round. A raw hex RENDERS — it is only
+    unthemeable, so it is a style finding and never costs a part. A var the
+    palette does not declare makes the whole property invalid at computed time,
+    the rule is dropped, and a label that should be red simply is not. The kit
+    shipped `--kit-paid` and `--kit-wash` undeclared and they were kept
+    (Claimsdesk, 2026-11-04)."""
+    doc, part = _doc(KIT), [{"file": "X.tsx", "code": '<p className="bg-[var(--kit-plum)]" />'}]
+    assert any("--kit-plum" in f for f in component_kit.undeclared_colours(doc, part))
+    assert component_kit.findings(doc, part) == [], "not a style finding any more"
+    # one it does declare is fine
+    assert component_kit.undeclared_colours(
+        doc, [{"file": "X.tsx", "code": '<p className="bg-[var(--kit-wash)]" />'}]) == []
+
+
+def test_the_part_whose_colour_does_not_resolve_is_dropped(monkeypatch, tmp_path):
+    ghost = {"file": "Ghost.tsx", "purpose": "names a colour that is not there",
+             "exports": ["Ghost"], "code": '<p className="bg-[var(--kit-plum)]" />'}
+    body, _ = _compose(monkeypatch, tmp_path, {**KIT, "parts": [*KIT["parts"], ghost]})
+    assert [p["file"] for p in body["parts"]] == ["Panel.tsx", "format.ts"]
 
 
 def test_a_scaffold_placeholder_is_refused_before_it_fails_the_build():
@@ -235,6 +256,43 @@ def test_the_kit_engineer_is_asked_for_parts_and_for_words():
         assert asked in user, asked
     assert "formatters" in user, "the words matter as much as the shapes"
     assert "never loads data" in user
+
+
+def test_the_engineer_is_told_which_decisions_are_still_its_own():
+    """The first kits honoured the token scale and stopped there: Claimsdesk's
+    Panel was `rounded-md border border-border bg-muted/40 p-3`, every value
+    stock, no decision made — while its StatusChip, where the job was obviously
+    to design something, built six tones over the palette with `color-mix`
+    (2026-11-04). The instruction offered its own values as an alternative to
+    the scale and the scale always won, so it now names the dimensions the
+    design system leaves unmade and says a stock surface is a choice too."""
+    system, _ = component_kit.kit_prompts(_doc())
+    assert "is not a neutral choice" in system
+    for dimension in ("inner padding", "its edge", "its ground", "interactive"):
+        assert dimension in system, dimension
+    # …and the register decides where those go, so a dense tool is not pushed
+    # toward ornament it should not have.
+    assert "A dense console earns its character from exact values" in system
+
+
+def test_the_engineer_is_told_tailwinds_spacing_ladder_is_not_the_designs():
+    """First attempt at the instruction above moved STRUCTURE and not VALUES:
+    the kit grew variants and a stated edge language, and every spacing value
+    was still `p-3`/`p-4`/`gap-2` (2026-11-04, same Blueprint, prompt the only
+    difference). The design states `--space-*`, exposed as `p-card`,
+    `gap-section` and `p-row` — and nothing had ever referenced them."""
+    system, _ = component_kit.kit_prompts(_doc())
+    assert "Tailwind's ladder, not this product's" in system
+    for named in ("p-card", "gap-section", "p-row"):
+        assert named in system, named
+
+
+def test_the_kit_is_asked_to_agree_with_itself():
+    system, user = component_kit.kit_prompts(_doc())
+    assert "One corner family, one padding rhythm" in system
+    assert "settle the decisions the whole kit shares" in user
+    assert "names the decisions every part shares" in user, (
+        "the rationale is where they are written down for the next part")
 
 
 def test_the_kit_implements_the_rhythm_the_director_chose():
