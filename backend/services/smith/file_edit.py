@@ -27,13 +27,15 @@ should be — and what happens to it depends on whose the file is:
 """
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
 import re
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +136,24 @@ def platform_text(rel: str) -> str | None:
 # --------------------------------------------------------------------------- #
 # The patch record
 # --------------------------------------------------------------------------- #
+
+#: The repair turn whose patches these are. Page repairs run side by side
+#: (`fix_to_green._fix`), and whose patch is whose cannot be read off the
+#: record: a sibling's patch, landing between one repair's first look at the
+#: record and its last, was read as that repair's own — which blamed the wrong
+#: page for the platform's fault and dropped a red that was the app's to fix.
+_TURN: contextvars.ContextVar[str] = contextvars.ContextVar("forge_patch_turn", default="")
+
+
+@contextmanager
+def patches_by(turn: str) -> Iterator[None]:
+    """Patches made inside this block say they are `turn`'s."""
+    token = _TURN.set(str(turn or ""))
+    try:
+        yield
+    finally:
+        _TURN.reset(token)
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -335,8 +355,10 @@ def edit_file(output_dir: str, path: str, find: str, replace: str, why: str = ""
     if new is None:
         return {"applied": False, "said": "", "touched": [], "finding": why_not}
     target.write_text(new, "utf-8")
+    turn = _TURN.get()
     patch = {"id": uuid.uuid4().hex[:10], "path": rel, "kind": kind["kind"], "find": find, "replace": replace,
-             "why": why, "at": _now(), "status": "pending" if kind["kind"] == "platform" else "active"}
+             "why": why, "at": _now(), "status": "pending" if kind["kind"] == "platform" else "active",
+             **({"turn": turn} if turn else {})}
     patches = load_patches(output_dir) + [patch]
     _save_patches(output_dir, patches)
     _register(output_dir, patch)
@@ -524,5 +546,5 @@ def edit_definition(output_dir: str, section: str, find: str, replace: str, why:
             "finding": "", "touched": [f"app/{m}" for m in moved] or [f"definition:{s}" for s in sections]}
 
 
-__all__ = ["classify", "edit_definition", "edit_file", "load_patches", "open_patches", "platform_text",
-           "reapply", "settle"]
+__all__ = ["classify", "edit_definition", "edit_file", "load_patches", "open_patches", "patches_by",
+           "platform_text", "reapply", "settle"]

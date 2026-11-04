@@ -89,3 +89,43 @@ def test_only_a_patch_the_turn_made_names_a_platform_fault(tmp_path):
          "at": "2026-10-22T08:25:00+00:00"}])
     assert ftg.platform_fault(str(tmp_path), {"answer": "x"}, before={"old"}) == "src/lib/data-engine.ts"
     assert ftg.platform_fault(str(tmp_path), None, before={"old"}) is None
+
+
+def test_a_patch_a_sibling_repair_made_is_not_this_ones_fault(tmp_path):
+    """The repairs run side by side. Calendar's turn reached into the engine
+    after Transaction History's turn had looked at the record and before it
+    finished, so the engine's fault was read as Transaction History's too:
+    the wrong page was named and a red that was the app's to fix was marked
+    platform and never worked again."""
+    from services.smith import file_edit
+    file_edit._save_patches(str(tmp_path), [
+        {"id": "sibling", "kind": "platform", "path": "src/lib/data-engine.ts", "status": "pending",
+         "turn": "PAGE-003:beefcafe", "at": file_edit._now()}])
+    assert ftg.platform_fault(str(tmp_path), {"answer": "x"}, before=set(), turn="PAGE-002:0ddba11") is None
+    # The turn that made it still has it named as its own.
+    assert ftg.platform_fault(str(tmp_path), {"answer": "x"}, before=set(),
+                              turn="PAGE-003:beefcafe") == "src/lib/data-engine.ts"
+    # A patch from before turns were stamped is told apart by the record alone.
+    file_edit._save_patches(str(tmp_path), [
+        {"id": "unstamped", "kind": "platform", "path": "src/sdk/client.tsx", "status": "pending",
+         "at": file_edit._now()}])
+    assert ftg.platform_fault(str(tmp_path), {"answer": "x"}, before=set(),
+                              turn="PAGE-002:0ddba11") == "src/sdk/client.tsx"
+
+
+def test_a_repair_puts_its_own_name_on_the_patches_it_makes(tmp_path):
+    """So `platform_fault` can tell them from a sibling repair's."""
+    from services.smith import file_edit
+    engine = tmp_path / "app" / "src" / "lib" / "workflows" / "engine.ts"
+    engine.parent.mkdir(parents=True, exist_ok=True)
+    engine.write_text("const v = read(path);\n")
+    with file_edit.patches_by("PAGE-002:0ddba11"):
+        out = file_edit.edit_file(str(tmp_path), "src/lib/workflows/engine.ts", "read(path)", "evaluate(path)", "")
+    assert out["applied"] and out["kind"] == "platform"
+    (patch,) = file_edit.load_patches(tmp_path)
+    assert patch["turn"] == "PAGE-002:0ddba11"
+    # Outside a repair nothing is stamped: the record alone tells them apart.
+    engine.write_text("const v = read(path);\n")
+    file_edit._save_patches(str(tmp_path), [])
+    file_edit.edit_file(str(tmp_path), "src/lib/workflows/engine.ts", "read(path)", "evaluate(path)", "")
+    assert "turn" not in file_edit.load_patches(tmp_path)[0]
