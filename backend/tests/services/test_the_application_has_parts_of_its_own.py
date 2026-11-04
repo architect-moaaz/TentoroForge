@@ -20,6 +20,8 @@ drawn-page path makes (`ui_engineer._drawn_findings`).
 from __future__ import annotations
 
 import json
+
+import pytest
 from pathlib import Path
 
 from services.blueprint import component_kit
@@ -499,3 +501,57 @@ def test_a_kit_var_in_the_wrong_case_is_the_break_it_is():
     # the one that is actually written passes
     ok = {"file": "Chip.tsx", "code": 'const c = "bg-[var(--kit-current-subtle)]";'}
     assert component_kit.undeclared_colours(doc, [ok]) == []
+
+
+# --- the largest answer in the build ----------------------------------------
+#
+# Stay's kit came back as 12,885 characters against `output_tokens=64000` — the
+# ceiling exactly — and `json.loads` raised on the unterminated string. That
+# cost the node one of its two attempts; the second one's parts then failed to
+# compile and were dropped, and the application shipped with no kit at all
+# (2026-11-04). Adaptive thinking and the answer share one ceiling.
+
+def test_the_kit_does_not_spend_its_budget_thinking():
+    """A dozen files in one reply, re-sent whole every compile round. The
+    compiler is what holds this node to its work, not deliberation — the same
+    argument already made for `drawn_views`."""
+    from services.blueprint.executors import EFFORT_BY_NODE, MAX_TOKENS_BY_NODE
+    assert EFFORT_BY_NODE.get("component_kit") == "medium"
+    assert MAX_TOKENS_BY_NODE.get("component_kit", 0) >= 64000
+
+
+def test_a_reply_cut_off_mid_answer_costs_a_round_and_not_the_node(tmp_path):
+    """It used to raise straight out of the node."""
+    import dataclasses
+
+    @dataclasses.dataclass
+    class FakeClient:
+        effort: str = "high"
+        max_tokens: int = 64000
+        seen: list = dataclasses.field(default_factory=list)
+
+        def __call__(self, *, system, user, schema):
+            self.seen.append(self.effort)
+            if self.effort != "low":          # the first ask thinks itself out
+                return type("R", (), {"text": '{"palette": [{"name": "wash",',
+                                      "usage": None})()
+            return type("R", (), {"text": json.dumps({
+                "rationale": "one hand",
+                "palette": [{"name": "wash", "value": "#f6e3c8"}],
+                "parts": [{"file": "Panel.tsx", "purpose": "a panel",
+                           "exports": ["Panel"],
+                           "code": "export const Panel = () => null;"}],
+            }), "usage": None})()
+
+    client = FakeClient()
+    body, _ = component_kit.compose_kit({"componentKit": {}}, client, tmp_path, rounds=1)
+    assert [p["file"] for p in body["parts"]] == ["Panel.tsx"]
+    assert client.seen == ["high", "low"], client.seen
+
+
+def test_a_client_with_no_effort_to_lower_still_raises(tmp_path):
+    """A test's fake and a plain callable have nothing to give back."""
+    def client(*, system, user, schema):
+        return type("R", (), {"text": '{"palette": [{"name":', "usage": None})()
+    with pytest.raises(json.JSONDecodeError):
+        component_kit.compose_kit({"componentKit": {}}, client, tmp_path, rounds=1)

@@ -503,7 +503,23 @@ def compose_kit(doc: dict, client: Any, app_root: str | Path,
     for round_ in range(1, max(1, rounds) + 1):
         reply = client(system=system, user=user + note, schema=KIT_SCHEMA)
         last = getattr(reply, "usage", None) or last
-        raw = json.loads(getattr(reply, "text", reply))
+        try:
+            raw = json.loads(getattr(reply, "text", reply))
+        except json.JSONDecodeError:
+            # CUT OFF MID-ANSWER: the budget went on reasoning and a dozen
+            # files did not fit in what was left. The node's own retry already
+            # knows the cure — write first, think less — and losing a whole
+            # attempt to it costs half of them (Stay, 2026-11-04). Ask again
+            # here, the same way, and only give up if that is cut off too.
+            from services.blueprint.executors import after_no_answer
+            lowered = after_no_answer(client, "Truncated")
+            if lowered is client:
+                raise
+            logger.warning("[component_kit] round %d was cut off mid-answer; "
+                           "asking again with less reasoning and more room", round_)
+            reply = lowered(system=system, user=user + note, schema=KIT_SCHEMA)
+            last = getattr(reply, "usage", None) or last
+            raw = json.loads(getattr(reply, "text", reply))
         body = {
             "rationale": str(raw.get("rationale") or ""),
             "palette": _palette_map(raw.get("palette")),

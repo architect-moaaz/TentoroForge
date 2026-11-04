@@ -4286,6 +4286,16 @@ EFFORT_BY_NODE: dict[str, str] = {
     "drawn_views": "medium",
     # Matching drawings by what they show is reading, not deliberating.
     "drawn_pairs": "medium",
+    # THE LARGEST SINGLE ANSWER IN THE BUILD: a dozen component files in one
+    # reply, re-sent whole every compile round. At `high` it spent the cap on
+    # deliberation and was cut off mid-answer — Stay's kit came back as 12,885
+    # characters against `output_tokens=64000`, the ceiling exactly, and the
+    # node lost an attempt to a `JSONDecodeError` before the parts it did get
+    # failed to compile and were dropped (2026-11-04; its application shipped
+    # with no kit at all). Adaptive thinking and the answer share one ceiling,
+    # so the room has to be taken from the thinking. The compiler is what
+    # holds this node to its work, and it runs three rounds.
+    "component_kit": "medium",
     # Tests are enumerated from what the Blueprint already claims, not invented.
     # A short list of named third parties.
     "integrations": "low",
