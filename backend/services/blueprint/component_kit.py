@@ -259,13 +259,27 @@ def typecheck(app_root: str | Path, timeout: float = 180.0) -> list[str]:
 # Writing it
 # --------------------------------------------------------------------------- #
 
+#: THE PALETTE IS A LIST HERE AND A MAP IN THE BLUEPRINT. A structured reply
+#: may not carry a free-form object: `{"additionalProperties": {"type":
+#: "string"}}` is refused outright — "For 'object' type, 'additionalProperties:
+#: object' is not supported" — and the node 400'd twice and wrote nothing
+#: (Claimsdesk, 2026-11-04). Named entries instead, folded back into the map the
+#: contract holds.
 KIT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
     "required": ["palette", "parts"],
     "properties": {
         "rationale": {"type": "string"},
-        "palette": {"type": "object", "additionalProperties": {"type": "string"}},
+        "palette": {
+            "type": "array",
+            "items": {
+                "type": "object", "additionalProperties": False,
+                "required": ["name", "value"],
+                "properties": {"name": {"type": "string"},
+                               "value": {"type": "string"}},
+            },
+        },
         "parts": {
             "type": "array",
             "items": {
@@ -369,10 +383,20 @@ def kit_prompts(doc: dict) -> tuple[str, str]:
         "- Real <button>/<a>, labels, `aria-label` on an icon-only control, visible focus.\n"
         "- Mobile first: nothing overflows at 375px.\n"
         "- Every exported name listed in `exports`, so the page writer can be handed them.\n\n"
-        "Return `palette` (name → `#rrggbb`, the handful this product needs beyond its roles), "
+        "Return `palette` — the handful of colours this product needs beyond its roles, each "
+        "`{name, value}` with value a `#rrggbb` — then "
         "`parts`, and a one-paragraph `rationale` saying what language these parts are in."
     )
     return system, user
+
+
+def _palette_map(palette: Any) -> dict[str, str]:
+    """The reply's named entries as the `{name: hex}` the contract holds. A map
+    is accepted too, so a hand-written body or a future schema still lands."""
+    if isinstance(palette, dict):
+        return {str(k): str(v) for k, v in palette.items()}
+    return {str(e["name"]): str(e.get("value") or "")
+            for e in (palette or []) if isinstance(e, dict) and e.get("name")}
 
 
 def compose_kit(doc: dict, client: Any, app_root: str | Path,
@@ -391,7 +415,7 @@ def compose_kit(doc: dict, client: Any, app_root: str | Path,
         raw = json.loads(getattr(reply, "text", reply))
         body = {
             "rationale": str(raw.get("rationale") or ""),
-            "palette": {str(k): str(v) for k, v in (raw.get("palette") or {}).items()},
+            "palette": _palette_map(raw.get("palette")),
             "parts": [{"file": Path(str(p.get("file"))).name,
                        "purpose": str(p.get("purpose") or ""),
                        "exports": [str(n) for n in (p.get("exports") or [])],

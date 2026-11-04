@@ -340,3 +340,39 @@ def test_a_style_finding_never_costs_a_part(monkeypatch, tmp_path):
                                   "var(--kit-line)", "#D7E4E1")}]}
     body, _ = _compose(monkeypatch, tmp_path, loud)
     assert [p["file"] for p in body["parts"]] == ["Panel.tsx"]
+
+
+def test_the_reply_schema_is_one_the_model_will_accept():
+    """A structured reply may not carry a free-form object. `palette` was
+    `{"additionalProperties": {"type": "string"}}` and the provider refused the
+    request outright — "For 'object' type, 'additionalProperties: object' is not
+    supported" — so the node 400'd on both attempts and wrote nothing
+    (Claimsdesk, 2026-11-04). Faked clients cannot see this; the shape can."""
+    def walk(node, path="schema"):
+        if not isinstance(node, dict):
+            return
+        if node.get("type") == "object":
+            assert node.get("additionalProperties") is False, (
+                f"{path}: an object in a reply schema must close itself")
+        for key in ("properties", "items", "$defs"):
+            child = node.get(key)
+            if isinstance(child, dict) and key == "properties":
+                for k, v in child.items():
+                    walk(v, f"{path}.{k}")
+            elif isinstance(child, dict):
+                walk(child, f"{path}.{key}")
+    walk(component_kit.KIT_SCHEMA)
+
+
+def test_the_palette_comes_back_as_named_entries():
+    assert component_kit._palette_map(
+        [{"name": "wash", "value": "#F2F7F6"}, {"name": "ink", "value": "#15241F"}]
+    ) == {"wash": "#F2F7F6", "ink": "#15241F"}
+    # a map still lands, so a hand-written body is not refused
+    assert component_kit._palette_map({"wash": "#F2F7F6"}) == {"wash": "#F2F7F6"}
+    assert component_kit._palette_map(None) == {}
+
+
+def test_the_engineer_is_asked_for_the_shape_the_schema_wants():
+    _, user = component_kit.kit_prompts(_doc())
+    assert "{name, value}" in user
