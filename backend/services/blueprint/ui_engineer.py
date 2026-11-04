@@ -663,18 +663,33 @@ What a finished page looks like:
   links), bg-accent / bg-accent-subtle (what to do now, see above), bg-inverse (the
   one leading card), ring-ring, and the success / warning / destructive / info
   families. Never a hex colour or an arbitrary palette like bg-blue-500.
+- AND THREE MORE, FOR THE QUIET PARTS A DENSE PAGE IS MOSTLY MADE OF. `text-faint`
+  is a third level under text-muted-foreground — a timestamp, a unit, a count, the
+  line a reader's eye skips. `text-brand` is the brand's hue at ink darkness, for a
+  heading or a figure that should carry the brand without becoming a button.
+  `border-hairline` is the line INSIDE a component — a table's row rules, a panel's
+  internal divider — where plain `border` stays the edge of things. Two inks and one
+  line is why a full page of real data reads flat: every quiet thing on it is the
+  same quiet, and every rule is the weight of the panel's own edge.
 - TYPE IN TWO VOICES. Page titles and card titles are `font-heading` (the design's
   display face; h1–h3 get it by default); everything else is the body face. Never
   `font-serif` or `font-mono` for a title — they are the browser's, not the design's.
 - AND SIZE IS THE DESIGN'S, BY ROLE. This application has its own type ramp, worked out
   from its register: `text-display` (the one title that carries a page — a hero, a
   landing, a sign-in), `text-h1` a page title, `text-h2` a section, `text-h3` a card
-  title, `text-body`, `text-caption` (labels, meta, the small print). Ask for the ROLE
+  title, `text-body`, `text-caption` (helper text and secondary lines) — and then the
+  two steps BELOW it, which is where a dense screen spends most of its type:
+  `text-label` for a table header, an eyebrow, a field label or a chip (it carries the
+  design's positive tracking, so it is the one to pair with `uppercase`), and
+  `text-micro` for a timestamp, a unit, a badge or a count. Ask for the ROLE
   and the design decides the size, the line height and the letter-spacing together —
   an editorial product's `text-h1` is 64px where a dense console's is 31px. Reach for
   `text-2xl`/`text-3xl` and you have overridden the design with a number you picked,
   which is why every application's titles used to come out the same size. Tailwind's
   own sizes are still right for everything the ramp does not name.
+- AND A CORNER IS CHOSEN TOO. `rounded-card` for a panel, `rounded-control` for a
+  button or an input, `rounded-pill` for a chip, a tag or an avatar. The design cuts
+  these differently on purpose; `rounded-lg` everywhere is the tell of a template.
 - DEPTH CARRIES THE LAYERS, AND IT IS THE DESIGN'S. Lift surfaces with the shadow scale —
   `shadow-sm` a resting card, `shadow-md` on hover, `shadow-lg`/`shadow-xl` a dialog or a
   raised hero — never a hand-rolled `shadow-[0_…]`. The scale is the register's (a flat
@@ -803,6 +818,11 @@ def _language(doc: dict) -> str:
     return f"# Its language\n{rule}\n\n" if rule else ""
 
 
+def _kebab_role(name: str) -> str:
+    """`inkFaint` → `ink-faint`, the name the projector writes it under."""
+    return re.sub(r"(?<!^)(?=[A-Z])", "-", str(name)).lower()
+
+
 def _look(doc: dict) -> str:
     """The design system as the page author uses it: the personality, each
     colour role with the class that draws it, and the two type faces."""
@@ -813,12 +833,19 @@ def _look(doc: dict) -> str:
                "textSecondary": "text-muted-foreground", "primary": "bg-primary / text-primary",
                "accent": "bg-accent / variant=\"accent\"", "accentSubtle": "bg-accent-subtle",
                "inverse": "bg-inverse", "gradientStart": "from-gradient-start",
-               "gradientEnd": "to-gradient-end"}
+               "gradientEnd": "to-gradient-end", "inkFaint": "text-faint",
+               "inkBrand": "text-brand", "hairline": "border-hairline"}
     from services.blueprint.verification import PALETTE_ROLES
     lines = [str(design.get("visualPersonality") or "")[:600]]
     for role, job in PALETTE_ROLES.items():
         value = colors.get(role)
-        lines.append(f"- {classes[role]}{f' ({value})' if value else ''}: {job}")
+        # A ROLE WITH NO CLASS IS STILL A ROLE. This was `classes[role]`, so
+        # adding a colour to `PALETTE_ROLES` raised a KeyError out of the page
+        # writer's own prompt — the table is in `verification` and nothing tied
+        # the two together. Fall back to the kebab of the role, which is the
+        # name the projector emits it under anyway.
+        drawn = classes.get(role) or f"var(--{_kebab_role(role)})"
+        lines.append(f"- {drawn}{f' ({value})' if value else ''}: {job}")
     head = typo.get("fontFamilyHeading") or typo.get("fontFamilyDisplay") or typo.get("headingFontFamily")
     body = typo.get("fontFamilyBase") or typo.get("fontFamily") or typo.get("fontFamilyBody")
     if head or body:
@@ -1846,6 +1873,10 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
     drawing = reference if (reference or {}).get("exact") and current is None and relayout_of is None else None
     looks = page_look.looks_for(drawing)
     looks_left = looks if critic is not None else 0
+    #: The best the reviewer has scored this page, so a look is only spent
+    #: while the page is still getting better (`page_look.worth_another_look`).
+    best_score: int | None = None
+    looks_taken = 0
     #: A page that already existed is being CHANGED: the reviewer checks the
     #: change did not break it, and sends it back only for that. Its taste
     #: notes are about the page as it was — sent back for a 7/10 the first
@@ -1964,6 +1995,7 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
                 # review as the brief. The reviewer's rank decides between
                 # the versions it saw — a rewrite is not always better.
                 looks_left -= 1
+                looks_taken += 1
                 try:
                     verdict, cost = page_look.look_at(doc, page, Path(app_root), load, view, critic,
                                                       attempt=looks - looks_left,
@@ -1980,8 +2012,20 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
                         except Exception:  # noqa: BLE001 — narration never fails a page
                             pass
                     seen = (page_look.rank(verdict), body)
+                    climbing = page_look.worth_another_look(
+                        verdict, None if best is None else best_score)
                     if best is None or seen[0] > best[0]:
                         best = seen
+                    if isinstance(verdict.get("score"), (int, float)):
+                        best_score = max(best_score or 0, int(verdict["score"]))
+                    # A LOOK IS SPENT ON A PAGE THAT IS STILL CLIMBING. The
+                    # budget used to be a flat two and the page shipped
+                    # whatever it had: fifteen of eighteen were still `revise`
+                    # when they ran out (2026-11-04). It is a ceiling now, and
+                    # a page that a rewrite failed to improve stops here
+                    # rather than spending the rest on the same reading.
+                    if not climbing:
+                        looks_left = 0
                     # A CHANGE GOES BACK FOR WHAT IT CAUSED: something proved
                     # broken, or an issue the reviewer marks as the change's.
                     must_fix = (verdict.get("verdict") != "pass" and not changing) or (
@@ -1991,6 +2035,17 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
                         # or, for a drawing reproduced, one that does not look like it.
                         must_fix = bool(verdict.get("broken")) or (
                             drawing is not None and verdict.get("verdict") != "pass")
+                    if must_fix and not looks_left:
+                        # SAID OUT LOUD. Both builds of 2026-11-04 reported no
+                        # failures while their own reviewer had rejected most
+                        # of their pages; the verdicts were in the ledger and
+                        # nothing read them back. A page that ships below the
+                        # bar says so in the log of the run that shipped it.
+                        logger.warning("[ui_engineer] %s ships at %s/10, still `revise` after "
+                                       "%d look(s): %s", page.get("id"), verdict.get("score"),
+                                       looks_taken,
+                                       "; ".join(str(i.get("problem") or "")
+                                                 for i in (verdict.get("issues") or [])[:3]))
                     if must_fix and looks_left and round_ < rounds:
                         # THE REVIEW IS A REFUSAL, NOT A WISH. Handed as the
                         # brief ("what is wanted of it now") the first trial's

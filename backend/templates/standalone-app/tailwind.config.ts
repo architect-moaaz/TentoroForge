@@ -69,6 +69,16 @@ const config: Config = {
         "gradient-foreground": "hsl(var(--gradient-foreground, var(--primary-foreground)))",
         popover: { DEFAULT: "hsl(var(--popover))", foreground: "hsl(var(--popover-foreground))" },
         card: { DEFAULT: "hsl(var(--card))", foreground: "hsl(var(--card-foreground))" },
+        // A THIRD INK, A BRAND INK AND A HAIRLINE. The palette had `foreground`
+        // and `muted-foreground` and one `border`, so everything quiet on a
+        // page was the same quiet and every line was the same line. The app a
+        // person designed by hand works four inks and keeps its hairline
+        // separate from its structural border — `border-[#ece7f2]` is the
+        // single most-used value in it, 77 times (CARES, 2026-11-04).
+        // Passthrough roles, so they carry their own value, not a triplet.
+        faint: "var(--ink-faint, hsl(var(--muted-foreground)))",
+        brand: "var(--ink-brand, hsl(var(--primary)))",
+        hairline: "var(--hairline, hsl(var(--border)))",
       },
       // The design's families (tokens.css): `font-heading` for titles, `font-sans` for the body.
       // A var() WITH A FALLBACK: an app whose design names no body face has no
@@ -78,10 +88,18 @@ const config: Config = {
         sans: ["var(--font-body, ui-sans-serif)", "ui-sans-serif", "system-ui", "sans-serif"],
         heading: ["var(--font-heading, var(--font-body, ui-sans-serif))", "ui-sans-serif", "system-ui", "sans-serif"],
       },
+      // One `--radius` gave every app one corner, stepped by 2px. A designed
+      // product cuts a card and a chip differently on purpose: CARES uses four
+      // distinct radii (12, 24, 16, 14px). `designSystem.radius` is a record
+      // and the projector already writes `--radius-<key>`; these are the keys
+      // worth naming, each falling back to the single corner.
       borderRadius: {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
+        card: "var(--radius-card, var(--radius))",
+        control: "var(--radius-control, calc(var(--radius) - 2px))",
+        pill: "var(--radius-pill, 9999px)",
       },
       // THE DESIGN'S TYPE RAMP, AS CLASSES. `look_scale.type_scale_vars` works out
       // a modular scale per application from `typography.scaleMode` and writes it
@@ -105,10 +123,24 @@ const config: Config = {
         h3: ["var(--text-h3, 1.35rem)", { lineHeight: "1.3" }],
         body: ["var(--text-body, 1rem)", { lineHeight: "1.55" }],
         caption: ["var(--text-caption, 0.85rem)", { lineHeight: "1.45" }],
+        // WHERE A DENSE PRODUCT ACTUALLY SPENDS ITS TYPE. The ramp had one step
+        // below body and five above; 297 of CARES's 715 typographic decisions
+        // are between 9px and 13px (2026-11-04). `label` is the table header,
+        // the eyebrow, the field label; `micro` is the timestamp, the unit, the
+        // chip. Without them every small thing on every page was `caption`.
+        label: ["var(--text-label, 0.72rem)", {
+          lineHeight: "1.35", letterSpacing: "var(--tracking-label, 0.08em)",
+        }],
+        micro: ["var(--text-micro, 0.625rem)", {
+          lineHeight: "1.3", letterSpacing: "var(--tracking-label, 0.08em)",
+        }],
       },
       letterSpacing: {
         tight: "var(--tracking-tight, -0.025em)",
         display: "var(--tracking-display, -0.035em)",
+        // The only positive track. Every other one pulls in; a small-caps label
+        // is the one thing that must be let out, and had no token at all.
+        label: "var(--tracking-label, 0.08em)",
       },
       // Depth is the design's too, the same way, and for the same reason: the
       // ramp `designSystem.elevation` chooses reached tokens.css and stopped

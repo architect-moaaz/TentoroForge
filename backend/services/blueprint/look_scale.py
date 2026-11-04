@@ -167,6 +167,30 @@ DEFAULT_SCALE = "comfortable"
 #: step name → how many ratio steps above the body size. Body is the anchor (0).
 _TYPE_STEPS = (("caption", -1), ("body", 0), ("h3", 2), ("h2", 3), ("h1", 4))
 
+#: TWO STEPS BELOW CAPTION, WHERE A DENSE PRODUCT ACTUALLY SPENDS ITS TYPE.
+#: The ramp had one word below body and five above. Criterion CARES — the one
+#: application a person designed by hand — ran the other way: 297 of its 715
+#: typographic decisions sit between 9px and 13px, on five sizes, and its five
+#: busiest are ALL at or under 13px (2026-11-04). That band is the table header,
+#: the eyebrow, the chip, the timestamp, the unit, the helper line — and Forge
+#: offered `caption` for all of them, so every page drew them identically.
+#:
+#: The descent is NOT the heading ratio. A modular ratio compounds, so an
+#: `editorial` register (1.414) would put the smallest step at 5.7px; and a
+#: table header is 11px whatever the brand's display face does. The ratio sets
+#: the hierarchy ABOVE body; below it, legibility does. So: a damped ratio,
+#: floored where type stops being readable, and always a visible step down.
+_DESCENT_DAMPING = 0.45     # how much of the register's ratio survives downward
+_LABEL_FLOOR_REM = 0.6875   # 11px
+_MICRO_FLOOR_REM = 0.5625   # 9px
+_MIN_STEP_DOWN = 0.94       # a step you cannot see is not a step
+
+
+def _below(top: float, ratio: float, floor: float) -> float:
+    """One damped step under `top`, never under `floor`, always a visible step."""
+    damped = 1 + (ratio - 1) * _DESCENT_DAMPING
+    return min(top * _MIN_STEP_DOWN, max(floor, top / damped))
+
 #: A DISPLAY STEP ABOVE h1, because the ramp stopped where the page titles are.
 #: `h1` is base x ratio^4 — 31px on a `tight` register — so a product whose type
 #: is meant to carry the page had no size to carry it with; the writer reached
@@ -234,6 +258,10 @@ def type_scale_vars(typography: dict | None) -> list[str]:
         out.append(f"  --text-{name}: {round(size, 4)}rem;")
     display = max(min(h1 * ratio, _DISPLAY_MAX_REM), h1 * _DISPLAY_MIN_OVER_H1)
     out.append(f"  --text-display: {round(display, 4)}rem;")
+    label = _below(base / ratio, ratio, _LABEL_FLOOR_REM)
+    micro = _below(label, ratio, _MICRO_FLOOR_REM)
+    out.append(f"  --text-label: {round(label, 4)}rem;")
+    out.append(f"  --text-micro: {round(micro, 4)}rem;")
     # A tighter track on display sizes reads as designed, not default; the
     # bigger the ratio (the more editorial), the tighter the heading track.
     # THE RANGE USED TO BE TOO NARROW TO SEE: -0.0089em at `tight` to -0.0159em
@@ -243,6 +271,12 @@ def type_scale_vars(typography: dict | None) -> list[str]:
     tracking = -0.012 - (ratio - _SCALE_RATIOS["tight"]) * 0.09
     out.append(f"  --tracking-tight: {round(tracking, 4)}em;")
     out.append(f"  --tracking-display: {round(tracking * 1.4, 4)}em;")
+    # AND A POSITIVE TRACK, which the ramp had none of. Every heading track was
+    # negative, so a small-caps label — the one thing in a dense UI that must be
+    # let out, not pulled in — had no token and came out at Tailwind's 0. CARES
+    # sets +0.16em on nineteen of them. The wider the heading track is pulled
+    # in, the further a label at a tenth of the size is let out.
+    out.append(f"  --tracking-label: {round(0.06 - tracking * 1.6, 4)}em;")
     return out
 
 

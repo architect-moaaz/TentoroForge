@@ -61,6 +61,25 @@ const typeSteps: Record<string, [string, { lineHeight: string; letterSpacing?: s
   h3: ["var(--text-h3, 1.35rem)", { lineHeight: "1.3" }],
   body: ["var(--text-body, 1rem)", { lineHeight: "1.55" }],
   caption: ["var(--text-caption, 0.85rem)", { lineHeight: "1.45" }],
+  // Two steps below caption, where a dense product spends most of its type.
+  label: ["var(--text-label, 0.72rem)", { lineHeight: "1.35", letterSpacing: "var(--tracking-label, 0.08em)" }],
+  micro: ["var(--text-micro, 0.625rem)", { lineHeight: "1.3", letterSpacing: "var(--tracking-label, 0.08em)" }],
+};
+
+// A third ink, a brand ink and a hairline of its own — see the note in
+// standalone-app/tailwind.config.ts. Passthrough roles, so they carry their
+// own value rather than an hsl triplet.
+const semanticInk: Record<string, string> = {
+  faint: "var(--ink-faint, hsl(var(--muted-foreground)))",
+  brand: "var(--ink-brand, hsl(var(--primary)))",
+  hairline: "var(--hairline, hsl(var(--border)))",
+};
+
+// More than one corner: a card and a chip are cut differently on purpose.
+const semanticRadius: Record<string, string> = {
+  card: "var(--radius-card, var(--radius))",
+  control: "var(--radius-control, calc(var(--radius) - 2px))",
+  pill: "var(--radius-pill, 9999px)",
 };
 
 // The design's rhythm of space, beside Tailwind's numbers rather than over them.
@@ -76,10 +95,16 @@ export const tailwindTokens: {
   fontSize: Record<string, unknown>;
   borderRadius: Record<string, string>;
   boxShadow: Record<string, string>;
+  letterSpacing: Record<string, string>;
 } = {
-  colors: collapseDefaults(tokens.color),
+  colors: { ...collapseDefaults(tokens.color), ...semanticInk },
   spacing: { ...spacingScale(tokens.spacing), ...semanticSpacing },
   fontSize: { ...tokens.typography.scale, ...typeSteps },
-  borderRadius: tokens.radius,
+  borderRadius: { ...tokens.radius, ...semanticRadius },
   boxShadow,
+  letterSpacing: {
+    tight: "var(--tracking-tight, -0.025em)",
+    display: "var(--tracking-display, -0.035em)",
+    label: "var(--tracking-label, 0.08em)",
+  },
 };

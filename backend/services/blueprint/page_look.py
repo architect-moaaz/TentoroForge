@@ -33,16 +33,50 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-#: Looks per page: one at the compiled page, one at its rewrite.
-LOOKS = 2
+#: THE CEILING, NOT THE ALLOWANCE. This was a flat 2 — one look at the
+#: compiled page, one at its rewrite — and the page shipped whatever it had.
+#: Measured over two whole builds (Claimsdesk and Stay, 2026-11-04): FIFTEEN
+#: OF EIGHTEEN PAGES WERE STILL `revise` WHEN THEIR LOOKS RAN OUT, at a median
+#: of 5/10 and 6.5/10, and both builds reported no failures. Every one of them
+#: stopped because it ran out of looks, never because it was good enough.
+#:
+#: So a page is looked at while it is GETTING BETTER (`worth_another_look`),
+#: up to this many. The same measurement is why that is the rule and not
+#: simply a bigger number: of the eighteen, seven were still climbing when
+#: they were cut off (1→5, 4→7, 4→5…) and three had gone BACKWARDS (6→5,
+#: 7→5, 4→2), because a look rewrites the page whole and a rewrite loses what
+#: was already right. Spending another look on a page a rewrite just made
+#: worse buys nothing; spending one on a page that gained three points buys
+#: the next three.
+LOOKS = 5
 #: Looks for a page that reproduces a drawing: closing the distance to a
 #: picture takes more rounds than passing a taste bar.
-EXACT_LOOKS = 3
+EXACT_LOOKS = 6
+#: A score at or above this is done. The reviewer's own scale: 8 is the lowest
+#: it has ever called `pass`, and holding out for 10 would rewrite good pages.
+GOOD_ENOUGH = 8
 
 
 def looks_for(reference: dict | None) -> int:
-    """How many looks a page gets: more when it must match a drawing."""
+    """The MOST looks a page may have; `worth_another_look` spends them."""
     return EXACT_LOOKS if (reference or {}).get("exact") and (reference or {}).get("images") else LOOKS
+
+
+def worth_another_look(verdict: dict, best_score: int | None) -> bool:
+    """Is this page still climbing?
+
+    True while the look just taken beat every look before it — the page is
+    being improved and the next round has somewhere to go. False once a
+    rewrite fails to better the best score, which is the point at which more
+    looks stop buying anything: the writer has shown it cannot get past this
+    reading of its own page.
+    """
+    score = verdict.get("score")
+    if not isinstance(score, (int, float)):
+        return best_score is None          # an unscored first look still earns one
+    if score >= GOOD_ENOUGH:
+        return False
+    return best_score is None or score > best_score
 
 
 def drawing_viewports(reference: dict | None) -> dict[str, tuple[int, int]]:

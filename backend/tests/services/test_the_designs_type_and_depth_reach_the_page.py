@@ -176,3 +176,148 @@ def test_an_escape_beside_a_value_is_caught_at_last():
     # and a whole component is not swallowed by the brace-stripping
     assert not escaped_in_jsx_text(
         'export function X({ a }: P) { return (<div><span>{a}</span></div>); }')
+
+
+# --- the band below caption, where a dense product spends its type -----------
+#
+# The ramp had one step below body and five above. Criterion CARES — the one
+# application a person designed by hand — runs the other way: 297 of its 715
+# typographic decisions sit between 9px and 13px, on five sizes, and its five
+# busiest are all at or under 13px (measured 2026-11-04). That band is the
+# table header, the eyebrow, the chip, the timestamp, the unit, the helper
+# line, and Forge offered `caption` for every one of them.
+
+def _band(mode):
+    v = _vars({"scaleMode": mode})
+    return _px(v["--text-micro"]), _px(v["--text-label"]), _px(v["--text-caption"])
+
+
+def test_there_are_two_steps_below_caption():
+    for mode in ("tight", "comfortable", "expressive", "editorial"):
+        micro, label, caption = _band(mode)
+        assert micro < label < caption, (mode, micro, label, caption)
+
+
+def test_the_small_band_stays_legible_whatever_the_register():
+    """THE DESCENT IS NOT THE HEADING RATIO. Compounded, `editorial` (1.414)
+    would put the smallest step at 5.7px — and a table header is 11px whatever
+    the brand's display face does."""
+    for mode in ("tight", "comfortable", "expressive", "editorial"):
+        micro, label, _ = _band(mode)
+        assert micro >= 9.0, (mode, micro)
+        assert label >= 10.5, (mode, label)
+
+
+def test_the_band_lands_where_a_designed_product_spends():
+    """9–13px across every register, which is CARES's whole working range."""
+    sizes = [s for mode in ("tight", "comfortable", "expressive", "editorial")
+             for s in _band(mode)[:2]]
+    assert min(sizes) >= 9.0 and max(sizes) <= 13.0, sizes
+
+
+def test_a_step_you_cannot_see_is_not_a_step():
+    """A floor that clamps two steps together would give the writer two words
+    for one size, which is worse than one word."""
+    for mode in ("tight", "comfortable", "expressive", "editorial"):
+        micro, label, caption = _band(mode)
+        assert label <= caption * 0.95, (mode, label, caption)
+        assert micro <= label * 0.95, (mode, micro, label)
+
+
+def test_there_is_one_positive_track_and_it_is_for_labels():
+    """Every track was negative, so a small-caps label — the one thing that
+    must be let out, not pulled in — had no token and came out at Tailwind's 0.
+    CARES sets +0.16em on nineteen of them."""
+    def em(mode, key):
+        return float(_vars({"scaleMode": mode})[key].removesuffix("em"))
+    for mode in ("tight", "editorial"):
+        assert em(mode, "--tracking-label") > 0.05, mode
+        assert em(mode, "--tracking-tight") < 0, mode
+    # the tighter the heading track, the further the label is let out
+    assert em("editorial", "--tracking-label") > em("tight", "--tracking-label")
+
+
+# --- and a page can reach all of it ------------------------------------------
+
+def test_the_shipped_config_maps_the_small_band_and_the_label_track():
+    text = SHIPPED.read_text("utf-8")
+    for step in ("label", "micro"):
+        assert f"var(--text-{step}," in text, step
+    assert "var(--tracking-label," in text
+
+
+def test_both_configs_carry_the_new_steps():
+    for text, where in ((SHIPPED.read_text("utf-8"), "shipped"),
+                        (BASE.read_text("utf-8"), "base")):
+        for step in ("label", "micro"):
+            assert f"var(--text-{step}," in text, (where, step)
+
+
+def test_a_dense_page_has_a_third_ink_a_brand_ink_and_its_own_hairline():
+    """Two inks and one border is why a full page of real data read flat:
+    every quiet thing was the same quiet. CARES's single most-used value of
+    any kind is one hairline colour, 77 times."""
+    for text, where in ((SHIPPED.read_text("utf-8"), "shipped"),
+                        (BASE.read_text("utf-8"), "base")):
+        for token in ("--ink-faint", "--ink-brand", "--hairline"):
+            assert f"var({token}," in text, (where, token)
+
+
+def test_a_card_and_a_chip_are_not_cut_the_same():
+    """One `--radius` stepped by 2px gave every app one corner; CARES uses
+    four distinct radii."""
+    for text, where in ((SHIPPED.read_text("utf-8"), "shipped"),
+                        (BASE.read_text("utf-8"), "base")):
+        for token in ("--radius-card", "--radius-control", "--radius-pill"):
+            assert f"var({token}," in text, (where, token)
+
+
+def test_nothing_new_is_a_bare_var():
+    """Same rule as the rest: a bare `var()` with nothing behind it makes the
+    whole declaration invalid at computed time."""
+    text = SHIPPED.read_text("utf-8")
+    bare = re.findall(r"var\(--(?:text|tracking|ink|hairline|radius)-?[\w-]*\)", text)
+    assert [b for b in bare if b != "var(--radius)"] == [], bare
+
+
+# --- and both writers are told -----------------------------------------------
+
+def test_the_design_agent_is_asked_for_the_new_roles():
+    from services.blueprint.executors import NODE_TASKS
+    from services.blueprint.verification import PALETTE_ROLES
+    for role in ("inkFaint", "inkBrand", "hairline"):
+        assert role in PALETTE_ROLES, role
+    task = NODE_TASKS["design_system"]
+    assert '"card"' in task and '"control"' in task and '"pill"' in task, \
+        "the radius ask still names sm/md/lg, which no class reads"
+
+
+def test_the_page_writer_is_given_the_whole_vocabulary():
+    from services.blueprint.ui_engineer import DESIGN_PRINCIPLES, _look
+    for word in ("text-label", "text-micro", "text-faint", "text-brand",
+                 "border-hairline", "rounded-card", "rounded-pill"):
+        assert word in DESIGN_PRINCIPLES, word
+    # and each new role is drawn with its class, not its raw name
+    look = _look({"designSystem": {"colors": {"inkFaint": "#8b8299"}}})
+    assert "text-faint (#8b8299)" in look, look
+
+
+def test_a_new_palette_role_does_not_raise_out_of_the_prompt():
+    """`classes[role]` meant adding a colour to `PALETTE_ROLES` — a table in
+    `verification` — raised a KeyError inside the page writer's prompt."""
+    import services.blueprint.verification as v
+    from services.blueprint.ui_engineer import _look
+    extra = dict(v.PALETTE_ROLES, somethingNew="a role nothing maps yet")
+    original, v.PALETTE_ROLES = v.PALETTE_ROLES, extra
+    try:
+        assert "var(--something-new)" in _look({"designSystem": {"colors": {}}})
+    finally:
+        v.PALETTE_ROLES = original
+
+
+def test_the_kit_author_is_told_the_same_words():
+    from services.blueprint.component_kit import kit_prompts
+    system, _ = kit_prompts({"designSystem": {"colors": {}}, "composition": {}})
+    for word in ("text-label", "text-micro", "text-faint", "border-hairline",
+                 "rounded-control"):
+        assert word in system, word
