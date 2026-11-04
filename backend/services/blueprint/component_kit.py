@@ -58,6 +58,11 @@ COMPILE_ROUNDS = 3
 _SCAFFOLD_TOKEN = re.compile(r"__[A-Z][A-Z_]+__|\{\{[a-z_]+\}\}")
 _HEX = re.compile(r"#[0-9a-fA-F]{3,8}\b")
 _KIT_VAR = re.compile(r"--kit-([a-z0-9-]+)")
+#: The kit is held to the page writer's rule for this too
+#: (`ui_engineer.escaped_in_jsx_text`): JSX text is not a JavaScript string, so
+#: `\u00b7` reaches the screen as six characters. Stay's lead card shipped
+#: "Nov 1 – Nov 1 \u00b7 0 nights" (2026-11-04) because the rule held pages and
+#: the kit was outside it.
 
 
 def _kebab(name: str) -> str:
@@ -184,6 +189,7 @@ def project_component_kit(doc: dict, app_root: str | Path) -> list[str]:
 
 def findings(doc: dict, parts: list[dict]) -> list[str]:
     """What the compiler cannot see and the kit's own bargain forbids."""
+    from services.blueprint.ui_engineer import escaped_in_jsx_text
     out: list[str] = []
     named = {_kebab(k) for k in palette_of(doc)}
     for part in parts:
@@ -198,6 +204,9 @@ def findings(doc: dict, parts: list[dict]) -> list[str]:
         for used in sorted(set(_KIT_VAR.findall(code))):
             if used not in named:
                 out.append(f"{name}: uses `--kit-{used}`, which `palette` does not declare.")
+        if escaped_in_jsx_text(code):
+            out.append(f"{name}: a `\\uXXXX` escape in JSX text or an attribute string is shown "
+                       "literally — write the character itself (— · ₹), or {\"\\u2014\"} in braces.")
         if "@/sdk/server" in code or re.search(r"\bfetch\(", code):
             out.append(f"{name}: reads data. A kit part is given what to draw; the page loads it.")
         if re.search(r'^\s*"use client"|^\s*\'use client\'', code) is None \

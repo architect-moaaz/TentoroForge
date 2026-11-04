@@ -156,3 +156,23 @@ def test_the_design_agent_is_asked_for_a_corner_and_a_title_that_can_carry_a_pag
     assert "28 to 64" in task, "the cap was 40px; no product could ask for a display title"
     assert "`radius`" in task, "radius had no guidance at all, so every app was cut the same"
     assert '"tint": "neutral"' in task
+
+
+def test_an_escape_beside_a_value_is_caught_at_last():
+    """The rule looked for `>…\\uXXXX…<` with no brace between the tags, and
+    every real case has one: the escape sits beside a value. SnapIT's home read
+    "app \\u2014 verified listings" (2026-10-01) and Stay's lead card
+    "Nov 1 – Nov 1 \\u00b7 0 nights" (2026-11-04) with the rule in place both
+    times."""
+    from services.blueprint.ui_engineer import escaped_in_jsx_text
+
+    assert escaped_in_jsx_text('<span>\\u00b7 {nightsLabel}</span>')
+    assert escaped_in_jsx_text('<p>{a} \\u2014 verified listings</p>')
+    assert escaped_in_jsx_text('<img alt="a \\u2014 b" />')
+    assert escaped_in_jsx_text('<p>plain \\u20b9 text</p>')      # the old form still caught
+    # a real JavaScript string is not JSX text
+    assert not escaped_in_jsx_text('<p>{facts.join(" \\u00b7 ")}</p>')
+    assert not escaped_in_jsx_text('const dash = `${a} \\u2013 ${b}`;')
+    # and a whole component is not swallowed by the brace-stripping
+    assert not escaped_in_jsx_text(
+        'export function X({ a }: P) { return (<div><span>{a}</span></div>); }')

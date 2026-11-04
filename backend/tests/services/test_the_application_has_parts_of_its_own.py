@@ -376,3 +376,15 @@ def test_the_palette_comes_back_as_named_entries():
 def test_the_engineer_is_asked_for_the_shape_the_schema_wants():
     _, user = component_kit.kit_prompts(_doc())
     assert "{name, value}" in user
+
+
+def test_an_escape_in_jsx_text_is_refused_in_a_part_too():
+    """JSX text is not a JavaScript string, so `\\u00b7` reaches the screen as
+    six characters. The page writer has been held to this since SnapIT
+    (2026-10-01); the kit was outside the rule and Stay's lead card shipped
+    "Nov 1 – Nov 1 \\u00b7 0 nights" (2026-11-04)."""
+    assert any("shown" in f for f in _finding('<span>{a} \\u00b7 {b}</span>'))
+    assert any("shown" in f for f in _finding('<img alt="a \\u2014 b" />'))
+    # inside a JS expression it is a real string, and fine
+    assert _finding('<p>{facts.join(" \\u00b7 ")}</p>') == []
+    assert _finding("const dash = `${a} \\u2013 ${b}`;") == []

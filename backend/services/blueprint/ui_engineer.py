@@ -1656,10 +1656,37 @@ def _static_findings(load: str, view: str, *, exact: bool = False) -> list[str]:
     # read "app \\u2014 verified listings" (2026-10-01): JSX text and attribute
     # strings are not JavaScript strings, so `\u2014` reaches the screen as six
     # characters. Write the character itself (— · ₹), or {"\u2014"} in braces.
-    if re.search(r">[^<{}]*\\u[0-9a-fA-F]{4}[^<{}]*<", view) or re.search(r'\s[a-zA-Z]+="[^"]*\\u[0-9a-fA-F]{4}', view):
+    if escaped_in_jsx_text(view):
         out.append("view.tsx: a `\\uXXXX` escape in JSX text or an attribute string is shown literally — "
                    "write the character itself.")
     return out
+
+
+#: A `{ … }` with no tag inside it — a value dropped into JSX text. One that
+#: CONTAINS markup is a component body or a conditional branch, and stripping
+#: those swallows the very text being checked.
+_JSX_EXPR = re.compile(r"\{[^{}<>]*\}")
+_JSX_TEXT_ESCAPE = re.compile(r">[^<>]*\\u[0-9a-fA-F]{4}[^<>]*<")
+_ATTR_ESCAPE = re.compile(r'\s[a-zA-Z-]+="[^"]*\\u[0-9a-fA-F]{4}')
+
+
+def escaped_in_jsx_text(code: str) -> bool:
+    """True when a `\\uXXXX` would be PRINTED rather than decoded.
+
+    This looked for `>…\\uXXXX…<` with no brace between the tags, and every real
+    case has one — the escape sits beside a value, as in `>\\u00b7 {nights}<`.
+    SnapIT's home read "app \\u2014 verified listings" (2026-10-01) and Stay's
+    lead card "Nov 1 – Nov 1 \\u00b7 0 nights" (2026-11-04) with the rule in
+    place both times. So the expressions are cut out first and the rule applied
+    to the text that is left, which is the text the reader sees. An escape
+    INSIDE an expression (`{facts.join(" \\u00b7 ")}`) is a real string: left alone.
+    """
+    bare = code
+    for _ in range(6):
+        bare, n = _JSX_EXPR.subn(" ", bare)
+        if not n:
+            break
+    return bool(_JSX_TEXT_ESCAPE.search(bare) or _ATTR_ESCAPE.search(code))
 
 
 #: An id shown to a reader: a helper that shortens one, a `#` before a
