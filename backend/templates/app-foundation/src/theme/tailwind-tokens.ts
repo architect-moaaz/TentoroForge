@@ -48,16 +48,38 @@ const boxShadow: Record<string, string> = Object.fromEntries(
   ),
 );
 
+// And the type ramp, the same way. The library's own scale stays (it is keyed by
+// Tailwind's names and plenty of markup asks for it); these are the SEMANTIC
+// steps beside it — `text-h1` is whatever size this application's register makes
+// a page title, not a number the author guessed. Written by
+// look_scale.type_scale_vars; see the note in standalone-app/tailwind.config.ts
+// for why nothing read them until now.
+const typeSteps: Record<string, [string, { lineHeight: string; letterSpacing?: string }]> = {
+  display: ["var(--text-display, 3rem)", { lineHeight: "1.03", letterSpacing: "var(--tracking-display, -0.028em)" }],
+  h1: ["var(--text-h1, 2rem)", { lineHeight: "1.15", letterSpacing: "var(--tracking-tight, -0.018em)" }],
+  h2: ["var(--text-h2, 1.6rem)", { lineHeight: "1.2", letterSpacing: "var(--tracking-tight, -0.018em)" }],
+  h3: ["var(--text-h3, 1.35rem)", { lineHeight: "1.3" }],
+  body: ["var(--text-body, 1rem)", { lineHeight: "1.55" }],
+  caption: ["var(--text-caption, 0.85rem)", { lineHeight: "1.45" }],
+};
+
+// The design's rhythm of space, beside Tailwind's numbers rather than over them.
+const semanticSpacing: Record<string, string> = {
+  card: "var(--space-card-padding, 1rem)",
+  section: "var(--space-section-gap, 1.5rem)",
+  row: "var(--space-compact-row-padding, 0.5rem)",
+};
+
 export const tailwindTokens: {
   colors: Record<string, string | Record<string, string>>;
   spacing: Record<string, string>;
-  fontSize: Record<string, string>;
+  fontSize: Record<string, unknown>;
   borderRadius: Record<string, string>;
   boxShadow: Record<string, string>;
 } = {
   colors: collapseDefaults(tokens.color),
-  spacing: spacingScale(tokens.spacing),
-  fontSize: tokens.typography.scale,
+  spacing: { ...spacingScale(tokens.spacing), ...semanticSpacing },
+  fontSize: { ...tokens.typography.scale, ...typeSteps },
   borderRadius: tokens.radius,
   boxShadow,
 };

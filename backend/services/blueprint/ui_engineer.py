@@ -645,6 +645,15 @@ What a finished page looks like:
 - TYPE IN TWO VOICES. Page titles and card titles are `font-heading` (the design's
   display face; h1–h3 get it by default); everything else is the body face. Never
   `font-serif` or `font-mono` for a title — they are the browser's, not the design's.
+- AND SIZE IS THE DESIGN'S, BY ROLE. This application has its own type ramp, worked out
+  from its register: `text-display` (the one title that carries a page — a hero, a
+  landing, a sign-in), `text-h1` a page title, `text-h2` a section, `text-h3` a card
+  title, `text-body`, `text-caption` (labels, meta, the small print). Ask for the ROLE
+  and the design decides the size, the line height and the letter-spacing together —
+  an editorial product's `text-h1` is 64px where a dense console's is 31px. Reach for
+  `text-2xl`/`text-3xl` and you have overridden the design with a number you picked,
+  which is why every application's titles used to come out the same size. Tailwind's
+  own sizes are still right for everything the ramp does not name.
 - DEPTH CARRIES THE LAYERS, AND IT IS THE DESIGN'S. Lift surfaces with the shadow scale —
   `shadow-sm` a resting card, `shadow-md` on hover, `shadow-lg`/`shadow-xl` a dialog or a
   raised hero — never a hand-rolled `shadow-[0_…]`. The scale is the register's (a flat
@@ -798,8 +807,15 @@ def _look(doc: dict) -> str:
     if any(typo.get(k) for k in ("headingWeight", "headingColor", "titleSize")):
         weight = {"regular": "font-normal", "medium": "font-medium", "semibold": "font-semibold", "bold": "font-bold"}[look["weight"]]
         colour = {"primary": "text-primary", "accent": "text-accent"}.get(look["tone"], "text-foreground")
-        size = f"{look['titleSize']}px (text-4xl is 36px, text-3xl 30px)" if look["titleSize"] else "text-3xl or text-4xl"
-        lines.append(f"- a page title (`h1`): `font-heading {weight} {colour}`, {size} - the design says so, and the phone draws it the same")
+        # `text-h1` IS this design's title size — the ramp is projected per app
+        # (look_scale.type_scale_vars → tokens.css → the Tailwind config). Naming
+        # a px value here used to send the writer to the nearest `text-Nxl`,
+        # which overrode the ramp on every heading and made every app's titles
+        # the same size. Say the class; mention the px only so the choice reads
+        # as deliberate.
+        size = f"`text-h1` (this design: {look['titleSize']}px)" if look["titleSize"] else "`text-h1`"
+        lines.append(f"- a page title (`h1`): `font-heading {weight} {colour}` at {size}"
+                     " - the design says so, and the phone draws it the same")
     gs, ge = colors.get("gradientStart"), colors.get("gradientEnd")
     lines.append("- bg-brand-gradient" + (f" ({gs} → {ge})" if gs and ge else " (primary → accent)")
                  + ": the brand gradient — the leading card, the sign-in panel, a hero band; its text is set")

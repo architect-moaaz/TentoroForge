@@ -61,6 +61,58 @@ _ELEVATION_SCHEMES: dict[str, tuple[str, str, str, str]] = {
 DEFAULT_ELEVATION = "soft"
 _SHADOW_KEYS = ("sm", "md", "lg", "xl")
 
+#: The schemes whose shadow takes the brand's hue unless the design says
+#: otherwise. A shadow is light the surface blocked, so on a warm clay product it
+#: is warm and on a deep violet one it is violet — neutral black under every app
+#: is the same depth tell the ramps above were written to break. Held to the rich
+#: registers: a `flat` utility console casts almost nothing, and tinting a hairline
+#: only muddies it.
+_TINTED_SCHEMES = frozenset({"layered", "dramatic"})
+
+#: How much a tinted shadow is deepened to hold its weight. A coloured shadow of
+#: the same opacity reads lighter than a black one, because the hue carries part
+#: of the contrast the darkness used to.
+_TINT_GAIN = 1.25
+
+_BLACK = "rgb(0 0 0 / "
+
+
+def _rgb(hex_colour: Any) -> tuple[int, int, int] | None:
+    """`#rrggbb` (or `#rgb`) as a channel triple; None for anything else."""
+    text = str(hex_colour or "").strip().lstrip("#")
+    if len(text) == 3:
+        text = "".join(c * 2 for c in text)
+    if len(text) != 6:
+        return None
+    try:
+        return int(text[0:2], 16), int(text[2:4], 16), int(text[4:6], 16)
+    except ValueError:
+        return None
+
+
+def _tinted(shadow: str, rgb: tuple[int, int, int]) -> str:
+    """One ramp step restated in the brand's hue.
+
+    The ramps are written as `rgb(0 0 0 / α)`; this swaps the channels and lifts
+    α by `_TINT_GAIN`, leaving every offset and blur alone so the scheme still
+    reads as the scheme.
+    """
+    out, rest = [], shadow
+    while (at := rest.find(_BLACK)) != -1:
+        close = rest.find(")", at)
+        if close == -1:
+            break
+        try:
+            alpha = float(rest[at + len(_BLACK):close])
+        except ValueError:
+            out.append(rest[:close + 1])
+            rest = rest[close + 1:]
+            continue
+        out.append(rest[:at])
+        out.append("rgb(%d %d %d / %.3f)" % (*rgb, min(alpha * _TINT_GAIN, 1.0)))
+        rest = rest[close + 1:]
+    return "".join(out) + rest
+
 
 def _scheme_name(value: Any, default: str, known: dict) -> str:
     """The scheme a design asked for: a bare string, or a record's `scheme`/
@@ -72,11 +124,22 @@ def _scheme_name(value: Any, default: str, known: dict) -> str:
     return name if name in known else default
 
 
-def elevation_vars(elevation: Any) -> list[str]:
+def elevation_vars(elevation: Any, tint: Any = None) -> list[str]:
     """`--shadow-sm/md/lg/xl` for the chosen elevation scheme. Explicit values in
-    the record (``{sm, md, lg, xl}``) win over the scheme they sit beside."""
+    the record (``{sm, md, lg, xl}``) win over the scheme they sit beside.
+
+    ``tint`` is the brand colour the shadow takes on the rich schemes; the design
+    overrules with ``elevation.tint`` of ``"brand"`` or ``"neutral"``.
+    """
     scheme = _scheme_name(elevation, DEFAULT_ELEVATION, _ELEVATION_SCHEMES)
     ramp = dict(zip(_SHADOW_KEYS, _ELEVATION_SCHEMES[scheme]))
+
+    asked = str((elevation or {}).get("tint") or "").strip().lower() \
+        if isinstance(elevation, dict) else ""
+    wants_tint = asked == "brand" or (asked != "neutral" and scheme in _TINTED_SCHEMES)
+    if wants_tint and (rgb := _rgb(tint)):
+        ramp = {k: _tinted(v, rgb) for k, v in ramp.items()}
+
     if isinstance(elevation, dict):
         for k in _SHADOW_KEYS:
             v = elevation.get(k) or elevation.get(f"shadow-{k}")
@@ -104,6 +167,15 @@ DEFAULT_SCALE = "comfortable"
 #: step name → how many ratio steps above the body size. Body is the anchor (0).
 _TYPE_STEPS = (("caption", -1), ("body", 0), ("h3", 2), ("h2", 3), ("h1", 4))
 
+#: A DISPLAY STEP ABOVE h1, because the ramp stopped where the page titles are.
+#: `h1` is base x ratio^4 — 31px on a `tight` register — so a product whose type
+#: is meant to carry the page had no size to carry it with; the writer reached
+#: for Tailwind's own `text-4xl` instead and every app's titles came out the same.
+#: One ratio step above h1, clamped: a further step at `editorial` is 90px, which
+#: is a poster, and it must never sit so close to h1 that it is not a step.
+_DISPLAY_MAX_REM = 4.5      # 72px — the biggest a page title goes
+_DISPLAY_MIN_OVER_H1 = 1.12
+
 
 def _base_rem(typography: dict | None) -> float:
     """The body size in rem. `baseSize` may be `16px`, `1rem`, or a number."""
@@ -120,10 +192,31 @@ def _base_rem(typography: dict | None) -> float:
     return 1.0
 
 
+def _rem(value: Any) -> float | None:
+    """A stated size in rem. `40px`, `2.5rem` or a bare number of px."""
+    raw = str(value or "").strip().lower()
+    try:
+        if raw.endswith("px"):
+            return round(float(raw[:-2]) / 16, 4)
+        if raw.endswith("rem"):
+            return float(raw[:-3])
+        if raw:
+            n = float(raw)
+            return round(n / 16, 4) if n > 4 else n
+    except ValueError:
+        pass
+    return None
+
+
 def type_scale_vars(typography: dict | None) -> list[str]:
-    """`--text-caption/body/h3/h2/h1` sized by a modular scale, plus
-    `--tracking-tight` for headings. The ratio comes from
-    `typography.scaleMode` (or `scaleRatio` as an explicit number)."""
+    """`--text-caption/body/h3/h2/h1/display` sized by a modular scale, plus
+    `--tracking-tight` and `--tracking-display` for headings. The ratio comes
+    from `typography.scaleMode` (or `scaleRatio` as an explicit number).
+
+    A stated `typography.titleSize` wins for `--text-h1`: the design agent is
+    asked for it in px and the ramp used to ignore it, so an application could
+    ask for a 40px title and be given 31px.
+    """
     typ = typography or {}
     ratio_raw = typ.get("scaleRatio")
     try:
@@ -134,13 +227,22 @@ def type_scale_vars(typography: dict | None) -> list[str]:
         mode = str(typ.get("scaleMode") or "").strip().lower()
         ratio = _SCALE_RATIOS.get(mode, _SCALE_RATIOS[DEFAULT_SCALE])
     base = _base_rem(typ)
+    h1 = _rem(typ.get("titleSize")) or base * (ratio ** 4)
     out: list[str] = []
     for name, steps in _TYPE_STEPS:
-        out.append(f"  --text-{name}: {round(base * (ratio ** steps), 4)}rem;")
+        size = h1 if name == "h1" else base * (ratio ** steps)
+        out.append(f"  --text-{name}: {round(size, 4)}rem;")
+    display = max(min(h1 * ratio, _DISPLAY_MAX_REM), h1 * _DISPLAY_MIN_OVER_H1)
+    out.append(f"  --text-display: {round(display, 4)}rem;")
     # A tighter track on display sizes reads as designed, not default; the
     # bigger the ratio (the more editorial), the tighter the heading track.
-    tracking = -0.011 - (ratio - 1.25) * 0.03
+    # THE RANGE USED TO BE TOO NARROW TO SEE: -0.0089em at `tight` to -0.0159em
+    # at `editorial`, when Tailwind's own `tracking-tight` is -0.025em and a
+    # designed display head is around -0.045em. Anchored at the tight end now,
+    # so the editorial end reaches where a display face actually sits.
+    tracking = -0.012 - (ratio - _SCALE_RATIOS["tight"]) * 0.09
     out.append(f"  --tracking-tight: {round(tracking, 4)}em;")
+    out.append(f"  --tracking-display: {round(tracking * 1.4, 4)}em;")
     return out
 
 
@@ -179,8 +281,9 @@ def motion_vars(motion: Any) -> list[str]:
 
 def look_vars(design: dict) -> list[str]:
     """Every depth/type/motion var for one design, in one call."""
+    colors = design.get("colors") or {}
     return (
-        elevation_vars(design.get("elevation"))
+        elevation_vars(design.get("elevation"), colors.get("primary"))
         + type_scale_vars(design.get("typography") or {})
         + motion_vars(design.get("motion"))
     )

@@ -83,6 +83,53 @@ const config: Config = {
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
       },
+      // THE DESIGN'S TYPE RAMP, AS CLASSES. `look_scale.type_scale_vars` works out
+      // a modular scale per application from `typography.scaleMode` and writes it
+      // to tokens.css — and until now nothing read it. tokens.css sets it on bare
+      // `h1/h2/h3`, which any `text-2xl` on the element beats on specificity, and
+      // on the one app measured every single heading carried one (Claimsdesk,
+      // 28 of 28, 2026-11-04). So an `editorial` product and a `tight` console
+      // drew their titles at exactly the same size. Named steps instead, so the
+      // page author asks for the ROLE and the design decides the size.
+      // Each var carries a fallback: a tree with no projected tokens still renders.
+      fontSize: {
+        display: ["var(--text-display, 3rem)", {
+          lineHeight: "1.03", letterSpacing: "var(--tracking-display, -0.028em)",
+        }],
+        h1: ["var(--text-h1, 2rem)", {
+          lineHeight: "1.15", letterSpacing: "var(--tracking-tight, -0.018em)",
+        }],
+        h2: ["var(--text-h2, 1.6rem)", {
+          lineHeight: "1.2", letterSpacing: "var(--tracking-tight, -0.018em)",
+        }],
+        h3: ["var(--text-h3, 1.35rem)", { lineHeight: "1.3" }],
+        body: ["var(--text-body, 1rem)", { lineHeight: "1.55" }],
+        caption: ["var(--text-caption, 0.85rem)", { lineHeight: "1.45" }],
+      },
+      letterSpacing: {
+        tight: "var(--tracking-tight, -0.025em)",
+        display: "var(--tracking-display, -0.035em)",
+      },
+      // Depth is the design's too, the same way, and for the same reason: the
+      // ramp `designSystem.elevation` chooses reached tokens.css and stopped
+      // there, so `shadow-md` was Tailwind's stock value in a flat console and a
+      // dramatic luxe product alike. app-foundation's config has mapped these
+      // since it was written (src/theme/tailwind-tokens.ts) — this copy, which
+      // overwrites it in every generated app, never did.
+      boxShadow: {
+        sm: "var(--shadow-sm, 0 1px 2px 0 rgb(0 0 0 / 0.05))",
+        DEFAULT: "var(--shadow-md, 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1))",
+        md: "var(--shadow-md, 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1))",
+        lg: "var(--shadow-lg, 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1))",
+        xl: "var(--shadow-xl, 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1))",
+      },
+      // The design's rhythm of space, as named steps beside Tailwind's numbers
+      // (which are untouched, so `p-4` still means 1rem).
+      spacing: {
+        card: "var(--space-card-padding, 1rem)",
+        section: "var(--space-section-gap, 1.5rem)",
+        row: "var(--space-compact-row-padding, 0.5rem)",
+      },
     },
   },
   plugins: [],
