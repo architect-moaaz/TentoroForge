@@ -71,6 +71,14 @@ def worth_another_look(verdict: dict, best_score: int | None) -> bool:
     looks stop buying anything: the writer has shown it cannot get past this
     reading of its own page.
     """
+    # A CRASH IS NOT A STALL. The rule below reads a score that has stopped
+    # moving as "the writer cannot get past this reading of its own page" —
+    # true of taste, false of a stack trace, which names one concrete thing to
+    # fix. Stay's booking page scored 1 twice while throwing `Cannot read
+    # properties of undefined (reading 'tone')` and was let go as stalled
+    # (2026-11-04). What the browser proved broken keeps its looks.
+    if verdict.get("broken"):
+        return True
     score = verdict.get("score")
     if not isinstance(score, (int, float)):
         return best_score is None          # an unscored first look still earns one

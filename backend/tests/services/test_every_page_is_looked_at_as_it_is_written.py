@@ -357,3 +357,33 @@ def test_a_page_that_ships_below_the_bar_says_so(monkeypatch, tmp_path, caplog):
     said = [r.getMessage() for r in caplog.records]
     assert any("ships at 4/10, still `revise` after 2 look(s)" in m for m in said), said
     assert any("no sort affordance" in m for m in said), said
+
+
+def test_a_page_the_browser_proved_broken_keeps_its_looks(monkeypatch, tmp_path):
+    """A CRASH IS NOT A STALL. The climbing rule reads a score that has
+    stopped moving as "the writer cannot get past this reading of its own
+    page" — true of taste, false of a stack trace, which names one concrete
+    thing to fix. Stay's booking page scored 1 twice while throwing `Cannot
+    read properties of undefined (reading 'tone')` and was let go as stalled
+    (2026-11-04)."""
+    crash = dict(REVISE, score=1, broken=["view.tsx: Cannot read properties of undefined"])
+    assert page_look.worth_another_look(crash, 1) is True, "stalled, but crashing"
+    assert page_look.worth_another_look(dict(crash, score=9), 9) is True, \
+        "a high score does not excuse a page that does not render"
+    assert page_look.worth_another_look(dict(REVISE, score=1), 1) is False, \
+        "and a page that merely stalls still stops"
+    seen, _ = _trail_broken(monkeypatch, tmp_path)
+    assert seen == page_look.LOOKS, seen
+
+
+def _trail_broken(monkeypatch, tmp_path):
+    """`broken` is the BROWSER's word, not the critic's: `look_at` fills it
+    from the render's own console errors (`body["broken"] = look["errors"]`),
+    so a crash is staged on the render, not on the verdict."""
+    critic = _Critic([dict(REVISE, score=1)] * (page_look.LOOKS + 1))
+    monkeypatch.setattr(page_look, "render", lambda *a, **k: {
+        "shots": {"desktop": "d.png", "mobile": "m.png"},
+        "errors": ["view.tsx: Cannot read properties of undefined (reading 'tone')"]})
+    writer = _Writer([{"rationale": "", "load": GOOD_LOAD, "view": GOOD_VIEW}] * 12)
+    body, _ = compose_page(_doc(), _doc()["pages"][0], tmp_path, writer, critic=critic)
+    return len(critic.seen), body

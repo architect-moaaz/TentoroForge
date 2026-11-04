@@ -555,3 +555,91 @@ def test_a_client_with_no_effort_to_lower_still_raises(tmp_path):
         return type("R", (), {"text": '{"palette": [{"name":', "usage": None})()
     with pytest.raises(json.JSONDecodeError):
         component_kit.compose_kit({"componentKit": {}}, client, tmp_path, rounds=1)
+
+
+# --- the kit is told what a record can actually say -------------------------
+#
+# THE KIT WAS GIVEN THE RECORD NAMES AND NOTHING ELSE, so a status chip's
+# vocabulary was a guess that typechecks: the kit declares its own union and
+# the PAGE is the one that has to pass a real value into it. Stay's kit wrote
+# `upcoming | in_house | departed | cancelled` for a field whose values are
+# `Upcoming | CheckedIn | CheckedOut | Cancelled`. The compiler said
+# `Type '"Cancelled"' is not assignable to type 'BookingStatus'. Did you mean
+# '"cancelled"'?` three rounds running; the page writer, which cannot edit the
+# kit, cast the error away, and two of nine pages crashed on `undefined.tone`
+# (2026-11-04).
+
+def _with_states():
+    return {"application": {"name": "Stay"}, "composition": {}, "designSystem": {"colors": {}},
+            "data": {"entities": [{"name": "Stay", "fields": [
+                {"name": "status", "type": "enum",
+                 "enumValues": ["Upcoming", "CheckedIn", "CheckedOut", "Cancelled"]},
+                {"name": "room", "type": "string"}]}]}}
+
+
+def test_the_kit_is_given_the_exact_strings_a_record_can_hold():
+    said = component_kit._states(_with_states())
+    assert "Stay.status" in said
+    for value in ("Upcoming", "CheckedIn", "CheckedOut", "Cancelled"):
+        assert f"`{value}`" in said, value
+    assert "room" not in said, "only the enumerated fields; the rest is noise"
+
+
+def test_a_product_with_no_enumerated_field_is_told_nothing_about_states():
+    assert component_kit._states({"data": {"entities": [{"name": "X", "fields": [
+        {"name": "title", "type": "string"}]}]}}) == ""
+
+
+def test_the_states_reach_the_prompt_with_the_instruction_not_to_spell_them():
+    _, user = component_kit.kit_prompts(_with_states())
+    assert "`CheckedIn`" in user
+    assert "THESE EXACT STRINGS" in user
+
+
+# --- a switch that typescript calls total and the browser does not ----------
+
+def test_a_switch_with_no_default_is_a_finding():
+    """`stayStatusMeta` took a four-value union, returned an object from each
+    arm and compiled clean. The rows carried `CheckedIn`; the switch fell off
+    the end and `.tone` on undefined took every page with a chip down."""
+    code = ('export function stayStatusMeta(status: StayStatus): '
+            '{ label: string; tone: "upcoming" | "past" } {\n'
+            '  switch (status) {\n'
+            '    case "upcoming":\n      return { label: "Upcoming", tone: "upcoming" };\n'
+            '    case "departed":\n      return { label: "Departed", tone: "past" };\n'
+            '  }\n}\n')
+    assert component_kit._falls_through(code) == ["stayStatusMeta"]
+    said = component_kit.findings({}, [{"file": "format.ts", "code": code}])
+    assert any("no `default`" in f for f in said), said
+
+
+def test_the_return_type_annotations_own_braces_do_not_hide_the_body():
+    """Brace-matching from the signature finds `{ label: string; … }`, not the
+    function body — which is why the first cut of this rule found nothing in
+    the file that prompted it."""
+    code = ('export function f(s: S): { a: string; b: { c: number } } {\n'
+            '  switch (s) {\n    case "x": return { a: "x", b: { c: 1 } };\n'
+            '    case "y": return { a: "y", b: { c: 2 } };\n  }\n}\n')
+    assert component_kit._falls_through(code) == ["f"]
+
+
+def test_a_switch_that_says_default_is_fine():
+    code = ('export function f(s: S): string {\n  switch (s) {\n'
+            '    case "a": return "A";\n    case "b": return "B";\n'
+            '    default: return "?";\n  }\n}\n')
+    assert component_kit._falls_through(code) == []
+    assert component_kit.findings({}, [{"file": "format.ts", "code": code}]) == []
+
+
+def test_a_single_case_is_not_a_status_map():
+    assert component_kit._falls_through(
+        'export function f(s: S) { switch (s) { case "a": return 1; } }') == []
+
+
+def test_it_never_costs_the_part():
+    """A crashing chip is worse than an unthemed one — but no kit at all is
+    worse than both, and every page imports it. This is asked three times and
+    then shipped, like the other style rules."""
+    code = ('export function f(s: S): string {\n  switch (s) {\n'
+            '    case "a": return "A";\n    case "b": return "B";\n  }\n}\n')
+    assert component_kit.undeclared_colours({}, [{"file": "format.ts", "code": code}]) == []

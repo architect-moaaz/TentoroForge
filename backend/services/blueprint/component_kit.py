@@ -231,6 +231,36 @@ def undeclared_colours(doc: dict, parts: list[dict]) -> list[str]:
     return out
 
 
+#: Where one function's text ends and the next begins. A return-type
+#: annotation carries its own braces (`): { label: string; tone: ... } {`), so
+#: brace-matching from the signature finds the annotation, not the body —
+#: split on the declarations instead and read each chunk whole.
+_FN_HEAD = re.compile(r"(?:^|\n)\s*(?:export\s+)?(?:async\s+)?function\s+(\w+)")
+
+
+def _falls_through(code: str) -> list[str]:
+    """Functions that switch over a union and never say `default`.
+
+    TYPESCRIPT CALLS THIS TOTAL AND THE BROWSER DOES NOT. `stayStatusMeta`
+    took a four-value union, returned an object from each arm and compiled
+    clean; the rows carried `CheckedIn` where the kit had written `in_house`,
+    the switch fell off the end, and `.tone` on undefined crashed every page
+    with a status chip (Stay, 2026-11-04). A kit part is handed values from a
+    database column, which is a string.
+    """
+    heads = list(_FN_HEAD.finditer(code))
+    out = []
+    for i, head in enumerate(heads):
+        body = code[head.end():heads[i + 1].start() if i + 1 < len(heads) else len(code)]
+        if "switch" not in body or "return" not in body:
+            continue
+        if re.search(r"\bdefault\s*:", body):
+            continue
+        if len(re.findall(r"\bcase\s", body)) >= 2:
+            out.append(head.group(1))
+    return out
+
+
 def findings(doc: dict, parts: list[dict]) -> list[str]:
     """What the compiler cannot see and the kit's own bargain forbids."""
     from services.blueprint.ui_engineer import escaped_in_jsx_text
@@ -251,6 +281,11 @@ def findings(doc: dict, parts: list[dict]) -> list[str]:
         if escaped_in_jsx_text(code):
             out.append(f"{name}: a `\\uXXXX` escape in JSX text or an attribute string is shown "
                        "literally — write the character itself (— · ₹), or {\"\\u2014\"} in braces.")
+        for fn in _falls_through(code):
+            out.append(f"{name}: `{fn}` switches over a status and has no `default`, so a "
+                       "value the union did not predict returns undefined and the first "
+                       "property read off it takes the page down. The data is a string, not "
+                       "your union — end it with a `default` that returns something drawable.")
         if "@/sdk/server" in code or re.search(r"\bfetch\(", code):
             out.append(f"{name}: reads data. A kit part is given what to draw; the page loads it.")
         if re.search(r'^\s*"use client"|^\s*\'use client\'', code) is None \
@@ -368,6 +403,27 @@ _PARTS_SEEN = (
 )
 
 
+def _states(doc: dict) -> str:
+    """Every enumerated field, as `Record.field: A | B | C`.
+
+    THE KIT IS GIVEN THE RECORD NAMES AND NOTHING ELSE, so a status chip's
+    vocabulary was a guess — and a guess that typechecks, because the kit
+    declares its own union and the page is the one that has to pass a real
+    value into it. The compiler said `Type '"Cancelled"' is not assignable to
+    type 'BookingStatus'. Did you mean '"cancelled"'?` three times; the page
+    writer, which cannot edit the kit, cast the error away and the page
+    crashed at runtime (Stay, 2026-11-04).
+    """
+    lines = []
+    for entity in ((doc.get("data") or {}).get("entities") or [])[:14]:
+        for field in (entity.get("fields") or []):
+            values = [str(v) for v in (field.get("enumValues") or field.get("options") or []) if v]
+            if values:
+                lines.append(f"- {entity.get('name')}.{field.get('name')}: "
+                             + " | ".join(f"`{v}`" for v in values[:12]))
+    return "\n".join(lines[:24])
+
+
 def kit_prompts(doc: dict) -> tuple[str, str]:
     """What the kit engineer is told. Deliberately not a template to fill: it is
     given the product, its register and its rhythm, and asked to design."""
@@ -437,6 +493,7 @@ def kit_prompts(doc: dict) -> tuple[str, str]:
                                    "colors", "typography", "radius", "elevation", "motion",
                                    "shell", "references") if ds.get(k)}
     entities = [e.get("name") for e in ((doc.get("data") or {}).get("entities") or [])][:14]
+    states = _states(doc)
     patterns = sorted({str(p.get("pattern")) for p in doc.get("pages") or []
                        if p.get("pattern") and p.get("status") != "DEPRECATED"})
 
@@ -448,7 +505,14 @@ def kit_prompts(doc: dict) -> tuple[str, str]:
         "told to build to it, and from now on your parts are how they do:\n"
         + "\n".join(f"- {k}: `{rhythm[k]}` — {RHYTHM_OPTIONS[k][rhythm[k]]}" for k in RHYTHM_OPTIONS)
         + f"\n\nIts records: {', '.join(str(e) for e in entities if e) or 'none yet'}\n"
-        f"Its kinds of page: {', '.join(patterns) or 'unknown'}\n\n"
+        f"Its kinds of page: {', '.join(patterns) or 'unknown'}\n"
+        + (f"\nTHE STATES A RECORD CAN BE IN — THESE EXACT STRINGS, and your formatters and "
+           f"chips must take them as they are. Given only the record NAMES, a kit invented "
+           f"`upcoming | in_house | departed` for a field whose values are "
+           f"`Upcoming | CheckedIn | CheckedOut`, and every page that drew a status chip "
+           f"crashed on an undefined tone (Stay, 2026-11-04). You cannot spell these; they "
+           f"are the data's:\n{states}\n" if states else "")
+        + "\n"
         "WRITE THE PARTS THIS PRODUCT NEEDS. A real designed application's pages reached for "
         "these, and the count is how many of its fourteen kit-using pages imported each:\n"
         + "\n".join(f"- {what} ({n} pages)" for what, n in _PARTS_SEEN)
