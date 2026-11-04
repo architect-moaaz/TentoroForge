@@ -145,7 +145,7 @@ def test_the_app_wears_the_frame_of_the_product_the_page_was_drawn_in(tmp_path):
     assert 'import ShellView1 from "./drawn/RecruiterShell";' in wrapper
     assert '"shell:Recruiter": Frame1,' in wrapper and 'const FIRST = "shell:Admin";' in wrapper
     assert '"Recruiter": "shell:Recruiter"' in wrapper, "a page no product drew is framed by the role's product"
-    assert "if (phone && PHONE.some((r) => matches(r, path))) return <><DrawnWords />{props.children}</>;" in wrapper
+    assert "if ((phone && PHONE.some((r) => matches(r, path))) || BARE.some((r) => matches(r, path))) return <><DrawnWords />{props.children}</>;" in wrapper
     assert "role?: string" in wrapper
 
 
@@ -374,3 +374,21 @@ def test_every_frame_is_a_drawer_on_a_narrow_screen_and_speaks_the_chosen_langua
     css = (app / "src/components/DrawnFrame.css").read_text()
     assert "@media (max-width: 1023px)" in css
     assert "overflow-x: auto" in css, "a table scrolls sideways inside its card"
+
+
+def test_a_page_drawn_without_its_portals_shell_is_shown_bare(tmp_path):
+    """DITANS D2 (2026-11-03): onboarding drawn full screen with its own brand
+    panel was squeezed inside the candidate's sidebar and top bar."""
+    from services.drawn.project import bare_routes
+    doc = {"designSources": [{"id": "F", "treatAs": "specification", "frames": [
+                {"nodeId": "1:1", "name": "Jobs", "portal": "Web", "width": 1440},
+                {"nodeId": "1:2", "name": "Onboarding", "portal": "Web", "width": 1440},
+                {"nodeId": "2:1", "name": "Phone home", "portal": "App", "width": 390}]}],
+           "drawnViews": [{"key": "shell:Web", "kind": "shell", "name": "WebShell", "portal": "Web", "code": "x"},
+                          {"key": "1:1", "frame": "1:1", "kind": "screen", "name": "JobsView", "code": "x", "framed": True},
+                          {"key": "1:2", "frame": "1:2", "kind": "screen", "name": "OnboardingView", "code": "x", "framed": False},
+                          {"key": "2:1", "frame": "2:1", "kind": "screen", "name": "PhoneHomeView", "code": "x", "framed": False}],
+           "pages": [{"id": "P1", "route": "/jobs", "figmaFrame": "F/1:1"},
+                     {"id": "P2", "route": "/start", "figmaFrame": "F/1:2"},
+                     {"id": "P3", "route": "/app-home", "figmaFrame": "F/2:1"}]}
+    assert bare_routes(doc, tmp_path) == ["/start"]     # a portal with no shell keeps the frame it had

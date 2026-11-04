@@ -362,6 +362,10 @@ def _sealed_fields(entity: dict, doc: dict) -> set[str]:
     for rule in ((doc.get("security") or {}).get("ownershipRules") or []):
         if isinstance(rule, dict) and str(rule.get("entity") or "").lower() in keys:
             found_by |= {str(rule.get(k)) for k in ("column", "guestColumn") if rule.get(k)}
+        # The membership record a "member" rule reads is searched by the
+        # member's email or id on every scoped read.
+        if isinstance(rule, dict) and str(rule.get("members") or "").lower() in keys:
+            found_by |= {str(rule.get(k)) for k in ("memberEmailColumn", "memberUserColumn") if rule.get(k)}
     if platform_table(str(entity.get("table") or to_snake(str(entity.get("name") or "")))):
         found_by |= {f for f in fields if re.sub(r"[^a-z]", "", f.lower()) in ("email", "password", "passwordhash")}
     # AND EVERY COLUMN A WORKFLOW FINDS ROWS BY. DITANS's staff steps look the
@@ -1310,7 +1314,7 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
     # text and its accent, as the tokens the page already reads.
     # …AND IN THE TONE THE DESIGN CHOSE (`shell.tone`), not the inverse
     # surface on every app: see `RAIL_PAINT`.
-    paint = RAIL_PAINT[derive_shell(doc)["tone"]]
+    paint = {**RAIL_PAINT[derive_shell(doc)["tone"]], **drawn_rail_paint(doc)}
     rail: dict[str, Any] = {"groups": groups, "appName": app_name, **paint, "accent": "hsl(var(--accent))"}
     # THE OWNER'S MARK GOES WHERE THE APPLICATION'S NAME IS. The rail's brand
     # block draws a square with the first letter of the name in it; given a
@@ -1948,6 +1952,23 @@ RAIL_PAINT: dict[str, dict[str, str]] = {
 }
 
 
+def drawn_rail_paint(doc: dict) -> dict[str, str]:
+    """THE SIDEBAR THE DESIGN DRAWS IS THE RAIL'S PAINT. A connected design's
+    sidebar colour (`designSystem.colors.sidebarBackground`, counted off its
+    frames by `figma.palette`) was written as a token and read by nothing: the
+    rail took its paint from a tone, and Criterion's deep-purple sidebar came
+    out a pale lavender wash (kkb5mzo3, 2026-11-03). The colour, with text
+    that reads on it; nothing when the design draws no sidebar."""
+    colour = str(((doc.get("designSystem") or {}).get("colors") or {}).get("sidebarBackground") or "")
+    if not re.fullmatch(r"#[0-9a-fA-F]{6}", colour):
+        return {}
+    r, g, b = (int(colour[i:i + 2], 16) / 255 for i in (1, 3, 5))
+    dark = 0.299 * r + 0.587 * g + 0.114 * b < 0.55
+    if dark:
+        return {"mode": "dark", "bg": colour, "text": "rgba(255, 255, 255, 0.86)", "muted": "rgba(255, 255, 255, 0.58)"}
+    return {"mode": "light", "bg": colour, "text": "hsl(var(--foreground) / 0.88)", "muted": "hsl(var(--muted-foreground))"}
+
+
 #: The most destinations an icon-only rail or a dock may hold before the
 #: frame falls back to a rail with labels.
 MAX_GLYPH_DESTINATIONS = 8
@@ -2201,6 +2222,15 @@ def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
             if isinstance(value, str) and _is_css_dimension(value):
                 lines.append(f"  --space-{_kebab(key)}: {value};")
 
+    # DEPTH, TYPE SCALE AND MOTION ARE THE DESIGN'S TOO — not one fixed library
+    # default for every app (`look_scale`). A named scheme the design states in
+    # a word (elevation "soft", scaleMode "editorial", motion "expressive") or
+    # explicit values become the `--shadow-*` / `--text-*` / `--motion-*` the
+    # kit and Tailwind read. Always emitted (sane defaults) so two apps differ
+    # in depth and rhythm, not only hue and typeface.
+    from services.blueprint import look_scale
+    lines += look_scale.look_vars(design)
+
     out = Path(app_root) / "src" / "app"
     out.mkdir(parents=True, exist_ok=True)
     header = ("/* Generated from the Living Blueprint (designSystem).\n"
@@ -2247,6 +2277,15 @@ def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
         from services.blueprint import native_tokens as _tk
         _w = {"regular": 400, "medium": 500, "semibold": 600, "bold": 700}[_tk.heading(doc)["weight"]]
         body_rule += "h1, h2, h3, .font-heading {\n  font-weight: %d;\n}\n" % _w
+    # THE DESIGN'S TYPE SCALE on bare headings — a real h1→h3 ramp (`look_scale`,
+    # `--text-*`), not the one size every app shared. A page that sets its own
+    # size class still wins (a utility class beats this element rule); this is
+    # the considered default beneath, so an unsized heading already reads as
+    # designed and the scale varies with the register.
+    body_rule += (
+        "h1 {\n  font-size: var(--text-h1);\n  letter-spacing: var(--tracking-tight);\n  line-height: 1.15;\n}\n"
+        "h2 {\n  font-size: var(--text-h2);\n  letter-spacing: var(--tracking-tight);\n  line-height: 1.2;\n}\n"
+        "h3 {\n  font-size: var(--text-h3);\n  line-height: 1.3;\n}\n")
     # THE BRAND GRADIENT, AS TWO CLASSES. `bg-gradient-to-br from-gradient-start
     # to-gradient-end` works too (the tailwind config names both stops); these
     # are the short spelling pages are told to use, with the primary and the
@@ -3210,9 +3249,24 @@ def entity_access(doc: dict) -> dict[str, dict[str, list[str]]]:
             if by_name.get(name) in entities:
                 readers[by_name[name]] |= roles
     # Ownership rules are dicts beside prose notes.
+    # UNSCOPED IS HOW FAR, NOT WHETHER. A role a rule leaves unscoped reads
+    # every property's rows in what it may read — its aggregate reports
+    # included — but where the Blueprint declares who may read the entity
+    # (a `read` permission), that list decides. kkb5mzo3's Management was
+    # unscoped on RefundCase for its cross-property reports and so was
+    # handed every case through the data API, against REQ-072 (2026-11-03).
+    permitted: dict[str, set[str]] = {}
+    for perm in _live(doc.get("permissions")):
+        subject = perm.get("subject") or perm.get("entity")
+        eid = by_name.get(subject, subject)
+        if eid in entities and str(perm.get("action") or "").lower() == "read":
+            holders = {str(r.get("name")) for r in _live(doc.get("roles")) if perm.get("id") in (r.get("permissions") or [])}
+            permitted.setdefault(eid, set()).update(holders)
     for rule in ((doc.get("security") or {}).get("ownershipRules") or []):
         if isinstance(rule, dict) and rule.get("status") != "DEPRECATED" and by_name.get(rule.get("entity")) in entities:
-            readers[by_name[rule["entity"]]] |= {str(r) for r in (rule.get("unscopedRoles") or [])}
+            eid = by_name[rule["entity"]]
+            unscoped = {str(r) for r in (rule.get("unscopedRoles") or [])}
+            readers[eid] |= unscoped & permitted[eid] if eid in permitted else unscoped
     # NO PAGE DECLARES IT: NOT LISTED. An entry with two empty lists refused
     # every role, the administrator's included, while the file and the data
     # route both say an entity left out is open to any signed-in role. A page
@@ -4105,8 +4159,10 @@ def ownership_rules(doc: dict) -> dict[str, list[dict]]:
             rule["guestColumn"] = str(item["guestColumn"])
         # EVERYONE READS, THE OWNER WRITES: a catalogue, a listing, a public
         # profile. The engine lifts the rule from reads and keeps it on writes.
-        if str(item.get("reads") or "") == "everyone":
-            rule["reads"] = "everyone"
+        # A PUBLIC LISTING IN A SCOPED WORKSPACE: signed-out visitors read
+        # every row, signed-in people what their scope gives them.
+        if str(item.get("reads") or "") in ("everyone", "visitors"):
+            rule["reads"] = str(item["reads"])
         # OWNED THROUGH ANOTHER RECORD: `column` references a record of
         # `through`, and the row is reachable when that one is. Written as
         # the target's TABLE, which the engine's registry always resolves —
@@ -4115,6 +4171,15 @@ def ownership_rules(doc: dict) -> dict[str, list[dict]]:
             target = by_key.get(_canonical_key(str(item["through"])))
             rule["through"] = str((target.get("table") or to_snake(target.get("name") or ""))
                                   if target else item["through"])
+        # AN ORGANISATION'S ROWS ARE ITS MEMBERS'. The membership record and
+        # its columns; the record is written as its TABLE, like `through`.
+        if rule["scope"] == "member" and item.get("members"):
+            target = by_key.get(_canonical_key(str(item["members"])))
+            rule["members"] = str((target.get("table") or to_snake(target.get("name") or ""))
+                                  if target else item["members"])
+            for key in ("memberColumn", "memberEmailColumn", "memberUserColumn"):
+                if item.get(key):
+                    rule[key] = str(item[key])
         # Key the rule under every spelling of the entity it actually resolves
         # to, so an SSR source asking for `rentPayments` and a route asking for
         # `rent-payments` both find it. An unresolved entity is still emitted
@@ -4177,8 +4242,9 @@ def render_ownership_rules_module(manifest: dict[str, list[dict]]) -> str:
         "  column: string;\n"
         '  /** "scope" -> also filters reads and writes; "attribution" -> fill only. */\n'
         '  kind: "scope" | "attribution";\n'
-        '  /** "user" -> the actor\'s id; "workspace" -> their workspace/tenant id. */\n'
-        '  scope: "user" | "workspace";\n'
+        '  /** "user" -> the actor\'s id; "workspace" -> their workspace/tenant id;\n'
+        '   *  "member" -> an organisation the actor has a row of `members` in. */\n'
+        '  scope: "user" | "workspace" | "member";\n'
         "  /** Roles exempt: they read unscoped, and may write the column themselves. */\n"
         "  unscopedRoles: string[];\n"
         "  /** For scope \"workspace\": the users column whose value is the actor's workspace. */\n"
@@ -4191,7 +4257,14 @@ def render_ownership_rules_module(manifest: dict[str, list[dict]]) -> str:
         "  guestColumn?: string;\n"
         "  /** \"everyone\": anyone reads every row, signed in or not; the column still\n"
         "   *  decides who may change or remove it. Absent: reads are scoped like writes. */\n"
-        '  reads?: "scoped" | "everyone";\n'
+        "  /** \"visitors\": people not signed in read every row; signed-in people stay scoped. */\n"
+        '  reads?: "scoped" | "everyone" | "visitors";\n'
+        "  /** For scope \"member\": the membership table, its organisation column, and\n"
+        "   *  the column matching the actor (their email, or their user id). */\n"
+        "  members?: string;\n"
+        "  memberColumn?: string;\n"
+        "  memberEmailColumn?: string;\n"
+        "  memberUserColumn?: string;\n"
         "}\n\n"
         "export const OWNERSHIP_RULES: Record<string, OwnershipRule[]> = "
         f"{json.dumps(manifest, indent=2, sort_keys=True)};\n\n"

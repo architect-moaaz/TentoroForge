@@ -93,6 +93,14 @@ def mcp_env(rows: list, skipped: list[dict[str, str]] | None = None) -> dict[str
     return out
 
 
+#: Keys an application makes for itself and keeps for its life: the sealing
+#: key of its sensitive fields and its Web Push pair. Known to the registry (an
+#: org may set its own), but never the platform's to remove.
+APP_OWNED: frozenset[str] = frozenset({
+    "SENSITIVE_ENCRYPTION_KEY", "VAPID_PUBLIC_KEY", "VAPID_PRIVATE_KEY", "VAPID_SUBJECT",
+})
+
+
 def _known_keys() -> set[str]:
     """Every env-var name the spec registry declares. Only these are touched
     by the writer; user-supplied keys (DATABASE_URL etc.) are left alone.
@@ -211,6 +219,15 @@ async def write_env_local_from_platform(
             below = True
             continue
         m = key_re.match(line)
+        if m and m.group(1) in APP_OWNED and m.group(1) not in desired:
+            # THE APP'S OWN KEY, KEPT. Its sealing key and push pair are made
+            # once per app (runtime_injector) and must outlive every rewrite:
+            # dropping them here, as a known key the org had not set, left 38
+            # of 42 apps on forge-v3 unable to seal or open a value and every
+            # push subscription orphaned (2026-11-03). An org value set on the
+            # platform still replaces it, from the managed block.
+            kept.append(line)
+            continue
         managed_key = bool(m) and (m.group(1) in known or m.group(1).startswith(_MCP_ENV_PREFIX) or m.group(1) in switches
                                    or m.group(1) in payment_names or m.group(1) in desired)
         if managed_key or (below and not m):

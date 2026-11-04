@@ -13,7 +13,8 @@ import { Bot, CreditCard, Hotel, LogOut, User } from "lucide-react";
 import { signOut } from "next-auth/react";
 
 function initials(name: string): string {
-  const parts = name.replace(/@.*$/, "").split(/[\s._-]+/).filter(Boolean);
+  // Letters only: "Candidate (demo)" read "C(" (DITANS D2, 2026-11-03).
+  const parts = name.replace(/@.*$/, "").replace(/[^\p{L}\s._-]/gu, " ").split(/[\s._-]+/).filter(Boolean);
   return ((parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? "")).toUpperCase() || "?";
 }
 

@@ -2007,3 +2007,73 @@ def test_a_restricted_pages_roles_survive_the_declaration_and_its_check():
     with pytest.raises(Exception) as refused:
         check_page_access(nameless, doc)
     assert "/reports" in str(refused.value) and "names no role" in str(refused.value)
+
+
+def test_a_prefix_can_be_cached_for_an_hour():
+    """Chosen from the start-to-start gap between calls that share the prefix:
+    Smith re-runs page authoring in groups 6 to 55 minutes apart, which is the
+    gap a 5-minute entry expires in and a 1-hour entry survives."""
+    from services.blueprint.executors import _cacheable
+
+    long = "x" * (2048 * 4)
+    assert _cacheable(long)[0]["cache_control"] == {"type": "ephemeral"}
+    assert _cacheable(long, "1h")[0]["cache_control"] == {
+        "type": "ephemeral", "ttl": "1h"}
+    with pytest.raises(ValueError):
+        _cacheable(long, "2h")
+
+
+def test_page_authoring_keeps_its_prefix_for_an_hour_and_nothing_else_does():
+    from services.blueprint.executors import CACHE_TTL_BY_NODE, tiered_router
+
+    assert set(CACHE_TTL_BY_NODE) <= set(DAG)
+    r = tiered_router()
+    assert r.for_task("page_layouts", DAG["page_layouts"].agent).cache_ttl == "1h"
+    # Smith's recompose asks the composer for a `page_layouts` subject; the
+    # node, not the agent, picks the client, so it gets the hour too.
+    assert r.for_task("page_layouts", "a2ui_pages").cache_ttl == "1h"
+    for node in ("data_model", "workflows", "requirements"):
+        assert r.for_task(node, DAG[node].agent).cache_ttl == "5m"
+
+
+def test_the_hour_reaches_the_request(tmp_path):
+    """The client's TTL is on the system prompt and the reference images it
+    sends, not only on the route that chose it."""
+    from types import SimpleNamespace
+
+    from services.blueprint.executors import AnthropicModel
+
+    final = SimpleNamespace(
+        stop_reason="end_turn",
+        content=[SimpleNamespace(type="text", text='{"proposals": []}')],
+        usage=SimpleNamespace(input_tokens=1, output_tokens=1,
+                              cache_read_input_tokens=0,
+                              cache_creation_input_tokens=0))
+    sent: dict = {}
+
+    class _Stream:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def __iter__(self):
+            return iter(())
+
+        def get_final_message(self):
+            return final
+
+    def stream(**kwargs):
+        sent.update(kwargs)
+        return _Stream()
+
+    shot = tmp_path / "montage.png"
+    shot.write_bytes(b"\x89PNG\r\n\x1a\n")
+    model = AnthropicModel(cache_ttl="1h",
+                           _client=SimpleNamespace(messages=SimpleNamespace(stream=stream)))
+    model(system="s" * (2048 * 4), user="u", schema={"type": "object"}, images=[shot])
+
+    hour = {"type": "ephemeral", "ttl": "1h"}
+    assert sent["system"][0]["cache_control"] == hour
+    assert sent["messages"][0]["content"][0]["cache_control"] == hour

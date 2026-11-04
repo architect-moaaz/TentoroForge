@@ -36,6 +36,7 @@ g.__execute = async (q: any) => {
   g.__dbCalls++;
   const { text, values } = sqlText(q);
   if (text.startsWith(" CREATE TABLE") || text.startsWith("CREATE TABLE")) return { rows: [] };
+  if (text.includes("SELECT 1 FROM forge_mews_properties")) return { rows: [] };
   if (text.includes("LIMIT 2")) return { rows: g.__props.slice(0, 2) };
   if (text.includes("ORDER BY lower(name)")) {
     return { rows: g.__props.map((p: any) => ({ ...p, has_token: Boolean(p.access_token_encrypted), access_token_encrypted: undefined })) };
@@ -164,5 +165,16 @@ const listed = await platform.json();
 eqJson(listed.properties.map((p: any) => [p.name, p.hasToken]), [["Lisbon Riverside", true]], "the list says which property has its own token");
 ok(!JSON.stringify(listed).includes(String(LISBON.access_token_encrypted)) && !JSON.stringify(listed).includes("at-lisbon-secret"),
    "and carries neither the token nor its seal");
+
+// An app with no sealing key refuses a token plainly, and stores nothing.
+const sealingKey = process.env.SENSITIVE_ENCRYPTION_KEY;
+delete process.env.SENSITIVE_ENCRYPTION_KEY;
+const nokey = await route.POST(new Request("http://app/api/mews/properties", { method: "POST",
+  body: JSON.stringify({ name: "Madrid", accessToken: "at-madrid" }) }));
+const said = await nokey.json();
+eqJson(nokey.status, 503, "with no sealing key a token is refused: 503, not a bare 500");
+ok(String(said.error).includes("no encryption key yet") && !String(said.error).includes("at-madrid"),
+   "saying why, and without the token");
+process.env.SENSITIVE_ENCRYPTION_KEY = sealingKey;
 
 done("a Mews call reaches the property it names");

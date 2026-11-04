@@ -601,6 +601,10 @@ export function WorkflowForm<I extends Json>({
     for (const [name, spec] of Object.entries(specs)) {
       if (spec && "value" in spec) input[name] = spec.value;
       else if (values[name] !== undefined && values[name] !== "") input[name] = values[name];
+      // A BOX NOBODY TICKED IS A NO. Left out, a required yes/no input was
+      // "missing" and the whole run refused (kkb5mzo3's Create refund,
+      // 2026-11-03: five unticked flags).
+      else if (["checkbox", "switch"].includes(String(spec?.kind)) && !spec?.render) input[name] = false;
     }
     const out = await run(input as I);
     // A create form that stays put is ready for the next record; the values

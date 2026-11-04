@@ -3242,9 +3242,10 @@
                     "type": "string",
                     "enum": [
                       "user",
-                      "workspace"
+                      "workspace",
+                      "member"
                     ],
-                    "description": "What `column` is compared to: the acting user's own id, or the workspace/tenant id their session carries.",
+                    "description": "What `column` is compared to: the acting user's own id, the workspace/tenant id their session carries, or (\"member\") the organisations the actor is a member of, read from the membership record named in `members`.",
                     "default": "user"
                   },
                   "unscopedRoles": {
@@ -3259,6 +3260,22 @@
                     "type": "string",
                     "description": "For scope \"workspace\": the column on the users table whose value is the actor's workspace — homePropertyId, organisationId, tenantId. The session carries that column and the engine compares `column` to it. Omit for scope \"user\", where the actor's id is the value."
                   },
+                  "members": {
+                    "type": "string",
+                    "description": "For scope \"member\": the entity recording who belongs to which organisation (OrganisationMember, TeamMember). The actor reaches a row when `column` is an organisation they have a row in."
+                  },
+                  "memberColumn": {
+                    "type": "string",
+                    "description": "For scope \"member\": the column of the `members` entity holding the organisation a member belongs to (organisationId)."
+                  },
+                  "memberEmailColumn": {
+                    "type": "string",
+                    "description": "For scope \"member\": the column of the `members` entity holding the member's sign-in email. Give this or memberUserColumn."
+                  },
+                  "memberUserColumn": {
+                    "type": "string",
+                    "description": "For scope \"member\": the column of the `members` entity holding the member's user id. Give this or memberEmailColumn."
+                  },
                   "through": {
                     "type": "string",
                     "description": "When the row belongs to the actor through another record: the entity `column` references (an Appointment's childId -> \"Child\"). The row is reachable when that record is reachable under its own scope rule, which it must have. Omit when `column` holds the actor's value itself."
@@ -3267,9 +3284,10 @@
                     "type": "string",
                     "enum": [
                       "scoped",
-                      "everyone"
+                      "everyone",
+                      "visitors"
                     ],
-                    "description": "Who may read the rows. \"scoped\": the same people who may write them (the default). \"everyone\": anyone, signed in or not, reads every row — a catalogue, a listing, a public profile — while `column` still decides who may change or remove it. Say \"everyone\" wherever visitors browse what owners manage; without it a signed-out visitor, who holds no role, reaches no row at all.",
+                    "description": "Who may read the rows. \"scoped\": the same people who may write them (the default). \"everyone\": anyone, signed in or not, reads every row — a catalogue, a listing, a public profile — while `column` still decides who may change or remove it. Say \"everyone\" wherever visitors browse what owners manage; without it a signed-out visitor, who holds no role, reaches no row at all. \"visitors\": people who are not signed in read every row (a public job board), while each signed-in person still reads only what the rule gives them — an employer's workspace lists its own jobs, not every employer's.",
                     "default": "scoped"
                   },
                   "guestColumn": {
@@ -3756,6 +3774,17 @@
             "type": "string"
           },
           "default": {}
+        },
+        "motion": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        },
+        "register": {
+          "type": "string",
+          "default": ""
         },
         "navigationApproach": {
           "type": "string",
@@ -4530,6 +4559,9 @@
               "shell",
               "component"
             ]
+          },
+          "framed": {
+            "type": "boolean"
           },
           "name": {
             "type": "string",

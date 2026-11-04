@@ -1465,6 +1465,10 @@ export const DrawnView = z.object({
   /** A frame's reference (`1:2`, `FIGMA-002/1:2`), `shell`, or `component:<Name>`. */
   key: z.string().min(1),
   kind: z.enum(["screen", "shell", "component"]),
+  /** For a screen: drawn inside its portal's sidebar and top bar. A screen
+   *  drawn without them (onboarding, a public page) is shown as drawn, with
+   *  no shell around it (DITANS D2, 2026-11-03). */
+  framed: z.boolean().optional(),
   /** The React component's name: `TenantsEntitlementsView`. */
   name: z.string().min(1),
   /** The frame it was converted from (a screen's own; a shell's or a
@@ -2505,10 +2509,12 @@ export const RecordScopeRule = z.object({
     .default("scope"),
   /** The actor's own id, or the workspace/tenant id their session carries. */
   scope: z
-    .enum(["user", "workspace"])
+    .enum(["user", "workspace", "member"])
     .describe(
-      "What `column` is compared to: the acting user's own id, or the " +
-      "workspace/tenant id their session carries.",
+      "What `column` is compared to: the acting user's own id, the " +
+      "workspace/tenant id their session carries, or (\"member\") the " +
+      "organisations the actor is a member of, read from the membership " +
+      "record named in `members`.",
     )
     .default("user"),
   /** Roles exempt from the rule — they read unscoped, and may write the column. */
@@ -2535,6 +2541,46 @@ export const RecordScopeRule = z.object({
       "the actor's workspace — homePropertyId, organisationId, tenantId. The " +
       "session carries that column and the engine compares `column` to it. " +
       "Omit for scope \"user\", where the actor's id is the value.",
+    )
+    .optional(),
+  /**
+   * MEMBERSHIP IS A RECORD OF THE APPLICATION. DITANS keeps who belongs to
+   * which employer or agency in OrganisationMember (organisationId, email);
+   * the users row carries no organisation, so no rule could say "my
+   * organisation's rows". Its rules were all per person, and a brand-new
+   * employer's Home, Approvals and Messages listed every organisation's jobs,
+   * offers and threads (QA D-59/60/65/67/70/71, 2026-11-02). With
+   * `scope: "member"` the row's `column` must be one of the `memberColumn`
+   * values of the `members` rows that are the actor's — matched on
+   * `memberEmailColumn` (their sign-in email) or `memberUserColumn` (their id).
+   */
+  members: z
+    .string()
+    .describe(
+      "For scope \"member\": the entity recording who belongs to which " +
+      "organisation (OrganisationMember, TeamMember). The actor reaches a row " +
+      "when `column` is an organisation they have a row in.",
+    )
+    .optional(),
+  memberColumn: z
+    .string()
+    .describe(
+      "For scope \"member\": the column of the `members` entity holding the " +
+      "organisation a member belongs to (organisationId).",
+    )
+    .optional(),
+  memberEmailColumn: z
+    .string()
+    .describe(
+      "For scope \"member\": the column of the `members` entity holding the " +
+      "member's sign-in email. Give this or memberUserColumn.",
+    )
+    .optional(),
+  memberUserColumn: z
+    .string()
+    .describe(
+      "For scope \"member\": the column of the `members` entity holding the " +
+      "member's user id. Give this or memberEmailColumn.",
     )
     .optional(),
   /**
@@ -2565,13 +2611,16 @@ export const RecordScopeRule = z.object({
    */
   /** Who may READ the rows: the same people who may write them, or everyone. */
   reads: z
-    .enum(["scoped", "everyone"])
+    .enum(["scoped", "everyone", "visitors"])
     .describe(
       'Who may read the rows. "scoped": the same people who may write them (the default). ' +
       '"everyone": anyone, signed in or not, reads every row — a catalogue, a listing, a ' +
       "public profile — while `column` still decides who may change or remove it. Say " +
       '"everyone" wherever visitors browse what owners manage; without it a signed-out ' +
-      "visitor, who holds no role, reaches no row at all.",
+      "visitor, who holds no role, reaches no row at all. " +
+      '"visitors": people who are not signed in read every row (a public job board), while ' +
+      "each signed-in person still reads only what the rule gives them — an employer's " +
+      "workspace lists its own jobs, not every employer's.",
     )
     .default("scoped"),
   guestColumn: z
@@ -2958,6 +3007,28 @@ export const DesignSystem = z.object({
   radius: z.record(z.string(), z.string()).default({}),
   borders: z.record(z.string(), z.string()).default({}),
   elevation: z.record(z.string(), z.string()).default({}),
+  /**
+   * How motion is used, as a free record the projector reads into the app's
+   * motion tokens: `level` (`none` | `subtle` | `expressive` — how much the UI
+   * moves at all), and optionally `durationFast`/`durationNormal`/`easing`.
+   * Every generated app shared one fixed, library-default motion regardless of
+   * personality; a playful consumer app and a restrained finance tool moved
+   * identically. Chosen by the design system agent from the register and the
+   * personality, projected to `--motion-*` and the `data-motion-level` the kit
+   * reads.
+   */
+  motion: z.record(z.string(), z.string()).default({}),
+  /**
+   * The design LANGUAGE this application is built in — a coherent register
+   * that bundles how it reads, not a colour. One of the director's known
+   * registers (e.g. `editorial`, `utility`, `warm`, `luxe`, `playful`,
+   * `minimal`) or a short phrase when none fits. It is chosen for the domain
+   * and audience and then expressed through the palette, type pairing,
+   * elevation, motion and density — so a fashion shop and an admin tool reach
+   * for different languages instead of the one dashboard look. Kept here so
+   * the page writer and reviewer hold the app to the register it declared.
+   */
+  register: z.string().default(""),
   navigationApproach: z.string().default(""),
   /**
    * The photographs the application uses, by the job each does: the sign-in

@@ -89,6 +89,9 @@ RUNTIME_FILES: tuple[tuple[str, str], ...] = (
     ("sensitive-crypto.ts", "src/lib/sensitive-crypto.ts"),
     ("push.ts", "src/lib/push.ts"),
     ("tenancy.ts", "src/lib/tenancy.ts"),
+    # The tick that runs what is due — and keeps the Mews stays a desk
+    # searches fresh. An app kept the one it was built with.
+    ("api-cron/route.ts", "src/app/api/cron/tick/route.ts"),
 )
 
 #: Sign-in logic every app runs, the platform's: where a signed-in person
@@ -125,6 +128,9 @@ MEWS_FILES: tuple[tuple[str, str], ...] = (
     ("api-mews/properties/route.ts", "src/app/api/mews/properties/route.ts"),
     ("api-mews/properties/[id]/route.ts", "src/app/api/mews/properties/[id]/route.ts"),
     ("api-mews/properties/[id]/check/route.ts", "src/app/api/mews/properties/[id]/check/route.ts"),
+    ("api-mews/stays/route.ts", "src/app/api/mews/stays/route.ts"),
+    ("api-mews/stays/suggest/route.ts", "src/app/api/mews/stays/suggest/route.ts"),
+    ("db/forge-mews-stays.schema.ts", "src/db/schema/_forge_mews_stays.ts"),
     ("pages/mews-properties/page.tsx", "src/app/(dashboard)/mews-properties/page.tsx"),
     ("pages/mews-properties/MewsPropertiesPanel.tsx", "src/app/(dashboard)/mews-properties/MewsPropertiesPanel.tsx"),
 )
@@ -241,6 +247,18 @@ def refresh_engine(app_root: str | Path, doc: dict | None = None, *, complete: b
                 changed.append(signup)
         except Exception:  # noqa: BLE001 — a refresh that cannot read the definition leaves the route alone
             logger.debug("[engine] the signup route could not be refreshed", exc_info=True)
+    # THE SEED'S BOOKKEEPING IS NOT THE SCHEMA'S. An app whose filter predates
+    # the import log saw it as an unknown table at the next push that added
+    # one, asked "created or renamed?", and could not be published (kkb5mzo3).
+    config = root / "drizzle.config.ts"
+    try:
+        text = config.read_text("utf-8") if config.is_file() else ""
+        if 'tablesFilter: ["!_forge_seed_meta"]' in text:
+            config.write_text(text.replace('tablesFilter: ["!_forge_seed_meta"]',
+                                           'tablesFilter: ["!_forge_seed_meta", "!_forge_import_log"]'), "utf-8")
+            changed.append("drizzle.config.ts")
+    except OSError:
+        logger.debug("[engine] the drizzle config could not be widened", exc_info=True)
     for rel in DB_SCRIPTS:
         src, dst = foundation / rel, root / rel
         if not src.is_file() or not (root / "drizzle.config.ts").is_file():
@@ -316,6 +334,12 @@ def refresh_engine(app_root: str | Path, doc: dict | None = None, *, complete: b
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(src, dst)
         changed.append(rel)
+    # A property's token is sealed with the app's key; an app built before the
+    # key was written into an existing `.env.local` has none (gvrhwft9).
+    if len(mews_wanted) > 1:
+        from services.runtime_injector import ensure_sensitive_key
+        if ensure_sensitive_key(root / ".env.local"):
+            changed.append(".env.local")
     # THE PAYMENT FILES AND THE APP'S PAYMENTS CONFIG, the platform's: the
     # routes and pages a gateway sends people back to, and what the owner
     # chose (`services.payments.app_payments`).
