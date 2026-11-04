@@ -42,7 +42,10 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 app = FastAPI(title="Forge payments emulator")
 BASE = os.environ.get("EMULATOR_BASE", "http://127.0.0.1:6599")
-_ids = itertools.count(1000)
+# Ids never come round again, across restarts too, as a gateway's never do:
+# counted from 1000, an id from before a restart named another subscription,
+# and an app holding the old one read the new one into it.
+_ids = itertools.count(int(time.time() * 1000))
 S: dict[str, dict[str, Any]] = {"sessions": {}, "subs": {}, "prices": {}, "hooks": {}, "rz_orders": {}, "rz_payments": {},
                                  "rz_plans": {}, "rz_subs": {}, "pp_orders": {}, "pp_products": {}, "pp_plans": {}, "pp_subs": {},
                                  "sent": {}}
