@@ -31,6 +31,7 @@ import contextvars
 import json
 import logging
 import re
+import threading
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -38,6 +39,11 @@ from pathlib import Path
 from typing import Any, Iterator
 
 logger = logging.getLogger(__name__)
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover — not a Unix; the threads here still hold each other off
+    fcntl = None  # type: ignore[assignment]
 
 PATCHES_FILE = "patches.json"
 #: The platform's own list of open patches, across every app, for the people
@@ -179,6 +185,50 @@ def _save_patches(output_dir: str | Path, patches: list[dict]) -> None:
     tmp.replace(path)
 
 
+#: One writer at a time on an application's patch record. Every change to it
+#: is a read, a change and a write of the whole list, and there is more than
+#: one writer: the repairs run side by side (`fix_to_green._fix`), and a
+#: person's turn runs beside them in another process. Two of them reading the
+#: same list wrote each other's patches away — the row, the settlement it was
+#: owed at the end of the turn, and its line in the platform's register.
+_LOCKS: dict[str, threading.Lock] = {}
+_LOCKS_GUARD = threading.Lock()
+
+
+@contextmanager
+def _writing(output_dir: str | Path) -> Iterator[None]:
+    """Nobody else changing this application's patch record: no other thread
+    here, and no other process on the same tree."""
+    path = _patches_path(output_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with _LOCKS_GUARD:
+        lock = _LOCKS.setdefault(str(path), threading.Lock())
+    with lock:
+        if fcntl is None:
+            yield
+            return
+        with path.with_suffix(".lock").open("w", encoding="utf-8") as fh:
+            fcntl.flock(fh, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(fh, fcntl.LOCK_UN)
+
+
+@contextmanager
+def amending(output_dir: str | Path) -> Iterator[list[dict]]:
+    """The patch record, read and written back as one change with no other
+    writer in between. The list handed over is the one to change: it is
+    written out on the way out if it changed, and left as it was if the
+    change raises."""
+    with _writing(output_dir):
+        patches = load_patches(output_dir)
+        was = json.dumps(patches, sort_keys=True)
+        yield patches
+        if json.dumps(patches, sort_keys=True) != was:
+            _save_patches(output_dir, patches)
+
+
 def _register(output_dir: str | Path, patch: dict) -> None:
     """Every platform patch's state, for the platform's people: one line per
     change, beside every app's folder."""
@@ -224,43 +274,36 @@ def reapply(output_dir: str | Path) -> list[str]:
     """Bring every kept patch back after something rewrote its file, and
     retire a platform patch whose spot the platform has since changed.
     Returns one line per patch that moved."""
-    patches = load_patches(output_dir)
-    if not patches:
-        return []
     app = Path(output_dir) / "app"
     said: list[str] = []
-    changed = False
-    for p in patches:
-        if p.get("status") != "active":
-            continue
-        rel, find, replace = str(p.get("path")), str(p.get("find") or ""), str(p.get("replace") or "")
-        if p.get("kind") == "platform":
-            fresh = platform_text(rel)
-            if fresh is not None and (replace in fresh or find not in fresh):
-                p.update(status="retired", note=("the platform now has this fix" if replace in fresh
-                                                 else "the platform changed this code; the patch no longer applies"),
-                         retired=_now())
-                changed = True
-                _register(output_dir, p)
-                said.append(f"{rel}: platform patch {p.get('id')} retired — {p['note']}")
+    with amending(output_dir) as patches:
+        for p in patches:
+            if p.get("status") != "active":
                 continue
-        target = app / rel
-        try:
-            text = target.read_text("utf-8")
-        except OSError:
-            continue
-        if replace and replace in text and find not in text:
-            continue                                   # still in place
-        if find in text and text.count(find) == 1:
-            target.write_text(text.replace(find, replace, 1), "utf-8")
-            said.append(f"{rel}: patch {p.get('id')} put back")
-        elif find not in text:
-            p.update(status="retired", note="the file no longer holds the text the patch changed", retired=_now())
-            changed = True
-            _register(output_dir, p)
-            said.append(f"{rel}: patch {p.get('id')} retired — {p['note']}")
-    if changed:
-        _save_patches(output_dir, patches)
+            rel, find, replace = str(p.get("path")), str(p.get("find") or ""), str(p.get("replace") or "")
+            if p.get("kind") == "platform":
+                fresh = platform_text(rel)
+                if fresh is not None and (replace in fresh or find not in fresh):
+                    p.update(status="retired", note=("the platform now has this fix" if replace in fresh
+                                                     else "the platform changed this code; the patch no longer applies"),
+                             retired=_now())
+                    _register(output_dir, p)
+                    said.append(f"{rel}: platform patch {p.get('id')} retired — {p['note']}")
+                    continue
+            target = app / rel
+            try:
+                text = target.read_text("utf-8")
+            except OSError:
+                continue
+            if replace and replace in text and find not in text:
+                continue                               # still in place
+            if find in text and text.count(find) == 1:
+                target.write_text(text.replace(find, replace, 1), "utf-8")
+                said.append(f"{rel}: patch {p.get('id')} put back")
+            elif find not in text:
+                p.update(status="retired", note="the file no longer holds the text the patch changed", retired=_now())
+                _register(output_dir, p)
+                said.append(f"{rel}: patch {p.get('id')} retired — {p['note']}")
     if said:
         logger.info("[patches] %s: %s", Path(output_dir).name, "; ".join(said))
     return said
@@ -271,28 +314,27 @@ def settle(output_dir: str | Path, ids: list[str], proven: bool) -> list[str]:
     taken back when not. Returns what the person is told."""
     if not ids:
         return []
-    patches = load_patches(output_dir)
     app = Path(output_dir) / "app"
     said: list[str] = []
-    for p in patches:
-        if p.get("id") not in ids or p.get("status") != "pending":
-            continue
-        if proven:
-            p.update(status="active", proven=_now())
-            said.append(f"Kept the platform patch to `{p.get('path')}` for this app — a try after it passed — "
-                        "and filed it for the platform to fold in.")
-        else:
-            target = app / str(p.get("path"))
-            try:
-                text = target.read_text("utf-8")
-                if str(p.get("replace")) in text:
-                    target.write_text(text.replace(str(p.get("replace")), str(p.get("find")), 1), "utf-8")
-            except OSError:
-                pass
-            p.update(status="reverted", note="no try after it passed", retired=_now())
-            said.append(f"Took back the change to `{p.get('path')}`: no try after it showed it fixed anything.")
-        _register(output_dir, p)
-    _save_patches(output_dir, patches)
+    with amending(output_dir) as patches:
+        for p in patches:
+            if p.get("id") not in ids or p.get("status") != "pending":
+                continue
+            if proven:
+                p.update(status="active", proven=_now())
+                said.append(f"Kept the platform patch to `{p.get('path')}` for this app — a try after it passed — "
+                            "and filed it for the platform to fold in.")
+            else:
+                target = app / str(p.get("path"))
+                try:
+                    text = target.read_text("utf-8")
+                    if str(p.get("replace")) in text:
+                        target.write_text(text.replace(str(p.get("replace")), str(p.get("find")), 1), "utf-8")
+                except OSError:
+                    pass
+                p.update(status="reverted", note="no try after it passed", retired=_now())
+                said.append(f"Took back the change to `{p.get('path')}`: no try after it showed it fixed anything.")
+            _register(output_dir, p)
     return said
 
 
@@ -359,8 +401,8 @@ def edit_file(output_dir: str, path: str, find: str, replace: str, why: str = ""
     patch = {"id": uuid.uuid4().hex[:10], "path": rel, "kind": kind["kind"], "find": find, "replace": replace,
              "why": why, "at": _now(), "status": "pending" if kind["kind"] == "platform" else "active",
              **({"turn": turn} if turn else {})}
-    patches = load_patches(output_dir) + [patch]
-    _save_patches(output_dir, patches)
+    with amending(output_dir) as patches:
+        patches.append(patch)
     _register(output_dir, patch)
     if kind["kind"] == "platform":
         said = (f"Changed the platform's `{rel}` for this app" + (f": {why}" if why else "") +
@@ -546,5 +588,5 @@ def edit_definition(output_dir: str, section: str, find: str, replace: str, why:
             "finding": "", "touched": [f"app/{m}" for m in moved] or [f"definition:{s}" for s in sections]}
 
 
-__all__ = ["classify", "edit_definition", "edit_file", "load_patches", "open_patches", "patches_by",
-           "platform_text", "reapply", "settle"]
+__all__ = ["amending", "classify", "edit_definition", "edit_file", "load_patches", "open_patches",
+           "patches_by", "platform_text", "reapply", "settle"]

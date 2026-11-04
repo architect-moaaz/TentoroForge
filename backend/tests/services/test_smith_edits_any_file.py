@@ -104,6 +104,22 @@ def test_a_platform_patch_waits_for_proof_and_is_taken_back_without_it(tmp_path)
     assert file_edit.load_patches(tmp_path)[0]["status"] == "reverted"
 
 
+def test_patches_made_side_by_side_all_stay_on_the_record(tmp_path):
+    """A change to the record is a read, a change and a write of the whole
+    list, and the repairs run side by side (`fix_to_green._fix`): without a
+    writer at a time they read the same list and wrote each other's patches
+    away, and a patch nobody has a row for is never settled or filed."""
+    from concurrent.futures import ThreadPoolExecutor
+    files = [f"src/components/C{i}.tsx" for i in range(12)]
+    for rel in files:
+        _app(tmp_path, rel, "const label = 'Add to bag';\n")
+    with ThreadPoolExecutor(max_workers=12) as pool:
+        out = list(pool.map(lambda rel: file_edit.edit_file(
+            str(tmp_path), rel, "'Add to bag'", "'Add to basket'", ""), files))
+    assert all(o["applied"] for o in out)
+    assert {p["path"] for p in file_edit.load_patches(tmp_path)} == set(files)
+
+
 def test_a_proven_platform_patch_is_filed_and_retires_when_the_platform_has_the_fix(tmp_path, monkeypatch):
     tmp_path = tmp_path / "output" / "app1"                         # one app under its own output root
     engine = _app(tmp_path, ENGINE, "const v = read(path);\n")
