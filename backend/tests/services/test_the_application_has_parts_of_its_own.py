@@ -446,3 +446,56 @@ def test_an_escape_in_jsx_text_is_refused_in_a_part_too():
     # inside a JS expression it is a real string, and fine
     assert _finding('<p>{facts.join(" \\u00b7 ")}</p>') == []
     assert _finding("const dash = `${a} \\u2013 ${b}`;") == []
+
+
+# --- one producer for the palette module ------------------------------------
+#
+# Both rebuilds of 2026-11-04 authored a palette part of their own: Claimsdesk
+# called it `palette.ts` and it silently replaced the generated module on disk;
+# Stay called it `palette.tsx` and left two modules where `./palette` resolves
+# to whichever extension TypeScript prefers. The module is written from
+# `componentKit.palette` and the part is never ours to keep.
+
+def test_the_palette_module_carries_both_forms():
+    """The model wrote its own because the generated one gave it only hex, and
+    what a class needs is the custom property."""
+    doc = {"componentKit": {"palette": {"rowSelected": "#f6e3c8"}, "parts": []}}
+    mod = component_kit._palette_module(doc)
+    assert 'rowSelected: "var(--kit-row-selected)"' in mod
+    assert 'rowSelected: "#f6e3c8"' in mod
+    assert "export const C" in mod and "export const HEX" in mod
+
+
+def test_a_part_may_not_author_the_palette_module(tmp_path):
+    doc = {"componentKit": {"palette": {"wash": "#f6e3c8"}, "parts": [
+        {"file": "palette.ts", "code": "export const C = { wash: '#bad' } as const;"},
+        {"file": "Panel.tsx", "code": "export const Panel = () => null;"},
+    ]}}
+    written = component_kit.project_component_kit(doc, tmp_path)
+    assert [p.name for p in sorted((tmp_path / component_kit.KIT_DIR).iterdir())] \
+        == ["Panel.tsx", "palette.ts"]
+    assert 'var(--kit-wash)' in (tmp_path / component_kit.KIT_DIR / "palette.ts").read_text()
+    assert "#bad" not in (tmp_path / component_kit.KIT_DIR / "palette.ts").read_text()
+    assert written  # and the part did not take a second slot
+    # the author is told, so it stops writing one
+    said = component_kit.findings(doc, doc["componentKit"]["parts"])
+    assert any("not yours to author" in f for f in said), said
+    # and the page writer is never handed an import from a file nobody wrote
+    assert "palette" not in component_kit.kit_vocabulary(doc)
+
+
+# --- a colour that resolves to nothing --------------------------------------
+
+def test_a_kit_var_in_the_wrong_case_is_the_break_it_is():
+    """`palette_vars` writes the kebab of the declared name. A part asking for
+    `--kit-currentSubtle` against a declared `currentSubtle` gets nothing — and
+    the rule read `[a-z0-9-]+`, so it saw `--kit-current`, found `current`
+    declared, and passed it (Stay, 2026-11-04)."""
+    doc = {"componentKit": {"palette": {"current": "#b5542e", "currentSubtle": "#f3ddd0"}}}
+    assert "  --kit-current-subtle: #f3ddd0;" in component_kit.palette_vars(doc)
+    part = {"file": "Chip.tsx", "code": 'const c = "bg-[var(--kit-currentSubtle)]";'}
+    said = component_kit.undeclared_colours(doc, [part])
+    assert len(said) == 1 and "--kit-current-subtle" in said[0], said
+    # the one that is actually written passes
+    ok = {"file": "Chip.tsx", "code": 'const c = "bg-[var(--kit-current-subtle)]";'}
+    assert component_kit.undeclared_colours(doc, [ok]) == []

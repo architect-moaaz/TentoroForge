@@ -57,7 +57,7 @@ COMPILE_ROUNDS = 3
 #: it the entire build, so the kit is refused them at the door instead.
 _SCAFFOLD_TOKEN = re.compile(r"__[A-Z][A-Z_]+__|\{\{[a-z_]+\}\}")
 _HEX = re.compile(r"#[0-9a-fA-F]{3,8}\b")
-_KIT_VAR = re.compile(r"--kit-([a-z0-9-]+)")
+_KIT_VAR = re.compile(r"--kit-([A-Za-z0-9_-]+)")
 #: The kit is held to the page writer's rule for this too
 #: (`ui_engineer.escaped_in_jsx_text`): JSX text is not a JavaScript string, so
 #: `\u00b7` reaches the screen as six characters. Stay's lead card shipped
@@ -97,6 +97,8 @@ def exports_of(doc: dict) -> dict[str, list[str]]:
     falling back to reading the code when it declares nothing."""
     out: dict[str, list[str]] = {}
     for part in parts_of(doc):
+        if Path(_filename(part)).stem == Path(PALETTE_FILE).stem:
+            continue  # the projector writes this one; the part is never on disk
         names = [str(n).strip() for n in (part.get("exports") or []) if str(n).strip()]
         if not names:
             names = re.findall(r"export\s+(?:async\s+)?(?:function|const|type)\s+(\w+)",
@@ -130,15 +132,23 @@ def kit_vocabulary(doc: dict) -> str:
 # --------------------------------------------------------------------------- #
 
 def _palette_module(doc: dict) -> str:
+    """The one producer of `palette.ts`.
+
+    BOTH FORMS, so a part never has a reason to write its own. `C` is the
+    themeable form — `var(--kit-row)` — which is what belongs in a class, a
+    style prop, an SVG fill or a gradient stop. `HEX` is the literal, for the
+    few places that cannot take a custom property: a canvas, a chart option, a
+    `<meta name="theme-color">`.
+    """
     colours = palette_of(doc)
-    body = "".join(f'  {k}: "{v}",\n' for k, v in sorted(colours.items()))
+    varred = "".join(f'  {k}: "var(--kit-{_kebab(k)})",\n' for k, v in sorted(colours.items()))
+    hexed = "".join(f'  {k}: "{v}",\n' for k, v in sorted(colours.items()))
     return (f"{KIT_MARKER}\n"
             "// This application's own colours, written from the Blueprint's\n"
-            "// `componentKit.palette`. Also projected as `--kit-*` in tokens.css, which is\n"
-            "// how a class names one (`bg-[var(--kit-wash)]`); this constant is for the\n"
-            "// places a class cannot reach, like an SVG fill or a gradient stop.\n"
+            "// `componentKit.palette` and projected as `--kit-*` in tokens.css.\n"
             "// Edit the Blueprint, not this file.\n"
-            f"export const C = {{\n{body}}} as const;\n\n"
+            f"export const C = {{\n{varred}}} as const;\n\n"
+            f"export const HEX = {{\n{hexed}}} as const;\n\n"
             "export type KitColour = keyof typeof C;\n")
 
 
@@ -166,6 +176,8 @@ def project_component_kit(doc: dict, app_root: str | Path) -> list[str]:
 
     put(PALETTE_FILE, _palette_module(doc))
     for part in parts:
+        if Path(_filename(part)).stem == Path(PALETTE_FILE).stem:
+            continue  # ours; `_shadowed_palette` asks the author to drop it
         code = str(part["code"])
         head = code if code.lstrip().startswith(KIT_MARKER) else f"{KIT_MARKER}\n{code}"
         put(_filename(part), head)
@@ -203,7 +215,16 @@ def undeclared_colours(doc: dict, parts: list[dict]) -> list[str]:
     for part in parts:
         name, code = _filename(part), str(part.get("code") or "")
         for used in sorted(set(_KIT_VAR.findall(code))):
-            if used not in named:
+            if used in named:
+                continue
+            # The property is written under the kebab of the declared name, so
+            # `--kit-currentSubtle` against a declared `currentSubtle` resolves
+            # to nothing just as surely as a name nobody declared. Say which.
+            if _kebab(used) in named:
+                out.append(f"{name}: uses `--kit-{used}`, but the property is written "
+                           f"`--kit-{_kebab(used)}` — so this one resolves to nothing and "
+                           "the rule is dropped.")
+            else:
                 out.append(f"{name}: uses `--kit-{used}`, which `palette` does not declare, so "
                            "it resolves to nothing and the rule is dropped. Declare it or use "
                            "one you did.")
@@ -219,6 +240,10 @@ def findings(doc: dict, parts: list[dict]) -> list[str]:
         for token in sorted(set(_SCAFFOLD_TOKEN.findall(code))):
             out.append(f"{name}: carries `{token}`, which the build reads as an unfilled "
                        "scaffold placeholder and refuses — write the real text.")
+        if Path(name).stem == Path(PALETTE_FILE).stem:
+            out.append(f"{name}: `{PALETTE_FILE}` is written from `palette` and is not yours "
+                       "to author — drop this part. It already exports `C` (the themeable "
+                       "`var(--kit-*)` form) and `HEX` (the literal).")
         for hexed in sorted(set(_HEX.findall(code))):
             out.append(f"{name}: names the colour `{hexed}`. The kit's colours live in "
                        "`palette`, and reach the code as `var(--kit-<name>)` in a class or "
@@ -439,6 +464,9 @@ def kit_prompts(doc: dict) -> tuple[str, str]:
         "data, imports `@/sdk/server` or calls `fetch`.\n"
         "- You may import: react, next/link, lucide-react, clsx, tailwind-merge, motion/react, "
         f"`{KIT_IMPORT}/palette`, another of your own parts, and the shadcn kit:\n{_kit_exports()}\n"
+        f"- `{PALETTE_FILE}` is written for you from `palette` — do not author it. It exports "
+        "`C` (the themeable form, `C.wash` === `var(--kit-wash)`) and `HEX` (the literal, for "
+        "a canvas or a chart option) and a `KitColour` type.\n"
         "- A part that uses a hook starts with \"use client\".\n"
         "- Real <button>/<a>, labels, `aria-label` on an icon-only control, visible focus.\n"
         "- Mobile first: nothing overflows at 375px.\n"
@@ -536,8 +564,9 @@ def _without_the_broken(doc: dict, body: dict, errors: list[str],
         # we cannot cut precisely, so we do not ship a kit at all.
         blamed = named
     kept = {**body, "parts": [p for p in body["parts"] if _filename(p) not in blamed]}
-    logger.warning("[component_kit] dropped %d part(s) that did not compile: %s",
-                   len(blamed), ", ".join(sorted(blamed)))
+    logger.warning("[component_kit] dropped %d part(s) that did not compile: %s\n%s",
+                   len(blamed), ", ".join(sorted(blamed)),
+                   "\n".join(f"    {e}" for e in errors[:20]))
     project_component_kit({**doc, "componentKit": kept}, app_root)
     if kept["parts"]:
         try:
