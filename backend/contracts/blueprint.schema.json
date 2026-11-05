@@ -2926,6 +2926,15 @@
               "type": "boolean",
               "default": false
             },
+            "verifyEmail": {
+              "type": "boolean",
+              "description": "A new account confirms its email with a six-digit code before it can use the application.",
+              "default": false
+            },
+            "verifyPath": {
+              "type": "string",
+              "description": "The page that asks for the code, when the application draws its own (\"/signup?step=verify\"); else the platform's /verify-email."
+            },
             "sso": {
               "type": "array",
               "items": {

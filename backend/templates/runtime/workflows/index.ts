@@ -2126,7 +2126,10 @@ export function registerDefaultActions(): void {
     // addresses; a message to anybody else is held back and saved as a
     // notification, so a tester never emails a real customer.
     let heldForTest = "";
-    if (to && process.env.FORGE_ENVIRONMENT === "test") {
+    // A CODE TO THE PERSON'S OWN ADDRESS goes out on the test version too: it
+    // is the tester's own sign-up, and held back no tester could ever verify
+    // (DITANS QA DIT-005, 2026-11-05). Only the platform's sign-in routes set it.
+    if (to && process.env.FORGE_ENVIRONMENT === "test" && !(config as any).toTheirOwnAddress) {
       const allowed = String(process.env.FORGE_TEST_RECIPIENTS ?? "").toLowerCase().split(",")
         .map((s) => s.trim()).filter(Boolean);
       const recipients = to.toLowerCase().split(",").map((s) => s.trim()).filter(Boolean);

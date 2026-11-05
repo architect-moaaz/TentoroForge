@@ -2612,6 +2612,21 @@ export const Security = z.object({
     .object({
       password: z.boolean().default(true),
       magicLink: z.boolean().default(false),
+      /**
+       * A NEW ACCOUNT PROVES ITS ADDRESS. DITANS made and signed in every
+       * account at once, with no code sent, and testers found an unverified
+       * example.com address let straight in (QA DIT-005/016, 2026-11-05).
+       * On: a six-digit code goes to the address at sign-up and the account
+       * reaches nothing but the code step until it is entered.
+       */
+      verifyEmail: z
+        .boolean()
+        .describe("A new account confirms its email with a six-digit code before it can use the application.")
+        .default(false),
+      verifyPath: z
+        .string()
+        .describe("The page that asks for the code, when the application draws its own (\"/signup?step=verify\"); else the platform's /verify-email.")
+        .optional(),
       sso: z
         .array(
           z.object({
