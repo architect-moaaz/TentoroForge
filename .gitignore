@@ -94,6 +94,8 @@ backend/data/drafts_room/
 
 # built on demand from backend/scripts/feel/entry.ts
 backend/scripts/feel/validate.cjs
+backend/scripts/rules/lab.cjs
+backend/scripts/rules/lab.tmp.cjs
 
 # Build output of `npm run emit:catalog` (packages/library). Regenerated on
 # demand and swept into commits by `git add -A` when it is not ignored.
@@ -102,3 +104,7 @@ backend/scripts/feel/validate.cjs
 # The native-app toolchain (the compiler and packages the phone screens are type-checked against) and the engineer's
 # working files live here by default: machine state, installed on first use, never part of the source.
 backend/.forge/
+
+# Local app registry: machine state, never committed (PR #29 review)
+backend/data/apps.json
+backend/data/apps.lock

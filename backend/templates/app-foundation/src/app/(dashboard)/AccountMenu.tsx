@@ -9,7 +9,7 @@
 // every frame carries it.
 
 import * as React from "react";
-import { Bot, Hotel, LogOut, User } from "lucide-react";
+import { Bot, CreditCard, Hotel, LogOut, User } from "lucide-react";
 import { signOut } from "next-auth/react";
 
 function initials(name: string): string {
@@ -47,6 +47,15 @@ export function AccountMenu({ name, email, role, compact = false, extras }: {
       .then((r) => setMews(r.ok)).catch(() => setMews(false));
   }, [open, mews]);
 
+  // "Plan & billing" only where the app sells plans: asked once, like the above.
+  const [plans, setPlans] = React.useState<boolean | null>(null);
+  React.useEffect(() => {
+    if (!open || plans !== null) return;
+    const base = (process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/+$/, "");
+    fetch(`${base}/api/billing/status`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null)).then((j) => setPlans(Boolean(j?.plans?.length))).catch(() => setPlans(false));
+  }, [open, plans]);
+
   React.useEffect(() => {
     if (!open) return;
     const onAway = (e: MouseEvent) => { if (box.current && !box.current.contains(e.target as Node)) setOpen(false); };
@@ -78,6 +87,12 @@ export function AccountMenu({ name, email, role, compact = false, extras }: {
             <div data-account-extras="" className="flex flex-col gap-2 border-b border-border/60 px-3 py-2">
               {extras}
             </div>
+          )}
+          {plans && (
+            <a role="menuitem" href={`${(process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/+$/, "")}/billing`} data-account-billing=""
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-foreground hover:bg-muted/50">
+              <CreditCard size={14} aria-hidden /> Plan &amp; billing
+            </a>
           )}
           {assistants && (
             <a role="menuitem" href={`${(process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/+$/, "")}/connect-ai`}

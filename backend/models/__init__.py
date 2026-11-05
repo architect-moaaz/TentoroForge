@@ -22,6 +22,7 @@ from models.project import (
     Version,
 )
 from models.template import AppTemplate
+from models.template_gallery import TemplateEvent, TemplateListing, TemplateReview, TemplateUse
 from models.discovery import DiscoverySession
 from models.brand_profile import OrgBrandProfile, BrandDiscoveryStatus
 from models.rules import ProjectRule, AppAccessPolicy, FieldAccessPolicy
@@ -43,6 +44,7 @@ from models.environment import Environment
 from models.platform_integration import PlatformIntegration
 from models.person_connection import PersonConnection
 from models.run_job import RunJob
+from models.payment_gateway import PaymentGateway, PaymentGatewayWebhook
 from models.platform_mcp_server import PlatformMcpServer
 from models.mobile_build import MobileBuild
 from models.verify_run import VerifyRun
@@ -75,6 +77,10 @@ __all__ = [
     "AgentJob",
     "Version",
     "AppTemplate",
+    "TemplateListing",
+    "TemplateEvent",
+    "TemplateUse",
+    "TemplateReview",
     "DiscoverySession",
     "OrgBrandProfile",
     "BrandDiscoveryStatus",
@@ -96,6 +102,8 @@ __all__ = [
     "PlatformIntegration",
     "PersonConnection",
     "RunJob",
+    "PaymentGateway",
+    "PaymentGatewayWebhook",
     "PlatformMcpServer",
     "MobileBuild",
     "VerifyRun",

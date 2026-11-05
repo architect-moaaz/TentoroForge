@@ -56,6 +56,7 @@ from routers.plan_adjust import router as plan_adjust_router
 from routers.mobile_builds import router as mobile_builds_router
 from routers.platform_integrations import router as platform_integrations_router
 from routers.figma_oauth import router as figma_oauth_router
+from routers.payment_gateways import router as payment_gateways_router
 from routers.platform_mcp_servers import router as platform_mcp_servers_router
 from routers.preview_proxy import router as preview_proxy_router
 from routers.phone_preview import router as phone_preview_router
@@ -153,6 +154,22 @@ app = FastAPI(
     redoc_url="/redoc" if APP_ENV != "production" else None,
 )
 
+# A request that fails validation is answered with what failed — never a 500
+# because the input it echoes back (a NaN, an Infinity) is not valid JSON.
+from fastapi.exceptions import RequestValidationError as _RequestValidationError
+from fastapi.exception_handlers import request_validation_exception_handler as _default_validation_handler
+from fastapi.responses import JSONResponse as _JSONResponse
+
+
+@app.exception_handler(_RequestValidationError)
+async def _validation_errors(request, exc: _RequestValidationError):
+    try:
+        return await _default_validation_handler(request, exc)
+    except ValueError:
+        errors = [{k: v for k, v in e.items() if k not in ("input", "ctx")} for e in exc.errors()]
+        return _JSONResponse(status_code=422, content={"detail": errors})
+
+
 # Set up structured logging
 from config import LOG_LEVEL
 setup_structured_logging(LOG_LEVEL)
@@ -211,6 +228,7 @@ app.include_router(plan_adjust_router)
 app.include_router(mobile_builds_router)
 app.include_router(platform_integrations_router)
 app.include_router(figma_oauth_router)
+app.include_router(payment_gateways_router)
 app.include_router(platform_mcp_servers_router)
 app.include_router(preview_proxy_router)
 app.include_router(phone_preview_router)

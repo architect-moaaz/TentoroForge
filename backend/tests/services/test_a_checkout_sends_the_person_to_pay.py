@@ -39,7 +39,11 @@ def test_a_checkout_step_is_projected_with_its_routes(tmp_path):
 
 def test_the_runtime_ships_the_stand_in_and_the_cart_waits_for_the_payment():
     injector = (ROOT / "services/runtime_injector.py").read_text()
-    assert '"payments"]' in injector and "_forge_payments.ts" in injector and "src/app/pay/stand-in/page.tsx" in injector
+    # The ledger and the stand-in come with the rest of the payment files, from
+    # the one installer a build, a sync and a publish share.
+    installer = (ROOT / "services/payments/app_payments.py").read_text()
+    assert '"payments"]' in injector and "install_runtime as _install_payments" in injector
+    assert "_forge_payments.ts" in installer and "src/app/pay/stand-in/page.tsx" in installer
     assert "input.__origin" in injector, "the run knows where the application is, for the return pages"
     cart = (ROOT / "templates/runtime/api-cart/checkout-route.ts").read_text()
     assert "db.delete(forgeCart)" not in cart and "EMPTIED BY THE PAYMENT" in cart

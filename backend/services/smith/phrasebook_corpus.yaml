@@ -574,6 +574,18 @@ sentences:
     source: code
     reaches: {verb: set_currency, states: [change]}
 
+  - id: does-take-payments-through-razorpay
+    say: "take payments through razorpay"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: set_up_payments, states: [change]}
+
+  - id: does-subscribe-monthly
+    say: "let people subscribe for 9 dollars a month"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: set_up_payments, states: [change]}
+
   - id: does-add-organisation
     say: "add an organisation called Northside Clinic"
     checked: {colour: acts, via: handler}
@@ -1378,6 +1390,48 @@ sentences:
     checked: {colour: acts, via: handler}
     source: routing
     reaches: {verb: back_up, states: []}
+
+  - id: rule-link-1
+    say: "link the deposit rule to the Book a room workflow"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: link_rule, states: [rule, workflow]}
+
+  - id: rule-link-2
+    say: "make Approve leave check the days left rule"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: link_rule, states: [rule, workflow]}
+
+  - id: rule-unlink-1
+    say: "stop checking the late fee rule in Return a book"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: unlink_rule, states: [rule, workflow]}
+
+  - id: template-status-1
+    say: "is my template approved yet?"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: template_status, states: []}
+
+  - id: template-status-2
+    say: "what templates do we have?"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: template_status, states: []}
+
+  - id: template-submit-1
+    say: "submit my template for review"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: submit_template, states: []}
+
+  - id: template-submit-2
+    say: "publish the template to the gallery"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: submit_template, states: []}
 
   - id: template-1
     say: "save this app as a template"

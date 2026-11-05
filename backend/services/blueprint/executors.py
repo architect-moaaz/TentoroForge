@@ -2115,7 +2115,14 @@ NODE_TASKS: dict[str, str] = {
         "ends on an `end` with `config.refused: true` and `config.message` — "
         "the sentence the person is shown, saying what to correct — and every "
         "other end says `config.refused: false`; a refused run is reported "
-        "to the person as a failure, never as the success message. An end "
+        "to the person as a failure, never as the success message. A BUSINESS "
+        "RULE OF A RECORD IS NOT WRITTEN AGAIN HERE: every `db_insert`, "
+        "`db_update` and `db_upsert` of a record checks that record's business "
+        "rules itself and stops the run with the rule's own message, so a "
+        "condition step that repeats one (`<field> > 0` beside the rule "
+        "'<field> must be more than zero') is a second copy that goes stale the "
+        "day the rule is edited. Write checks here only for what no rule of "
+        "the record says. An end "
         "that has something for the page that ran it declares it: "
         "`config.reply` maps a few names to templates (`{\"url\": "
         "\"{{checkout.url}}\"}`) and `config.redirect` is where the person is "
@@ -2588,6 +2595,20 @@ def integration_adapters(node: str) -> str:
     return "\n\n" + adapter_lines()
 
 
+def payments_hold(doc: dict, node: str) -> str:
+    """What the owner decided about money (`payments`), for the agents whose
+    work it shapes — so none of them declares a gateway the owner did not
+    choose, writes a checkout into an app that takes no money, or hand-builds
+    a pricing page the runtime already ships."""
+    from services.payments.app_payments import agent_note
+    try:
+        note = agent_note(doc, node)
+    except Exception:  # noqa: BLE001 — a note that cannot be written is no note
+        logger.warning("[executors] payments note for %s could not be written", node, exc_info=True)
+        return ""
+    return f"\n\n{note}" if note else ""
+
+
 def reference_hold(doc: dict, node: str) -> str:
     """The paragraph that holds a model node to the domain reference: every
     item of its kind answered by name or declined with a reason. Empty when
@@ -2677,7 +2698,7 @@ def _build_prompt(
         reply_rules=(DATA_MODEL_REPLY_RULES if node in SCHEMA_BY_NODE
                      else ENVELOPE_RULES),
         task=NODE_TASKS.get(node, f"Produce the {node} artifacts this stage owns.")
-             + reference_hold(doc, node) + integration_adapters(node),
+             + reference_hold(doc, node) + integration_adapters(node) + payments_hold(doc, node),
     )
     if inline_shapes:
         shapes = {k: v for k, v in writable_shapes(agent).items() if k in writes}

@@ -3130,7 +3130,20 @@ def project_integrations(doc: dict, app_root: str | Path) -> dict[str, Any]:
         "",
         "export const CONNECTED_SERVICES: Record<string, ConnectedService> = {",
     ]
+    # ONE SERVICE PER ACTION. An app paid into several gateways has an
+    # integration row for each, all serving `take_payment`; written as they
+    # came, the object literal held the key twice and the last silently won.
+    # The owner's first-chosen gateway answers for the action, as it is the
+    # default in the app's payments config (which routes payers between them);
+    # otherwise the first declared.
+    default = next((str(g.get("provider")) for g in ((doc.get("payments") or {}).get("gateways") or [])
+                    if isinstance(g, dict)), "")
+    by_action: dict[str, dict[str, Any]] = {}
     for entry in entries:
+        kept = by_action.get(entry["action"])
+        if kept is None or (entry["provider"] == default and kept["provider"] != default):
+            by_action[entry["action"]] = entry
+    for entry in by_action.values():
         lines.append(f"  {json.dumps(entry['action'])}: " + json.dumps({
             "name": entry["name"], "provider": entry["provider"],
             "keys": entry["keys"], "liveKey": entry["liveKey"],
@@ -4587,6 +4600,9 @@ def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
         lines.append(f'//   public: {r.route}{"/*" if r.subtree else ""}  (the platform\'s: {r.why})')
     gated_by_role = role_routes(doc)
     public_lines = [f'  new RegExp({json.dumps(rx)}),  // {why}' for rx, why in public]
+    # A SUBSCRIPTION OPENS THE APP when its payments say so (`payments.access`).
+    from services.payments.app_payments import middleware_gate
+    gate_head, gate_body = middleware_gate(doc)
     role_lines = [
         f'  {{ route: new RegExp({json.dumps(_route_regex(r["route"]))}), roles: {json.dumps(r["roles"])} }},'
         for r in gated_by_role
@@ -4626,8 +4642,9 @@ def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
         'const refuse = (status: 401 | 403, code: string, message: string) =>',
         '  NextResponse.json({ error: { code, message } }, { status });',
         '',
+        *gate_head,
         'export default withAuth(',
-        '  function middleware(req) {',
+        ('  async function middleware(req) {' if gate_body else '  function middleware(req) {'),
         '    const path = req.nextUrl.pathname;',
         '    if (isPublic(path)) return NextResponse.next();',
         '    const token = req.nextauth.token as { role?: unknown } | null;',
@@ -4639,6 +4656,7 @@ def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
         '        return NextResponse.redirect(new URL("/403", req.url));',
         '      }',
         '    }',
+        *gate_body,
         '    return NextResponse.next();',
         '  },',
         '  {',
@@ -5567,14 +5585,50 @@ def project_business_rules(doc: dict, app_root: str | Path) -> dict[str, Any]:
     bound to its entity by NAME (what the engine matches; it also accepts the
     table/URL spelling). Prose rules (`statement`) constrain people, not
     records, and prerequisites are written into the workflows they gate.
-    Retired (DEPRECATED) and switched-off (`enabled: false`) rules are left
-    out — a rule off in the Business Rules tab is off in the app.
+    Retired (DEPRECATED) rules are left out; a switched-off (`enabled:
+    false`) rule is written by name only, inactive — off in the app, and
+    known there as off (see `switched_off_rule_rows`).
 
     Mirrored into ``src/rules/`` beside the editor's ``index.json``: a
     serverless deployment reads that copy (the root ``rules/`` is not traced),
     and the loader reads ONE directory, so both must hold every file. Always
     written, so an empty file and a never-run projection stay distinguishable.
     """
+    active = business_rule_rows(doc)
+    rows = active + switched_off_rule_rows(doc)
+    text = json.dumps(rows, indent=2)
+    files = []
+    for rel in ("rules", "src/rules"):
+        out = Path(app_root) / rel
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "blueprint-rules.json").write_text(text, "utf-8")
+        files.append(f"{rel}/blueprint-rules.json")
+    return {"files": files, "rules": len(active)}
+
+
+def switched_off_rule_rows(doc: dict) -> list[dict]:
+    """A rule switched off, by name only (`is_active: false`, no condition):
+    every check of the engine passes it by, and a workflow step that runs it
+    can tell "off — it does not apply, carry on" from "gone — a broken
+    definition, never a yes"."""
+    entities = {str(e.get("id")): e for e in (doc.get("data") or {}).get("entities") or []}
+    rows = []
+    for rule in doc.get("businessRules") or []:
+        if (not isinstance(rule, dict) or rule.get("status") in ("DEPRECATED", "SUPERSEDED", "REJECTED")
+                or rule.get("enabled") is not False or not rule.get("entity")
+                or rule.get("kind") not in ("condition_action", "decision_table")):
+            continue
+        model = (entities.get(str(rule["entity"])) or {}).get("name") or str(rule["entity"])
+        rows.append({"id": rule.get("id"), "name": rule.get("name") or rule.get("id"), "model_name": model,
+                     "field_name": None, "is_active": False, "source": "blueprint",
+                     "rule_type": rule.get("kind"), "config": {"source": "blueprint"}})
+    return rows
+
+
+def business_rule_rows(doc: dict) -> list[dict]:
+    """The rules the app runs, in the row shape its engine reads — what
+    ``project_business_rules`` writes, and what the rule lab tests a draft
+    among (so a test is of the rules as the app will hold them)."""
     entities = {str(e.get("id")): e for e in (doc.get("data") or {}).get("entities") or []}
     rows = []
     for rule in doc.get("businessRules") or []:
@@ -5594,7 +5648,8 @@ def project_business_rules(doc: dict, app_root: str | Path) -> dict[str, Any]:
             if not table.get("inputs") or not table.get("outputs") or not table.get("rules"):
                 continue
             rows.append({**base, "rule_type": "decision_table",
-                         "config": {"source": "blueprint", "table": table}})
+                         "config": {"source": "blueprint", "table": table,
+                                    **({"on": list(rule["on"])} if rule.get("on") else {})}})
             continue
         rows.append({
             **base, "rule_type": "condition_action",
@@ -5610,14 +5665,9 @@ def project_business_rules(doc: dict, app_root: str | Path) -> dict[str, Any]:
                 # only says `form`.
                 "scope": rule.get("scope") or "entity",
                 "salience": int(rule.get("salience") or 0),
+                # When it fires: created, updated, or both (absent).
+                **({"on": list(rule["on"])} if rule.get("on") else {}),
             },
         })
-    text = json.dumps(rows, indent=2)
-    files = []
-    for rel in ("rules", "src/rules"):
-        out = Path(app_root) / rel
-        out.mkdir(parents=True, exist_ok=True)
-        (out / "blueprint-rules.json").write_text(text, "utf-8")
-        files.append(f"{rel}/blueprint-rules.json")
-    return {"files": files, "rules": len(rows)}
+    return rows
 

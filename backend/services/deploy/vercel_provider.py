@@ -544,10 +544,17 @@ class VercelDeployProvider:
                     nextauth_url = published_address(snapshot.output_dir, _slugify(snapshot.project_slug))
                 except Exception:  # noqa: BLE001 — no Blueprint to read: no provider to tell
                     nextauth_url = ""
+            # THE APP'S PAYMENT GATEWAYS LAST: their keys for this side (test keys
+            # on Test, live on Production) over the organisation's older ones,
+            # and nothing this side must not carry.
+            side_env = {**publish_env(snapshot.project_id),
+                        **envs.integrations_for(side, dict(snapshot.integrations)),
+                        **envs.side_settings(side, test_recipients=snapshot.test_recipients),
+                        **dict(snapshot.payments_env)}
+            for gone in snapshot.remove_env:
+                side_env.pop(gone, None)
             env = build_deploy_env(
-                integrations={**publish_env(snapshot.project_id),
-                              **envs.integrations_for(side, dict(snapshot.integrations)),
-                              **envs.side_settings(side, test_recipients=snapshot.test_recipients)},
+                integrations=side_env,
                 neon_url=neon_url,
                 vercel_url="",  # unused — NEXTAUTH_URL is left to VERCEL_URL unless a provider needs it
                 nextauth_secret=nextauth_secret,
@@ -574,6 +581,11 @@ class VercelDeployProvider:
                     await self.vercel.set_env(
                         vercel_project_id, key, val, targets
                     )
+
+            for gone in snapshot.remove_env:
+                prior = existing_by_key.get(gone)
+                if prior and prior.get("id") and gone not in env:
+                    await self.vercel.delete_env(vercel_project_id, prior["id"])
 
             # NEXTAUTH_URL is intentionally unset so NextAuth falls back to
             # Vercel's own VERCEL_URL — the real host — on both preview and

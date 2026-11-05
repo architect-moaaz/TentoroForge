@@ -603,7 +603,7 @@
       "label": "Decision Table",
       "icon": "Table2",
       "gradient": "bg-gradient-to-br from-emerald-500 to-green-700",
-      "description": "Rule-based routing",
+      "description": "Run a business rule or decision table; then- or else-path",
       "handles": {
         "in": true,
         "out": true,
@@ -613,7 +613,8 @@
         "required": [
           [
             "decisionTable",
-            "decisionTableId"
+            "decisionTableId",
+            "rule"
           ]
         ],
         "defaults": {}
