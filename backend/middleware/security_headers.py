@@ -76,8 +76,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # Against the local gateway emulator, its stand-in of that window.
         pay_script, pay_frame, pay_connect = "", "", ""
         if is_preview_serve:
-            pay_script = " https://checkout.razorpay.com"
-            pay_frame = " https://api.razorpay.com https://checkout.razorpay.com"
+            # Razorpay's window loads its parts from more than one razorpay.com address.
+            pay_script = " https://checkout.razorpay.com https://*.razorpay.com"
+            pay_frame = " https://api.razorpay.com https://checkout.razorpay.com https://*.razorpay.com"
             emulator = (os.environ.get("FORGE_PAYMENTS_EMULATOR") or "").rstrip("/")
             if emulator:
                 pay_script += f" {emulator}"
