@@ -72,6 +72,13 @@ const priceTable = { __name: "p", price: { columnType: "PgNumeric", dataType: "s
 eqJson(_finalizeInsert(priceTable, { price: "₹12,995", discount: "20%", note: "20% off" }, ctx),
        { price: "12995", discount: 20, note: "20% off" }, "a number column takes the number, a text column the text");
 eqJson(_finalizeInsert(priceTable, { price: "call for price" }, ctx), {}, "text with no number is dropped, not the row");
+// An empty field is left out — except a required text column, which keeps the
+// empty text: dropped, a DITANS draft job had no description and every new
+// job was refused by Postgres (QA DIT-007, 2026-11-05).
+const jobs = { __name: "jobs", description: { columnType: "PgText", dataType: "string", notNull: true },
+               requirementsText: { columnType: "PgText", dataType: "string" }, payMin: { columnType: "PgInteger", dataType: "number" } };
+eqJson(_finalizeInsert(jobs, { description: "", requirementsText: "", payMin: "" }, ctx), { description: "" },
+       "a required text column keeps \"\"; an optional one and a number column are left out");
 const r0 = mod._resolveRef;
 const photo: any = { variables: { analyze_image: { brand: null, productName: "French Press", category: "" }, count: 0 } };
 eqJson(r0('{{analyze_image.brand ?? "Unbranded"}}', photo), "Unbranded", "a missing value takes its fallback");

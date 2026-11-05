@@ -1038,7 +1038,16 @@ export function _finalizeInsert(
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(values)) {
-    if (!(k in table) || v === "" || v === undefined) continue;
+    if (!(k in table) || v === undefined) continue;
+    // AN EMPTY FIELD IS LEFT OUT — except where null cannot go: a required text
+    // column keeps the empty text it was given. Dropped, DITANS's "Save draft"
+    // inserted a job with no description and Postgres refused every new job
+    // (QA DIT-007, 2026-11-05).
+    if (v === "") {
+      const c = (table as any)[k] as { notNull?: unknown; columnType?: unknown } | undefined;
+      if (c?.notNull && /^Pg(Text|Varchar|Char)$/.test(String(c?.columnType ?? ""))) out[k] = "";
+      continue;
+    }
     // Drizzle timestamp columns crash with "value.toISOString is not a
     // function" when they receive anything that isn't a Date (or null).
     // Detect the column type via drizzle's internal `columnType` /
