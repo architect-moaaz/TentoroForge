@@ -515,7 +515,34 @@ export async function loadRecordRow(table: string, id: string): Promise<Record<s
   const idColumn = (resolved as any).id;
   if (!idColumn) return null;
   const rows = await (db as any).select().from(resolved).where(eq(idColumn, id)).limit(1);
-  return (rows?.[0] as Record<string, unknown>) ?? null;
+  const row = (rows?.[0] as Record<string, unknown>) ?? null;
+  return row ? await openSealed(row) : null;
+}
+
+/**
+ * A PROCESS READS WHAT WAS SEALED. A sensitive field is kept as ciphertext
+ * (`<field>_encrypted`) with its plain column empty, so a process reading the
+ * row saw nothing there: "the signatory's name is set" was false for every
+ * organisation that had named one, and no DITANS employer could ever submit
+ * for verification (QA DIT-004, 2026-11-05). The process runs on the server,
+ * as the application; it reads the value, as it must to check it or to write
+ * to the person. A screen still reads masks through the data engine.
+ */
+export async function openSealed<T extends Record<string, unknown>>(row: T): Promise<T> {
+  const out: Record<string, unknown> = { ...row };
+  for (const [key, blob] of Object.entries(row)) {
+    if (!key.endsWith("_encrypted") || typeof blob !== "string" || !blob) continue;
+    const plain = key.slice(0, -"_encrypted".length);
+    if (out[plain] !== null && out[plain] !== undefined && out[plain] !== "") continue;
+    try {
+      const { decryptSensitive } = await import("../sensitive-crypto");
+      out[plain] = await decryptSensitive(blob);
+    } catch {
+      // A value that cannot be opened (key rotated) reads as present but unknown.
+      out[plain] = (row as Record<string, unknown>)[`${plain}_mask`] ?? "••••";
+    }
+  }
+  return out as T;
 }
 
 
@@ -1724,7 +1751,7 @@ export function registerDefaultActions(): void {
       // `rows`, which keep their own names when a column shares one — the
       // first row whenever there is one, the row a template reads too
       // (`_firstRowFallback`; AquaTrack's three active goals, m1dck85j).
-      return queryResult(rows);
+      return queryResult(await Promise.all((rows ?? []).map((r: Record<string, unknown>) => openSealed(r))));
     } catch (err) { console.error("[workflow] db_query failed:", err); return { error: String(err), rows: [], count: 0 }; }
   });
 
