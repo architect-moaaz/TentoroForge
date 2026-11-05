@@ -15,7 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Markdown } from '@/components/markdown';
 import { Avatar } from '@/components/ui';
-import { apiFetch, apiJson, errorText, postJson } from '@/lib/api';
+import { ApiError, apiJson, postJson } from '@/lib/api';
 import { readSse, type SseFrame } from '@/lib/sse';
 import { icon, radius, shadow, space, type, useColors, type Palette } from '@/theme';
 
@@ -46,12 +46,38 @@ function isControlSignal(message: string) {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+const clock = (ms: number) => {
+  const s = Math.max(0, Math.round(ms / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+};
+
+/** The line under the chat while Smith works. A job we saw before the person sent their
+ *  message is an earlier one, and theirs waits behind it (one job at a time per project). */
+function workingLine(
+  work: { text: string; since: number } | null,
+  busy: boolean,
+  sentAt: number,
+  liveStatus: string | null,
+): string {
+  if (!work) return liveStatus ?? 'Smith is working…';
+  if (busy && work.since < sentAt) {
+    return `Smith is finishing an earlier job first, then your message is next.\nNow: ${work.text}`;
+  }
+  // The time is only honest for a job that began after the person sent their message; one we
+  // joined part way through has been running longer than we have watched.
+  return sentAt > 0 && work.since >= sentAt ? `${work.text} · ${clock(Date.now() - work.since)}` : work.text;
+}
+
 export function ChatView({ projectId, onApplied }: { projectId: string; onApplied: () => void }) {
   const [messages, setMessages] = useState<Msg[]>([]);
   const colors = useColors();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
+  // The job Smith is running now (from the job feed), when we first saw it, and when we last sent.
+  const [work, setWork] = useState<{ text: string; since: number } | null>(null);
+  const [, setTick] = useState(0);
+  const [sentAt, setSentAt] = useState(0);
   const [liveStatus, setLiveStatus] = useState<string | null>(null);
   // Which door a message goes through: a project with a Living Blueprint takes
   // changes at /smith/turn; one without is still being discovered, planned and
@@ -178,23 +204,58 @@ export function ChatView({ projectId, onApplied }: { projectId: string; onApplie
     };
   }, [projectId, addMsg]);
 
-  const smithTurn = async (message: string, signal: AbortSignal) => {
-    const res = await apiFetch(`/api/projects/${projectId}/smith/turn`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: message }),
-      signal,
-    });
-    const body = await res.json().catch(() => null);
-    if (!res.ok) throw new Error(errorText(body, `Smith could not take that turn (${res.status})`));
-    // `rejected` is a turn Smith declined to act on; its reply says why.
-    addMsg('assistant', body?.reply || body?.rejected || '');
-    if (body?.applied) onApplied();
-  };
+  // What Smith is doing right now, read from the project's job feed. It also tells a person
+  // when their message waits behind a job that started earlier (one job at a time per project),
+  // and shows a job someone else, or an earlier message, started.
+  useEffect(() => {
+    const ctl = new AbortController();
+    let alive = true;
 
-  const frontDoor = async (message: string, signal: AbortSignal) => {
-    // The same stream the web panel reads. The server also remembers the conversation, but
-    // sends a short window of it with the message so Smith can read its own earlier question.
+    const onFrame = (frame: SseFrame) => {
+      if (frame.event !== 'office') return;
+      const d = frame.data as { type?: string; status?: string };
+      if (d.type === 'agent_start') {
+        setWork({ text: 'Working on your message', since: Date.now() });
+      } else if (d.type === 'agent_status' && d.status) {
+        setWork((w) => ({ text: String(d.status), since: w?.since ?? Date.now() }));
+      } else if (d.type === 'agent_complete' || d.type === 'agent_error') {
+        setWork(null);
+      }
+    };
+
+    (async () => {
+      let wait = 3000;
+      while (alive) {
+        try {
+          await readSse(`/api/projects/${projectId}/office`, {}, onFrame, ctl.signal);
+          wait = 3000;
+        } catch (e) {
+          // Not allowed or not found: nothing will change by asking again.
+          if (e instanceof ApiError && (e.status === 403 || e.status === 404)) return;
+        }
+        if (alive) await sleep(wait);
+        wait = Math.min(wait * 2, 30000);
+      }
+    })();
+
+    return () => {
+      alive = false;
+      ctl.abort();
+    };
+  }, [projectId]);
+
+  // Re-draw once a second while something runs, so the time on the banner moves.
+  useEffect(() => {
+    if (!busy && !work) return;
+    const t = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [busy, work]);
+
+  // Every message goes the way the web panel sends it: Smith decides whether it is a change,
+  // a question or a first build, and the server saves both sides of the conversation. (The older
+  // /smith/turn answers the same way but saves nothing, so a reload lost the person's message.)
+  // We also send a short window of the chat so Smith can read its own earlier question.
+  const smithChat = async (message: string, signal: AbortSignal) => {
     const history = messages
       .filter((m) => m.role !== 'system')
       .slice(-10)
@@ -261,13 +322,13 @@ export function ChatView({ projectId, onApplied }: { projectId: string; onApplie
     setText('');
     setBusy(true);
     setLiveStatus(null);
+    setSentAt(Date.now());
 
     const ctl = new AbortController();
     turnAbort.current = ctl;
     const baseline = await knownIds();
     try {
-      if (hasBlueprint && !control) await smithTurn(message, ctl.signal);
-      else await frontDoor(message, ctl.signal);
+      await smithChat(message, ctl.signal);
     } catch (e) {
       if (ctl.signal.aborted) {
         /* we stopped waiting on purpose */
@@ -333,11 +394,11 @@ export function ChatView({ projectId, onApplied }: { projectId: string; onApplie
         // In an inverted list the header sits at the bottom, above the input.
         ListHeaderComponent={
           <View style={{ gap: space.sm, paddingHorizontal: space.lg, paddingTop: space.sm }}>
-            {busy ? (
+            {busy || work ? (
               <View style={styles.working}>
                 <ActivityIndicator size="small" color={colors.brand} />
-                <Text style={styles.workingText} numberOfLines={2}>
-                  {liveStatus ?? 'Smith is working…'}
+                <Text style={styles.workingText} numberOfLines={4}>
+                  {workingLine(work, busy, sentAt, liveStatus)}
                 </Text>
               </View>
             ) : null}

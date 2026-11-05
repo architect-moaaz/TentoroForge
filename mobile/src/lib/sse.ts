@@ -2,7 +2,7 @@
 // streams (project events, the build chat) read through it.
 import { fetch as streamFetch } from 'expo/fetch';
 
-import { getAccessToken } from './api';
+import { ApiError, getAccessToken } from './api';
 import { API_BASE } from './config';
 
 export type SseFrame = { event: string; data: Record<string, unknown> };
@@ -29,7 +29,7 @@ export async function readSse(
   if (!res.ok || !res.body) {
     const body = await res.json().catch(() => null);
     const detail = (body as { detail?: unknown } | null)?.detail;
-    throw new Error(typeof detail === 'string' ? detail : `Stream failed (${res.status})`);
+    throw new ApiError(res.status, typeof detail === 'string' ? detail : `Stream failed (${res.status})`);
   }
 
   const reader = res.body.getReader();
