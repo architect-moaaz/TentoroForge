@@ -141,6 +141,12 @@ choice.
   never outlives an ending plan's end.
 - Billing POSTs are refused from another site (`Sec-Fetch-Site`/`Origin`).
 - `amount_minor` is a bigint (IDR 25,000,000 is past 32 bits).
+- An agent never declares a payment service in an app whose payments are
+  Settings → Payments' (`apply_agent_result` sets it aside): "take payments
+  for the memberships" had an agent add Razorpay on its own. An owner's
+  choice retires every payment service they did not choose, "test payments"
+  included. A change Smith makes before the app is modelled ends with the
+  same payment question and button as one after.
 
 **Robustness**
 - A payment is believed only from the gateway: its signed webhook, or a

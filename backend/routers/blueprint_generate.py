@@ -3517,7 +3517,19 @@ def _gate_turn(svc: Any, gate: str, output_dir: str, app_root: str, req: Any, *,
                                  "say it another way, or name the item you mean.",
                          "status": "needs_user"})
         return {"status": "needs_user"}
-    emit("message", {"text": text, "status": "resolved"})
+    # A CHANGE THAT MAKES THE APP TAKE MONEY ASKS HOW, here too: "take payments
+    # for the memberships" before the app is modelled came through this door,
+    # and nothing asked which of the organisation's gateways it uses.
+    _options: list[str] = []
+    try:
+        from services.payments.app_payments import sense_after_change
+        _sensed = sense_after_change(output_dir, req.message)
+        if _sensed:
+            text = f"{text}\n\n{_sensed['said']}"
+            _options = list(_sensed.get("options") or [])
+    except Exception:  # noqa: BLE001 — the change stands; the Payments tab can still be opened
+        logger.exception("[gates] sensing payments after a change failed")
+    emit("message", {"text": text, "status": "resolved", **({"options": _options} if _options else {})})
     emit("state", {"state": str(svc.doc.get("state") or "")})
     return {"status": "resolved", "gate": gate, "version": out.get("version")}
 

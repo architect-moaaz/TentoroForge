@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shutil
 from pathlib import Path
 from typing import Any, Iterable
@@ -314,12 +315,13 @@ def _sync_integrations(svc: Any) -> None:
     from services.smith.payment_connect import EVENTS, SERVICES
     doc = svc.doc
     chosen = {g["provider"] for g in section(doc).get("gateways") or []}
-    # Payments turned off retire them all: a Stripe row left behind kept the
-    # app's checkouts reading Stripe's old keys after the owner said no.
-    off = section(doc).get("needed") is False
+    # WHAT THE OWNER DID NOT CHOOSE IS RETIRED — none chosen ("test payments",
+    # or payments off) included: a Stripe row left behind kept the app's
+    # checkouts reading Stripe's old keys after the owner said no, and a row an
+    # agent declared on its own showed as "ready to connect".
     for row in doc.get("integrations") or []:
         if isinstance(row, dict) and row.get("serves") == SERVES and str(row.get("status") or "") not in _RETIRED \
-                and str(row.get("provider") or "") not in chosen and (chosen or off):
+                and str(row.get("provider") or "") not in chosen:
             row["status"] = "DEPRECATED"
     for g in section(doc).get("gateways") or []:
         svc_info = next((s for s in SERVICES if s.provider == g["provider"]), None)
@@ -692,7 +694,9 @@ def sense_after_change(output_dir: str | Path, asked: str = "") -> dict[str, Any
     if p.get("needed") is True and p.get("gateways"):
         return None
     sig = need_mod.signals(doc)
-    words = bool(need_mod._SUBSCRIPTION_WORDS.search(asked or "") or need_mod._ONE_TIME_WORDS.search(asked or ""))
+    # Money in the person's words: plans, a checkout — or just "take payments".
+    words = bool(need_mod._SUBSCRIPTION_WORDS.search(asked or "") or need_mod._ONE_TIME_WORDS.search(asked or "")
+                 or need_mod._PAYING.search(asked or "") or re.search(r"\bpayments?\b", asked or "", re.I))
     if not (sig["checkout"] or sig["sub_entities"] or words):
         return None
     if p.get("needed") is True and not p.get("gateways"):
@@ -703,6 +707,8 @@ def sense_after_change(output_dir: str | Path, asked: str = "") -> dict[str, Any
         return None
     what = " and ".join({"one_time": "takes payments", "subscription": "sells subscriptions"}[m]
                         for m in decided.get("models") or []) or "takes payments"
-    return {"said": f"With this change the app {what}. Choose which of your payment gateways it uses — "
-                    "Razorpay for India, Stripe or PayPal for everyone else — and I will build it in.",
+    # Said the same whether or not this turn changed anything ("nothing in the
+    # model needed to change" was followed by "With this change…").
+    return {"said": f"This app {what}, and no payment gateway is chosen for it yet. Choose which of your gateways it "
+                    "uses — Razorpay for India, Stripe or PayPal for everyone else — and I will build it in.",
             "options": [PAYMENT_CHIP]}

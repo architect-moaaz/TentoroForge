@@ -634,3 +634,38 @@ def test_smith_never_chooses_a_gateway_whose_keys_were_refused(tmp_path, monkeyp
     monkeypatch.setattr(S, "_org_gateways", lambda _o: [broken])
     out = S.run(str(tmp_path), change="take payments through razorpay")
     assert not out["applied"] and "refused" in out["reason"]
+
+
+def test_an_agent_never_declares_a_payment_service_in_an_app_whose_owner_chooses_them(tmp_path):
+    from services.blueprint.agent_contract import AgentResult, ArtifactProposal, apply_agent_result
+    svc = _svc(tmp_path, "A yoga studio; members pay ₹999 a month.", currency="INR")
+    N_doc = svc.doc
+    N_doc["payments"] = {"needed": True, "models": ["subscription"], "decidedBy": "forge", "gateways": [], "plans": [], "access": "none",
+                         "reason": ""}
+    svc.save()
+    svc = BlueprintService.load(output_dir=tmp_path)
+    result = AgentResult(task_id="t", agent="integration", confidence=0.9, proposals=[
+        ArtifactProposal("integrations", "razorpay", {"name": "Razorpay", "kind": "payment", "provider": "razorpay",
+                                                      "serves": "take_payment", "status": "PROPOSED", "secretRefs": ["RAZORPAY_KEY_ID"]})])
+    apply_agent_result(svc, result, commit=False)
+    assert not [r for r in svc.doc.get("integrations") or [] if r.get("serves") == "take_payment"], \
+        "the agent's own payment service is set aside: the owner chooses the gateways"
+
+
+def test_test_payments_retire_a_payment_service_nobody_chose(tmp_path):
+    svc = _svc(tmp_path, "A shop.", currency="USD")
+    svc.doc.setdefault("integrations", []).append({"id": "INT-001", "name": "Razorpay", "kind": "payment", "provider": "razorpay",
+                                                   "serves": "take_payment", "status": "PROPOSED"})
+    svc.save()
+    AP.choose(BlueprintService.load(output_dir=tmp_path), gateways=[], needed=True, models=["one_time"])
+    rows = [r for r in BlueprintService.load(output_dir=tmp_path).doc.get("integrations") or [] if r.get("serves") == AP.SERVES]
+    assert rows and all(r["status"] == "DEPRECATED" for r in rows)
+
+
+def test_a_change_that_says_take_payments_asks_which_gateway(tmp_path):
+    svc = _svc(tmp_path, "A yoga studio.", currency="INR")
+    svc.doc["payments"] = {"needed": True, "models": ["subscription"], "decidedBy": "forge", "gateways": [], "plans": [], "access": "none",
+                           "reason": ""}
+    svc.save()
+    sensed = AP.sense_after_change(tmp_path, "Take payments for the memberships through our payment gateways")
+    assert sensed and sensed["options"] == [AP.PAYMENT_CHIP]
