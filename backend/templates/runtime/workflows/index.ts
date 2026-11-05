@@ -608,6 +608,12 @@ function _firstRowFallback(path: string, vars: Record<string, unknown>): unknown
  *  the workflow's variables, or a literal ("text", 'text', a number, true,
  *  false). Empty text and null count as nothing, as a missing value does. */
 export function _firstPresent(inner: string, ctx: WorkflowExecutionContext): unknown {
+  // NOTHING HELD, BUT SOMETHING WAS EMPTY TEXT: the answer is that empty text,
+  // and the column decides what it becomes (_coerceValue: null where null may
+  // go, "" in a required text column). Null here refused DITANS's second
+  // "Save draft" — `{{description ?? job.description}}` over a job saved with
+  // an empty description (QA DIT-007, 2026-11-06).
+  let emptyText = false;
   for (const raw of inner.split("??")) {
     const part = raw.trim();
     let v: unknown;
@@ -626,9 +632,10 @@ export function _firstPresent(inner: string, ctx: WorkflowExecutionContext): unk
         if (v === undefined) v = _firstRowFallback(part, ctx.variables) ?? _recordIdFallback(part, ctx.variables);
       }
     }
-    if (v !== undefined && v !== null && v !== "") return v;
+    if (v === "") emptyText = true;
+    else if (v !== undefined && v !== null) return v;
   }
-  return null;
+  return emptyText ? "" : null;
 }
 
 function _walkPath(root: unknown, path: string): unknown {

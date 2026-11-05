@@ -143,4 +143,13 @@ const among = mod._buildWhere(customers, { id: { in: ["c-1", "{{customer.id}}"] 
 eqJson([among.op, among.v], ["inArray", ["c-1", "c-1"]], "{ in: [...] } resolves each value");
 eqJson(mod._comparison({ neq: 1 })?.name, "ne", "neq is ne");
 eqJson(mod._comparison({ id: 1 }), null, "an object that is not one comparison is not one");
+// `{{a ?? b}}` where every side is empty: empty text where it was empty text,
+// so a required text column keeps "" and an optional one gets null.
+const draftJob = { __name: "jobs", description: { columnType: "PgText", dataType: "string", notNull: true },
+               notes: { columnType: "PgText", dataType: "string" } };
+const jctx: any = { variables: { job: { description: "", notes: "" } } };
+eqJson(mod._resolveValueMap({ description: "{{description ?? job.description}}", notes: "{{notes ?? job.notes}}" }, jctx, draftJob),
+       { description: "", notes: null }, "an empty stored value updates as empty: required text \"\", optional null");
+eqJson(mod._firstPresent("missing ?? job.gone", jctx), null, "nothing at all is still null");
+eqJson(mod._firstPresent("description ?? job.description ?? \"x\"", jctx), "x", "a written fallback still wins over empty");
 done("insert-binding");
