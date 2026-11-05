@@ -22,7 +22,7 @@ from typing import Any
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models.payment_gateway import PaymentGateway
+from models.payment_gateway import PaymentGateway, PaymentGatewayWebhook
 from services.payments import providers as P
 from services.platform_integrations_crypto import CryptoError, decrypt, encrypt
 
@@ -147,7 +147,8 @@ def _clean_coverage(coverage: Any, provider: P.Provider) -> str:
 
 
 def _clean_country(country: Any, coverage: str, provider: P.Provider) -> str | None:
-    c = str(country or "").strip().upper() or (provider.home_country or "")
+    # "" is the owner's "No home country"; only a country never given takes the provider's own.
+    c = ("" if country == "" and coverage != "domestic" else str(country or "").strip().upper() or (provider.home_country or ""))
     if not c:
         if coverage == "domestic":
             raise GatewayError("A domestic gateway needs its home country (for example IN for India).")
@@ -231,8 +232,13 @@ async def edit(db: AsyncSession, row: PaymentGateway, user_id: Any, body: dict[s
         row.home_country = _clean_country(body.get("homeCountry", row.home_country), coverage, provider)
     if "currencies" in body:
         row.currencies = _clean_currencies(body.get("currencies"), provider)
+    changed: set[str] = set()
     for mode in P.MODES:
-        if mode in (body.get("clear") or []):
+        sent = body.get(mode)
+        typed = isinstance(sent, dict) and any(str(v or "").strip() for v in sent.values())
+        # Removed and typed again in one save is a replacement: the new keys are kept.
+        if mode in (body.get("clear") or []) and not typed:
+            changed.add(mode)
             if mode == P.TEST:
                 row.test_ct = row.test_iv = None
             else:
@@ -241,17 +247,30 @@ async def edit(db: AsyncSession, row: PaymentGateway, user_id: Any, body: dict[s
             checks.pop(mode, None)
             row.checks = checks
             continue
-        sent = body.get(mode)
-        if not isinstance(sent, dict) or not any(str(v or "").strip() for v in sent.values()):
+        if not typed:
             continue
-        # A field left empty keeps what is stored: re-typing a secret to fix a
-        # typo in the id is not asked of anyone.
-        merged = {**keys_of(row, mode), **{k: v for k, v in sent.items() if str(v or "").strip()}}
+        # A field left empty keeps what is stored — unless the mode was removed
+        # in the same save: re-typing a secret to fix a typo in the id is not
+        # asked of anyone.
+        was = keys_of(row, mode)
+        stored = {} if mode in (body.get("clear") or []) else was
+        merged = {**stored, **{k: v for k, v in sent.items() if str(v or "").strip()}}
         try:
             keys = P.clean_keys(provider.id, mode, merged)
         except P.KeyProblem as exc:
             raise GatewayError(str(exc)) from exc
         await _check_and_seal(row, provider, mode, keys)
+        if keys != was:
+            changed.add(mode)
+    if changed:
+        # NEW KEYS MAY BE ANOTHER ACCOUNT'S: its apps' webhooks are registered
+        # again at their next publish. Kept, the endpoint stayed at the old
+        # account — renewals, refunds and late payments were never heard.
+        sides = ({"production"} if P.LIVE in changed else set()) | ({"test", "local"} if P.TEST in changed else set())
+        await db.execute(update(PaymentGatewayWebhook).where(
+            PaymentGatewayWebhook.gateway_id == row.id, PaymentGatewayWebhook.side.in_(sides),
+            PaymentGatewayWebhook.status == "registered").values(
+            status="stale", detail="The gateway's keys changed; it is registered again at the next publish."))
     if not has_mode(row, P.TEST) and not has_mode(row, P.LIVE):
         raise GatewayError("A gateway keeps at least one set of keys. Remove the gateway instead.")
     if body.get("isDefault") is True:
@@ -274,7 +293,9 @@ async def recheck(row: PaymentGateway) -> PaymentGateway:
     return row
 
 
-async def remove(db: AsyncSession, row: PaymentGateway) -> None:
+async def remove(db: AsyncSession, row: PaymentGateway) -> PaymentGateway | None:
+    """Removed (its keys wiped). Returns the gateway that became the default
+    in its place, when it was the default — said to the admin, never silent."""
     row.deleted_at = datetime.now(timezone.utc)
     was_default = row.is_default
     row.is_default = False
@@ -284,6 +305,8 @@ async def remove(db: AsyncSession, row: PaymentGateway) -> None:
         rest = await listing(db, row.org_id)
         if rest:
             await _make_default(db, rest[0])
+            return rest[0]
+    return None
 
 
 def apps_using(project_dirs: list[tuple[str, str, str]], gateway_id: str) -> list[dict[str, str]]:

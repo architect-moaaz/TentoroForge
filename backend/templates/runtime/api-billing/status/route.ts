@@ -23,7 +23,7 @@ export async function GET(req: Request) {
   const res = NextResponse.json({
     access: ok, required: billing.accessRequired(), plans: billing.subscriptionsOffered() ? billing.plans() : [], ...billing.priceList(countryOf(req.headers)),
     subscription: row ? { id: row.id, plan: row.plan_id, status: row.status, provider: row.provider, currency: row.currency,
-      amountMinor: row.amount_minor, interval: row.interval, currentPeriodEnd: iso(row.current_period_end),
+      amountMinor: Number(row.amount_minor), interval: row.interval, currentPeriodEnd: iso(row.current_period_end),
       cancelAtPeriodEnd: row.cancel_at_period_end } : null,
   });
   accessCookie(res, billing.accessToken(who.id, row));

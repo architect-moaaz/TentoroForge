@@ -16,6 +16,7 @@ installHarness({ stubs: {
   "@/lib/integrations/connected": "export function connectedService() { return undefined; }",
   "@/lib/integrations/resolver": "export async function getSecret(_p, k) { return globalThis.__env?.[k]; }",
   "@/lib/payments-config": "export const PAYMENTS = globalThis.__payments ?? { needed: false, gateways: [], plans: [] };",
+  "@/lib/events/bus": "export async function emitEventAndProcess(t, o) { return globalThis.__emit ? globalThis.__emit(t, o) : { id: 'e1' }; }",
 } });
 
 const calls: Array<{ url: string; method: string; headers: Record<string, string>; body: string }> = [];
@@ -449,5 +450,171 @@ const { routeFor, currencyFor }: any = await import("../payments/routing.ts");
   try { await billing.cancel(base, false); } catch { threw = true; }
   ok(threw, "a gateway outage is still an error to try again, not an ending");
   delete (globalThis as any).__dbExec;
+}
+// --- The live app never takes a payment through the stand-in --------------------------
+{
+  const pay: any = await import("../payments/index.ts");
+  const billing: any = await import("../payments/billing.ts");
+  const { PAYMENTS: cfg }: any = await import("@/lib/payments-config");
+  const env = process.env as any;
+  const was = { side: env.FORGE_PAYMENTS_SIDE, vercel: env.VERCEL_ENV };
+  Object.assign(cfg, { needed: true, currency: "USD", models: ["one_time"], access: "none",
+    gateways: [{ id: "g1", provider: "stripe", label: "Stripe US", coverage: "both", currencies: ["USD"], integration: "stripe", isDefault: true }], plans: [] });
+  (globalThis as any).__env = {};
+  env.FORGE_PAYMENTS_SIDE = "test";
+  const test = await pay.gatewayFor({ currency: "USD" });
+  ok(test.adapter.provider === "stand_in" && !test.live, "on the test side, a gateway without keys stands in, and says so");
+  env.FORGE_PAYMENTS_SIDE = "production";
+  let said = "";
+  try { await pay.gatewayFor({ currency: "USD" }); } catch (e) { said = `${(e as Error).name}: ${(e as Error).message}`; }
+  ok(/^PaymentsNotReady: Payments are not switched on/.test(said), "in production a gateway without live keys refuses — no stand-in, no free 'Paid'");
+  ok(!/Stripe US|Settings|keys/.test(said), "and the payer is not told how the app is set up");
+  Object.assign(cfg, { gateways: [] });
+  said = "";
+  try { await pay.gatewayFor({ currency: "USD" }); } catch (e) { said = (e as Error).name; }
+  ok(said === "PaymentsNotReady", "and with no gateway chosen at all");
+  (globalThis as any).__dbExec = (q: any) => /FROM forge_subscriptions WHERE id/.test((q.s ?? []).join("?"))
+    ? [{ id: "11111111-1111-4111-8111-111111111111", user_id: "u1", provider: "stand_in", status: "incomplete", interval: "month", metadata: {} }] : [];
+  ok(await billing.standInSettle("11111111-1111-4111-8111-111111111111", "u1", "paid") === null, "and the stand-in's 'Subscribed' opens no plan there");
+  delete env.FORGE_PAYMENTS_SIDE;
+  env.VERCEL_ENV = "production";
+  ok(pay.liveSide(), "an app published before the side was written reads Vercel's production as live");
+  env.VERCEL_ENV = "preview";
+  ok(!pay.liveSide(), "and its preview as not");
+  if (was.side === undefined) delete env.FORGE_PAYMENTS_SIDE; else env.FORGE_PAYMENTS_SIDE = was.side;
+  if (was.vercel === undefined) delete env.VERCEL_ENV; else env.VERCEL_ENV = was.vercel;
+  delete (globalThis as any).__dbExec;
+  Object.assign(cfg, { needed: false, gateways: [], plans: [] });
+}
+
+// --- One signed event settles the order it is about, once, and the app is told ---------
+{
+  const pay: any = await import("../payments/index.ts");
+  const rows: Record<string, any> = {
+    X: { id: "aaaaaaaa-0000-4000-8000-00000000000a", provider: "razorpay", provider_ref: "order_X", status: "pending", amount_minor: 50000, currency: "INR", metadata: {} },
+    Y: { id: "aaaaaaaa-0000-4000-8000-00000000000b", provider: "razorpay", provider_ref: "order_Y", status: "pending", amount_minor: 50000, currency: "INR", metadata: {} },
+  };
+  const byKey = (k: string) => Object.values(rows).find((r: any) => r.id === k || r.provider_ref === k);
+  const emitted: string[] = [];
+  (globalThis as any).__emit = (t: string, o: any) => { emitted.push(o.dedupeKey); return { id: "e" }; };
+  (globalThis as any).__dbExec = (q: any) => {
+    const text = (q.s ?? []).join("?");
+    if (/SELECT \* FROM forge_payments WHERE/.test(text)) { const r = byKey(String(q.v[0])); return r ? [{ ...r, metadata: { ...r.metadata } }] : []; }
+    if (/UPDATE forge_payments SET status = .* RETURNING id/s.test(text)) {
+      // `sql.join` hands the statuses it may move from as fragments, each holding its value.
+      const r = byKey(String(q.v[2])); const from = (q.v[3] ?? []).map((f: any) => f?.v?.[0]);
+      if (r && from.includes(r.status)) { r.status = q.v[0]; if (q.v[1]) r.provider_ref = q.v[1]; return [{ id: r.id }]; }
+      return [];
+    }
+    if (/UPDATE forge_payments SET metadata/.test(text)) { const r = byKey(String(q.v[1])); if (r) Object.assign(r.metadata, JSON.parse(q.v[0])); return []; }
+    return [];
+  };
+  // A payer's own notes on Y's payment name X: the event is Y's order.
+  const out = await pay.settle("razorpay", { type: "payment.succeeded", providerRef: "order_Y", paymentId: rows.X.id, amountMinor: 50000, currency: "INR", metadata: {} });
+  ok(out.paymentId === rows.Y.id && rows.Y.status === "succeeded" && rows.X.status === "pending" && rows.X.provider_ref === "order_X",
+    "a payment whose notes name another order settles its own order, never the one it names");
+  // Settled, and the app never heard: told when the gateway sends it again.
+  emitted.length = 0;
+  const again = await pay.settle("razorpay", { type: "payment.succeeded", providerRef: "order_Y", amountMinor: 50000, currency: "INR", metadata: {} });
+  ok(again.moved === false && emitted.length === 1, "a payment already paid is told again (its event key keeps it to once in the app)");
+  (globalThis as any).__emit = () => null;
+  const lost = await pay.settle("razorpay", { type: "payment.succeeded", providerRef: "order_Y", amountMinor: 50000, currency: "INR", metadata: {} });
+  ok(lost.told === false, "an event that could not be written is said, so the webhook answers 500 and the gateway sends it again");
+  (globalThis as any).__emit = (t: string, o: any) => { emitted.push(o.dedupeKey); return { id: "e" }; };
+  // Two partial refunds from Razorpay's dashboard, each its own event.
+  emitted.length = 0;
+  await pay.settle("razorpay", { type: "refund.succeeded", providerRef: "order_Y", paymentId: rows.Y.id, amountMinor: 20000, currency: "INR", metadata: { refundId: "rfnd_1" } });
+  ok(rows.Y.status === "partially_refunded", "a first part refunded: partly refunded");
+  await pay.settle("razorpay", { type: "refund.succeeded", providerRef: "order_Y", paymentId: rows.Y.id, amountMinor: 20000, currency: "INR", metadata: { refundId: "rfnd_1" } });
+  ok(rows.Y.status === "partially_refunded" && Object.keys(rows.Y.metadata.refunds).length === 1, "the same refund delivered twice counts once");
+  await pay.settle("razorpay", { type: "refund.succeeded", providerRef: "order_Y", paymentId: rows.Y.id, amountMinor: 30000, currency: "INR", metadata: { refundId: "rfnd_2" } });
+  ok(rows.Y.status === "refunded", "the refunds adding up to the whole: refunded in full");
+  ok(new Set(emitted).size === 2 && emitted[0] === emitted[1],
+    "each refund is its own event to the app; the same refund again carries the same key (the bus keeps one)");
+  delete (globalThis as any).__dbExec; delete (globalThis as any).__emit;
+}
+// --- A subscription is taken once, its trial once, and its grace from the failed charge ---
+{
+  const billing: any = await import("../payments/billing.ts");
+  const { PAYMENTS: cfg }: any = await import("@/lib/payments-config");
+  Object.assign(cfg, { needed: true, currency: "USD", models: ["subscription"], access: "none",
+    gateways: [{ id: "g1", provider: "stripe", label: "Stripe", coverage: "both", currencies: ["USD"], integration: "stripe", isDefault: true }],
+    plans: [{ id: "pro", name: "Pro", interval: "month", intervalCount: 1, prices: { USD: 5 }, trialDays: 14, features: [] }] });
+  (globalThis as any).__env = { STRIPE_SECRET_KEY: "sk_test_trials" };
+  const day = 86_400_000;
+  let openCheckout = false, heldBefore = false;
+  const keys: string[] = [];
+  const closed: string[] = [];
+  (globalThis as any).__dbExec = (q: any) => {
+    const text = (q.s ?? []).join("?");
+    if (/SELECT \* FROM forge_subscriptions WHERE user_id = \? AND plan_id/.test(text)) return openCheckout
+      ? [{ id: "33333333-3333-4333-8333-333333333333", user_id: "u9", plan_id: "pro", provider: "stripe", provider_ref: "cs_open", status: "incomplete",
+           currency: "USD", amount_minor: 500, interval: "month", current_period_end: null, cancel_at_period_end: false, metadata: {} }] : [];
+    if (/SET status = 'expired', metadata/.test(text)) { closed.push(String(q.v.at(-1))); return []; }
+    // A write answers the row as written (RETURNING *).
+    if (/UPDATE forge_subscriptions SET status = \?/.test(text)) return [{ id: "33333333-3333-4333-8333-333333333333", user_id: "u9", plan_id: "pro",
+      provider: "stripe", provider_ref: "cs_open", status: q.v[0], currency: "USD", amount_minor: 500, interval: "month",
+      current_period_end: q.v[1], cancel_at_period_end: false, metadata: {} }];
+    if (/SELECT \* FROM forge_subscriptions WHERE user_id/.test(text)) return [];
+    if (/SELECT 1 FROM forge_subscriptions/.test(text)) return heldBefore ? [{ "?column?": 1 }] : [];
+    if (/SELECT ref FROM forge_plan_refs/.test(text)) { keys.push(String(q.v[0])); return [{ ref: "price_x" }]; }
+    if (/INSERT INTO forge_subscriptions/.test(text)) return [{ id: "22222222-2222-4222-8222-222222222222" }];
+    return [];
+  };
+  answer = (url: string) => url.includes("/checkout/sessions/cs_open/expire") ? { status: 200, body: { id: "cs_open", status: "expired" } }
+    : url.includes("/checkout/sessions/cs_open") ? { status: 200, body: { id: "cs_open", status: "open", payment_status: "unpaid" } }
+    : url.includes("/checkout/sessions") ? { status: 200, body: { id: "cs_t", url: "https://checkout.stripe.test/cs_t" } } : { status: 200, body: {} };
+  const go = () => billing.subscribe({ user: { id: "u9", email: "p@q.test" }, planId: "pro", currency: "USD", origin: "https://app.test" });
+  openCheckout = true;
+  calls.length = 0;
+  const again = await go();
+  ok(again.url.includes("cs_t") && calls.some((c) => c.url.endsWith("/checkout/sessions/cs_open/expire")) && closed.length === 1,
+    "choosing the plan again closes the checkout left open at Stripe (it can never be completed too), and opens a new one");
+  answer = (url: string) => url.includes("/subscriptions/sub_paid")
+    ? { status: 200, body: { id: "sub_paid", status: "active", current_period_end: Math.floor(Date.now() / 1000) + 30 * 86400, cancel_at_period_end: false } }
+    : url.includes("/checkout/sessions/cs_open")
+    ? { status: 200, body: { id: "cs_open", status: "complete", payment_status: "paid", subscription: "sub_paid" } }
+    : url.includes("/checkout/sessions") ? { status: 200, body: { id: "cs_t", url: "https://checkout.stripe.test/cs_t" } } : { status: 200, body: {} };
+  let said = "";
+  try { await go(); } catch (e) { said = (e as Error).message; }
+  ok(/already hold this plan/.test(said), "an earlier checkout that was paid after all: the person holds the plan, and is not charged again");
+  answer = (url: string) => url.includes("/checkout/sessions") ? { status: 200, body: { id: "cs_t", url: "https://checkout.stripe.test/cs_t" } } : { status: 200, body: {} };
+  openCheckout = false;
+  await go();
+  ok(keys.at(-1)?.includes("-t14"), "someone new gets the plan's free trial");
+  heldBefore = true;
+  await go();
+  ok(keys.at(-1)?.includes("-t0"), "someone who held a plan before pays from the first day (no second trial)");
+
+  const now = Date.now();
+  const late = { id: "r", user_id: "u", plan_id: "pro", provider: "stripe", status: "past_due", currency: "USD", amount_minor: 500, interval: "year",
+    current_period_end: new Date(now + 300 * day).toISOString(), cancel_at_period_end: false, metadata: {} as any };
+  ok(!billing.grants({ ...late, metadata: { pastDueSince: new Date(now - 5 * day).toISOString() } }),
+    "a renewal that failed five days ago closes the app, though Stripe moved the period's end a year on");
+  ok(billing.grants({ ...late, metadata: { pastDueSince: new Date(now - day).toISOString() } }), "within its grace it stays open");
+
+  const env = process.env as any;
+  const secretWas = env.NEXTAUTH_SECRET;
+  env.NEXTAUTH_SECRET = "test-secret";
+  const ending = { ...late, status: "active", interval: "month", cancel_at_period_end: true, current_period_end: new Date(now + 3_600_000).toISOString(), metadata: {} };
+  const tok = billing.accessToken("u", ending);
+  ok(tok && tok.maxAge <= 3600, "a plan ending in an hour opens the app for that hour, not its grace after");
+  if (secretWas === undefined) delete env.NEXTAUTH_SECRET; else env.NEXTAUTH_SECRET = secretWas;
+
+  // The plan that goes on is the one shown and cancelled, not the one ending.
+  let ordered = "";
+  (globalThis as any).__dbExec = (q: any) => { const text = (q.s ?? []).join("?"); if (/FROM forge_subscriptions WHERE user_id/.test(text)) ordered = text; return []; };
+  await billing.current("u");
+  ok(/cancel_at_period_end ASC, created_at DESC/.test(ordered) && /status = 'cancelled' AND cancel_at_period_end AND current_period_end > NOW\(\)/.test(ordered),
+    "after a switch, the person's plan is the new one (the old one is ending); a plan ending but still paid for comes before one long over");
+
+  // Resumed in Stripe's own portal: resumed here.
+  const writes: any[] = [];
+  (globalThis as any).__dbExec = (q: any) => { const text = (q.s ?? []).join("?"); if (/UPDATE forge_subscriptions SET status/.test(text)) { writes.push(q.v); return []; } return []; };
+  answer = () => ({ status: 200, body: { id: "sub_r", status: "active", current_period_end: Math.floor((now + 20 * day) / 1000), cancel_at_period_end: false } });
+  await billing.refresh({ ...ending, provider_ref: "sub_r" });
+  ok(writes.at(-1)?.[2] === false, "a Stripe plan resumed in Stripe's portal is no longer 'ending' here");
+  delete (globalThis as any).__dbExec;
+  Object.assign(cfg, { needed: false, gateways: [], plans: [] });
 }
 done("every gateway is believed only from itself");

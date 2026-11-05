@@ -100,6 +100,8 @@ export interface Subscriptions {
   start(input: SubscriptionStart, secrets: Secrets, origin: string): Promise<{ url: string; providerRef: string }>;
   retrieve(providerRef: string, secrets: Secrets): Promise<SubSnapshot>;
   cancel(providerRef: string, atPeriodEnd: boolean, secrets: Secrets): Promise<SubSnapshot>;
+  /** Close a checkout the payer never finished, so it cannot be completed later (a second tab). Never throws for one already closed. */
+  abandon?(providerRef: string, secrets: Secrets): Promise<void>;
   /** The gateway's own page where the payer manages the subscription, when it has one. */
   manageUrl?(snapshot: { providerRef: string; customerRef?: string | null }, returnUrl: string, secrets: Secrets): Promise<string | null>;
 }
@@ -126,7 +128,8 @@ export interface PaymentAdapter {
   confirm?(row: { id: string; providerRef: string | null; amountMinor: number; currency: string; metadata: Record<string, unknown> },
            params: Record<string, string>, secrets: Secrets): Promise<Confirmed>;
   /** `amountMinor` absent refunds it all; present, that much, in the payment's `currency`. */
-  refund(input: { providerRef: string; amountMinor?: number; currency?: string; metadata?: Record<string, unknown> }, secrets: Secrets): Promise<{ refundId: string; status: "pending" | "succeeded" | "failed" }>;
+  /** `idempotencyKey`: the same refund asked twice (a retried step) is made once. */
+  refund(input: { providerRef: string; amountMinor?: number; currency?: string; metadata?: Record<string, unknown>; idempotencyKey?: string }, secrets: Secrets): Promise<{ refundId: string; status: "pending" | "succeeded" | "failed" }>;
   retrieve(providerRef: string, secrets: Secrets): Promise<{ status: PaymentStatus; amountMinor: number; currency: string }>;
   verifyWebhook(rawBody: string, headers: Headers, webhookSecret: string, secrets?: Secrets): Verified | Promise<Verified>;
   normalizeEvent(raw: unknown): Normalized | null;

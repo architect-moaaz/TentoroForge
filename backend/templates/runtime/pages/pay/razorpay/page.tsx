@@ -19,8 +19,14 @@ export default async function RazorpayPay({ searchParams }: { searchParams: Prom
   const one = (k: string) => String(Array.isArray(sp[k]) ? sp[k]![0] : sp[k] ?? "");
   const keyId = String(process.env.RAZORPAY_KEY_ID ?? "");
   const name = String(process.env.NEXT_PUBLIC_APP_NAME ?? process.env.FORGE_APP_NAME ?? "");
+  // A local check against the gateway emulator opens its stand-in of the
+  // window; anywhere else, Razorpay's own script (never set in production).
+  const emulator = String(process.env.FORGE_PAY_EMULATOR ?? "").replace(/\/$/, "");
+  const script = emulator ? `${emulator}/razorpay/checkout.js` : undefined;
   const paymentId = one("payment");
   const subscriptionId = one("subscription");
+  // `gatewayRef`, never `ref`: React keeps that name for itself and refuses a
+  // server page that hands one to a client component (the page failed whole).
   let props: any = null;
   let problem = "";
   try {
@@ -28,13 +34,13 @@ export default async function RazorpayPay({ searchParams }: { searchParams: Prom
       const row = rows(await db.execute(sql`SELECT id, provider, provider_ref, status, amount_minor, currency, description, success_url FROM forge_payments WHERE id = ${paymentId}::uuid LIMIT 1`))[0];
       if (!row || row.provider !== "razorpay") problem = "This payment is not waiting for Razorpay.";
       else if (row.status === "succeeded") props = { done: row.success_url };
-      else props = { kind: "payment", id: row.id, ref: row.provider_ref, amountMinor: Number(row.amount_minor), currency: row.currency, description: row.description ?? "" };
+      else props = { kind: "payment", id: row.id, gatewayRef: row.provider_ref, amountMinor: Number(row.amount_minor), currency: row.currency, description: row.description ?? "" };
     } else if (subscriptionId && /^[0-9a-f-]{36}$/i.test(subscriptionId)) {
       const session = await auth();
       const uid = String((session?.user as any)?.id ?? "");
       const row = rows(await db.execute(sql`SELECT id, user_id, provider, provider_ref, status, plan_id FROM forge_subscriptions WHERE id = ${subscriptionId}::uuid LIMIT 1`))[0];
       if (!row || row.provider !== "razorpay" || row.user_id !== uid) problem = "This subscription is not waiting for Razorpay.";
-      else props = { kind: "subscription", id: row.id, ref: row.provider_ref, plan: row.plan_id,
+      else props = { kind: "subscription", id: row.id, gatewayRef: row.provider_ref, plan: row.plan_id,
         email: (session?.user as any)?.email ?? "", userName: (session?.user as any)?.name ?? "" };
     } else {
       problem = "Nothing to pay here.";
@@ -48,7 +54,7 @@ export default async function RazorpayPay({ searchParams }: { searchParams: Prom
     <main className="flex min-h-screen items-center justify-center bg-muted/40 p-6">
       <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-sm">
         {problem ? <p role="alert" className="text-sm">{problem}</p>
-          : <RazorpayCheckout keyId={keyId} appName={name} {...props} />}
+          : <RazorpayCheckout keyId={keyId} appName={name} script={script} {...props} />}
       </div>
     </main>
   );

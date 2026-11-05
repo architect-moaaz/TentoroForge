@@ -8,7 +8,7 @@
  * plan at the same price is one plan at the gateway however many times the
  * app is deployed. Forge runtime — do not remove.
  */
-import { boolean, index, integer, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { bigint, boolean, index, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
 export const forgeSubscriptions = pgTable("forge_subscriptions", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -19,7 +19,8 @@ export const forgeSubscriptions = pgTable("forge_subscriptions", {
   // incomplete | trialing | active | past_due | paused | cancelled | expired
   status: text("status").notNull().default("incomplete"),
   currency: text("currency").notNull(),
-  amountMinor: integer("amount_minor").notNull(),
+  // bigint: IDR 25,000,000 is 2.5e9 in minor units, past a 32-bit integer.
+  amountMinor: bigint("amount_minor", { mode: "number" }).notNull(),
   interval: text("interval").notNull(),
   currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
   cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),

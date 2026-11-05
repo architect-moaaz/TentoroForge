@@ -6,11 +6,12 @@
 import { NextResponse } from "next/server";
 import { initializeRuntime } from "@/lib/runtime-loader";
 import { countryOf } from "@/lib/payments/routing";
-import { originOf, person } from "../_session";
+import { fromThisApp, originOf, person } from "../_session";
 
 export const runtime = "nodejs";
 
 export async function POST(req: Request) {
+  if (!fromThisApp(req)) return NextResponse.json({ error: "This can only be done from the app's own billing page." }, { status: 403 });
   await initializeRuntime();
   const who = await person();
   if (!who) return NextResponse.json({ error: "Sign in to subscribe." }, { status: 401 });
@@ -23,6 +24,7 @@ export async function POST(req: Request) {
       country: countryOf(req.headers), origin: originOf(req) });
     return NextResponse.json(out);
   } catch (err) {
+    if ((err as Error)?.name === "PaymentsNotReady") return NextResponse.json({ error: (err as Error).message }, { status: 503 });
     const said = String((err as Error)?.message ?? err);
     console.error("[billing] subscribe failed:", said);
     const known = /no plan|no price|already hold|cannot take/.test(said);

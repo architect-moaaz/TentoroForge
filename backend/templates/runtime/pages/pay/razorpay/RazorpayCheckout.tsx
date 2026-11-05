@@ -11,18 +11,18 @@ declare global { interface Window { Razorpay?: any } }
 const base = () => (process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/$/, "");
 const SCRIPT = "https://checkout.razorpay.com/v1/checkout.js";
 
-function load(): Promise<void> {
+function load(src: string = SCRIPT): Promise<void> {
   if (window.Razorpay) return Promise.resolve();
   return new Promise((resolve, reject) => {
     const s = document.createElement("script");
-    s.src = SCRIPT; s.async = true;
+    s.src = src; s.async = true;
     s.onload = () => resolve();
     s.onerror = () => reject(new Error("Razorpay's checkout could not be loaded. Check your connection and try again."));
     document.body.appendChild(s);
   });
 }
 
-export function RazorpayCheckout(p: { keyId: string; appName?: string; kind?: "payment" | "subscription"; id?: string; ref?: string;
+export function RazorpayCheckout(p: { keyId: string; appName?: string; script?: string; kind?: "payment" | "subscription"; id?: string; gatewayRef?: string;
   amountMinor?: number; currency?: string; description?: string; plan?: string; email?: string; userName?: string; done?: string }) {
   const [state, setState] = useState<"loading" | "open" | "confirming" | "closed" | "failed">("loading");
   const [said, setSaid] = useState("");
@@ -44,10 +44,10 @@ export function RazorpayCheckout(p: { keyId: string; appName?: string; kind?: "p
   const open = useCallback(async () => {
     setSaid("");
     try {
-      await load();
+      await load(p.script);
       const rzp = new window.Razorpay({
         key: p.keyId,
-        ...(p.kind === "subscription" ? { subscription_id: p.ref } : { order_id: p.ref, amount: p.amountMinor, currency: p.currency }),
+        ...(p.kind === "subscription" ? { subscription_id: p.gatewayRef } : { order_id: p.gatewayRef, amount: p.amountMinor, currency: p.currency }),
         name: p.appName || undefined,
         description: p.description || undefined,
         prefill: { email: p.email || undefined, name: p.userName || undefined },

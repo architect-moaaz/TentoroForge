@@ -146,7 +146,7 @@ export const razorpayAdapter: PaymentAdapter = {
     if (type === "refund.processed") {
       const refund = ev?.payload?.refund?.entity ?? {};
       return { type: "refund.succeeded" as NormalizedEvent, providerRef: String(pay.order_id ?? refund.payment_id ?? ""), paymentId: notes.paymentId,
-        amountMinor: Number(refund.amount ?? 0), currency: String(refund.currency ?? "").toUpperCase(), metadata: { providerPayment: String(refund.payment_id ?? "") } };
+        amountMinor: Number(refund.amount ?? 0), currency: String(refund.currency ?? "").toUpperCase(), metadata: { providerPayment: String(refund.payment_id ?? ""), ...(refund.id ? { refundId: String(refund.id) } : {}) } };
     }
     return null;
   },
@@ -178,6 +178,11 @@ export const razorpayAdapter: PaymentAdapter = {
     },
     async retrieve(providerRef, secrets) {
       return snapshot(await call("GET", `/subscriptions/${encodeURIComponent(providerRef)}`, secrets));
+    },
+    async abandon(providerRef, secrets) {
+      // A subscription the payer never authorised is cancelled; one already ended answers 400, which is fine.
+      try { await call("POST", `/subscriptions/${encodeURIComponent(providerRef)}/cancel`, secrets, { cancel_at_cycle_end: 0 }); }
+      catch (err: any) { if (Number(err?.status) !== 400) throw err; }
     },
     async cancel(providerRef, atPeriodEnd, secrets) {
       const sub = await call("POST", `/subscriptions/${encodeURIComponent(providerRef)}/cancel`, secrets,

@@ -42,7 +42,7 @@ export default function PaymentsSettingsPage({ params }: { params: Promise<{ org
 function PaymentsSettings({ orgId }: { orgId: string }) {
   const providers = useQuery({ queryKey: ["paymentProviders"], queryFn: gatewayApi.providers, staleTime: 3_600_000 });
   const list = useQuery({ queryKey: gatewaysKey(orgId), queryFn: () => gatewayApi.list(orgId) });
-  const [dialog, setDialog] = useState<{ gateway?: Gateway | null; provider?: string | null } | null>(null);
+  const [dialog, setDialog] = useState<{ gateway?: Gateway | null; provider?: string | null; mode?: Mode } | null>(null);
   const [removing, setRemoving] = useState<Gateway | null>(null);
   const gateways = list.data?.gateways ?? [];
   const canManage = Boolean(list.data?.canManage);
@@ -50,9 +50,13 @@ function PaymentsSettings({ orgId }: { orgId: string }) {
   if (list.isLoading || providers.isLoading) {
     return <div className="p-8"><h1 className="mb-2 text-2xl font-semibold">Payments</h1><p className="text-muted-foreground">Loading…</p></div>;
   }
-  if (list.isError) {
+  if (list.isError || providers.isError) {
+    // Without the gateways' own descriptions nothing here can be added or
+    // changed: said, with a way to try again, not buttons that do nothing.
     return <div className="p-8"><h1 className="mb-2 text-2xl font-semibold">Payments</h1>
-      <p className="text-red-600">The gateways could not be loaded: {(list.error as Error)?.message}</p></div>;
+      <p className="text-red-600 dark:text-red-400" role="alert">
+        {list.isError ? `The gateways could not be loaded: ${(list.error as Error)?.message}` : "The payment gateways Forge supports could not be loaded."}</p>
+      <Button variant="outline" className="mt-3" onClick={() => { void list.refetch(); void providers.refetch(); }}>Try again</Button></div>;
   }
 
   return (
@@ -84,7 +88,7 @@ function PaymentsSettings({ orgId }: { orgId: string }) {
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {gateways.map((g) => (
               <GatewayCard key={g.id} orgId={orgId} gateway={g} canManage={canManage}
-                           onEdit={() => setDialog({ gateway: g })} onRemove={() => setRemoving(g)} />
+                           onEdit={(mode?: Mode) => setDialog({ gateway: g, mode })} onRemove={() => setRemoving(g)} />
             ))}
           </div>
         </>
@@ -92,7 +96,7 @@ function PaymentsSettings({ orgId }: { orgId: string }) {
 
       {dialog && providers.data && (
         <GatewayDialog orgId={orgId} providers={providers.data} gateway={dialog.gateway} initialProvider={dialog.provider}
-                       onClose={() => setDialog(null)} />
+                       initialMode={dialog.mode} onClose={() => setDialog(null)} />
       )}
       {removing && <RemoveDialog orgId={orgId} gateway={removing} onClose={() => setRemoving(null)} />}
     </div>
@@ -141,8 +145,13 @@ function EmptyState({ canManage, providers, onStart }: { canManage: boolean; pro
 }
 
 function RoutingPanel({ gateways }: { gateways: Gateway[] }) {
-  const lines = routingLines(gateways.filter((g) => g.status !== "attention"));
+  const usable = gateways.filter((g) => g.status !== "attention");
+  const lines = routingLines(usable);
   if (gateways.length < 2 || lines.length === 0) return null;
+  // A gateway no currency is sent to here still serves an app that chooses it
+  // without the others — said, so it does not look unused.
+  const routed = new Set(lines.map((l) => l.gateway.id));
+  const spare = usable.filter((g) => !routed.has(g.id));
   return (
     <section data-routing="" className="mb-6 rounded-xl border border-slate-200 bg-slate-50/60 p-5 dark:border-slate-800 dark:bg-slate-900/50">
       <h2 className="flex items-center gap-2 text-sm font-semibold"><Route className="h-4 w-4" />How payers are routed when an app uses all of them</h2>
@@ -154,6 +163,11 @@ function RoutingPanel({ gateways }: { gateways: Gateway[] }) {
           </li>
         ))}
       </ul>
+      {spare.length > 0 && (
+        <p className="mt-3 text-xs text-muted-foreground" data-routing-spare="">
+          {spare.map((g) => g.label).join(", ")} {spare.length === 1 ? "takes" : "take"} these currencies too, for apps that choose {spare.length === 1 ? "it" : "them"} without the gateway above.
+        </p>
+      )}
     </section>
   );
 }
@@ -182,7 +196,7 @@ function ModeLine({ gateway, mode }: { gateway: Gateway; mode: Mode }) {
   );
 }
 
-function GatewayCard({ orgId, gateway, canManage, onEdit, onRemove }: { orgId: string; gateway: Gateway; canManage: boolean; onEdit: () => void; onRemove: () => void }) {
+function GatewayCard({ orgId, gateway, canManage, onEdit, onRemove }: { orgId: string; gateway: Gateway; canManage: boolean; onEdit: (mode?: Mode) => void; onRemove: () => void }) {
   const qc = useQueryClient();
   const refresh = () => qc.invalidateQueries({ queryKey: gatewaysKey(orgId) });
   const check = useMutation({
@@ -215,7 +229,7 @@ function GatewayCard({ orgId, gateway, canManage, onEdit, onRemove }: { orgId: s
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem data-menu-edit="" onSelect={onEdit}><Pencil className="mr-2 h-4 w-4" />Edit keys and details</DropdownMenuItem>
+              <DropdownMenuItem data-menu-edit="" onSelect={() => onEdit()}><Pencil className="mr-2 h-4 w-4" />Edit keys and details</DropdownMenuItem>
               <DropdownMenuItem data-menu-check="" onSelect={() => check.mutate()}><RefreshCw className="mr-2 h-4 w-4" />Check the keys again</DropdownMenuItem>
               {!gateway.isDefault && <DropdownMenuItem data-menu-default="" onSelect={() => makeDefault.mutate()}><Star className="mr-2 h-4 w-4" />Make default</DropdownMenuItem>}
               <DropdownMenuSeparator />
@@ -238,7 +252,7 @@ function GatewayCard({ orgId, gateway, canManage, onEdit, onRemove }: { orgId: s
         </p>
       </div>
       {canManage && !gateway.modes.live.set && (
-        <Button variant="outline" size="sm" className="mt-4" data-add-live="" onClick={onEdit}>Add live keys to take real money</Button>
+        <Button variant="outline" size="sm" className="mt-4" data-add-live="" onClick={() => onEdit("live")}>Add live keys to take real money</Button>
       )}
     </div>
   );
@@ -249,7 +263,11 @@ function RemoveDialog({ orgId, gateway, onClose }: { orgId: string; gateway: Gat
   const apps = useQuery({ queryKey: ["gatewayApps", gateway.id], queryFn: () => gatewayApi.apps(orgId, gateway.id) });
   const remove = useMutation({
     mutationFn: () => gatewayApi.remove(orgId, gateway.id),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: gatewaysKey(orgId) }); toast.success(`${gateway.label} removed.`); onClose(); },
+    onSuccess: (out) => {
+      qc.invalidateQueries({ queryKey: gatewaysKey(orgId) });
+      toast.success(`${gateway.label} removed.${out?.newDefault ? ` ${out.newDefault.label} is the default gateway for new apps now.` : ""}`);
+      onClose();
+    },
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Could not remove it"),
   });
   const using = apps.data?.apps ?? [];
@@ -260,16 +278,22 @@ function RemoveDialog({ orgId, gateway, onClose }: { orgId: string; gateway: Gat
           <DialogTitle>Remove {gateway.label}?</DialogTitle>
           <DialogDescription>Its keys are deleted from Forge. Nothing changes in your {gateway.providerName} account.</DialogDescription>
         </DialogHeader>
-        {apps.isLoading ? <p className="text-sm text-muted-foreground">Checking which apps use it…</p> : using.length > 0 ? (
+        {apps.isLoading ? <p className="text-sm text-muted-foreground">Checking which apps use it…</p> : apps.isError ? (
+          <p className="text-sm text-red-700 dark:text-red-300" role="alert" data-apps-unknown="">
+            Which apps use it could not be checked just now. An app that takes money through it would stop taking payments.
+            <button type="button" className="ml-1 underline" onClick={() => void apps.refetch()}>Check again</button></p>
+        ) : using.length > 0 ? (
           <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200" data-apps-using="">
             <p className="font-medium">{using.length === 1 ? "1 app takes payments" : `${using.length} apps take payments`} through it:</p>
-            <ul className="mt-1 list-disc pl-5">{using.slice(0, 8).map((a) => <li key={a.id}>{a.name || "Untitled app"}</li>)}</ul>
-            <p className="mt-2">After removal they fall back to their other gateways, or to the stand-in checkout that charges nobody, the next time they are published.</p>
+            <ul className="mt-1 list-disc pl-5">{using.slice(0, 8).map((a) => <li key={a.id}>{a.name || "Untitled app"}</li>)}
+              {using.length > 8 && <li>and {using.length - 8} more</li>}</ul>
+            <p className="mt-2">After removal they take money through their other gateways. An app with no other gateway stops taking payments
+              in production — its payers are told payments are not switched on — until you choose a gateway for it again.</p>
           </div>
         ) : <p className="text-sm text-muted-foreground">No app uses it.</p>}
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={remove.isPending}>Keep it</Button>
-          <Button variant="destructive" data-confirm-remove="" onClick={() => remove.mutate()} disabled={remove.isPending || apps.isLoading}>
+          <Button variant="destructive" data-confirm-remove="" onClick={() => remove.mutate()} disabled={remove.isPending || apps.isLoading || apps.isError}>
             {remove.isPending ? "Removing…" : "Remove"}
           </Button>
         </DialogFooter>

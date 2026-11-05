@@ -2298,14 +2298,7 @@ async def smith_chat(
                         "status": "asked"})
                     return {"status": "asked"}
 
-                # HOW IT TAKES MONEY, BEFORE IT IS BUILT. An app that sells
-                # something waits for its owner to choose the gateways (the
-                # dialog opens on this message); one that takes no money builds.
-                from services.payments.app_payments import build_question as _payment_question
-                _asked = _payment_question(svc)
-                if _asked is not None:
-                    emit("message", _asked)
-                    return {"status": "asked"}
+                # (How it takes money is asked in `_run_dag`, for every door a build comes through.)
 
                 # VERIFICATION IS THE USER'S CALL, NOT AN AUTOMATIC COST. `_run_dag`
                 # offers it beside the completion line for every approved build
@@ -3139,6 +3132,20 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
                     from services.blueprint import documents as _documents
                     _documents.store(output_dir, documents)
                 emit("message", _stop)
+                return {"status": "asked"}
+            # HOW IT TAKES MONEY, BEFORE IT IS BUILT, WHICHEVER DOOR IT CAME
+            # THROUGH. An app that sells something waits for its owner to choose
+            # the gateways (the dialog opens on this message); one that takes no
+            # money builds. It used to be asked at the card alone, and the answer
+            # to the design question, a resumed build and Smith's "build" went past it.
+            from services.payments.app_payments import build_question as _payment_question
+            _asked = _payment_question(svc)
+            if _asked is not None:
+                _add_to_the_brief(svc, description)
+                if documents:
+                    from services.blueprint import documents as _documents
+                    _documents.store(output_dir, documents)
+                emit("message", _asked)
                 return {"status": "asked"}
         if approved and announce_completion:
             # "APPROVE AND BUILD" IS THE APPROVAL. Recorded now, against the

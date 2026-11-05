@@ -84,7 +84,7 @@ export const gatewayApi = {
   create: (orgId: string, body: GatewayBody) => api.post<Gateway>(`/api/orgs/${orgId}/payment-gateways`, body),
   edit: (orgId: string, id: string, body: GatewayBody) => api.patch<Gateway>(`/api/orgs/${orgId}/payment-gateways/${id}`, body),
   check: (orgId: string, id: string) => api.post<Gateway>(`/api/orgs/${orgId}/payment-gateways/${id}/check`),
-  remove: (orgId: string, id: string) => api.delete<{ removed: string; apps: { id: string; name: string }[] }>(`/api/orgs/${orgId}/payment-gateways/${id}`),
+  remove: (orgId: string, id: string) => api.delete<{ removed: string; apps: { id: string; name: string }[]; newDefault: { id: string; label: string } | null }>(`/api/orgs/${orgId}/payment-gateways/${id}`),
   apps: (orgId: string, id: string) => api.get<{ apps: { id: string; name: string }[] }>(`/api/orgs/${orgId}/payment-gateways/${id}/apps`),
 };
 
@@ -148,6 +148,18 @@ export function modeOfKey(provider: ProviderInfo | undefined, value: string): Mo
   return null;
 }
 
+/** Which field (and mode) a pasted value belongs in, by its prefix: a Key ID pasted where the secret goes is found. */
+export function fieldOfKey(provider: ProviderInfo | undefined, value: string): { field: ProviderField; mode: Mode } | null {
+  const v = value.trim();
+  if (!provider || !v) return null;
+  for (const f of provider.fields) {
+    for (const mode of ["test", "live"] as Mode[]) {
+      if ((f.prefix[mode] ?? []).some((p) => v.startsWith(p))) return { field: f, mode };
+    }
+  }
+  return null;
+}
+
 /** A field's value against its prefix: "" when it fits, else what is wrong. */
 export function prefixProblem(field: ProviderField, mode: Mode, value: string, testName: string): string {
   const v = value.trim();
@@ -198,7 +210,8 @@ export function suggested<T extends Routable & { status?: GatewayStatus }>(gatew
   const usable = gateways.filter((g) => g.status !== "attention");
   if (!usable.length) return [];
   const pick: T[] = [];
-  const add = (g?: T) => { if (g && !pick.includes(g)) pick.push(g); };
+  // One account per provider: an app cannot take money through two Stripe accounts.
+  const add = (g?: T) => { if (g && !pick.some((p) => p.provider === g.provider)) pick.push(g); };
   if (appCurrency) add(routeFor(usable, appCurrency) ?? undefined);
   add(usable.find((g) => g.isDefault));
   const domestic = usable.find((g) => g.coverage === "domestic");

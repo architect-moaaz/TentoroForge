@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.payment_gateway import PaymentGateway, PaymentGatewayWebhook
@@ -80,19 +80,6 @@ async def payment_env(output_dir: str | Path, org_id: Any, db: AsyncSession, *, 
     return AP.env_for_side(doc, await _rows(db, org_id), side, webhooks=webhooks)
 
 
-async def webhook_secrets(db: AsyncSession, project_id: Any, side: str) -> dict[str, str]:
-    """provider -> the signing secret (PayPal: webhook id) kept for this app and side."""
-    rows = (await db.execute(select(PaymentGatewayWebhook, PaymentGateway).join(
-        PaymentGateway, PaymentGateway.id == PaymentGatewayWebhook.gateway_id).where(
-        PaymentGatewayWebhook.project_id == project_id, PaymentGatewayWebhook.side == side))).all()
-    out: dict[str, str] = {}
-    for hook, gw in rows:
-        value = _open(hook)
-        if value:
-            out[gw.provider] = value
-    return out
-
-
 async def ensure_webhooks(db: AsyncSession, *, project_id: Any, output_dir: str | Path, org_id: Any, side: str,
                           address: str) -> dict[str, Any]:
     """Register (or reuse, or move) the app's webhook at each chosen gateway
@@ -105,6 +92,15 @@ async def ensure_webhooks(db: AsyncSession, *, project_id: Any, output_dir: str 
     if not governs(doc) or not AP.takes_money(doc) or not address:
         return out
     mode = P.LIVE if side == "production" else P.TEST
+    # ONE PUBLISH AT A TIME REGISTERS THIS APP'S WEBHOOKS FOR A SIDE. Two at
+    # once each made an endpoint; the second's row collided, its publish lost
+    # its payment keys, and its endpoint was left at the gateway, failing every
+    # signature. Held until this transaction commits (below).
+    try:
+        if db.get_bind().dialect.name == "postgresql":
+            await db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:k))"), {"k": f"forge-webhooks:{project_id}:{side}"})
+    except Exception:  # noqa: BLE001 — no lock is the old behaviour, not a failed publish
+        logger.warning("[payments] the webhook lock could not be taken", exc_info=True)
     by_id = {str(r.id): r for r in await _rows(db, org_id)}
     for g in AP.section(doc).get("gateways") or []:
         row = by_id.get(str(g.get("gateway")))
@@ -157,7 +153,12 @@ async def _stripe(hook: PaymentGatewayWebhook, keys: dict[str, str], url: str) -
             if resp.status_code == 200:
                 hook.url, hook.status, hook.detail = url, "registered", "Moved to the app's current address."
                 return
-            # Gone at Stripe (deleted by hand): make a new one.
+            # Gone at Stripe (deleted by hand, or the keys are another account's
+            # now): make a new one. Anything else — busy, down — is tried at the
+            # next publish: a new endpoint each time left orphans that count
+            # toward Stripe's 16 and fail every signature.
+            if resp.status_code != 404:
+                raise RuntimeError(f"Stripe answered {resp.status_code} when the endpoint was moved; it is tried again at the next publish")
         form: list[tuple[str, str]] = [("url", url), ("description", "Forge app payments"), ("metadata[forge]", "1")]
         form += [("enabled_events[]", e) for e in AP.WEBHOOK_EVENTS["stripe"]]
         from urllib.parse import urlencode
@@ -199,20 +200,34 @@ async def _paypal(hook: PaymentGatewayWebhook, keys: dict[str, str], url: str, m
         hook.url, hook.status, hook.detail = url, "registered", "Registered with PayPal by Forge."
 
 
-async def setup_for(db: AsyncSession, project_id: Any) -> list[dict[str, Any]]:
+async def setup_for(db: AsyncSession, project_id: Any, *, admin: bool = True, doc: dict | None = None) -> list[dict[str, Any]]:
     """What the app's Payments panel shows about its webhooks: per gateway and
     side, the address, whether Forge registered it, and — for Razorpay, which
-    the owner registers — the secret and events to paste."""
+    the owner registers — the secret and events to paste.
+
+    THE SIGNING SECRET IS AN ADMINISTRATOR'S. With it anyone can sign a
+    "payment captured" the app believes; a member sees that it must be pasted,
+    not what. `doc`: only the gateways the app takes money through now — a
+    gateway it no longer uses has nothing left to paste."""
     rows = (await db.execute(select(PaymentGatewayWebhook, PaymentGateway).join(
         PaymentGateway, PaymentGateway.id == PaymentGatewayWebhook.gateway_id).where(
         PaymentGatewayWebhook.project_id == project_id))).all()
+    chosen = None if doc is None else {str(g.get("gateway")) for g in AP.section(doc).get("gateways") or []}
     out = []
     for hook, gw in rows:
+        if gw.deleted_at is not None or (chosen is not None and str(gw.id) not in chosen):
+            continue
         manual = hook.status == "manual"
-        out.append({"provider": gw.provider, "gateway": str(gw.id), "label": gw.label, "side": hook.side, "url": hook.url,
-                    "status": hook.status, "detail": hook.detail,
-                    **({"secret": _open(hook), "events": AP.WEBHOOK_EVENTS.get(gw.provider, [])} if manual else {})})
+        entry = {"provider": gw.provider, "gateway": str(gw.id), "label": gw.label, "side": hook.side, "url": hook.url,
+                 "status": hook.status, "detail": hook.detail}
+        if manual:
+            entry["events"] = AP.WEBHOOK_EVENTS.get(gw.provider, [])
+            if admin:
+                entry["secret"] = _open(hook)
+            else:
+                entry["secretHidden"] = True
+        out.append(entry)
     return out
 
 
-__all__ = ["ensure_webhooks", "governs", "load_doc", "payment_env", "setup_for", "webhook_secrets"]
+__all__ = ["ensure_webhooks", "governs", "load_doc", "payment_env", "setup_for"]

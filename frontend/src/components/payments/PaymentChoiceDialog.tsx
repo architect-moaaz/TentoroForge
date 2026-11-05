@@ -10,7 +10,7 @@
  * Spec: docs/PAYMENT-GATEWAYS-PLAN.md.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ArrowRight, Check, ExternalLink, Loader2, Plus, Sparkles, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
@@ -51,11 +51,36 @@ export interface PaymentsView {
   payments: AppPayments;
   gateways: Gateway[];
   canManageGateways: boolean;
-  webhooks: Array<{ provider: string; label: string; side: string; url: string; status: string; detail?: string; secret?: string; events?: string[] }>;
+  webhooks: Array<{ provider: string; gateway?: string; label: string; side: string; url: string; status: string; detail?: string; secret?: string;
+    secretHidden?: boolean; events?: string[] }>;
+  /** Whether the published app can take money: each chosen gateway's live keys. */
+  readiness?: { needed: boolean; liveReady: boolean; gateways: ReadinessLine[]; missing: ReadinessLine[] };
   orgId: string;
 }
 
+export interface ReadinessLine { gateway: string; label: string; provider: string; live: boolean; removed: boolean; state: string; currencies: string[] }
+
+/** Decimals a price may carry in each currency (the gateways' own lists). */
+const ZERO_DECIMAL = new Set(["BIF", "CLP", "DJF", "GNF", "JPY", "KMF", "KRW", "MGA", "PYG", "RWF", "UGX", "VND", "VUV", "XAF", "XOF", "XPF"]);
+const THREE_DECIMAL = new Set(["BHD", "IQD", "JOD", "KWD", "LYD", "OMR", "TND"]);
+export const decimalsOf = (c: string) => (ZERO_DECIMAL.has(c) ? 0 : THREE_DECIMAL.has(c) ? 3 : 2);
+
+/** A typed price: its number, or why it cannot be charged (empty is no price in that currency). */
+export function readPrice(text: string, currency: string): { value: number | null; problem: string } {
+  const t = text.trim();
+  if (!t) return { value: null, problem: "" };
+  const n = Number(t);
+  if (!Number.isFinite(n)) return { value: null, problem: `is not a number` };
+  if (n <= 0) return { value: null, problem: `must be more than zero` };
+  const places = decimalsOf(currency);
+  if (Math.round(n * 10 ** places) / 10 ** places !== n) return { value: null, problem: places ? `has more than ${places} decimals` : "has no decimals in " + currency };
+  return { value: n, problem: "" };
+}
+
 export const paymentsKey = (projectId: string) => ["appPayments", projectId] as const;
+
+/** Smith's chip that opens this dialog (the platform's `app_payments.PAYMENT_CHIP`); never sent as words. */
+export const PAYMENT_CHIP = "Choose payment gateways";
 
 export const paymentsApi = {
   get: (projectId: string) => api.get<PaymentsView>(`/api/projects/${projectId}/payments`),
@@ -87,11 +112,22 @@ interface Props {
 
 export function PaymentChoiceDialog({ projectId, appName, mode, onClose, onDone }: Props) {
   const qc = useQueryClient();
-  // In build mode Forge decides first (once per definition; a person's choice is kept).
+  // In build mode Forge decides first (once per definition; a person's choice
+  // is kept); after that the dialog only reads — coming back from Settings
+  // re-reads the gateways, it does not decide again.
+  const decided = useRef(false);
   const view = useQuery({
     queryKey: [...paymentsKey(projectId), mode],
-    queryFn: () => (mode === "build" ? paymentsApi.decide(projectId) : paymentsApi.get(projectId)),
-    refetchOnWindowFocus: true,
+    queryFn: async () => {
+      if (mode === "build" && !decided.current) {
+        const v = await paymentsApi.decide(projectId);
+        decided.current = true;
+        return v;
+      }
+      return paymentsApi.get(projectId);
+    },
+    refetchOnWindowFocus: "always",
+    retry: 0,
   });
   const data = view.data;
   const p = data?.payments;
@@ -99,6 +135,9 @@ export function PaymentChoiceDialog({ projectId, appName, mode, onClose, onDone 
   const [models, setModels] = useState<Model[] | null>(null);
   const [picked, setPicked] = useState<string[] | null>(null);
   const [plans, setPlans] = useState<Plan[] | null>(null);
+  // Prices as typed ("plan id:currency" -> text): a number box that rewrote
+  // "" to 0 could not be cleared, and a −5 was dropped without a word.
+  const [priceText, setPriceText] = useState<Record<string, string>>({});
   const [access, setAccess] = useState<"app" | "none" | null>(null);
   const [problem, setProblem] = useState("");
 
@@ -109,40 +148,62 @@ export function PaymentChoiceDialog({ projectId, appName, mode, onClose, onDone 
     setPlans((x) => x ?? p.plans);
     setAccess((a) => a ?? p.access);
   }, [p]);
-  // A gateway set up in another tab arrives on focus: tick the best ones when nothing is ticked yet.
+  // A gateway set up in another tab arrives on focus: tick the best ones when
+  // nothing is ticked yet. What the owner chose stays chosen — "test payments"
+  // (none) too — and a gateway whose keys were refused is never ticked for them.
   useEffect(() => {
     if (!p || picked !== null || !gateways.length) return;
-    const chosen = p.gateways.map((g) => g.gateway).filter((id) => gateways.some((g) => g.id === id));
-    setPicked(chosen.length ? chosen : suggested(gateways, p.currency).map((g) => g.id));
+    const chosen = p.gateways.map((g) => g.gateway)
+      .filter((id) => gateways.some((g) => g.id === id && g.status !== "attention"));
+    const ownChoice = p.decidedBy === "person" || p.decidedBy === "smith";
+    setPicked(chosen.length || (ownChoice && p.needed) ? chosen : suggested(gateways, p.currency).map((g) => g.id));
   }, [p, gateways, picked]);
 
   const ms = models ?? [];
   const sel = (picked ?? []).map((id) => gateways.find((g) => g.id === id)).filter(Boolean) as Gateway[];
   const covered = new Set(sel.flatMap((g) => g.currencies));
   const currency = p?.currency ?? "USD";
-  const priceCurrencies = useMemo(() => {
-    const list = [currency, ...Array.from(covered).filter((c) => c !== currency)];
-    return sel.length ? list.filter((c) => covered.has(c) || c === currency) : [currency];
-  }, [currency, covered, sel.length]);
   const planList = plans ?? [];
+  // The text of a price box: what was typed, else the plan's own price.
+  const textOf = (pl: Plan, c: string) => priceText[`${pl.id}:${c}`] ?? (pl.prices[c] != null && pl.prices[c] > 0 ? String(pl.prices[c]) : "");
+  // Every currency the gateways take, and every currency a plan is already
+  // priced in — a price never hides behind a currency the list left out.
+  const priceCurrencies = useMemo(() => {
+    const priced = planList.flatMap((pl) => Object.keys(pl.prices).filter((c) => (pl.prices[c] ?? 0) > 0));
+    const list = [currency, ...Array.from(covered), ...priced];
+    return Array.from(new Set(sel.length ? list : [currency, ...priced]));
+  }, [currency, covered, sel.length, planList]);
 
   const warnings: string[] = [];
-  if (sel.length && !covered.has(currency)) warnings.push(`Your app's prices are in ${currency}, and none of these gateways takes ${currency}.`);
+  if (!ms.length) warnings.push("Choose what it sells — one-time payments, subscriptions or both.");
+  // As the server: only one-time payments are priced in the app's own currency.
+  if (sel.length && ms.includes("one_time") && !covered.has(currency))
+    warnings.push(`One-time payments are in ${currency}, and none of these gateways takes ${currency}.`);
   if (ms.includes("subscription")) {
     if (!planList.length) warnings.push("Add at least one plan.");
     for (const pl of planList) {
+      const name = pl.name.trim() || "A plan";
       if (!pl.name.trim()) warnings.push("Every plan needs a name.");
-      if (!Object.values(pl.prices).some((v) => v > 0)) warnings.push(`${pl.name || "A plan"} needs a price.`);
-      const unpayable = Object.entries(pl.prices).filter(([c, v]) => v > 0 && sel.length && !covered.has(c)).map(([c]) => c);
-      if (unpayable.length) warnings.push(`${pl.name || "A plan"} is priced in ${unpayable.join(", ")}, which none of the chosen gateways takes.`);
+      let priced = false;
+      for (const c of priceCurrencies) {
+        const { value, problem: why } = readPrice(textOf(pl, c), c);
+        if (why) warnings.push(`${name}'s price in ${c} ${why}.`);
+        if (value != null) {
+          priced = true;
+          if (sel.length && !covered.has(c)) warnings.push(`${name} is priced in ${c}, which none of the chosen gateways takes.`);
+        }
+      }
+      if (!priced) warnings.push(`${name} needs a price.`);
     }
   }
-  const blocking = warnings.length > 0 || !ms.length;
+  const blocking = warnings.length > 0;
 
   const save = useMutation({
+    // The gateways as shown: one removed in another tab is not sent.
     mutationFn: (needed: boolean) => paymentsApi.choose(projectId, needed
-      ? { needed: true, gateways: picked ?? [], models: ms,
-          plans: ms.includes("subscription") ? planList.map((pl) => ({ ...pl, prices: Object.fromEntries(Object.entries(pl.prices).filter(([, v]) => v > 0)),
+      ? { needed: true, gateways: sel.map((g) => g.id), models: ms,
+          plans: ms.includes("subscription") ? planList.map((pl) => ({ ...pl,
+            prices: Object.fromEntries(priceCurrencies.map((c) => [c, readPrice(textOf(pl, c), c).value]).filter(([, v]) => v != null)),
             features: pl.features.map((f) => f.trim()).filter(Boolean) })) : [],
           access: access ?? "none" }
       : { needed: false, gateways: [] }),
@@ -175,14 +236,22 @@ export function PaymentChoiceDialog({ projectId, appName, mode, onClose, onDone 
           </DialogDescription>
         </DialogHeader>
 
-        {view.isLoading || !p ? (
+        {view.isError && !p ? (
+          // NOTHING TO SHOW IS SAID, with a way on: an error used to spin here for good.
+          <div className="space-y-3 py-6 text-sm" role="alert" data-payment-load-error="">
+            <p className="text-red-700 dark:text-red-300">{(view.error as Error)?.message || "How this app takes money could not be read."}</p>
+            <Button variant="outline" size="sm" onClick={() => void view.refetch()}>Try again</Button>
+          </div>
+        ) : view.isLoading || !p ? (
           <div className="flex items-center gap-3 py-10 text-sm text-muted-foreground" data-payment-deciding="">
             <Loader2 className="h-4 w-4 animate-spin" /> Working out how this app takes money…
           </div>
-        ) : view.isError ? (
-          <p className="text-sm text-red-600">{(view.error as Error)?.message}</p>
         ) : (
           <div className="space-y-6">
+            {view.isError && (
+              <p className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+                The latest gateways could not be read; this shows what was read before.</p>
+            )}
             {p.reason && (
               <p className="flex gap-2 rounded-lg bg-primary/5 p-3 text-sm" data-payment-reason="">
                 <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
@@ -200,7 +269,7 @@ export function PaymentChoiceDialog({ projectId, appName, mode, onClose, onDone 
                             onClick={() => { setProblem(""); setModels(on ? ms.filter((x) => x !== m) : [...ms, m]);
                               if (m === "subscription" && !on && !planList.length) setPlans([{ ...newPlan(currency), name: "Monthly", highlighted: true }]); }}
                             className={`flex items-start gap-2 rounded-lg border p-3 text-left text-sm transition ${on ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-slate-200 hover:border-slate-300 dark:border-slate-800"}`}>
-                      <span className={`mt-0.5 grid h-4 w-4 place-items-center rounded border ${on ? "border-primary bg-primary text-primary-foreground" : "border-slate-300"}`}>{on && <Check className="h-3 w-3" />}</span>
+                      <span className={`mt-0.5 grid h-4 w-4 place-items-center rounded border ${on ? "border-primary bg-primary text-primary-foreground" : "border-slate-300 dark:border-slate-600"}`}>{on && <Check className="h-3 w-3" />}</span>
                       <span><span className="block font-medium">{MODEL_TEXT[m].title}</span><span className="block text-xs text-muted-foreground">{MODEL_TEXT[m].text}</span></span>
                     </button>
                   );
@@ -230,16 +299,17 @@ export function PaymentChoiceDialog({ projectId, appName, mode, onClose, onDone 
                     const on = (picked ?? []).includes(g.id);
                     const broken = g.status === "attention";
                     return (
-                      <button key={g.id} type="button" disabled={broken} aria-pressed={on} data-choose-gateway={g.id} onClick={() => toggleGateway(g)}
+                      // A refused gateway cannot be ticked — but one ticked before can be unticked.
+                      <button key={g.id} type="button" disabled={broken && !on} aria-pressed={on} data-choose-gateway={g.id} onClick={() => toggleGateway(g)}
                               className={`flex items-center gap-3 rounded-lg border p-3 text-left transition disabled:cursor-not-allowed disabled:opacity-60 ${on ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-slate-200 hover:border-slate-300 dark:border-slate-800"}`}>
-                        <span className={`grid h-4 w-4 shrink-0 place-items-center rounded border ${on ? "border-primary bg-primary text-primary-foreground" : "border-slate-300"}`}>{on && <Check className="h-3 w-3" />}</span>
+                        <span className={`grid h-4 w-4 shrink-0 place-items-center rounded border ${on ? "border-primary bg-primary text-primary-foreground" : "border-slate-300 dark:border-slate-600"}`}>{on && <Check className="h-3 w-3" />}</span>
                         <GatewayMark provider={g.provider} size={32} />
                         <span className="min-w-0 flex-1">
                           <span className="block text-sm font-medium">{g.label}{g.isDefault && <span className="ml-1.5 text-xs font-normal text-muted-foreground">default</span>}</span>
                           <span className="block truncate text-xs text-muted-foreground">{coverageWords(g)} · {g.currencies.join(", ")}</span>
                         </span>
-                        <span className={`shrink-0 text-xs ${broken ? "text-amber-700" : g.status === "ready" ? "text-emerald-700" : "text-muted-foreground"}`}>
-                          {broken ? "Fix its keys first" : STATUS_WORDS[g.status]}
+                        <span className={`shrink-0 text-xs ${broken ? "text-amber-700 dark:text-amber-300" : g.status === "ready" ? "text-emerald-700 dark:text-emerald-300" : "text-muted-foreground"}`}>
+                          {broken ? (on ? "Keys refused — untick it or fix its keys" : "Fix its keys first") : STATUS_WORDS[g.status]}
                         </span>
                       </button>
                     );
@@ -272,41 +342,48 @@ export function PaymentChoiceDialog({ projectId, appName, mode, onClose, onDone 
                 </div>
                 {planList.map((pl, i) => (
                   <div key={pl.id} data-plan={i} className="space-y-3 rounded-lg border border-slate-200 p-3 dark:border-slate-800">
-                    <div className="flex gap-2">
-                      <div className="flex-1 space-y-1">
+                    <div className="flex flex-wrap gap-2 sm:flex-nowrap">
+                      <div className="min-w-0 flex-1 space-y-1">
                         <Label htmlFor={`plan-name-${i}`} className="text-xs">Name</Label>
                         <Input id={`plan-name-${i}`} value={pl.name} maxLength={60} placeholder="Pro" onChange={(e) => setPlan(i, { name: e.target.value })} />
                       </div>
                       <div className="w-36 space-y-1">
-                        <Label className="text-xs">Billed</Label>
-                        <select value={`${pl.interval}`} onChange={(e) => setPlan(i, { interval: e.target.value as Plan["interval"], intervalCount: 1 })}
+                        <Label htmlFor={`plan-interval-${i}`} className="text-xs">Billed</Label>
+                        <select id={`plan-interval-${i}`} value={`${pl.interval}`} onChange={(e) => setPlan(i, { interval: e.target.value as Plan["interval"], intervalCount: 1 })}
                                 className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm" data-plan-interval={i}>
                           <option value="month">Every month</option>
                           <option value="year">Every year</option>
                           <option value="week">Every week</option>
+                          <option value="day">Every day</option>
                         </select>
                       </div>
-                      <Button type="button" variant="ghost" size="icon" className="mt-5" aria-label="Remove plan" onClick={() => setPlans(planList.filter((_, j) => j !== i))}>
+                      <Button type="button" variant="ghost" size="icon" className="mt-5" aria-label={`Remove plan ${pl.name || i + 1}`} onClick={() => setPlans(planList.filter((_, j) => j !== i))}>
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      {priceCurrencies.map((c) => (
-                        <div key={c} className="w-32 space-y-1">
-                          <Label className="text-xs">Price in {c}{c !== currency && <span className="text-muted-foreground"> (optional)</span>}</Label>
-                          <Input type="number" min={0} step="0.01" inputMode="decimal" data-plan-price={`${i}:${c}`} value={pl.prices[c] ?? ""}
-                                 onChange={(e) => setPlan(i, { prices: { ...pl.prices, [c]: Number(e.target.value) || 0 } })} />
-                        </div>
-                      ))}
+                      {priceCurrencies.map((c) => {
+                        const id = `plan-price-${i}-${c}`;
+                        const why = readPrice(textOf(pl, c), c).problem;
+                        return (
+                          <div key={c} className="w-32 space-y-1">
+                            <Label htmlFor={id} className="text-xs">Price in {c}{c !== currency && <span className="text-muted-foreground"> (optional)</span>}</Label>
+                            <Input id={id} type="text" inputMode="decimal" data-plan-price={`${i}:${c}`} value={textOf(pl, c)} aria-invalid={Boolean(why)}
+                                   aria-label={`${pl.name || "Plan"} price in ${c}`} placeholder={decimalsOf(c) ? "0." + "0".repeat(decimalsOf(c)) : "0"}
+                                   className={why ? "border-red-400 focus-visible:ring-red-400" : ""}
+                                   onChange={(e) => { setProblem(""); setPriceText((t) => ({ ...t, [`${pl.id}:${c}`]: e.target.value })); }} />
+                          </div>
+                        );
+                      })}
                       <div className="w-28 space-y-1">
-                        <Label className="text-xs">Free trial (days)</Label>
-                        <Input type="number" min={0} max={365} value={pl.trialDays || ""} placeholder="0"
+                        <Label htmlFor={`plan-trial-${i}`} className="text-xs">Free trial (days)</Label>
+                        <Input id={`plan-trial-${i}`} type="number" min={0} max={365} value={pl.trialDays || ""} placeholder="0"
                                onChange={(e) => setPlan(i, { trialDays: Math.max(0, Math.min(365, Number(e.target.value) || 0)) })} />
                       </div>
                     </div>
                     <div className="space-y-1">
-                      <Label className="text-xs">What it includes (one per line)</Label>
-                      <textarea rows={2} value={pl.features.join("\n")} onChange={(e) => setPlan(i, { features: e.target.value.split("\n") })}
+                      <Label htmlFor={`plan-features-${i}`} className="text-xs">What it includes (one per line)</Label>
+                      <textarea id={`plan-features-${i}`} rows={2} value={pl.features.join("\n")} onChange={(e) => setPlan(i, { features: e.target.value.split("\n") })}
                                 className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" placeholder={"Unlimited bookings\nPriority support"} />
                     </div>
                   </div>
@@ -333,7 +410,7 @@ export function PaymentChoiceDialog({ projectId, appName, mode, onClose, onDone 
         )}
 
         <DialogFooter className="gap-2 sm:justify-between">
-          <Button variant="ghost" data-payments-none="" onClick={() => save.mutate(false)} disabled={save.isPending || !p}>
+          <Button variant="ghost" data-payments-none="" onClick={() => save.mutate(false)} disabled={save.isPending || (!p && !view.isError)}>
             {mode === "build" ? "Build without payments" : "Turn payments off"}
           </Button>
           <Button data-payments-save="" onClick={() => save.mutate(true)} disabled={save.isPending || !p || blocking}>

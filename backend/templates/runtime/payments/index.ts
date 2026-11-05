@@ -6,7 +6,9 @@
  * projected into `@/lib/payments-config`); an application made before that
  * reads its one `serves: "take_payment"` integration (`connected.ts`). A
  * gateway whose keys are not in this environment is replaced by the stand-in,
- * which says so — a preview, or the test version without test keys.
+ * which says so — a preview, or the test version without test keys. NEVER in
+ * production: there the stand-in's "Paid" would hand out what was sold for
+ * nothing, so a payment is refused instead (`PaymentsNotReady`).
  *
  * A PAYMENT MOVES ONE WAY. pending → succeeded / failed / cancelled; a failed
  * or cancelled attempt may still succeed (the payer tried again on the same
@@ -68,6 +70,24 @@ export async function secretsFor(provider: string): Promise<Secrets | null> {
   };
 }
 
+/** This copy is the live app (`FORGE_PAYMENTS_SIDE`, written at publish; for an
+ * app published before it, Vercel's own word for its production deployment). */
+export function liveSide(): boolean {
+  const side = String(process.env.FORGE_PAYMENTS_SIDE ?? "").trim().toLowerCase();
+  if (side) return side === "production";
+  return process.env.VERCEL_ENV === "production";
+}
+
+/** A payment the live app cannot take: its gateway's live keys are not set. Its message is for the payer. */
+export class PaymentsNotReady extends Error {
+  constructor(why: string) {
+    super("Payments are not switched on in this app yet, so nothing was charged. Please try again later.");
+    this.name = "PaymentsNotReady";
+    // The owner's reason, in the server's log (the payer is not told how the app is set up).
+    console.error(`[payments] refused in production: ${why}`);
+  }
+}
+
 export interface Chosen { adapter: PaymentAdapter; secrets: Secrets; live: boolean; declared: string | null; gateway: GatewayRef | null; notice?: string }
 
 /** The gateway for a payer paying in `currency` (from `country`, when known), its keys, and whether it is live. */
@@ -75,6 +95,7 @@ export async function gatewayFor(opts: { currency?: string; country?: string | n
   const list = gateways();
   const currency = String(opts.currency || (await currencyOf())).toUpperCase();
   if (!list.length) {
+    if (liveSide()) throw new PaymentsNotReady("no payment gateway is chosen for this app");
     return { adapter: standInAdapter, secrets: { secret: "" }, live: false, declared: null, gateway: null,
       notice: "No payment gateway is connected; a stand-in took the payment and nobody was charged. Choose one under Payments." };
   }
@@ -83,11 +104,13 @@ export async function gatewayFor(opts: { currency?: string; country?: string | n
     ?? list.find((g) => g.isDefault) ?? list[0];
   const adapter = ADAPTERS[gw.provider];
   if (!adapter) {
+    if (liveSide()) throw new PaymentsNotReady(`${gw.label} has no payment adapter`);
     return { adapter: standInAdapter, secrets: { secret: "" }, live: false, declared: gw.provider, gateway: gw,
       notice: `${gw.label} has no payment adapter; a stand-in took the payment.` };
   }
   const secrets = await secretsFor(gw.provider);
   if (!secrets) {
+    if (liveSide()) throw new PaymentsNotReady(`${gw.label}'s live keys are not set — add them in Forge, Settings → Payments, and publish again`);
     return { adapter: standInAdapter, secrets: { secret: "" }, live: false, declared: gw.provider, gateway: gw,
       notice: `Payments go through ${gw.label}, but its keys are not set where this copy runs — a stand-in took the payment and nobody was charged.` };
   }
@@ -171,13 +194,38 @@ function slugsFor(integrationSlug: string): string[] {
  * webhook trigger names it start.
  */
 export async function settle(integrationSlug: string, ev: { type: NormalizedEvent; providerRef: string; paymentId?: string;
-  amountMinor?: number; currency?: string; metadata: Record<string, string> }): Promise<{ paymentId: string | null; event: string; moved: boolean }> {
-  const row = (ev.paymentId ? await ledgerGet(ev.paymentId) : null) ?? await ledgerGet(ev.providerRef)
+  amountMinor?: number; currency?: string; metadata: Record<string, string> }): Promise<{ paymentId: string | null; event: string; moved: boolean; told?: boolean }> {
+  let hinted = ev.paymentId ? await ledgerGet(ev.paymentId) : null;
+  // A HINT NAMES A ROW ONLY WHEN IT IS THE GATEWAY'S OWN ORDER. A Razorpay
+  // payer can write notes on the payment itself: one payment, its notes
+  // naming another order of the same price, would have paid both.
+  if (hinted && ev.type !== "refund.succeeded" && ev.providerRef && hinted.provider_ref && hinted.provider_ref !== ev.providerRef) {
+    console.error(`[payments] an event for ${ev.providerRef} named ${hinted.id}, which is ${hinted.provider_ref}'s — not settled by the name`);
+    hinted = null;
+  }
+  const row = hinted ?? await ledgerGet(ev.providerRef)
     ?? (ev.metadata?.providerPayment ? await ledgerGet(ev.metadata.providerPayment) : null);
   const event = `${integrationSlug}.${ev.type}`;
   if (!row) return { paymentId: null, event, moved: false };
+  // REFUNDED IN FULL WHEN THE REFUNDS ADD UP. Razorpay and PayPal (and the
+  // app's own refund step) report each refund by its id; Stripe reports the
+  // total refunded so far. Two halves refunded are the whole.
+  let refundTotal = 0;
+  if (ev.type === "refund.succeeded") {
+    const meta: any = row.metadata ?? {};
+    const refundId = ev.metadata?.refundId;
+    if (refundId) {
+      const seen: Record<string, number> = { ...(meta.refunds ?? {}) };
+      if (seen[refundId] == null) seen[refundId] = Number(ev.amountMinor ?? 0) || Number(row.amount_minor);
+      await ledgerSet(row.id, { metadata: { refunds: seen } });
+      refundTotal = Object.values(seen).reduce((a, b) => a + Number(b || 0), 0);
+    } else {
+      refundTotal = Number(ev.amountMinor ?? 0) || Number(row.amount_minor);
+    }
+    refundTotal = Math.max(refundTotal, Number(meta.refundedMinor ?? 0));
+  }
   let status: PaymentStatus | null = ev.type === "payment.succeeded" ? "succeeded" : ev.type === "payment.failed" ? "failed"
-    : ev.type === "refund.succeeded" ? (ev.amountMinor && ev.amountMinor < Number(row.amount_minor) ? "partially_refunded" : "refunded") : null;
+    : ev.type === "refund.succeeded" ? (refundTotal < Number(row.amount_minor) ? "partially_refunded" : "refunded") : null;
   if (!status) return { paymentId: row.id, event, moved: false };
   // PAID IS PAID ONLY AT THE PRICE: a gateway's word for a different amount or
   // currency than the ledger's is not this payment succeeding.
@@ -192,18 +240,30 @@ export async function settle(integrationSlug: string, ev: { type: NormalizedEven
     if (Object.keys(keep).length) await ledgerSet(row.id, { metadata: keep });
   }
   const moved = await ledgerMove(row.id, status, ev.type === "refund.succeeded" ? undefined : ev.providerRef);
-  if (!moved) return { paymentId: row.id, event, moved: false };
+  if (!moved) {
+    // ALREADY THERE, PERHAPS NEVER TOLD: the move and the event are two
+    // writes, and an event lost between them left a paid order unfulfilled
+    // for good. Told again; its dedupe key keeps it to once.
+    const now = await ledgerGet(row.id);
+    if (!now || now.status !== status) return { paymentId: row.id, event, moved: false };
+  }
   const { emitEventAndProcess } = await import("@/lib/events/bus");
   const payload = { paymentId: row.id, entity: row.entity ?? null, entityId: row.entity_id ?? null,
     amount: toMajor(Number(row.amount_minor), row.currency), currency: row.currency, status, providerRef: ev.providerRef,
     provider: row.provider, event: ev.type, ...(row.actor_id ? { user: { id: row.actor_id } } : {}) };
+  // One refund is one event: a second partial refund of the same payment is
+  // news too (its gateway id, or its amount, tells it apart).
+  const which = ev.type === "refund.succeeded" ? `:${ev.metadata?.refundId ?? ev.amountMinor ?? ""}` : "";
+  let told = true;
   for (const slug of slugsFor(integrationSlug)) {
-    await emitEventAndProcess(`${slug}.${ev.type}`, {
+    const got = await emitEventAndProcess(`${slug}.${ev.type}`, {
       entity: row.entity ?? slug, entityId: row.entity_id ?? null, payload: { ...payload, integration: slug },
-      dedupeKey: `${slug}:${ev.type}:${row.id}`,
+      dedupeKey: `${slug}:${ev.type}:${row.id}${which}`,
     });
+    if (got === null) told = false;
   }
-  return { paymentId: row.id, event, moved: true };
+  if (!told) console.error(`[payments] ${row.id} is ${status}, and the application could not be told yet — the gateway's next delivery tells it`);
+  return { paymentId: row.id, event, moved, told };
 }
 
 /**
@@ -212,7 +272,7 @@ export async function settle(integrationSlug: string, ev: { type: NormalizedEven
  * settle it. Works with no webhook at all — a preview on a laptop, or before
  * the owner pasted Razorpay's webhook in.
  */
-export async function confirmPayment(paymentId: string, params: Record<string, string>): Promise<{ row: LedgerRow | null; status: PaymentStatus | "unknown"; error?: string }> {
+export async function confirmPayment(paymentId: string, params: Record<string, string>): Promise<{ row: LedgerRow | null; status: PaymentStatus | "unknown"; error?: string; refused?: boolean }> {
   const row = await ledgerGet(paymentId);
   if (!row) return { row: null, status: "unknown", error: "no such payment" };
   if (row.status !== "pending" && row.status !== "failed" && row.status !== "cancelled") return { row, status: row.status };
@@ -232,7 +292,10 @@ export async function confirmPayment(paymentId: string, params: Record<string, s
     return { row: after, status: after?.status ?? found.status };
   } catch (err) {
     console.error(`[payments] confirming ${row.id} with ${row.provider} failed:`, err);
-    return { row, status: row.status, error: String((err as Error)?.message ?? err) };
+    const said = String((err as Error)?.message ?? err);
+    // REFUSED is not "not known yet": an answer that is not the gateway's
+    // (a forged signature, another order's payment) is refused, never waited on.
+    return { row, status: row.status, error: said, refused: /did not check out|belongs to another|not this payment/i.test(said) };
   }
 }
 
@@ -254,6 +317,9 @@ export async function onProviderCall(provider: string, integrationSlug: string, 
       return { ok: true, status: 200, body: { accepted: true, ...out, eventId: v.eventId ?? null } };
     }
     const out = await settle(integrationSlug, ev);
+    // Settled but not yet told: 500, so the gateway sends it again and the
+    // next delivery tells the application.
+    if (out.told === false) return { ok: false, status: 500, body: { error: "the payment was recorded; the application could not be told yet" } };
     return { ok: true, status: out.moved ? 202 : 200, body: { accepted: true, ...out, eventId: v.eventId ?? null } };
   } catch (err) {
     // 500 so the gateway tries again: nothing was settled.

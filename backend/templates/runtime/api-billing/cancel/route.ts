@@ -4,7 +4,7 @@
  */
 import { NextResponse } from "next/server";
 import { initializeRuntime } from "@/lib/runtime-loader";
-import { accessCookie, person } from "../_session";
+import { accessCookie, fromThisApp, person } from "../_session";
 
 export const runtime = "nodejs";
 
@@ -12,13 +12,17 @@ export const runtime = "nodejs";
 const iso = (v: unknown) => (v ? new Date(v as string).toISOString() : null);
 
 export async function POST(req: Request) {
+  if (!fromThisApp(req)) return NextResponse.json({ error: "This can only be done from the app's own billing page." }, { status: 403 });
   await initializeRuntime();
   const who = await person();
   if (!who) return NextResponse.json({ error: "Sign in first." }, { status: 401 });
   const body: any = await req.json().catch(() => ({}));
   const billing = await import("@/lib/payments/billing");
   const row = await billing.current(who.id);
-  if (!row || !billing.grants(row)) return NextResponse.json({ error: "You have no active subscription." }, { status: 404 });
+  // A plan the gateway still charges can be ended, its grace over or not
+  // (a card retried, a plan paused).
+  const going = row && (billing.grants(row) || ["active", "trialing", "past_due", "paused"].includes(String(row.status)));
+  if (!row || !going) return NextResponse.json({ error: "You have no active subscription." }, { status: 404 });
   try {
     const after = await billing.cancel(row, !body?.now);
     const res = NextResponse.json({ ok: true, status: after.status, cancelAtPeriodEnd: after.cancel_at_period_end, currentPeriodEnd: iso(after.current_period_end) });

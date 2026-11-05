@@ -41,6 +41,9 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 app = FastAPI(title="Forge payments emulator")
+# The Checkout window's stand-in is called from the app's own page.
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 BASE = os.environ.get("EMULATOR_BASE", "http://127.0.0.1:6599")
 # Ids never come round again, across restarts too, as a gateway's never do:
 # counted from 1000, an id from before a restart named another subscription,
@@ -48,7 +51,7 @@ BASE = os.environ.get("EMULATOR_BASE", "http://127.0.0.1:6599")
 _ids = itertools.count(int(time.time() * 1000))
 S: dict[str, dict[str, Any]] = {"sessions": {}, "subs": {}, "prices": {}, "hooks": {}, "rz_orders": {}, "rz_payments": {},
                                  "rz_plans": {}, "rz_subs": {}, "pp_orders": {}, "pp_products": {}, "pp_plans": {}, "pp_subs": {},
-                                 "sent": {}}
+                                 "sent": {}, "rz_keys": {}}
 LOG: list[dict] = []
 
 
@@ -222,6 +225,18 @@ async def st_session(request: Request):
     return {k: v for k, v in S["sessions"][cs].items() if k not in ("price", "sub_meta", "trial")}
 
 
+@app.post("/stripe/v1/checkout/sessions/{cs}/expire")
+async def st_expire_session(cs: str):
+    s = S["sessions"].get(cs)
+    if not s:
+        return JSONResponse({"error": {"message": "No such checkout.session"}}, 404)
+    if s.get("status") != "open":
+        return JSONResponse({"error": {"type": "invalid_request_error",
+                                       "message": "Only Checkout Sessions with a status in [\"open\"] can be expired."}}, 400)
+    s["status"] = "expired"
+    return {k: v for k, v in s.items() if k not in ("price", "sub_meta", "trial")}
+
+
 @app.get("/stripe/v1/checkout/sessions/{cs}")
 async def st_get_session(cs: str):
     s = S["sessions"].get(cs)
@@ -313,8 +328,10 @@ async def st_pay(cs: str, request: Request):
     form = await body_of(request)
     s = S["sessions"][cs]
     if form.get("outcome") != "paid":
-        s["status"] = "expired"
+        # As Stripe: leaving the page leaves the session open (it expires a day later).
         return RedirectResponse(s["cancel_url"], 303)
+    if s.get("status") != "open":
+        return JSONResponse({"error": {"message": "This Checkout Session is no longer active."}}, 400)
     s["status"], s["payment_status"] = "complete", "paid"
     if s["mode"] == "subscription":
         sid = nid("sub_")
@@ -360,6 +377,55 @@ def _rz_key_secret(request: Request) -> tuple[str, str]:
     raw = base64.b64decode(request.headers.get("authorization", "Basic Og==")[6:]).decode()
     key_id, _, secret = raw.partition(":")
     return key_id, secret
+
+
+@app.middleware("http")
+async def _rz_remember_keys(request: Request, call_next):
+    # Razorpay knows each key id's secret; the emulator learns it from the
+    # app's own server calls, so its Checkout window can sign as Razorpay does
+    # without the secret ever reaching a browser.
+    if request.url.path.startswith("/razorpay/v1/") and request.headers.get("authorization", "").startswith("Basic "):
+        key_id, secret = _rz_key_secret(request)
+        if key_id and secret:
+            S["rz_keys"][key_id] = secret
+    return await call_next(request)
+
+
+#: Razorpay's Checkout window, for a browser: `new Razorpay(options).open()`
+#: shows the order or subscription with Pay and Cancel; Pay answers the
+#: handler with what Razorpay's own window would (`/razorpay/_checkout`).
+CHECKOUT_JS = """
+(function () {
+  var BASE = %s;
+  function Razorpay(o) { this.o = o; this.h = {}; }
+  Razorpay.prototype.on = function (e, f) { this.h[e] = f; };
+  Razorpay.prototype.open = function () {
+    var o = this.o, self = this, box = document.createElement("div");
+    box.setAttribute("data-emulated-razorpay", "1");
+    box.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:99999";
+    box.innerHTML = '<div style="background:#fff;padding:24px;border-radius:12px;font:14px system-ui;min-width:260px">' +
+      '<h2 style="margin:0 0 8px">Razorpay (emulated)</h2><p style="margin:0 0 16px">' +
+      (o.subscription_id ? "Subscription " + o.subscription_id : "Order " + o.order_id + " · " + o.amount + " " + o.currency) + '</p>' +
+      '<button data-pay style="margin-right:8px">Pay</button><button data-fail style="margin-right:8px">Fail</button><button data-cancel>Cancel</button></div>';
+    document.body.appendChild(box);
+    box.querySelector("[data-cancel]").onclick = function () { box.remove(); o.modal && o.modal.ondismiss && o.modal.ondismiss(); };
+    box.querySelector("[data-fail]").onclick = function () {
+      self.h["payment.failed"] && self.h["payment.failed"]({ error: { description: "The bank declined this payment (emulated)." } });
+    };
+    box.querySelector("[data-pay]").onclick = function () {
+      fetch(BASE + "/razorpay/_checkout", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: o.key, order_id: o.order_id, subscription_id: o.subscription_id }) })
+        .then(function (r) { return r.json(); }).then(function (res) { box.remove(); o.handler && o.handler(res); });
+    };
+  };
+  window.Razorpay = Razorpay;
+})();
+"""
+
+
+@app.get("/razorpay/checkout.js")
+async def rz_checkout_js():
+    return Response(CHECKOUT_JS % json.dumps(BASE), media_type="application/javascript")
 
 
 @app.get("/razorpay/v1/orders")
@@ -414,7 +480,10 @@ async def rz_refund(pid: str):
 async def rz_checkout(request: Request):
     """Razorpay's Checkout window: the payer pays an order (or authorises a subscription)."""
     b = await request.json()
-    secret = b["key_secret"]
+    # A test hands the secret; the browser's window hands only the key id.
+    secret = b.get("key_secret") or S["rz_keys"].get(str(b.get("key") or ""), "")
+    if not secret:
+        return JSONResponse({"error": {"code": "BAD_REQUEST_ERROR", "description": "unknown key"}}, 400)
     pid = nid("pay_")
     if b.get("order_id"):
         order = S["rz_orders"][b["order_id"]]

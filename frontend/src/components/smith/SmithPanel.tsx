@@ -99,7 +99,7 @@ import {
 import { authFetch } from "@/lib/api";
 import { useSmithDraftStore } from "@/stores/smithDraft";
 import { SecretCard } from "./SecretCard";
-import { PaymentChoiceDialog, paymentsApi } from "@/components/payments/PaymentChoiceDialog";
+import { PaymentChoiceDialog, paymentsApi, PAYMENT_CHIP } from "@/components/payments/PaymentChoiceDialog";
 
 /** §107 step 1 — what Smith says before the user says anything. */
 type Greeting = {
@@ -818,7 +818,8 @@ export function SmithPanel({
       })),
     ]);
     // THE BUILD WAITS FOR THE PAYMENT CHOICE: the dialog opens on Smith's word.
-    if (fresh.some((x) => x.paymentChoice)) setPaymentDialog((d) => d ?? { modules: null });
+    // The modules the person asked to build come back with the server's question (they were lost: the whole app was built).
+    if (fresh.some((x) => x.paymentChoice)) setPaymentDialog((d) => d ?? { modules: lastModules.current, mode: "build" });
   }, [run.messages]);
 
   // Split out so a turn can be sent by something other than the composer —
@@ -968,15 +969,18 @@ export function SmithPanel({
   // HOW IT TAKES MONEY, ASKED AS THE BUILD STARTS. Forge decides once per
   // definition whether the app takes payments; when it does and nobody has
   // chosen the gateways, the dialog opens and the build waits for it.
-  const [paymentDialog, setPaymentDialog] = useState<{ modules: string[] | null } | null>(null);
+  // "edit": opened from Smith's chip after a change — saving does not start a build.
+  const [paymentDialog, setPaymentDialog] = useState<{ modules: string[] | null; mode: "build" | "edit" } | null>(null);
   const [checkingPayments, setCheckingPayments] = useState(false);
+  const lastModules = useRef<string[] | null>(null);
   const buildApp = async (modules: string[] | null) => {
     if (!projectId) return;
+    lastModules.current = modules;
     setCheckingPayments(true);
     try {
       const v = await paymentsApi.decide(projectId);
       if (v.payments.needed && !v.payments.decided) {
-        setPaymentDialog({ modules });
+        setPaymentDialog({ modules, mode: "build" });
         return;
       }
     } catch {
@@ -1251,7 +1255,7 @@ export function SmithPanel({
 
             {m.paymentChoice && i === messages.length - 1 && (
               <button type="button" disabled={busy} data-open-payment-choice=""
-                      onClick={() => setPaymentDialog({ modules: null })}
+                      onClick={() => setPaymentDialog({ modules: lastModules.current, mode: "build" })}
                       className="mt-2 rounded border border-current/25 px-2.5 py-1 text-xs font-medium hover:bg-current/10">
                 Choose payment gateways
               </button>
@@ -1293,7 +1297,9 @@ export function SmithPanel({
                       <button
                         key={opt}
                         disabled={busy}
-                        onClick={() => answerQuestion(i, opt)}
+                        // Smith's "Choose payment gateways" OPENS the dialog: sent as
+                        // words it was a turn that asked the same question again.
+                        onClick={() => (opt === PAYMENT_CHIP ? setPaymentDialog({ modules: null, mode: "edit" }) : answerQuestion(i, opt))}
                         className="rounded border border-current/25 px-2 py-0.5 text-xs hover:bg-current/10"
                       >
                         {opt}
@@ -1314,11 +1320,15 @@ export function SmithPanel({
           <PaymentChoiceDialog
             projectId={projectId}
             appName={String(((blueprint as { application?: { name?: unknown } } | null | undefined)?.application?.name) ?? "") || undefined}
-            mode="build"
+            mode={paymentDialog.mode}
             onClose={() => setPaymentDialog(null)}
             onDone={(v) => {
               const pending = paymentDialog;
               setPaymentDialog(null);
+              if (pending.mode === "edit") {
+                toast.success(v.payments.needed ? "Payments saved. The app's preview uses them now." : "Payments turned off.");
+                return;
+              }
               toast.success(v.payments.needed
                 ? `Payments set: ${v.payments.gateways.map((g) => g.label).join(" and ") || "a test checkout until a gateway is chosen"}. Building now.`
                 : "No payments for now. Building now.");

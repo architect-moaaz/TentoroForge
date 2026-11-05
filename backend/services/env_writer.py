@@ -193,6 +193,16 @@ async def write_env_local_from_platform(
     except Exception as exc:  # noqa: BLE001 — the rest of the environment is still written
         log.warning("[env_writer] payment keys unavailable: %s", exc)
         pay = None
+        # FAILING CLOSED for an app whose payments are Settings → Payments':
+        # every payment variable is removed rather than left as it was (an old
+        # live key from Integrations would have stayed in the preview).
+        try:
+            from services.payments import app_payments as _AP
+            from services.payments.webhooks import governs, load_doc
+            if governs(load_doc(output_dir)):
+                pay = {name: None for name in _AP.ALL_ENV}
+        except Exception:  # noqa: BLE001
+            pass
     if pay is not None:
         payment_names = set(pay)
         for k, v in pay.items():

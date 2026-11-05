@@ -36,7 +36,12 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
     problem = "Your plan could not be read just now. Refresh the page in a moment.";
   }
   const list = billing.priceList(countryOf(h));
-  const gateways = (PAYMENTS?.gateways ?? []).map((g: any) => String(g.label || g.provider));
+  // By the gateway's own name: "Stripe Global" is the owner's label for an account, not what a payer knows.
+  const NAMES: Record<string, string> = { stripe: "Stripe", razorpay: "Razorpay", paypal: "PayPal" };
+  const gateways = Array.from(new Set((PAYMENTS?.gateways ?? []).map((g: any) => NAMES[String(g.provider)] ?? String(g.label || g.provider))));
+  // Where they were going, back inside this app only.
+  const nextRaw = one("next");
+  const next = nextRaw.startsWith("/") && !nextRaw.startsWith("//") && !nextRaw.includes("\\") ? nextRaw : "";
   return (
     <BillingClient
       plans={billing.plans()}
@@ -50,7 +55,7 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
         currentPeriodEnd: row.current_period_end ? new Date(row.current_period_end).toISOString() : null,
         cancelAtPeriodEnd: Boolean(row.cancel_at_period_end) } : null}
       flags={{ welcome: one("welcome") === "1", pending: one("pending") === "1", required: one("required") === "1",
-        cancelled: one("cancelled") === "1", problem: one("problem"), next: one("next") }}
+        cancelled: one("cancelled") === "1", problem: one("problem"), next }}
       readProblem={problem}
     />
   );

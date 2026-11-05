@@ -430,8 +430,11 @@ def test_a_smith_change_that_makes_the_app_take_money_asks_how(tmp_path, monkeyp
 def test_smith_sets_payments_up_from_words_through_the_orgs_gateways(tmp_path, monkeypatch):
     from services.smith import payments_setup as S
     svc = _svc(tmp_path, "A coaching app.", currency="INR")
-    rzp = _row("razorpay", label="Razorpay India", coverage="domestic", home="IN", currencies=["INR"])
-    stripe = _row("stripe", label="Stripe Global", currencies=["USD", "INR"])
+    # Connected as an admin connects them: test keys, checked.
+    rzp = _row("razorpay", label="Razorpay India", coverage="domestic", home="IN", currencies=["INR"],
+               test={"key_id": "rzp_test_" "AbCdEf123456", "key_secret": "s3cret"})
+    stripe = _row("stripe", label="Stripe Global", currencies=["USD", "INR"], test={"secret_key": "sk_test_" "51Abc"})
+    rzp.checks = stripe.checks = {"test": {"ok": True}}
     monkeypatch.setattr(S, "_org_gateways", lambda _o: [rzp, stripe])
     asked = S.run(str(tmp_path), change="let people subscribe")
     assert not asked["applied"] and asked["options"] == [AP.PAYMENT_CHIP] and "Razorpay India" in asked["reason"]
@@ -521,6 +524,113 @@ async def test_webhooks_are_registered_once_and_moved_with_the_address(tmp_path,
         stored = (await db.execute(select(PaymentGatewayWebhook))).scalars().all()
         assert all("whsec_from_stripe" not in (h.secret_ct or "") for h in stored), "secrets are sealed"
         setup = await W.setup_for(db, project_id)
+        member = await W.setup_for(db, project_id, admin=False)
     manual = next(s for s in setup if s["provider"] == "razorpay")
     assert manual["secret"] == first["secrets"]["razorpay"] and "subscription.charged" in manual["events"]
     assert "secret" not in next(s for s in setup if s["provider"] == "stripe"), "a registered secret is never shown"
+    told = next(s for s in member if s["provider"] == "razorpay")
+    assert "secret" not in told and told["secretHidden"] is True and told["events"], \
+        "a member is told the webhook must be pasted, never the secret that signs payments"
+
+
+# --------------------------------------------------------------------------- #
+# Brutal round 1: what an owner, a payer and the live app must never get wrong
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.parametrize("prices,said", [
+    ({"USD": -5}, "more than zero"), ({"USD": 0}, "more than zero"), ({"USD": "abc"}, "not a number"),
+    ({"USD": 5.999}, "Use 6.00"), ({"JPY": 500.5}, "Use 500"), ({"KWD": 1.2555}, "Use 1.256"),
+])
+def test_a_price_that_cannot_be_charged_is_said_never_dropped(tmp_path, prices, said):
+    svc = _svc(tmp_path, "A members' club.", currency="USD")
+    cur = next(iter(prices))
+    with pytest.raises(AP.ChoiceError, match=said):
+        AP.choose(svc, gateways=[_row("stripe", currencies=[cur, "USD"])], needed=True, models=["subscription"],
+                  plans=[{"name": "Gold", "interval": "month", "prices": prices}])
+
+
+def test_three_decimal_currencies_keep_their_fils():
+    assert N.clean_plans([{"name": "Gold", "prices": {"KWD": 1.255, "JPY": 500}}], "KWD")[0]["prices"] == {"KWD": 1.255, "JPY": 500}
+
+
+def test_razorpay_is_not_asked_to_bill_daily(tmp_path):
+    svc = _svc(tmp_path, "A gym.", currency="INR")
+    with pytest.raises(AP.ChoiceError, match="at most once a week"):
+        AP.choose(svc, gateways=[_row("razorpay", currencies=["INR"])], needed=True, models=["subscription"],
+                  plans=[{"name": "Day pass", "interval": "day", "prices": {"INR": 99}}])
+
+
+@pytest.mark.parametrize("brief,needed", [
+    ("Free to use for browsing classes; members pay ₹999 a month", True),
+    ("free for everyone during the trial, then $49 per month", True),
+    ("A gym members portal to book classes. No payments — members pay at the front desk.", False),
+    ("A team task board, completely free, no payments.", False),
+])
+def test_a_free_part_does_not_decide_the_whole_app(tmp_path, brief, needed):
+    svc = _svc(tmp_path, brief, currency="INR")
+    out = N.decide(svc.doc, provider=lambda _p: (_ for _ in ()).throw(RuntimeError("no model")))
+    assert out["needed"] is needed, out
+
+
+def test_the_live_side_is_told_it_is_live_and_live_readiness_is_checked_keys(tmp_path):
+    svc = _svc(tmp_path, "A shop.", currency="USD")
+    test_only = _row("stripe", currencies=["USD"], test={"secret_key": "sk_test_" "51Abc"})
+    test_only.checks = {"test": {"ok": True}}
+    AP.choose(svc, gateways=[test_only], needed=True, models=["one_time"])
+    doc = BlueprintService.load(output_dir=tmp_path).doc
+    prod = AP.env_for_side(doc, [test_only], "production")
+    assert prod[AP.SIDE_ENV] == "production" and prod["STRIPE_SECRET_KEY"] is None, "no live keys: none shipped, and the app knows it is live"
+    assert AP.env_for_side(doc, [test_only], "test")[AP.SIDE_ENV] == "test"
+    ready = AP.readiness(doc, [test_only])
+    assert ready["needed"] and not ready["liveReady"] and ready["missing"][0]["state"] == "test_only"
+    unchecked = _row("stripe", currencies=["USD"], live={"secret_key": "sk_live_" "51Abc"})
+    unchecked.id = test_only.id
+    unchecked.checks = {"live": {"ok": False, "reachable": False}}
+    assert not AP.readiness(doc, [unchecked])["liveReady"], "live keys never checked may be sandbox keys: not ready"
+    unchecked.checks = {"live": {"ok": True}}
+    assert AP.readiness(doc, [unchecked])["liveReady"]
+
+
+def test_a_role_people_choose_at_sign_up_is_never_an_operator_who_skips_the_plan(tmp_path):
+    svc = _svc(tmp_path, "A property app.", currency="USD")
+    svc.doc["roles"] = [{"id": "ROLE-001", "name": "Admin"}, {"id": "ROLE-002", "name": "Owner"}]
+    svc.doc.setdefault("security", {})["signupRoles"] = ["ROLE-002"]
+    ops = AP._operators(svc.doc)
+    assert "owner" not in ops and "admin" in ops
+
+
+def test_payments_turned_off_retire_the_old_payment_service(tmp_path):
+    svc = _svc(tmp_path, "A shop.", currency="USD")
+    AP.choose(svc, gateways=[_row("stripe", currencies=["USD"])], needed=True, models=["one_time"])
+    svc = BlueprintService.load(output_dir=tmp_path)
+    AP.choose(svc, gateways=[], needed=False)
+    rows = [r for r in BlueprintService.load(output_dir=tmp_path).doc.get("integrations") or [] if r.get("serves") == AP.SERVES]
+    assert rows and all(r["status"] == "DEPRECATED" for r in rows)
+
+
+def test_another_organisations_copy_of_a_template_chooses_its_own_gateways():
+    from services.project_templates import for_another_organisation
+    doc = {"payments": {"needed": True, "models": ["subscription"], "decidedBy": "person", "basis": "x",
+                        "gateways": [{"gateway": "g-of-org-a", "provider": "razorpay", "label": "Acme India"}],
+                        "plans": [{"name": "Pro"}], "access": "app", "reason": "You chose."}}
+    out = for_another_organisation(doc)["payments"]
+    assert "gateways" not in out and "decidedBy" not in out and out["plans"] == [{"name": "Pro"}]
+
+
+@pytest.mark.parametrize("asked,off", [
+    ("Don't forget to add a Pro plan with payments", False), ("remove the old billing page and charge through Razorpay", False),
+    ("do not charge for the trial, add a monthly plan at 499 rupees", False), ("stop taking payments", True), ("make it free", True),
+])
+def test_smith_turns_payments_off_only_when_asked_to(asked, off):
+    from services.smith import payments_setup as S
+    assert bool(S._OFF.search(asked) and not S._ADDS.search(asked) and not N.plans_in_words(asked, "USD")) is off
+
+
+def test_smith_never_chooses_a_gateway_whose_keys_were_refused(tmp_path, monkeypatch):
+    from services.smith import payments_setup as S
+    _svc(tmp_path, "A coaching app.", currency="INR")
+    broken = _row("razorpay", label="Razorpay India", currencies=["INR"], test={"key_id": "rzp_test_" "AbC", "key_secret": "x"})
+    broken.checks = {"test": {"ok": False, "error": "refused"}}
+    monkeypatch.setattr(S, "_org_gateways", lambda _o: [broken])
+    out = S.run(str(tmp_path), change="take payments through razorpay")
+    assert not out["applied"] and "refused" in out["reason"]

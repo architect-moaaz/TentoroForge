@@ -130,7 +130,7 @@ export const stripeAdapter: PaymentAdapter = {
     }
     if (!intent) throw new Error("the payment has no intent to refund (not paid?)");
     const refund = await call("POST", "/refunds", secrets.secret, { payment_intent: intent,
-      ...(input.amountMinor ? { amount: input.amountMinor } : {}) });
+      ...(input.amountMinor ? { amount: input.amountMinor } : {}) }, input.idempotencyKey);
     const st = String(refund.status);
     return { refundId: String(refund.id), status: st === "succeeded" ? "succeeded" : st === "failed" ? "failed" : "pending" };
   },
@@ -236,6 +236,12 @@ export const stripeAdapter: PaymentAdapter = {
         return { status: String(session?.status) === "expired" ? "expired" : "incomplete", currentPeriodEnd: null, cancelAtPeriodEnd: false, providerRef };
       }
       return snapshot(sub);
+    },
+    async abandon(providerRef, secrets) {
+      // An open Checkout Session is expired; one already complete or expired answers 400, which is fine.
+      if (!providerRef.startsWith("cs_")) return;
+      try { await call("POST", `/checkout/sessions/${encodeURIComponent(providerRef)}/expire`, secrets.secret, {}); }
+      catch (err: any) { if (Number(err?.status) !== 400) throw err; }
     },
     async cancel(providerRef, atPeriodEnd, secrets) {
       const sub = await subscriptionOf(providerRef, secrets.secret);

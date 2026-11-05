@@ -42,6 +42,12 @@ _NO = re.compile(
     r"(?:any\s+)?(?:payments?|money|fees?|subscriptions?)\b"
     r"|\bfree\s+(?:to\s+use|of\s+charge|for\s+everyone|for\s+all)\b|\b(?:100%|completely|entirely|totally)\s+free\b",
     re.I)
+_OFFLINE = re.compile(
+    r"\b(?:pay(?:s|ing)?|paid|payments?|charged?)\s+(?:(?:at|in|on|by)\s+(?:the\s+)?(?:front\s+desk|counter|reception|venue|door|"
+    r"person|cash|cheque|check|store|shop|site|location|bank\s+transfer)|offline|in\s+cash|outside\s+(?:the\s+)?app)\b", re.I)
+#: Someone paying, in any words: beside a "free"/"no payments", it makes the
+#: decline a part of the app's ("free to list, students pay per session").
+_PAYING = re.compile(r"\b(?:pay(?:s|ing)?|paid|purchas(?:e|es|ing)|buy(?:s|ing)?|charged?|fees?|prices?|priced|tickets?|deposits?)\b", re.I)
 _SUBSCRIPTION_WORDS = re.compile(
     r"\b(?:subscri(?:be|bers?|ption|ptions|bing)|membership(?:s)?|monthly\s+(?:plan|fee|membership|subscription)|"
     r"yearly\s+(?:plan|fee)|annual\s+(?:plan|fee|membership)|premium\s+(?:plan|tier|members?|features?)|paid\s+(?:plan|tier)s?|"
@@ -176,6 +182,16 @@ def _slug(text: str, used: set[str]) -> str:
     return slug
 
 
+#: Currencies with no minor unit, and with three (the gateways' own lists).
+ZERO_DECIMAL = frozenset({"BIF", "CLP", "DJF", "GNF", "JPY", "KMF", "KRW", "MGA", "PYG", "RWF", "UGX", "VND", "VUV", "XAF", "XOF", "XPF"})
+THREE_DECIMAL = frozenset({"BHD", "IQD", "JOD", "KWD", "LYD", "OMR", "TND"})
+
+
+def decimals(currency: str) -> int:
+    c = str(currency or "").upper()
+    return 0 if c in ZERO_DECIMAL else 3 if c in THREE_DECIMAL else 2
+
+
 def clean_plans(raw: Any, currency: str, *, limit: int = 3) -> list[dict]:
     """Plans as the Blueprint holds them, from whatever shape was proposed
     (a suggestion keeps three; a person may keep up to eight)."""
@@ -189,14 +205,14 @@ def clean_plans(raw: Any, currency: str, *, limit: int = 3) -> list[dict]:
             for k, v in p["prices"].items():
                 try:
                     if re.fullmatch(r"[A-Z]{3}", str(k)) and float(v) > 0:
-                        prices[str(k)] = round(float(v), 2)
+                        prices[str(k)] = round(float(v), decimals(str(k)))
                 except (TypeError, ValueError):
                     continue
         else:
             try:
                 price = float(p.get("price"))
                 if price > 0:
-                    prices[currency] = round(price, 2)
+                    prices[currency] = round(price, decimals(currency))
             except (TypeError, ValueError):
                 pass
         if not prices:
@@ -339,8 +355,20 @@ def decide(doc: dict, *, provider: Callable[[str], str] | None = None) -> dict[s
     sig = signals(doc)
     currency = app_currency(doc)
     if sig["declined"]:
-        return {"needed": False, "models": [], "plans": [], "access": "none", "by": "words",
-                "reason": f"You said “{sig['declined']}”, so the app takes no payments."}
+        # "NO PAYMENTS" DECIDES ONLY WHEN NOTHING ELSE TAKES MONEY. "Free to use
+        # for browsing; members pay ₹999 a month" and "staff have no
+        # subscription" decline a part, not the app: with a checkout, a priced
+        # record, a price, or money words outside the declining phrase, the
+        # whole request is read (the model is told to say "free" where it is).
+        # Money paid OUTSIDE the app ("members pay at the front desk", "paid
+        # offline") is no money the app takes.
+        rest = _OFFLINE.sub(" ", _NO.sub(" ", text_of(doc)))
+        money = (sig["checkout"] or sig["sub_entities"] or sig["sale_entities"] or plans_in_words(rest, currency)
+                 or one_off_prices(rest) or _SUBSCRIPTION_WORDS.search(rest) or _ONE_TIME_WORDS.search(rest)
+                 or _PAYING.search(rest))
+        if not money:
+            return {"needed": False, "models": [], "plans": [], "access": "none", "by": "words",
+                    "reason": f"You said “{sig['declined']}”, so the app takes no payments."}
     text = text_of(doc).strip()
     if not text:
         return {"needed": False, "models": [], "plans": [], "access": "none", "by": "signals",

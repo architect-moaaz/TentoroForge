@@ -128,9 +128,9 @@ async def remove_gateway(org_id: uuid.UUID, gateway_id: str, user: PlatformUser 
     except G.GatewayError as exc:
         raise _fail(exc) from exc
     apps = await _apps_using(db, org_id, str(row.id))
-    await G.remove(db, row)
+    heir = await G.remove(db, row)
     await db.commit()
-    return {"removed": str(row.id), "apps": apps}
+    return {"removed": str(row.id), "apps": apps, "newDefault": {"id": str(heir.id), "label": heir.label} if heir else None}
 
 
 @router.get("/api/orgs/{org_id}/payment-gateways/{gateway_id}/apps")
@@ -196,8 +196,11 @@ async def _payments_view(db: AsyncSession, project: Any, out: Any, user: Platfor
     svc = _load(out)
     membership = await require_org_member(project.org_id, user, db)
     rows = await G.listing(db, project.org_id)
+    admin = _is_admin(membership)
     return {"payments": AP.state(svc.doc), "gateways": [G.view(r, admin=False) for r in rows],
-            "canManageGateways": _is_admin(membership), "webhooks": await W.setup_for(db, project.id),
+            "canManageGateways": admin, "webhooks": await W.setup_for(db, project.id, admin=admin, doc=svc.doc),
+            # Whether the published app can take money: each chosen gateway's live keys.
+            "readiness": AP.readiness(svc.doc, rows),
             "orgId": str(project.org_id)}
 
 
@@ -253,6 +256,11 @@ async def choose_project_payments(project_id: uuid.UUID, body: ChoiceBody, user:
         rows.append(row)
     def locked() -> None:
         with business_rules.write_lock(out, timeout=business_rules.TAB_LOCK_WAIT):
+            # Checked again under the lock: a build rewrites the whole definition
+            # without taking it, and one that began a moment ago would erase this.
+            if business_rules.busy(out) in ("building", "checking"):
+                raise business_rules.RuleError(
+                    "Forge is building this app right now. Choose its payments when the build finishes.", status=423)
             AP.choose(_load(out), gateways=rows, needed=body.needed, models=body.models, plans=body.plans,
                       access=body.access, by="person", output_dir=str(out))
     try:

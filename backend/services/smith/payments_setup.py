@@ -28,6 +28,15 @@ _SUB = re.compile(r"\b(?:subscri\w*|members?hip|plans?|monthly|yearly|annual(?:l
 _ONE = re.compile(r"\b(?:checkout|buy|purchase|order|pay\s+for|fee|one[-\s]?time|deposit|donat\w+|ticket)\b", re.I)
 _GATE_APP = re.compile(r"\b(?:must|need(?:s)?\s+to|have\s+to|only)\b[^.]*\bsubscri\w*|\bmembers?\s+only\b|\bpaywall\b", re.I)
 _OPEN_APP = re.compile(r"\b(?:free\s+to\s+use|stays?\s+open|optional)\b", re.I)
+#: Words that ADD money to the app: beside a "don't"/"remove", the request is
+#: still about taking payments ("don't forget to add a Pro plan with payments",
+#: "remove the old billing page and charge through Razorpay").
+_ADDS = re.compile(r"\b(?:add|create|set\s*up|connect|through|via|razorpay|stripe|paypal|plans?|prices?|priced|tiers?)\b", re.I)
+
+
+def _says(name: str, text: str) -> bool:
+    """`name` said as a word of its own: a gateway called "Main" is not in "maintain"."""
+    return bool(name) and re.search(rf"(?<![a-z0-9]){re.escape(name.lower())}(?![a-z0-9])", text) is not None
 def _org_gateways(output_dir: str) -> list[Any]:
     """The organisation's gateways, read through the same bridge the secret lookups use."""
     from services.figma.integrations import _org_for_output_dir, _run, _session_on_this_loop
@@ -54,7 +63,7 @@ def run(output_dir: str, *, change: str = "", reasoning: Any = None) -> dict[str
     doc = svc.doc
     current = AP.section(doc)
     try:
-        if _OFF.search(text) and not need_mod.plans_in_words(text, "USD"):
+        if _OFF.search(text) and not _ADDS.search(text) and not need_mod.plans_in_words(text, "USD"):
             AP.choose(svc, gateways=[], needed=False, by="smith", output_dir=str(output_dir))
             tell(reasoning, "Payments turned off.", "step")
             return {"applied": True, "edited_paths": ["src/lib/payments-config.ts"], "reason": "", "options": [],
@@ -69,10 +78,19 @@ def run(output_dir: str, *, change: str = "", reasoning: Any = None) -> dict[str
     # WHICH GATEWAYS: the ones named; else the ones the app already has; else,
     # with exactly one connected, that one. Otherwise the person chooses.
     low = text.lower()
-    named = [r for r in rows if r.provider in low or (r.label and r.label.lower() in low)]
-    chosen = named or [r for r in rows if str(r.id) in {str(g.get("gateway")) for g in current.get("gateways") or []}]
     from services.payments.gateways import status_of
+    # A GATEWAY WHOSE KEYS WERE REFUSED IS NOT CHOSEN, named or not: it would
+    # ship keys its gateway refuses, and every checkout would fail.
     usable = [r for r in rows if status_of(r) != "attention"]
+    said = [r for r in rows if _says(r.provider, low) or _says(r.label or "", low)]
+    refused = [r for r in said if status_of(r) == "attention"]
+    named = [r for r in said if status_of(r) != "attention"]
+    if refused and not named:
+        names = ", ".join(r.label for r in refused)
+        return {"applied": False, "edited_paths": [], "options": [AP.PAYMENT_CHIP],
+                "reason": f"{names}'s keys were refused by the gateway, so it cannot take payments yet. An admin fixes them in "
+                          "Settings → Payments; then ask me again, or choose another gateway."}
+    chosen = named or [r for r in usable if str(r.id) in {str(g.get("gateway")) for g in current.get("gateways") or []}]
     if not chosen and len(usable) == 1:
         chosen = usable
     models = list(current.get("models") or []) if current.get("needed") else []

@@ -27,6 +27,16 @@ export function originOf(req: Request): string {
 
 export const basePath = () => (process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/$/, "");
 
+/** Asked by this app's own pages. A page of another site — or a sibling
+ *  sub-domain, which the browser's same-site rule lets through — cannot
+ *  subscribe someone, or cancel their plan, with their cookie. */
+export function fromThisApp(req: Request): boolean {
+  const site = req.headers.get("sec-fetch-site");
+  if (site && site !== "same-origin" && site !== "none") return false;
+  const origin = req.headers.get("origin");
+  return !origin || origin === originOf(req);
+}
+
 /** A path inside this app to send someone on to — never another site. */
 export function safeNext(next: string | null | undefined, fallback = "/"): string {
   const n = String(next ?? "");

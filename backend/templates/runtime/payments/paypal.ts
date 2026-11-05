@@ -153,7 +153,9 @@ export const paypalAdapter: PaymentAdapter = {
     // amount is given, so a partial refund with no currency is refused.
     if (input.amountMinor && !currency) throw new Error("the currency of the capture is unknown; nothing was refunded");
     const body = input.amountMinor ? { amount: { value: money(input.amountMinor, currency), currency_code: currency } } : {};
-    const refund = await call("POST", `/v2/payments/captures/${encodeURIComponent(captureId)}/refund`, secrets, body, `refund-${captureId}-${input.amountMinor ?? "all"}`);
+    const refund = await call("POST", `/v2/payments/captures/${encodeURIComponent(captureId)}/refund`, secrets, body,
+      // Per refund, not per amount: two refunds of the same part are two refunds.
+      input.idempotencyKey ?? `refund-${captureId}-${input.amountMinor ?? "all"}`);
     const st = String(refund.status);
     return { refundId: String(refund.id), status: st === "COMPLETED" ? "succeeded" : st === "CANCELLED" || st === "FAILED" ? "failed" : "pending" };
   },
@@ -182,6 +184,8 @@ export const paypalAdapter: PaymentAdapter = {
       + `"transmission_time":${JSON.stringify(headers.get("paypal-transmission-time"))},"webhook_id":${JSON.stringify(webhookId)},"webhook_event":${rawBody}}`;
     const res = await fetch(`${base(secrets)}/v1/notifications/verify-webhook-signature`, {
       method: "POST", body, headers: { Authorization: `Bearer ${await token(secrets)}`, "Content-Type": "application/json" },
+      // A PayPal that does not answer is a delivery it sends again, not a request held open.
+      signal: AbortSignal.timeout(15_000),
     });
     const out: any = await res.json().catch(() => ({}));
     if (!res.ok || String(out?.verification_status) !== "SUCCESS") return { ok: false, reason: "PayPal did not confirm the signature" };
@@ -217,7 +221,7 @@ export const paypalAdapter: PaymentAdapter = {
     if (type === "PAYMENT.CAPTURE.REFUNDED") {
       return { type: "refund.succeeded" as NormalizedEvent, providerRef: order || String(r.id ?? ""), paymentId: custom,
         amountMinor: r.amount?.value != null ? minorOf(r.amount.value, String(r.amount.currency_code ?? "")) : undefined,
-        currency: String(r.amount?.currency_code ?? "").toUpperCase(), metadata: {} };
+        currency: String(r.amount?.currency_code ?? "").toUpperCase(), metadata: r.id ? { refundId: String(r.id) } : {} };
     }
     return null;
   },

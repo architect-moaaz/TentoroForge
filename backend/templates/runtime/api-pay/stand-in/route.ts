@@ -13,6 +13,10 @@ export const runtime = "nodejs";
 
 export async function POST(req: Request): Promise<Response> {
   await initializeRuntime();
+  // NOTHING IS SETTLED HERE IN THE LIVE APP: the stand-in's "Paid" charges
+  // nobody, and a real gateway settles its own payments.
+  const { liveSide } = await import("@/lib/payments");
+  if (liveSide()) return NextResponse.json({ error: "Payments are not switched on in this app yet, so nothing was charged." }, { status: 403 });
   const form = await req.formData().catch(() => null);
   const body: any = form ? Object.fromEntries(form.entries()) : await req.json().catch(() => ({}));
   const outcome = String(body?.outcome ?? "paid");

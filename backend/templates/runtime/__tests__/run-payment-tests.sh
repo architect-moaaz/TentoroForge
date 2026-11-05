@@ -5,3 +5,4 @@ set -e
 DIR="$(cd "$(dirname "$0")" && pwd)"
 node --experimental-strip-types --no-warnings "$DIR/a-payment-is-believed-only-from-a-signed-event.test.mts"
 node --experimental-strip-types --no-warnings "$DIR/every-gateway-is-believed-only-from-itself.test.mts"
+node --experimental-strip-types --no-warnings "$DIR/a-refund-is-for-what-it-says.test.mts"

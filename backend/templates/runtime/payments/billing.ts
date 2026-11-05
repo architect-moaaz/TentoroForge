@@ -121,9 +121,16 @@ export async function rowFor(id: string): Promise<SubRow | null> {
 
 /** The person's subscription that matters: the newest that is not abandoned. */
 export async function current(userId: string): Promise<SubRow | null> {
+  // THE PLAN THAT STILL OPENS THE APP first (an ending one too, until its
+  // end), and among those THE PLAN THAT GOES ON, not the one ending: after a
+  // switch the old plan was written last (set to end, then the gateway's word
+  // on it), and by `updated_at` it came first — cancel ended nothing and the
+  // new one renewed.
   const res = await db.execute(sql`
     SELECT * FROM forge_subscriptions WHERE user_id = ${userId} AND status <> 'incomplete'
-    ORDER BY (status IN ('active', 'trialing', 'past_due')) DESC, updated_at DESC LIMIT 1`);
+    ORDER BY (status IN ('active', 'trialing', 'past_due')
+              OR (status = 'cancelled' AND cancel_at_period_end AND current_period_end > NOW())) DESC,
+             cancel_at_period_end ASC, created_at DESC LIMIT 1`);
   return (_rows(res)[0] as SubRow) ?? null;
 }
 
@@ -136,7 +143,13 @@ export function grants(row: SubRow | null, now = Date.now()): boolean {
   if (!row) return false;
   const end = endOf(row);
   if (row.status === "active" || row.status === "trialing") return !end || now < end + GRACE_DAYS * 86_400_000;
-  if (row.status === "past_due") return Boolean(end) && now < end + GRACE_DAYS * 86_400_000;
+  // THE GRACE RUNS FROM THE FAILED CHARGE, not from the period's end: Stripe
+  // moves the end on at a renewal even when its charge fails, and a year's
+  // plan stayed open for the year (and its grace) unpaid.
+  if (row.status === "past_due") {
+    const since = Date.parse(String((row.metadata as any)?.pastDueSince ?? "")) || end;
+    return Boolean(since) && now < Math.min(end || since, since) + GRACE_DAYS * 86_400_000;
+  }
   if (row.status === "cancelled" && row.cancel_at_period_end) return Boolean(end) && now < end;
   return false;
 }
@@ -144,7 +157,10 @@ export function grants(row: SubRow | null, now = Date.now()): boolean {
 async function write(row: SubRow, snap: SubSnapshot, endsNow = false): Promise<SubRow> {
   // Asked to end at the period's end, it keeps saying so until the gateway
   // says it ended, or it is ended now.
-  const cancelAtEnd = !endsNow && (snap.cancelAtPeriodEnd || (Boolean(row.cancel_at_period_end) && snap.status !== "expired"));
+  // Stripe says so itself, and a plan resumed in its portal is resumed here;
+  // Razorpay and PayPal stop saying it once they are asked.
+  const sticky = row.provider !== "stripe";
+  const cancelAtEnd = !endsNow && (snap.cancelAtPeriodEnd || (sticky && Boolean(row.cancel_at_period_end) && snap.status !== "expired"));
   const res = await db.execute(sql`
     UPDATE forge_subscriptions SET status = ${snap.status},
       -- A KNOWN END IS NOT ERASED BY AN UNKNOWN ONE. PayPal reports no next
@@ -152,7 +168,11 @@ async function write(row: SubRow, snap: SubSnapshot, endsNow = false): Promise<S
       -- period the person paid for would close the moment the webhook landed.
       current_period_end = COALESCE(${snap.currentPeriodEnd}::timestamptz, current_period_end),
       cancel_at_period_end = ${cancelAtEnd}, provider_ref = COALESCE(${snap.providerRef || null}, provider_ref),
-      customer_ref = COALESCE(${snap.customerRef ?? null}, customer_ref), checked_at = NOW(), updated_at = NOW()
+      customer_ref = COALESCE(${snap.customerRef ?? null}, customer_ref), checked_at = NOW(), updated_at = NOW(),
+      -- When it first fell behind (what its grace counts from); gone once paid.
+      metadata = CASE WHEN ${snap.status} = 'past_due' AND status <> 'past_due'
+                      THEN metadata || jsonb_build_object('pastDueSince', NOW())
+                      WHEN ${snap.status} <> 'past_due' THEN metadata - 'pastDueSince' ELSE metadata END
     WHERE id = ${row.id}::uuid RETURNING *`);
   return (_rows(res)[0] as SubRow) ?? row;
 }
@@ -200,10 +220,20 @@ export async function subscribe(input: { user: { id: string; email?: string | nu
   const { currency: suggested } = priceList(input.country);
   const currency = String(input.currency || suggested).toUpperCase();
   if (!(currency in plan.prices)) throw new Error(`${plan.name} has no price in ${currency}`);
+  // ONE CHECKOUT AT A TIME: two tabs (or a back-and-again) each opened one,
+  // and both completed — two subscriptions, the first period charged twice.
+  // An earlier checkout still open is asked about: paid, the person holds the
+  // plan; not paid, it is closed at the gateway so it can never be completed.
+  await closeOpenCheckouts(input.user.id, plan.id);
+  // A FREE TRIAL IS FOR SOMEONE NEW: taken, cancelled and taken again, it
+  // was a new trial every time. Anyone who held a plan before pays from day one.
+  const before = _rows(await db.execute(sql`
+    SELECT 1 FROM forge_subscriptions WHERE user_id = ${input.user.id} AND status <> 'incomplete' LIMIT 1`));
+  const offered = before.length && plan.trialDays ? { ...plan, trialDays: 0 } : plan;
   const chosen = await gatewayFor({ currency, country: input.country });
   const adapter = chosen.adapter;
   if (!adapter.subscriptions) throw new Error(`${adapter.provider} cannot take a subscription`);
-  const spec = specFor(plan, currency);
+  const spec = specFor(offered, currency);
   let ref = await planRef(adapter.provider, spec, chosen.secrets);
   const inserted = _rows(await db.execute(sql`
     INSERT INTO forge_subscriptions (user_id, plan_id, provider, status, currency, amount_minor, interval, metadata)
@@ -245,21 +275,54 @@ export async function confirmReturn(subscriptionId: string, userId: string, para
       throw new Error("the subscription's signature did not check out");
     }
   }
+  const before = row.status;
   row = await refresh(row);
   // An authorised Razorpay subscription is `authenticated` until its first charge
   // lands (minutes): the signature above already proved the payer authorised it.
   if (row.provider === "razorpay" && params.razorpay_signature && row.status === "incomplete") {
     row = await write(row, { status: "trialing", currentPeriodEnd: null, cancelAtPeriodEnd: false });
   }
-  if (grants(row)) await supersede(row);
+  // Only when it has just begun: an old return address revisited (browser
+  // history) must not end the plan taken after it.
+  if (grants(row) && before === "incomplete") await supersede(row);
+  // A checkout the person left for a newer one, approved after all: ended now.
+  if (grants(row) && (row.metadata as any)?.abandoned) {
+    try { row = await cancel(row, false); } catch (err) { console.error("[billing] a left checkout that was completed could not be ended:", err); }
+  }
   return row;
+}
+
+/** Earlier checkouts of this plan that were never finished: refused if one was paid after all, else closed. */
+async function closeOpenCheckouts(userId: string, planId: string): Promise<void> {
+  const open = _rows(await db.execute(sql`
+    SELECT * FROM forge_subscriptions WHERE user_id = ${userId} AND plan_id = ${planId} AND status = 'incomplete'
+      AND provider_ref IS NOT NULL`)) as SubRow[];
+  for (let row of open) {
+    try { row = await refresh(row); } catch (err) { console.warn("[billing] an open checkout could not be read:", err); }
+    if (grants(row)) {
+      await supersede(row);
+      throw new Error("you already hold this plan");
+    }
+    if (row.status !== "incomplete") continue;
+    try {
+      const adapter = ADAPTERS[row.provider];
+      const secrets = row.provider === "stand_in" ? null : await secretsFor(row.provider);
+      if (adapter?.subscriptions?.abandon && secrets) await adapter.subscriptions.abandon(String(row.provider_ref), secrets);
+    } catch (err) {
+      console.warn("[billing] an open checkout could not be closed at the gateway:", err);
+    }
+    // Marked as left, so one completed at the gateway after all is ended there (`onSubscriptionEvent`).
+    await db.execute(sql`UPDATE forge_subscriptions SET status = 'expired', metadata = metadata || '{"abandoned": true}'::jsonb,
+      updated_at = NOW() WHERE id = ${row.id}::uuid AND status = 'incomplete'`);
+  }
 }
 
 /** A new plan taken: the person's other live subscriptions end with their periods (never two charges). */
 async function supersede(row: SubRow): Promise<void> {
   const others = _rows(await db.execute(sql`
     SELECT * FROM forge_subscriptions WHERE user_id = ${row.user_id} AND id <> ${row.id}::uuid
-      AND status IN ('active', 'trialing', 'past_due') AND cancel_at_period_end = false`)) as SubRow[];
+      AND status IN ('active', 'trialing', 'past_due') AND cancel_at_period_end = false
+      AND created_at < (SELECT created_at FROM forge_subscriptions WHERE id = ${row.id}::uuid)`)) as SubRow[];
   for (const other of others) {
     try { await cancel(other, true); } catch (err) { console.error("[billing] could not end the earlier subscription:", err); }
   }
@@ -269,6 +332,9 @@ async function supersede(row: SubRow): Promise<void> {
 export async function standInSettle(subscriptionId: string, userId: string, outcome: "paid" | "failed"): Promise<SubRow | null> {
   const row = await rowFor(subscriptionId);
   if (!row || row.user_id !== userId || row.provider !== "stand_in") return null;
+  // The live app never settles a stand-in: its "Paid" charges nobody.
+  const { liveSide } = await import("./index");
+  if (liveSide()) return null;
   if (outcome !== "paid") return row;
   const days = { day: 1, week: 7, month: 30, year: 365 }[String(row.interval)] ?? 30;
   const written = await write(row, { status: "active", currentPeriodEnd: new Date(Date.now() + days * 86_400_000).toISOString(), cancelAtPeriodEnd: false });
@@ -331,6 +397,11 @@ export async function onSubscriptionEvent(provider: string, ev: Normalized): Pro
   const before = row.status;
   row = await refresh(row);
   if (grants(row) && before === "incomplete") await supersede(row);
+  // A checkout the person left for a newer one, completed at the gateway after
+  // all (PayPal cannot close an approval page): ended there now, never two plans.
+  if (grants(row) && (row.metadata as any)?.abandoned) {
+    try { row = await cancel(row, false); } catch (err) { console.error("[billing] a left checkout that was completed could not be ended:", err); }
+  }
   if (before !== row.status) {
     try {
       const { emitEventAndProcess } = await import("@/lib/events/bus");
@@ -367,7 +438,10 @@ export function accessToken(userId: string, row: SubRow | null): { value: string
   if (!key() || !grants(row)) return null;
   const end = row ? endOf(row) : 0;
   const now = Date.now();
-  const until = Math.min(now + ACCESS_TTL_S * 1000, end ? end + GRACE_DAYS * 86_400_000 : now + ACCESS_TTL_S * 1000);
+  // An ending plan opens nothing past its end (no grace: it will not renew).
+  const ending = Boolean(row && (row.cancel_at_period_end || row.status === "cancelled"));
+  const last = end ? (ending ? end : end + GRACE_DAYS * 86_400_000) : now + ACCESS_TTL_S * 1000;
+  const until = Math.min(now + ACCESS_TTL_S * 1000, last);
   return { value: signAccess(userId, until / 1000), maxAge: Math.max(60, Math.floor((until - now) / 1000)) };
 }
 

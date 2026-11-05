@@ -54,6 +54,8 @@ export function BillingClient(props: { plans: Plan[]; currencies: string[]; curr
   const [error, setError] = useState(props.readProblem);
   const [confirming, setConfirming] = useState(false);
   const [waiting, setWaiting] = useState(props.flags.pending);
+  // Asked for a minute and still not confirmed: said so, and no second payment offered.
+  const [slow, setSlow] = useState(false);
   const plan = useMemo(() => props.plans.find((p) => p.id === sub?.plan), [props.plans, sub]);
 
   // A NEW SUBSCRIPTION IS CONFIRMED BY THE GATEWAY, NOT THE CLICK: while it is,
@@ -69,7 +71,7 @@ export function BillingClient(props: { plans: Plan[]; currencies: string[]; curr
         if (j?.subscription) setSub(j.subscription);
         if (j?.access) { setAccess(true); setWaiting(false); clearInterval(t); }
       } catch { /* the next tick asks again */ }
-      if (n >= 20) { setWaiting(false); clearInterval(t); }
+      if (n >= 20) { setWaiting(false); setSlow(true); clearInterval(t); }
     }, 3000);
     return () => clearInterval(t);
   }, [waiting]);
@@ -107,23 +109,32 @@ export function BillingClient(props: { plans: Plan[]; currencies: string[]; curr
       const r = await fetch(`${base()}/api/billing/manage`, { method: "POST" });
       const j = await r.json().catch(() => ({}));
       if (j?.url) { window.location.assign(j.url); return; }
-      setError("Your payment method is managed with your bank or wallet for this gateway. To change it, cancel and subscribe again.");
+      setError(j?.error || "Your payment method is managed with your bank or wallet for this gateway. To change it, cancel and subscribe again.");
+    } catch {
+      setError("The payment settings page could not be opened. Check your connection and try again.");
     } finally {
       setBusy(null);
     }
   }
 
   const live = sub && (sub.status === "active" || sub.status === "trialing" || sub.status === "past_due" || (sub.status === "cancelled" && sub.cancelAtPeriodEnd)) && access;
+  // A FAILED RENEWAL IS STILL SHOWN once its grace is over: the payer is told
+  // what happened and what to do, not just "Choose a plan".
+  const behind = sub?.status === "past_due" && !access;
+  const amber = "border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100";
+  const sky = "border-sky-300 bg-sky-50 text-sky-900 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-100";
+  // WHAT HAPPENED TO THEIR MONEY COMES FIRST: "Choose a plan" to someone whose
+  // payment is still clearing is an invitation to pay twice.
   const banner = props.flags.welcome && access && !sub?.cancelAtPeriodEnd && sub?.status !== "cancelled" ? { tone: "border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-100",
       text: `You're subscribed${plan ? ` to ${plan.name}` : ""}. Thank you!` }
-    : waiting ? { tone: "border-sky-300 bg-sky-50 text-sky-900 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-100",
-      text: "Your payment is being confirmed with the gateway — this page updates on its own." }
+    : waiting ? { tone: sky, text: "Your payment is being confirmed with the gateway — this page updates on its own. There is no need to pay again." }
+    : slow || props.flags.problem ? { tone: amber,
+      text: "We could not confirm that payment yet. If money left your account, your plan will show here within a few minutes — please don't pay again. Refresh this page in a little while." }
+    : behind ? { tone: amber, text: "Your last payment didn't go through, so your plan is paused until it does." }
     : props.flags.cancelled ? { tone: "border-border bg-muted text-foreground", text: "Checkout was cancelled. Nothing was charged." }
-    : (props.flags.required || props.required) && !access ? { tone: "border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100",
-      text: "Choose a plan to continue." }
-    : props.flags.problem ? { tone: "border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100",
-      text: "We could not confirm that payment yet. If money left your account, your plan will show here within a few minutes." }
+    : (props.flags.required || props.required) && !access ? { tone: amber, text: "Choose a plan to continue." }
     : null;
+  const hold = waiting || slow;
 
   return (
     <main className="mx-auto w-full max-w-5xl space-y-8 p-6" data-forge-billing="">
@@ -132,10 +143,11 @@ export function BillingClient(props: { plans: Plan[]; currencies: string[]; curr
         <p className="mt-1 text-sm text-muted-foreground">Your subscription, and the plans you can choose from.</p>
       </header>
 
-      {banner && <div role="status" data-billing-banner="" className={`rounded-lg border p-4 text-sm ${banner.tone}`}>{banner.text}</div>}
+      {banner && <div role="status" data-billing-banner="" className={`rounded-lg border p-4 text-sm ${banner.tone}`}>{banner.text}
+        {props.flags.welcome && access && props.flags.next && <a href={`${base()}${props.flags.next}`} className="ml-2 font-medium underline">Continue</a>}</div>}
       {error && <div role="alert" data-billing-error="" className="rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-900 dark:border-red-800 dark:bg-red-950/40 dark:text-red-100">{error}</div>}
 
-      {live && sub && (
+      {(live || behind) && sub && (
         <section data-billing-current="" className="rounded-xl border border-border bg-card p-6 shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
@@ -151,7 +163,9 @@ export function BillingClient(props: { plans: Plan[]; currencies: string[]; curr
                   : sub.status === "trialing" ? <>Your trial ends on <b>{date(sub.currentPeriodEnd)}</b>.</>
                   : <>Renews on <b>{date(sub.currentPeriodEnd)}</b>.</>}</p>
               )}
-              {sub.status === "past_due" && <p className="mt-2 text-sm text-amber-700 dark:text-amber-300">Your last payment didn't go through. The gateway will try again; update your payment method to keep your access.</p>}
+              {sub.status === "past_due" && <p className="mt-2 text-sm text-amber-700 dark:text-amber-300">Your last payment didn't go through. {sub.provider === "stripe"
+                ? "The gateway will try again; update your payment method to keep your access."
+                : "The gateway will try again. If it keeps failing, cancel and subscribe again with another card or account."}</p>}
             </div>
             <div className="flex flex-wrap gap-2">
               {sub.provider === "stripe" && <button type="button" onClick={manage} disabled={busy !== null} className="rounded-md border border-border px-3 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50">{busy === "manage" ? "Opening…" : "Manage payment method"}</button>}
@@ -170,7 +184,7 @@ export function BillingClient(props: { plans: Plan[]; currencies: string[]; curr
           <h2 className="text-lg font-semibold">{live ? "Change plan" : "Choose a plan"}</h2>
           {props.currencies.length > 1 && (
             <label className="flex items-center gap-2 text-sm text-muted-foreground">Pay in
-              <select value={currency} onChange={(e) => setCurrency(e.target.value)} data-billing-currency="" className="rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground">
+              <select value={currency} onChange={(e) => setCurrency(e.target.value)} data-billing-currency="" aria-label="Pay in" className="rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground">
                 {props.currencies.map((c) => <option key={c} value={c}>{c}</option>)}
               </select>
             </label>
@@ -198,7 +212,7 @@ export function BillingClient(props: { plans: Plan[]; currencies: string[]; curr
                     {p.features.map((f) => <li key={f} className="flex gap-2"><span aria-hidden className="text-primary">✓</span>{f}</li>)}
                   </ul>
                 )}
-                <button type="button" data-billing-choose={p.id} onClick={() => choose(p.id)} disabled={mine || price == null || busy !== null}
+                <button type="button" data-billing-choose={p.id} onClick={() => choose(p.id)} disabled={mine || price == null || busy !== null || hold}
                         className={`mt-6 rounded-md px-4 py-2.5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${p.highlighted ? "bg-primary text-primary-foreground hover:opacity-90" : "border border-border hover:bg-muted"}`}>
                   {ending ? (sub?.currentPeriodEnd ? `Yours until ${date(sub.currentPeriodEnd)}` : "Ending") : mine ? "Your current plan"
                     : busy === p.id ? "Opening secure checkout…" : live ? `Switch to ${p.name}` : p.trialDays > 0 ? "Start free trial" : `Choose ${p.name}`}

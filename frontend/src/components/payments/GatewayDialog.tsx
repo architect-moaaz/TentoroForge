@@ -19,7 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { GatewayMark } from "./GatewayMark";
 import {
   COUNTRIES, type Coverage, type Gateway, type GatewayBody, type Mode, type ProviderInfo,
-  gatewayApi, gatewaysKey, modeOfKey, prefixProblem,
+  fieldOfKey, gatewayApi, gatewaysKey, prefixProblem,
 } from "@/lib/payment-gateways";
 
 const BEST_FOR: Record<string, string> = {
@@ -41,16 +41,18 @@ interface Props {
   gateway?: Gateway | null;
   /** Start on this provider's keys (skips the choice). */
   initialProvider?: string | null;
+  /** Open on these keys ("Add live keys" opens Live). */
+  initialMode?: Mode;
   onClose: () => void;
   onSaved?: (g: Gateway) => void;
 }
 
-export function GatewayDialog({ orgId, providers, gateway, initialProvider, onClose, onSaved }: Props) {
+export function GatewayDialog({ orgId, providers, gateway, initialProvider, initialMode, onClose, onSaved }: Props) {
   const qc = useQueryClient();
   const editing = Boolean(gateway);
   const [providerId, setProviderId] = useState<string | null>(gateway?.provider ?? initialProvider ?? null);
   const provider = providers.find((p) => p.id === providerId);
-  const [mode, setMode] = useState<Mode>(gateway && !gateway.modes.test.set && gateway.modes.live.set ? "live" : "test");
+  const [mode, setMode] = useState<Mode>(initialMode ?? (gateway && !gateway.modes.test.set && gateway.modes.live.set ? "live" : "test"));
   const [keys, setKeys] = useState<Record<Mode, Record<string, string>>>({ test: {}, live: {} });
   const [shown, setShown] = useState<Record<string, boolean>>({});
   const [label, setLabel] = useState(gateway?.label ?? "");
@@ -79,10 +81,15 @@ export function GatewayDialog({ orgId, providers, gateway, initialProvider, onCl
   }, [provider, keys, testName]);
   const missing = (m: Mode) => provider ? provider.fields.filter((f) => f.required && !(keys[m][f.key] ?? "").trim()
                                                                 && !(editing && gateway?.modes[m].set)) : [];
-  const ready = Boolean(provider) && Object.keys(fieldIssues).length === 0
-    && (["test", "live"] as Mode[]).every((m) => !typed(m) || missing(m).length === 0)
-    && (editing || typed("test") || typed("live"))
-    && cur.length > 0 && !(cov === "domestic" && !home);
+  // WHY CONNECT IS NOT PRESSABLE, in words: a greyed button and a red star
+  // left the owner guessing.
+  const blocker = !provider ? "" : Object.keys(fieldIssues).length ? "A key is in the wrong place — see the field marked red."
+    : (["test", "live"] as Mode[]).find((m) => typed(m) && missing(m).length)
+      ? `Fill in ${missing((["test", "live"] as Mode[]).find((m) => typed(m) && missing(m).length)!).map((f) => f.label).join(" and ")}.`
+    : !(editing || typed("test") || typed("live")) ? "Paste at least one set of keys — test or live."
+    : cur.length === 0 ? "Choose at least one currency."
+    : cov === "domestic" && !home ? "Choose the home country of a domestic gateway." : "";
+  const ready = Boolean(provider) && !blocker;
 
   const save = useMutation({
     mutationFn: async () => {
@@ -109,20 +116,33 @@ export function GatewayDialog({ orgId, providers, gateway, initialProvider, onCl
 
   const setKey = (m: Mode, key: string, value: string) => {
     setProblem("");
+    // Keys typed into a mode marked for removal replace it instead (the server
+    // used to drop them and keep the removal).
+    if (value.trim()) setClear((c) => c.filter((x) => x !== m));
     setKeys((k) => ({ ...k, [m]: { ...k[m], [key]: value } }));
   };
-  // A KEY PASTED INTO THE WRONG MODE GOES TO THE RIGHT ONE: its prefix says
-  // which. Only on a paste — a key typed by hand would be moved half-typed;
-  // typing gets the field's own "this is a live key" line instead.
+  // A KEY PASTED INTO THE WRONG PLACE GOES TO THE RIGHT ONE: its prefix says
+  // which field, and which mode — a live key under Test, a Key ID where the
+  // secret goes. Only on a paste: a key typed by hand would be moved
+  // half-typed; typing gets the field's own "this is a live key" line instead.
   const onPaste = (m: Mode, key: string) => (e: React.ClipboardEvent<HTMLInputElement>) => {
     const value = e.clipboardData.getData("text").trim();
-    const belongs = modeOfKey(provider, value);
-    if (!belongs || belongs === m || (keys[belongs][key] ?? "").trim()) return;
+    const belongs = fieldOfKey(provider, value);
+    if (!belongs || (belongs.mode === m && belongs.field.key === key) || (keys[belongs.mode][belongs.field.key] ?? "").trim()) return;
     e.preventDefault();
     setProblem("");
-    setKeys((k) => ({ ...k, [belongs]: { ...k[belongs], [key]: value } }));
-    setMode(belongs);
-    toast.info(`That is a ${belongs === "live" ? "live" : testName.toLowerCase()} key — it is under ${modeName(belongs)} now.`);
+    setClear((c) => c.filter((x) => x !== belongs.mode));
+    setKeys((k) => ({ ...k, [belongs.mode]: { ...k[belongs.mode], [belongs.field.key]: value } }));
+    setMode(belongs.mode);
+    toast.info(belongs.field.key !== key
+      ? `That is the ${belongs.field.label} — it is in ${belongs.field.label}${belongs.mode !== m ? ` under ${modeName(belongs.mode)}` : ""} now.`
+      : `That is a ${belongs.mode === "live" ? "live" : testName.toLowerCase()} key — it is under ${modeName(belongs.mode)} now.`);
+  };
+  // Another gateway chosen: nothing typed for the first one comes along (its
+  // currencies, its name, its keys would be refused by the next).
+  const chooseAnother = () => {
+    setProviderId(null); setProblem(""); setKeys({ test: {}, live: {} }); setShown({}); setLabel("");
+    setCoverage(null); setCountry(null); setCurrencies(null); setMakeDefault(false); setClear([]); setMode("test");
   };
 
   // --- Step 1: which gateway --------------------------------------------- //
@@ -226,7 +246,7 @@ export function GatewayDialog({ orgId, providers, gateway, initialProvider, onCl
                            placeholder={saved(mode) ? "Saved — leave empty to keep" : (f.prefix[mode]?.[0] ? `${f.prefix[mode]![0]}…` : "")}
                            aria-invalid={Boolean(issue)} className={`pr-10 font-mono text-[13px] ${issue ? "border-red-400 focus-visible:ring-red-400" : ""}`} />
                     {f.secret && (
-                      <button type="button" aria-label={hidden ? "Show" : "Hide"} onClick={() => setShown((s) => ({ ...s, [id]: !s[id] }))}
+                      <button type="button" aria-label={`${hidden ? "Show" : "Hide"} ${f.label}`} onClick={() => setShown((s) => ({ ...s, [id]: !s[id] }))}
                               className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
                         {hidden ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
                       </button>
@@ -252,8 +272,8 @@ export function GatewayDialog({ orgId, providers, gateway, initialProvider, onCl
             <p className="text-xs text-muted-foreground">How you will tell it apart from other gateways, e.g. “Razorpay India” or “Stripe US”.</p>
           </div>
           <div className="space-y-1.5">
-            <Label>Takes money from</Label>
-            <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Takes money from">
+            <Label id="gw-coverage-label">Takes money from</Label>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3" role="radiogroup" aria-labelledby="gw-coverage-label">
               {(Object.keys(COVERAGE_TEXT) as Coverage[]).map((c) => (
                 <button key={c} type="button" role="radio" aria-checked={cov === c} data-coverage={c} onClick={() => setCoverage(c)}
                         className={`rounded-lg border p-2.5 text-left text-sm transition ${cov === c ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-slate-200 hover:border-slate-300 dark:border-slate-800"}`}>
@@ -264,9 +284,9 @@ export function GatewayDialog({ orgId, providers, gateway, initialProvider, onCl
             </div>
           </div>
           <div className="space-y-1.5">
-            <Label>Home country {cov === "domestic" && <span className="text-red-500">*</span>}</Label>
-            <Select value={home ?? "none"} onValueChange={(v) => setCountry(v === "none" ? "" : v)}>
-              <SelectTrigger data-home-country="" className="w-full"><SelectValue placeholder="Choose a country" /></SelectTrigger>
+            <Label htmlFor="gw-home-country">Home country {cov === "domestic" && <span className="text-red-500">*</span>}</Label>
+            <Select value={home || "none"} onValueChange={(v) => setCountry(v === "none" ? "" : v)}>
+              <SelectTrigger id="gw-home-country" data-home-country="" className="w-full"><SelectValue placeholder="Choose a country" /></SelectTrigger>
               <SelectContent>
                 {cov !== "domestic" && <SelectItem value="none">No home country</SelectItem>}
                 {COUNTRIES.map((c) => <SelectItem key={c.code} value={c.code}>{c.name}</SelectItem>)}
@@ -275,8 +295,8 @@ export function GatewayDialog({ orgId, providers, gateway, initialProvider, onCl
             <p className="text-xs text-muted-foreground">Payers in this country are sent here first, when it is a domestic gateway.</p>
           </div>
           <div className="space-y-1.5">
-            <Label>Currencies</Label>
-            <div className="flex flex-wrap gap-1.5" data-currencies="">
+            <Label id="gw-currencies-label">Currencies</Label>
+            <div className="flex flex-wrap gap-1.5" data-currencies="" role="group" aria-labelledby="gw-currencies-label">
               {provider.currencies.map((c) => {
                 const on = cur.includes(c);
                 return (
@@ -315,9 +335,10 @@ export function GatewayDialog({ orgId, providers, gateway, initialProvider, onCl
 
         <DialogFooter className="gap-2 sm:justify-between">
           {!editing ? (
-            <Button variant="ghost" onClick={() => { setProviderId(null); setProblem(""); }} disabled={save.isPending}>Choose another gateway</Button>
+            <Button variant="ghost" onClick={chooseAnother} disabled={save.isPending}>Choose another gateway</Button>
           ) : <span />}
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {blocker && !problem && <p className="w-full text-right text-xs text-muted-foreground sm:w-auto" data-gateway-blocker="">{blocker}</p>}
             <Button variant="outline" onClick={onClose} disabled={save.isPending}>Cancel</Button>
             <Button data-gateway-save="" onClick={() => save.mutate()} disabled={!ready || save.isPending}>
               {save.isPending ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Checking with {provider.name}…</> : editing ? "Check and save" : "Connect"}

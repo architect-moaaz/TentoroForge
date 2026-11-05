@@ -38,6 +38,12 @@ export async function POST(req: Request) {
   const status = out.row.status;
   const target = status === "succeeded" ? out.row.success_url : out.row.cancel_url ?? out.row.success_url;
   let redirect: string | null = null;
+  if (status === "pending" && !out.refused && out.row.success_url) {
+    // Paid in the window, not yet settled at the gateway: the payer waits, never on the cancel page.
+    const wait = new URL(`${basePath()}/pay/confirming`, new URL(out.row.success_url).origin);
+    wait.searchParams.set("payment", out.row.id);
+    return NextResponse.json({ ok: false, status, redirect: wait.toString() });
+  }
   if (target) {
     const dest = new URL(target);
     dest.searchParams.set("payment", out.row.id);

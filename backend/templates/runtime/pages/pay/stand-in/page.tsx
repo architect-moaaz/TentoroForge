@@ -8,6 +8,7 @@
  */
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
+import { liveSide } from "@/lib/payments";
 
 export const dynamic = "force-dynamic";
 
@@ -39,14 +40,20 @@ export default async function StandInCheckout({ searchParams }: { searchParams: 
     }
   } catch { row = null; }
   const waiting = row && (kind === "subscription" ? row.status === "incomplete" : row.status === "pending");
+  const live = liveSide();
+  // What the person reads, in words: "succeeded" is the ledger's.
+  const STATE: Record<string, string> = { succeeded: "paid", active: "active", trialing: "active", cancelled: "cancelled",
+    failed: "not paid", expired: "ended", refunded: "refunded", partially_refunded: "partly refunded" };
   return (
     <main className="flex min-h-screen items-center justify-center p-6">
       <div className="w-full max-w-md rounded-lg border border-border p-6 shadow-sm" data-stand-in={kind}>
         <p className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">Test checkout · nobody is charged</p>
-        {!row ? (
+        {live ? (
+          <p role="alert">Payments are not switched on in this app yet, so nothing was charged. Please try again later.</p>
+        ) : !row ? (
           <p>There is nothing to pay here.</p>
         ) : !waiting ? (
-          <p>This {kind} is already {row.status}.</p>
+          <p>This {kind} is {STATE[String(row.status)] ?? String(row.status)} already.</p>
         ) : (
           <>
             <h1 className="mb-1 text-2xl font-semibold">{shown(Number(row.amount_minor), String(row.currency))}
@@ -60,6 +67,7 @@ export default async function StandInCheckout({ searchParams }: { searchParams: 
             </form>
           </>
         )}
+        <a href={`${base}/`} className="mt-6 inline-block text-sm text-muted-foreground underline">Back to the app</a>
       </div>
     </main>
   );

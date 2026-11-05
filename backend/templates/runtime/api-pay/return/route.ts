@@ -28,6 +28,13 @@ export async function GET(req: Request) {
     // settles it (`MOVES.succeeded` takes a cancelled one).
     if (await pay.ledgerMove(row.id, "cancelled")) status = "cancelled";
   }
+  // STILL CLEARING, OR NOT READ: the payer waits on a page that keeps asking,
+  // never on the cancel page (told "not paid" after paying, people pay again).
+  if (status === "pending" && !cancelled && !out.refused && row.success_url) {
+    const wait = new URL(`${(process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/$/, "")}/pay/confirming`, new URL(row.success_url).origin);
+    wait.searchParams.set("payment", row.id);
+    return NextResponse.redirect(wait.toString(), 303);
+  }
   const target = status === "succeeded" ? row.success_url : row.cancel_url ?? row.success_url;
   if (!target) return NextResponse.json({ status });
   const dest = new URL(target);

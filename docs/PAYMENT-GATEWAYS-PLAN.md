@@ -85,7 +85,62 @@ choice.
   try again.
 - Refunds name their amount and currency (PayPal refunds everything when no
   amount is sent); a partial refund whose currency cannot be known is
-  refused.
+  refused. A refund step whose amount resolves to nothing, zero or text
+  refuses (never "refund it all"); a part never goes past what is left; the
+  same refund asked twice carries one idempotency key. The ledger adds
+  refunds up by the gateway's refund id, so two halves are refunded in full.
+- A failed renewal's grace (3 days) runs from the failed charge, not the
+  period's end (Stripe moves the end on even when the charge fails). A plan
+  resumed in Stripe's own portal is resumed here. A plan the gateway still
+  charges can be cancelled whatever its grace.
+- One checkout per plan at a time (two tabs made two subscriptions); a free
+  trial only for someone who never held a plan.
+
+**The live app never takes money for free**
+- Every side is told which it is (`FORGE_PAYMENTS_SIDE`: local, test,
+  production; Vercel's own `VERCEL_ENV` for an app published before). In
+  production a gateway without live keys refuses the payment ("Payments are
+  not switched on in this app yet") — the stand-in, whose "Paid" button
+  charges nobody, runs only in previews and the test version.
+- The app's Payments tab and the publish dialog say, before anyone publishes,
+  which chosen gateways cannot take live money (no live keys, refused keys,
+  live keys never confirmed, removed) — `readiness` on GET /payments.
+- Preparing a publish's payment keys never fails open: an error removes every
+  payment variable of an app whose payments are Settings → Payments'.
+
+**What the review round (5 Nov 2026) closed**
+- The payment question is asked in `_run_dag` for every build door (the
+  design-language answer, a resumed build and Smith's "build" went past it).
+- Razorpay's webhook signing secret is shown to admins only; a member is told
+  it must be pasted. Only the gateways the app uses now are listed.
+- A Gallery template taken by another organisation carries what the app sells
+  and its plans, never the other organisation's gateways or "you chose".
+- "No payments"/"free" in a brief decides only when nothing else takes money
+  ("free to browse; members pay ₹999 a month" asks); money paid offline
+  ("pay at the front desk") is not money the app takes.
+- A price that cannot be charged is said, never dropped: not a number, not
+  above zero, finer than its currency (none for JPY, three for KWD).
+  Razorpay is never asked to bill more often than weekly.
+- Smith turns payments off only when asked to (not on "don't forget to add a
+  Pro plan"), never chooses a gateway whose keys were refused, and matches
+  gateway names as whole words.
+- New keys for a gateway mark its apps' webhooks to be registered again at the
+  next publish; a Stripe endpoint is made anew only when Stripe says 404; one
+  publish at a time registers an app's webhooks (an advisory lock).
+- A Razorpay payer's own notes cannot name another order: an event settles the
+  order it is about. A payment settled but not yet told to the app is told
+  again (the webhook answers 500 until it is).
+- After a plan switch the plan shown and cancelled is the new one; an old
+  return address revisited does not end the new plan.
+- A payment still clearing waits on `/pay/confirming` (never the cancel page);
+  `/billing` puts "confirming" and "not confirmed yet" before "Choose a plan"
+  and offers no second payment while it waits.
+- The gate: a role people choose at sign-up is never an operator who skips
+  the plan; an API read whose access token ran out is renewed through
+  `/api/billing/access?api=1`; the cookie is compared in constant time and
+  never outlives an ending plan's end.
+- Billing POSTs are refused from another site (`Sec-Fetch-Site`/`Origin`).
+- `amount_minor` is a bigint (IDR 25,000,000 is past 32 bits).
 
 **Robustness**
 - A payment is believed only from the gateway: its signed webhook, or a
@@ -93,8 +148,9 @@ choice.
   Razorpay payment link + signature, PayPal capture). So payments work in a
   local preview, where no webhook can arrive, and before Razorpay's webhook is
   pasted in.
-- Every outcome is settled once (ledger state machine; webhook dedupe on the
-  event id); a late or repeated event never moves a payment backwards.
+- Every outcome is settled once (ledger state machine; the app's events
+  carry a dedupe key per payment, outcome and refund); a late or repeated
+  event never moves a payment backwards.
 - Amounts in minor units at the gateway, zero-decimal currencies respected.
 - Subscription access is read from the app's own table; when the period has
   passed with no renewal heard, the gateway is asked before access is denied.

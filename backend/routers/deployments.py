@@ -198,6 +198,16 @@ async def _payments_for(project: Any, side: str, db: AsyncSession) -> tuple[dict
         return {k: v for k, v in env.items() if v}, tuple(k for k, v in env.items() if not v)
     except Exception:  # noqa: BLE001 — the app publishes; its payments say what is missing
         log.exception("[publish] payment gateways for %s could not be prepared", project.id)
+        # Failing closed for an app whose payments are Settings → Payments': no
+        # payment variable carried over from before (the live app then refuses
+        # payments and says so, rather than taking them on stale keys).
+        try:
+            from services.payments import app_payments as _AP
+            from services.payments.webhooks import governs, load_doc
+            if governs(load_doc(project.output_dir)):
+                return {}, tuple(_AP.ALL_ENV)
+        except Exception:  # noqa: BLE001
+            pass
         return {}, ()
 
 

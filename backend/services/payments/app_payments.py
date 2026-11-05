@@ -44,7 +44,10 @@ FIELD_ENV: dict[str, dict[str, str]] = {
 #: The variable the webhook's signing secret (PayPal: its webhook id) goes into.
 WEBHOOK_ENV = {"stripe": "STRIPE_WEBHOOK_SECRET", "razorpay": "RAZORPAY_WEBHOOK_SECRET", "paypal": "PAYPAL_WEBHOOK_ID"}
 #: Every name any gateway reads — what a side WITHOUT that gateway must not carry.
-ALL_ENV = sorted({n for m in FIELD_ENV.values() for n in m.values()} | set(WEBHOOK_ENV.values()) | {"PAYPAL_ENV"})
+#: Which side a copy of the app runs on ("local", "test", "production"). The
+#: runtime reads it: production NEVER takes a payment through the stand-in.
+SIDE_ENV = "FORGE_PAYMENTS_SIDE"
+ALL_ENV = sorted({n for m in FIELD_ENV.values() for n in m.values()} | set(WEBHOOK_ENV.values()) | {"PAYPAL_ENV", SIDE_ENV})
 
 #: The events each gateway's webhook is registered for.
 WEBHOOK_EVENTS: dict[str, list[str]] = {
@@ -96,7 +99,9 @@ def agent_note(doc: dict, node: str) -> str:
     names = ", ".join(f"{g.get('label') or g.get('provider')} (provider `{g.get('provider')}`)" for g in chosen)
     if node == "integrations":
         if not needed:
-            return ("PAYMENTS: the owner decided this application takes NO payments. Declare no payment service "
+            # Whose decision it is, as it is: Forge's own reading is not the owner's word.
+            who = "the owner decided" if p.get("decidedBy") in ("person", "smith") else "Forge read from the request that"
+            return (f"PAYMENTS: {who} this application takes NO payments. Declare no payment service "
                     "(nothing that serves `take_payment`).")
         if chosen:
             return ("PAYMENTS ARE ALREADY DECIDED BY THE OWNER: the application takes money through " + names + ". "
@@ -193,7 +198,32 @@ class ChoiceError(ValueError):
     pass
 
 
+def _refuse_bad_prices(plans: Any) -> None:
+    """A person's plans, as they typed them: a price that is not a number
+    above zero, or finer than its currency counts, is said — never dropped
+    (a −5 vanished, and the plan went on without that price)."""
+    for p in plans if isinstance(plans, list) else []:
+        if not isinstance(p, dict) or not str(p.get("name") or "").strip():
+            continue
+        name = str(p.get("name")).strip()
+        prices = p.get("prices") if isinstance(p.get("prices"), dict) else {}
+        for cur, value in prices.items():
+            if value is None or str(value).strip() == "":
+                continue
+            try:
+                amount = float(value)
+            except (TypeError, ValueError):
+                raise ChoiceError(f"{name}'s price in {cur} is not a number.") from None
+            if amount != amount or amount <= 0:
+                raise ChoiceError(f"{name}'s price in {cur} must be more than zero.")
+            places = need_mod.decimals(str(cur))
+            if round(amount, places) != amount:
+                raise ChoiceError(f"{name}'s price in {cur} has more decimals than {cur} has "
+                                  f"({places if places else 'none'}). Use {round(amount, places):.{places}f}.")
+
+
 def _clean_choice_plans(plans: Any, currencies: set[str], app_currency: str) -> list[dict]:
+    _refuse_bad_prices(plans)
     cleaned = need_mod.clean_plans(plans, app_currency, limit=8) if isinstance(plans, list) else []
     for p in cleaned:
         bad = [c for c in p["prices"] if currencies and c not in currencies]
@@ -234,6 +264,12 @@ def choose(svc: Any, *, gateways: list[Any], needed: bool, models: list[str] | N
             if "subscription" in models else []
         if "subscription" in models and not clean:
             raise ChoiceError("A subscription needs at least one plan with a price.")
+        # Razorpay bills a plan at most once a week.
+        if any(g["provider"] == "razorpay" for g in chosen):
+            for pl in clean:
+                if pl["interval"] == "day" and pl["intervalCount"] < 7:
+                    raise ChoiceError(f"Razorpay cannot bill {pl['name']} every {'day' if pl['intervalCount'] == 1 else str(pl['intervalCount']) + ' days'}; "
+                                      "it bills at most once a week. Bill it weekly, or choose another gateway for it.")
         if chosen and app_currency not in currencies and "one_time" in models:
             raise ChoiceError(f"The app's prices are in {app_currency}, and none of the chosen gateways takes {app_currency}. "
                               f"Add a gateway that does, or change the app's currency.")
@@ -278,9 +314,12 @@ def _sync_integrations(svc: Any) -> None:
     from services.smith.payment_connect import EVENTS, SERVICES
     doc = svc.doc
     chosen = {g["provider"] for g in section(doc).get("gateways") or []}
+    # Payments turned off retire them all: a Stripe row left behind kept the
+    # app's checkouts reading Stripe's old keys after the owner said no.
+    off = section(doc).get("needed") is False
     for row in doc.get("integrations") or []:
         if isinstance(row, dict) and row.get("serves") == SERVES and str(row.get("status") or "") not in _RETIRED \
-                and str(row.get("provider") or "") not in chosen and chosen:
+                and str(row.get("provider") or "") not in chosen and (chosen or off):
             row["status"] = "DEPRECATED"
     for g in section(doc).get("gateways") or []:
         svc_info = next((s for s in SERVICES if s.provider == g["provider"]), None)
@@ -356,7 +395,10 @@ RUNTIME_FILES: tuple[tuple[str, str], ...] = (
     ("api-pay/stand-in/route.ts", "src/app/api/pay/stand-in/route.ts"),
     ("api-pay/return/route.ts", "src/app/api/pay/return/route.ts"),
     ("api-pay/confirm/route.ts", "src/app/api/pay/confirm/route.ts"),
+    ("api-pay/status/route.ts", "src/app/api/pay/status/route.ts"),
     ("pages/pay/stand-in/page.tsx", "src/app/pay/stand-in/page.tsx"),
+    ("pages/pay/confirming/page.tsx", "src/app/pay/confirming/page.tsx"),
+    ("pages/pay/confirming/ConfirmingPayment.tsx", "src/app/pay/confirming/ConfirmingPayment.tsx"),
     ("pages/pay/razorpay/page.tsx", "src/app/pay/razorpay/page.tsx"),
     ("pages/pay/razorpay/RazorpayCheckout.tsx", "src/app/pay/razorpay/RazorpayCheckout.tsx"),
     ("pages/billing/page.tsx", "src/app/(dashboard)/billing/page.tsx"),
@@ -475,6 +517,18 @@ GATE_FREE = (r"^/billing(?:/.*)?$", r"^/api/billing(?:/.*)?$", r"^/pay(?:/.*)?$"
 OPERATOR_ROLES = ("admin", "administrator", "owner", "superadmin", "super_admin")
 
 
+def _operators(doc: dict) -> list[str]:
+    """The app's operators, who use it without a plan — never a role a person
+    may take at sign-up: "Owner" in a property app is the one who pays, and
+    choosing it at the sign-up form would have opened the app for nothing."""
+    from services.blueprint.account_model import signup_roles
+    try:
+        self_serve = {r.strip().lower() for r in signup_roles(doc)}
+    except Exception:  # noqa: BLE001 — unknown sign-up roles: the fixed list stands
+        self_serve = set()
+    return [r for r in OPERATOR_ROLES if r not in self_serve]
+
+
 def middleware_gate(doc: dict) -> tuple[list[str], list[str]]:
     """(lines before `export default`, lines inside the middleware after the
     role checks) — empty when no subscription opens the app."""
@@ -488,7 +542,7 @@ def middleware_gate(doc: dict) -> tuple[list[str], list[str]]:
         "// with the app's own secret (`src/lib/payments/billing.ts`); a missing or",
         "// expired one is checked against the subscription itself (`/api/billing/access`).",
         "const GATE_FREE: RegExp[] = [" + ", ".join(f"new RegExp({json.dumps(r)})" for r in GATE_FREE) + "];",
-        f"const OPERATORS = new Set({json.dumps(list(OPERATOR_ROLES))});",
+        f"const OPERATORS = new Set({json.dumps(_operators(doc))});",
         "async function holdsAccess(req: any, uid: string): Promise<boolean> {",
         "  const raw = req.cookies?.get?.(\"forge_access\")?.value ?? \"\";",
         "  const secret = process.env.NEXTAUTH_SECRET ?? process.env.AUTH_SECRET ?? \"\";",
@@ -502,7 +556,10 @@ def middleware_gate(doc: dict) -> tuple[list[str], list[str]]:
         "    const mac = new Uint8Array(await crypto.subtle.sign(\"HMAC\", key, new TextEncoder().encode(text)));",
         "    let bin = \"\"; for (const b of mac) bin += String.fromCharCode(b);",
         "    const expected = btoa(bin).replace(/\\+/g, \"-\").replace(/\\//g, \"_\").replace(/=+$/, \"\");",
-        "    return expected.length === sig.length && expected === sig;",
+        "    // Compared whole, never stopping at the first difference.",
+        "    if (expected.length !== sig.length) return false;",
+        "    let diff = 0; for (let i = 0; i < sig.length; i++) diff |= expected.charCodeAt(i) ^ sig.charCodeAt(i);",
+        "    return diff === 0;",
         "  } catch {",
         "    return false;",
         "  }",
@@ -513,10 +570,13 @@ def middleware_gate(doc: dict) -> tuple[list[str], list[str]]:
         "    if (token && !GATE_FREE.some((r) => r.test(path)) && !OPERATORS.has(role.toLowerCase())) {",
         "      const uid = String((token as any).id ?? (token as any).sub ?? \"\");",
         "      if (!(await holdsAccess(req, uid))) {",
-        "        if (isApi(path)) return NextResponse.json({ error: { code: \"SUBSCRIPTION_REQUIRED\", message: \"Choose a plan to use this.\" } }, { status: 402 });",
+        "        // A read from the app's pages whose token ran out is checked and sent on (307 keeps the request);",
+        "        // a write without a token is refused until the next read renews it.",
+        "        const reads = req.method === \"GET\" || req.method === \"HEAD\";",
+        "        if (isApi(path) && !reads) return NextResponse.json({ error: { code: \"SUBSCRIPTION_REQUIRED\", message: \"Choose a plan to use this.\" } }, { status: 402 });",
         "        const to = req.nextUrl.clone();",
         "        to.pathname = \"/api/billing/access\";",
-        "        to.search = `?next=${encodeURIComponent(path + (req.nextUrl.search ?? \"\"))}`;",
+        "        to.search = `?${isApi(path) ? \"api=1&\" : \"\"}next=${encodeURIComponent(path + (req.nextUrl.search ?? \"\"))}`;",
         "        return NextResponse.redirect(to);",
         "      }",
         "    }",
@@ -543,6 +603,10 @@ def env_for_side(doc: dict, rows: Iterable[Any], side: str, *, webhooks: dict[st
     out: dict[str, str | None] = {name: None for name in ALL_ENV}
     if not takes_money(doc):
         return out
+    # THE SIDE, ALWAYS. A production copy whose gateways have no live keys is
+    # told so here, and refuses to take a payment: the stand-in, which lets
+    # the payer press "Paid", would have handed out plans and paid orders free.
+    out[SIDE_ENV] = side
     for g in section(doc).get("gateways") or []:
         row = by_id.get(str(g.get("gateway")))
         if row is None or getattr(row, "deleted_at", None) is not None:
@@ -562,8 +626,32 @@ def env_for_side(doc: dict, rows: Iterable[Any], side: str, *, webhooks: dict[st
 
 
 __all__ = ["ALL_ENV", "ChoiceError", "FIELD_ENV", "GATE_FREE", "RUNTIME_FILES", "SERVES", "WEBHOOK_ENV", "WEBHOOK_EVENTS",
-           "agent_note", "choose", "config_text", "decide_and_record", "env_for_side", "install_runtime", "integration_slug",
+           "agent_note", "choose", "config_text", "decide_and_record", "env_for_side", "readiness", "install_runtime", "integration_slug",
            "middleware_gate", "project_config", "project_into", "section", "sells_plans", "state", "summarise", "takes_money"]
+
+
+def readiness(doc: dict, rows: Iterable[Any]) -> dict[str, Any]:
+    """Whether the published app can take money: each chosen gateway, and
+    whether its live keys are set and were not refused. `liveReady` is True
+    when every chosen gateway can take live payments; `missing` names the ones
+    that cannot, with the currencies whose payers they would have served."""
+    from services.payments.gateways import has_mode, status_of
+    by_id = {str(r.id): r for r in rows}
+    gateways: list[dict[str, Any]] = []
+    for g in section(doc).get("gateways") or []:
+        row = by_id.get(str(g.get("gateway")))
+        gone = row is None or getattr(row, "deleted_at", None) is not None
+        state = "removed" if gone else status_of(row)
+        # Live only when its live keys were checked: keys saved while the
+        # gateway could not be reached may be sandbox keys pasted under Live.
+        live = (not gone) and has_mode(row, P.LIVE) and state == "ready"
+        gateways.append({"gateway": str(g.get("gateway")), "label": g.get("label") or (row.label if row else ""),
+                         "provider": g.get("provider") or (row.provider if row else ""), "live": bool(live),
+                         "removed": gone, "state": state, "currencies": list(g.get("currencies") or [])})
+    needed = takes_money(doc)
+    missing = [g for g in gateways if not g["live"]]
+    return {"needed": needed, "gateways": gateways, "missing": missing,
+            "liveReady": bool(needed and gateways and not missing)}
 
 
 def build_question(svc: Any) -> dict[str, Any] | None:
