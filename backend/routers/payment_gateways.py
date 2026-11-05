@@ -102,6 +102,7 @@ async def edit_gateway(org_id: uuid.UUID, gateway_id: str, body: GatewayBody,
         raise _fail(exc) from exc
     await db.commit()
     await db.refresh(row)
+    await _refresh_apps(db, org_id, str(row.id))
     return G.view(row, admin=True)
 
 
@@ -130,6 +131,7 @@ async def remove_gateway(org_id: uuid.UUID, gateway_id: str, user: PlatformUser 
     apps = await _apps_using(db, org_id, str(row.id))
     heir = await G.remove(db, row)
     await db.commit()
+    await _refresh_apps(db, org_id, str(row.id))
     return {"removed": str(row.id), "apps": apps, "newDefault": {"id": str(heir.id), "label": heir.label} if heir else None}
 
 
@@ -143,6 +145,27 @@ async def gateway_apps(org_id: uuid.UUID, gateway_id: str, user: PlatformUser = 
     except G.GatewayError as exc:
         raise _fail(exc) from exc
     return {"apps": await _apps_using(db, org_id, str(row.id))}
+
+
+async def _refresh_apps(db: AsyncSession, org_id: uuid.UUID, gateway_id: str) -> int:
+    """THE APPS THAT USE A GATEWAY GET ITS KEYS AS THEY ARE NOW. Keys fixed in
+    Settings never reached an app's preview until something else rewrote its
+    environment, so an owner went on testing against the keys just replaced.
+    Each app's `.env.local` is written again (its preview restarts on it).
+    Never fails the save. Returns how many apps were refreshed."""
+    from models.project import Project
+    from services.env_writer import write_env_local_from_platform
+    apps = await _apps_using(db, org_id, gateway_id)
+    done = 0
+    for app in apps:
+        try:
+            project = (await db.execute(select(Project).where(Project.id == uuid.UUID(app["id"])))).scalar_one_or_none()
+            if project is not None and project.output_dir:
+                await write_env_local_from_platform(project.output_dir, project.org_id, db)
+                done += 1
+        except Exception:  # noqa: BLE001 — the next sync writes it
+            log.warning("[payments] the environment of app %s could not be refreshed", app.get("id"), exc_info=True)
+    return done
 
 
 async def _apps_using(db: AsyncSession, org_id: uuid.UUID, gateway_id: str) -> list[dict[str, str]]:
