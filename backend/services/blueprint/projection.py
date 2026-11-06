@@ -4663,6 +4663,7 @@ def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
         # page while a valid session sat in the browser (Vercel, 0l133sp2).
         'import { sessionCookies } from "@/lib/session-cookie";',
         'import { NextResponse } from "next/server";',
+        'import { SIGN_IN } from "@/lib/sign-in-policy";',
         '',
         '// A role-restricted page names the roles that may open it; the session',
         '// carries the role. Anyone else is sent to the 403 page, signed in or',
@@ -4688,9 +4689,24 @@ def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
         'const refuse = (status: 401 | 403, code: string, message: string) =>',
         '  NextResponse.json({ error: { code, message } }, { status });',
         '',
+        '// A NEW ACCOUNT PROVES ITS ADDRESS FIRST (`signIn.verifyEmail`). Until the',
+        '// code is entered it reaches only the sign-in machinery and the code page,',
+        '// public pages included: an employer\'s onboarding is public, and DITANS let',
+        '// an unverified example.com address straight in (QA DIT-016, 2026-11-05).',
+        'const VERIFY_PATH = SIGN_IN.verifyEmail ? (SIGN_IN.verifyPath ?? "/verify-email") : "";',
+        'const VERIFY_OPEN = [/^\\/api\\/auth(?:\\/.*)?$/, /^\\/login$/, /^\\/signup$/, /^\\/verify-email$/, /^\\/offline$/];',
+        'const pendingProof = (token: unknown) =>',
+        '  Boolean(VERIFY_PATH) && (token as { profile?: { emailVerification?: unknown } } | null)?.profile?.emailVerification === "pending";',
+        '',
         'export default withAuth(',
         '  function middleware(req) {',
         '    const path = req.nextUrl.pathname;',
+        '    if (pendingProof(req.nextauth.token) && !VERIFY_OPEN.some((r) => r.test(path)) && path !== VERIFY_PATH.split("?")[0]) {',
+        '      if (isApi(path)) return refuse(403, "EMAIL_NOT_VERIFIED", "Confirm your email with the code we sent before using this.");',
+        '      const to = new URL(VERIFY_PATH, req.url);',
+        '      to.searchParams.set("next", path + req.nextUrl.search);',
+        '      return NextResponse.redirect(to);',
+        '    }',
         '    if (isPublic(path)) return NextResponse.next();',
         '    const token = req.nextauth.token as { role?: unknown } | null;',
         '    if (!token && isApi(path)) return refuse(401, "UNAUTHORIZED", "Sign in to use this.");',
@@ -5456,7 +5472,13 @@ def sign_in_policy(doc: dict) -> dict[str, Any]:
     magic = sec.get("magicLink") is True
     if not password and not magic and not sso:
         password = True   # nobody could sign in otherwise; the contract check refuses this upstream
-    return {"password": password, "magicLink": magic, "sso": sso}
+    # A NEW ACCOUNT PROVES ITS ADDRESS before it reaches anything (a code by
+    # email); `verifyPath` is the app's own code step, else the platform's.
+    verify = sec.get("verifyEmail") is True
+    out = {"password": password, "magicLink": magic, "sso": sso, "verifyEmail": verify}
+    if verify:
+        out["verifyPath"] = str(sec.get("verifyPath") or "/verify-email")
+    return out
 
 
 def project_sign_in(doc: dict, app_root: str | Path) -> dict[str, Any]:
@@ -5474,7 +5496,7 @@ def project_sign_in(doc: dict, app_root: str | Path) -> dict[str, Any]:
         "  issuerKey: string;\n  clientIdKey: string;\n  clientSecretKey: string;\n  domains: string[];\n"
         "  roleFrom: { claim: string; map: Record<string, string>; default: string | null } | null;\n"
         "  provisioning: \"invite_only\" | \"just_in_time\";\n}\n"
-        "export interface SignInPolicy { password: boolean; magicLink: boolean; sso: SsoEntry[] }\n"
+        "export interface SignInPolicy { password: boolean; magicLink: boolean; sso: SsoEntry[]; verifyEmail?: boolean; verifyPath?: string }\n"
         f"export const SIGN_IN: SignInPolicy = {json.dumps(policy, indent=2)};\n", "utf-8")
     return {"files": [SIGN_IN_POLICY_FILE], **policy}
 

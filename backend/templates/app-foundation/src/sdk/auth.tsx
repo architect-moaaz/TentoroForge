@@ -6,7 +6,7 @@
 
 import { apiPath } from "@/lib/api-path";
 import * as React from "react";
-import { getSession, signIn } from "next-auth/react";
+import { getSession, signIn, useSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ACCOUNT, AFTER_SIGNUP, type AccountField } from "@/lib/account";
 // Where a signed-in person lands: one rule for every sign-in form.
@@ -211,6 +211,51 @@ export function useMagicLink() {
     }
   }, []);
   return { request, pending, sent, error };
+}
+
+/** The code a new account proves its address with (`signIn.verifyEmail`):
+ *  `send()` mails a fresh one to the signed-in person, `verify(code)` checks
+ *  it and refreshes the session so the application opens to them. */
+export function useEmailCode() {
+  const { update } = useSession();
+  const [sending, setSending] = React.useState(false);
+  const [checking, setChecking] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const [notice, setNotice] = React.useState<string | null>(null);
+  const [sentTo, setSentTo] = React.useState<string | null>(null);
+  const send = React.useCallback(async () => {
+    setSending(true); setError(null);
+    try {
+      const res = await fetch(apiPath("/api/auth/email-code"), { method: "POST" });
+      const body = await res.json().catch(() => null) as { sentTo?: string; notice?: string; verified?: boolean } | null;
+      if (!res.ok) { setError(messageOf(body, "The code could not be sent.")); return false; }
+      setSentTo(body?.sentTo ?? null);
+      setNotice(body?.notice ? `The code could not be emailed: ${body.notice}` : null);
+      return true;
+    } catch {
+      setError("The code could not be sent — check your connection and try again.");
+      return false;
+    } finally {
+      setSending(false);
+    }
+  }, []);
+  const verify = React.useCallback(async (code: string) => {
+    setChecking(true); setError(null);
+    try {
+      const res = await fetch(apiPath("/api/auth/email-code"), { method: "PUT", headers: { "Content-Type": "application/json" },
+                                                                body: JSON.stringify({ code }) });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) { setError(messageOf(body, "That code could not be checked.")); return false; }
+      await update();
+      return true;
+    } catch {
+      setError("The code could not be checked — check your connection and try again.");
+      return false;
+    } finally {
+      setChecking(false);
+    }
+  }, [update]);
+  return { send, verify, sending, checking, error, notice, sentTo };
 }
 
 const secondaryButtonClass =
