@@ -661,6 +661,16 @@ def _shown_as_words(plan: _Plan) -> None:
                 f["type"] = "string"
 
 
+#: What `present(props.x)` asks of a record a view draws a card for.
+PRESENT = """
+/** A record is there when anything in it is: not null, not only empty words. */
+function present(record: unknown): boolean {
+  return !!record && Object.values(record as Record<string, unknown>).some(
+    (v) => v !== "" && v != null && v !== false && !(Array.isArray(v) && v.length === 0));
+}
+"""
+
+
 def _guard_records(plan: _Plan) -> None:
     """A CARD ABOUT ONE RECORD IS SHOWN WHILE THERE IS ONE. A new DITANS
     candidate's home drew its next step, an invitation and an unfinished
@@ -719,7 +729,11 @@ def _guard_records(plan: _Plan) -> None:
             card = card.parent
         if card is plan.root or card.id in plan.shows or others(card):
             continue
-        plan.shows[card.id] = {"node": card.id, "when": f"props.{name}"}
+        # THERE WHILE ANYTHING IN IT IS. `null` is none; so is an object of empty
+        # words, which is what a page gives that wrote `x?.title ?? ""` for one
+        # it does not have. A record being written has no id yet but has words
+        # — a new job's title, its "Draft" — and keeps its card.
+        plan.shows[card.id] = {"node": card.id, "when": f"present(props.{name})"}
 
 
 def _attrs(attrs: list[tuple[str, str]]) -> str:
@@ -1246,6 +1260,8 @@ def apply(static: str, reply: dict, name: str, *, components: dict[str, list[str
     code = (f'"use client";\nimport type * as React from "react";\n{imports}\n'
             f"export default function {name}(props: {name}Props) {{\n  return (\n"
             + "\n".join(body) + "\n  );\n}\n")
+    if "present(props." in code:
+        code += PRESENT
     for a in contract["actions"]:
         a.pop("nodes", None)
     # WHAT NOTHING READS IS NOT IN THE CONTRACT. An action with no element to

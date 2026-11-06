@@ -65,7 +65,7 @@ def _home():
 
 def _guarded(code: str, record: str) -> str:
     """The markup drawn only while `record` is there."""
-    start = code.index("{props." + record + " && (")
+    start = code.index("{present(props." + record + ") && (")
     return code[start:re.compile(r"\n\s*\)\}").search(code, start).start()]
 
 
@@ -77,7 +77,19 @@ def test_each_records_card_is_drawn_only_while_there_is_one():
     assert "Invitations to apply" not in step, "and nothing about another record"
     invitation = _guarded(code, "invitation")
     assert 'data-layer="Invitation"' in invitation and "Invitations to apply" in invitation
-    assert "{props.nurse && (" in code
+    assert "{present(props.nurse) && (" in code
+    assert code.count("function present(") == 1, "the view carries what it asks"
+
+
+def test_a_record_is_there_when_anything_in_it_is():
+    """A new job has no id yet, only its title and "Draft": its header stays."""
+    import subprocess
+    probe = P.PRESENT.replace("record: unknown", "record").replace("): boolean", ")").replace(
+        " as Record<string, unknown>", "") + """
+console.log(JSON.stringify([present(null), present({id: "", title: "", done: false, tags: []}),
+                            present({id: "", title: "Charge Nurse"}), present({id: "j-1", title: ""})]));"""
+    out = subprocess.run(["node", "-e", probe], capture_output=True, text=True, check=True).stdout
+    assert out.strip() == "[false,false,true,true]"
 
 
 def test_the_page_may_give_none_and_is_told_so():
@@ -97,5 +109,5 @@ def test_a_record_spread_over_the_whole_screen_stays_required():
               "values": [{"node": "3", "expr": "props.job.title"}, {"node": "15", "expr": "props.job.summary"}]}
     out, problems = P.apply(HOME, answer, "JobView")
     assert problems == [], problems
-    assert "{props.job && (" not in out["code"], "the screen itself is never hidden"
+    assert "present(props.job)" not in out["code"], "the screen itself is never hidden"
     assert "| null" not in out["code"]

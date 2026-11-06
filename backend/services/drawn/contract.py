@@ -50,9 +50,9 @@ def _row(slot: dict) -> str:
 
 
 def absent_records(code: str) -> set[str]:
-    """The records a view shows only while there is one (`{props.x && (`):
+    """The records a view shows only while there is one (`present(props.x) && (`):
     the page gives `null` when there is none."""
-    return set(re.findall(r"\{props\.([A-Za-z_]\w*) && \(", code or ""))
+    return set(re.findall(r"present\(props\.([A-Za-z_]\w*)\) && \(", code or ""))
 
 
 def props_type(name: str, contract: dict, *, children: bool = False, code: str = "") -> str:
