@@ -2185,11 +2185,16 @@ export function registerDefaultActions(): void {
     const { connectedService } = await import("@/lib/integrations/connected");
     const service = connectedService("send_email");
     const ownFrom = await getSecret("resend", "FORGE_EMAIL_FROM");
-    const from = ownFrom || "notifications@example.com";
+    // NO ADDRESS SET, A MAILBOX SIGNED IN: a mail server sends as the account
+    // it signed in, and refuses or rewrites any other sender — the stand-in
+    // below never reached anyone through SMTP (DITANS's verification codes,
+    // 2026-11-06). An SMTP user that is an address is the sender.
+    const smtpUser = ownFrom ? "" : String((await getSecret("smtp", "SMTP_USER")) ?? "");
+    const from = ownFrom || (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(smtpUser) ? smtpUser : "notifications@example.com");
     // The from-address an owner never set: the mail goes out from a stand-in,
     // which is the "it's sending from a weird address" complaint. Said once,
     // on a send that actually happened, rather than guessed at afterwards.
-    const fromNotice = ownFrom
+    const fromNotice = ownFrom || from === smtpUser
       ? undefined
       : `sent from ${from} — set FORGE_EMAIL_FROM to the address you want people to see`;
 
