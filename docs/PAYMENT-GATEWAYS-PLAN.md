@@ -69,6 +69,11 @@ choice.
   are not asked. It reads a short-lived `forge_access` cookie signed with the
   app's secret, and checks the subscription itself when the cookie is missing
   or expired.
+- `access: "none"` (the app stays open) locks nothing, so the frame shows the
+  way to a plan instead: a "Choose a plan" button above every signed-in page
+  (`PlanPrompt`, one of the frame files) for anyone the app says holds none,
+  never on `/billing` or `/pay/*`. Before it, the plans were only in the
+  account menu and a new member never learned they existed.
 
 **How a subscription ends**
 - Cancel at the period's end (the default): access stays until the end paid

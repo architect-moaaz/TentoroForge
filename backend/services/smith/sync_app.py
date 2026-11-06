@@ -394,7 +394,7 @@ FRAME_FILES: tuple[str, ...] = (
     "src/app/(dashboard)/layout.tsx", "src/app/(dashboard)/NotificationBell.tsx",
     "src/app/(dashboard)/AccountMenu.tsx", "src/app/(dashboard)/MobileNav.tsx",
     "src/app/(dashboard)/MobileTabBar.tsx", "src/app/(dashboard)/PersonaChrome.tsx",
-    "src/app/(dashboard)/RouteBreadcrumb.tsx",
+    "src/app/(dashboard)/RouteBreadcrumb.tsx", "src/app/(dashboard)/PlanPrompt.tsx",
     # The layout imports these two siblings; without them its refreshed copy
     # has a dangling import and every dashboard route 500s with "module not
     # found". OrgSwitcher (tenancy) and OutsideOrganisation (an app answering

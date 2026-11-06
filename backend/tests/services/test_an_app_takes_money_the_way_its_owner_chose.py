@@ -669,3 +669,15 @@ def test_a_change_that_says_take_payments_asks_which_gateway(tmp_path):
     svc.save()
     sensed = AP.sense_after_change(tmp_path, "Take payments for the memberships through our payment gateways")
     assert sensed and sensed["options"] == [AP.PAYMENT_CHIP]
+
+
+def test_a_member_without_a_plan_is_shown_the_way_to_one():
+    """An app that stays open showed its plans only inside the account menu: a
+    new member never learned one existed (Task Board, 2026-11-06)."""
+    from services.smith.sync_app import FRAME_FILES
+    shell = Path(__file__).resolve().parents[2] / "templates" / "app-foundation" / "src" / "app" / "(dashboard)"
+    layout, prompt = (shell / "layout.tsx").read_text(), (shell / "PlanPrompt.tsx").read_text()
+    assert "subscriptionsOffered()" in layout and "plansOnSale &&" in layout and "<PlanPrompt />" in layout
+    assert "/api/billing/status" in prompt and "!j.access" in prompt, "shown once the app says the person holds no plan"
+    assert "(billing|pay)" in prompt, "never on the plan page or a payment page"
+    assert "src/app/(dashboard)/PlanPrompt.tsx" in FRAME_FILES, "an app's refreshed layout brings the file it imports"
