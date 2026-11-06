@@ -31,7 +31,7 @@ HOME = """export default function HomeView() {
             </div>
           </div>
         </div>
-        <div className="flex flex-col" data-layer="Invitation">
+        <div className="flex flex-col bg-[#ffffff] border-[1px] border-[#e1e8eb]" data-layer="Invitation">
           <p className="text-[16px]">Invitations to apply</p>
           <p className="text-[14px]">Saudi German Hospital · Charge Nurse</p>
         </div>
@@ -77,7 +77,7 @@ def test_each_records_card_is_drawn_only_while_there_is_one():
     assert "Invitations to apply" not in step, "and nothing about another record"
     invitation = _guarded(code, "invitation")
     assert 'data-layer="Invitation"' in invitation and "Invitations to apply" in invitation
-    assert "{present(props.nurse) && (" in code
+    assert "present(props.nurse)" not in code, "a page's head is not a card: it has no box of its own"
     assert code.count("function present(") == 1, "the view carries what it asks"
 
 
@@ -97,6 +97,7 @@ def test_the_page_may_give_none_and_is_told_so():
     typed = props_type("HomeView", out["contract"], code=out["code"])
     assert "nextStep: { id: string; title: string; payLabel: string } | null;" in typed
     assert "invitation: { id: string; summary: string } | null;" in typed
+    assert "nurse: { id: string; greeting: string };" in typed
     # read from the stored code, the page writer's type says the same
     assert "| null" not in props_type("HomeView", out["contract"])
 
@@ -111,3 +112,22 @@ def test_a_record_spread_over_the_whole_screen_stays_required():
     assert problems == [], problems
     assert "present(props.job)" not in out["code"], "the screen itself is never hidden"
     assert "| null" not in out["code"]
+
+
+def test_a_line_in_the_screens_header_does_not_take_the_header_with_it():
+    """A 90-day check-in with no placement lost "Is the job what you were promised?"
+    with the placement's line above it (DITANS 2026-11-06)."""
+    answer = {"contract": {"data": [{"name": "nextStep", "kind": "record", "label": "Next step", "fields": [
+                  {"name": "title", "label": "Title", "type": "string"}]},
+                  {"name": "invitation", "kind": "record", "label": "Invitation", "fields": [
+                      {"name": "summary", "label": "Summary", "type": "string"}]},
+                  {"name": "placement", "kind": "record", "label": "Placement", "fields": [
+                      {"name": "line", "label": "Line", "type": "string"}]}], "actions": []},
+              "lists": [], "inputs": [], "shows": [],
+              "values": [{"node": "3", "expr": "props.placement.line"},
+                         {"node": "8", "expr": "props.nextStep.title"},
+                         {"node": "15", "expr": "props.invitation.summary"}]}
+    out, problems = P.apply(HOME, answer, "CheckInView")
+    assert problems == [], problems
+    assert "present(props.placement)" not in out["code"]
+    assert "{present(props.nextStep) && (" in out["code"] and "{present(props.invitation) && (" in out["code"]

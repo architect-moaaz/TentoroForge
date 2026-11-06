@@ -725,15 +725,34 @@ def _guard_records(plan: _Plan) -> None:
         def others(n: M.Node) -> bool:
             return any(reads.get(t.id, set()) - {name} for t in n.walk())
 
-        while card.parent is not None and card.parent is not plan.root and not others(card.parent):
-            card = card.parent
-        if card is plan.root or card.id in plan.shows or others(card):
+        top = card
+        while top.parent is not None and top.parent is not plan.root and not others(top.parent):
+            top = top.parent
+        if top is plan.root or others(top):
+            continue
+        # A CARD IS WHAT THE DRAWING DRAWS AS ONE: a box with its own fill, edge or
+        # shadow, or a shared component. Climbing to whatever held nothing else
+        # took page headers and whole bodies with it — a 90-day check-in lost its
+        # question when there was no placement, and 124 of DITANS' 226 guards were
+        # a "Header", "Body" or "KPI row" (2026-11-06). With no box, nothing hides.
+        span = chain(card)[chain(card).index(top):] if top is not card else [card]
+        card = next((n for n in span if _surface(n)), None)
+        if card is None or card.id in plan.shows:
             continue
         # THERE WHILE ANYTHING IN IT IS. `null` is none; so is an object of empty
         # words, which is what a page gives that wrote `x?.title ?? ""` for one
         # it does not have. A record being written has no id yet but has words
         # — a new job's title, its "Draft" — and keeps its card.
         plan.shows[card.id] = {"node": card.id, "when": f"present(props.{name})"}
+
+
+_SURFACE = re.compile(r"(?:^|\s)(?:bg-|border(?:-\[|\s|$)|shadow)")
+
+
+def _surface(n: M.Node) -> bool:
+    """The element draws a box of its own: a fill, an edge, a shadow, or it is
+    (or only sizes) a shared component."""
+    return n.unit().is_component or bool(_SURFACE.search(n.classes()))
 
 
 def _attrs(attrs: list[tuple[str, str]]) -> str:
