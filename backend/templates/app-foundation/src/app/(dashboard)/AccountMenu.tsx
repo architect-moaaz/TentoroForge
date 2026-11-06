@@ -108,8 +108,11 @@ export function AccountMenu({ name, email, role, compact = false, extras }: {
           )}
           <button type="button" role="menuitem"
             onClick={() => {
-              try { void signOut({ callbackUrl: "/login" }); }
-              catch { window.location.href = "/login"; }   // a hard way out beats none
+              // UNDER THE APP'S OWN PREFIX: a bare "/login" took a Preview's
+              // member to the platform's address, which answered "Not Found".
+              const out = `${(process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/+$/, "")}/login`;
+              try { void signOut({ callbackUrl: out }); }
+              catch { window.location.href = out; }   // a hard way out beats none
             }}
             className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-foreground hover:bg-muted/50">
             <LogOut size={14} aria-hidden /> Sign out

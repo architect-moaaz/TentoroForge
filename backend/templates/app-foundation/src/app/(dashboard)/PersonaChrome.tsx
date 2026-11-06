@@ -240,11 +240,14 @@ export function PersonaChrome({
                 type="button"
                 role="menuitem"
                 onClick={() => {
+                  // Under the app's own prefix, as in the account menu: a bare
+                  // "/login" left a Preview for the platform's address.
+                  const out = `${(process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/+$/, "")}/login`;
                   try {
-                    void signOut({ callbackUrl: "/login" });
+                    void signOut({ callbackUrl: out });
                   } catch {
                     // Fallback: hard nav to /login
-                    window.location.href = "/login";
+                    window.location.href = out;
                   }
                 }}
                 className="flex w-full items-center gap-2 px-3 py-2 hover:bg-muted/50 text-foreground text-left"
