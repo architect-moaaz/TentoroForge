@@ -661,6 +661,67 @@ def _shown_as_words(plan: _Plan) -> None:
                 f["type"] = "string"
 
 
+def _guard_records(plan: _Plan) -> None:
+    """A CARD ABOUT ONE RECORD IS SHOWN WHILE THERE IS ONE. A new DITANS
+    candidate's home drew its next step, an invitation and an unfinished
+    application as cards of empty words and wordless buttons, because the
+    drawing shows one of each and nothing said they could be missing (QA
+    2026-11-06). The card is the largest element holding everything bound to
+    the record and nothing bound to anything else; it is drawn while the
+    record is there, and the page gives `null` when it is not."""
+    reads: dict[str, set[str]] = {}
+
+    def note(nid: str, expr: Any) -> None:
+        m = _PATH.match(str(expr or "").strip())
+        if m and m.group(1) == "props":
+            reads.setdefault(nid, set()).add(m.group(2))
+
+    for nid, values in plan.values.items():
+        for v in values:
+            note(nid, v["expr"])
+    for nid, a in plan.actions.items():
+        if a.get("on"):
+            reads.setdefault(nid, set()).add(str(a["on"]).split(".")[0])
+    for nid, t in plan.templates.items():
+        reads.setdefault(nid, set()).add(str(t.get("prop") or "").split(".")[0])
+    for nid, inp in plan.inputs.items():
+        reads.setdefault(nid, set()).add(str(inp["form"]))
+    for nid, s in plan.shows.items():
+        note(nid, s["when"])
+    asked = {_PATH.match(str(s["when"])).group(2) for s in plan.shows.values() if _PATH.match(str(s["when"]))}
+
+    def chain(n: M.Node) -> list[M.Node]:
+        out = []
+        while n is not None:
+            out.append(n)
+            n = n.parent
+        return out[::-1]
+
+    for name, slot in plan.slots.items():
+        if slot.get("kind") != "record" or "." in name or name in asked:
+            continue
+        bound = [plan.nodes[nid] for nid, slots in reads.items() if name in slots]
+        if not bound or any(n.id in plan.scope for n in bound):
+            continue
+        chains = [chain(n) for n in bound]
+        card = None
+        for level in zip(*chains):
+            if any(n is not level[0] for n in level):
+                break
+            card = level[0]
+        if card is None:
+            continue
+
+        def others(n: M.Node) -> bool:
+            return any(reads.get(t.id, set()) - {name} for t in n.walk())
+
+        while card.parent is not None and card.parent is not plan.root and not others(card.parent):
+            card = card.parent
+        if card is plan.root or card.id in plan.shows or others(card):
+            continue
+        plan.shows[card.id] = {"node": card.id, "when": f"props.{name}"}
+
+
 def _attrs(attrs: list[tuple[str, str]]) -> str:
     return "".join(f" {k}={v}" for k, v in attrs)
 
@@ -1177,6 +1238,7 @@ def apply(static: str, reply: dict, name: str, *, components: dict[str, list[str
     if problems:
         return None, problems
     _shown_as_words(plan)
+    _guard_records(plan)
     writer = _Writer(plan)
     body = writer.piece(root, 2, None, child=False)
     imports = "".join(f'import {c} from "./{c}";\n' for c in sorted(plan.components)
@@ -1257,7 +1319,7 @@ def parameterise(client: Any, name: str, static: str, *, heading: str, image: st
 
 def finish(name: str, code: str, contract: dict, *, children: bool = False) -> str:
     """The view's file with its generated Props type in place."""
-    typed = props_type(name, contract, children=children)
+    typed = props_type(name, contract, children=children, code=code)
     code = code.lstrip()
     head = ""
     for directive in ('"use client";', "'use client';"):

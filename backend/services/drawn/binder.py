@@ -156,7 +156,7 @@ def user_prompt(doc: dict, page: dict, *, feedback: str = "") -> str:
                      + ("the page as it opens" if as_ == "main" else
                         f"the phone drawing of `{label}`, shown instead of it on a phone" if as_ == "phone" else
                         f"its {as_} “{label}” (the whole page as drawn with it open)")
-                     + "\n```ts\n" + props_type(row["name"], contract) + "```")
+                     + "\n```ts\n" + props_type(row["name"], contract, code=str(row.get("code") or "")) + "```")
         acts = []
         for action in contract.get("actions") or []:
             target = targets.get(str(action.get("target") or ""))
@@ -179,7 +179,8 @@ def user_prompt(doc: dict, page: dict, *, feedback: str = "") -> str:
         "type asks for. Records become the props as the drawing displays them: format money, dates and counts "
         "the way the sample shows them (“7 of 10”, “1 Mar 2027”); an `enum` prop takes "
         "one of its drawn values; every row's `id` is the record's id. A record a view shows (one row, not a "
-        "list) is always given, as drawn: the one chosen, else the first. A form — what the person sets — starts "
+        "list) is always given, as drawn: the one chosen, else the first — and where its type allows `null`, "
+        "`null` when there is none, never an object of empty words: the view then leaves its card out. A form — what the person sets — starts "
         "as the record it changes, or empty for a new one: never the drawing's example words, choices or ticks, "
         "which its fields already show as hints.\n"
         "- A view drawn for the phone (\"the phone drawing of X\") is the same screen as X: show it instead of X "

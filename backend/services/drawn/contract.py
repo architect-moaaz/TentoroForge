@@ -49,9 +49,16 @@ def _row(slot: dict) -> str:
     return _ts_object(slot.get("fields") or [], with_id=True)
 
 
-def props_type(name: str, contract: dict, *, children: bool = False) -> str:
+def absent_records(code: str) -> set[str]:
+    """The records a view shows only while there is one (`{props.x && (`):
+    the page gives `null` when there is none."""
+    return set(re.findall(r"\{props\.([A-Za-z_]\w*) && \(", code or ""))
+
+
+def props_type(name: str, contract: dict, *, children: bool = False, code: str = "") -> str:
     """``export type <Name>Props = {...}`` from the contract."""
     lines: list[str] = []
+    absent = absent_records(code)
     slots = {str(s.get("name")): s for s in contract.get("data") or [] if isinstance(s, dict) and s.get("name")}
     # A LIST DRAWN INSIDE A RECORD IS ONE OF ITS FIELDS. A list declared as
     # `selectedAgency.checks` is read by the view as
@@ -80,11 +87,12 @@ def props_type(name: str, contract: dict, *, children: bool = False) -> str:
             # tenant selected, and its view reads `props.selectedTenant.code`
             # as drawn; typed optional, the page fed `undefined` until one was
             # chosen and the drawn page crashed the moment it had rows
-            # (d6drawn, 2026-10-28). Required, the page must give it one.
+            # (d6drawn, 2026-10-28). Required, the page must give it one —
+            # `null` when the view draws its card only while there is one.
             row = _row(slot)
             if inner.get(slot["name"]):
                 row = row.rstrip()[:-1].rstrip() + "; " + "; ".join(inner[slot["name"]]) + " }"
-            lines.append(f"  {slot['name']}: {row};")
+            lines.append(f"  {slot['name']}: {row}{' | null' if slot['name'] in absent else ''};")
         elif kind == "form":
             lines.append(f"  {slot['name']}: {_ts_object(slot.get('fields') or [], with_id=False)};")
             lines.append(f"  {change_handler(slot['name'])}(field: string, value: string | boolean): void;")
