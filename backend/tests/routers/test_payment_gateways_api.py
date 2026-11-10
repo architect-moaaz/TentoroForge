@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from pathlib import Path
 
 import httpx
 import pytest
@@ -316,8 +317,7 @@ def test_masking_shows_the_kind_and_last_four():
 # One application's payments, through the API
 # --------------------------------------------------------------------------- #
 
-async def _app_with_definition(admin, org_id: str, description: str) -> tuple[str, "Path"]:
-    from pathlib import Path
+async def _app_with_definition(admin, org_id: str, description: str) -> tuple[str, Path]:
     from services.project_service import OUTPUT_BASE
     from services.blueprint.service import BlueprintService
     project = (await admin.post(f"/api/orgs/{org_id}/projects", json={"name": "Fit Club"})).json()
