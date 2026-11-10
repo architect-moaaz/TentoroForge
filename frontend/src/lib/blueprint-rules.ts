@@ -88,6 +88,8 @@ export interface RulesResponse {
   linked?: { rule: string; ruleName?: string; workflow: string; name: string; step: string }[];
   /** Workflow checks that say exactly what a rule says, offered to hand to the rule ("Use the rules"). */
   repeats?: { rule: string; ruleName?: string; workflow: string; name: string; step: string; stepName?: string }[];
+  /** Rules saved by the tab before the definition held them, waiting to be brought in ("Bring them in"). */
+  olderRules?: number;
 }
 
 export const ORIGIN_LABEL: Record<RuleOrigin, string> = {

@@ -52,8 +52,12 @@ def _uses(lineages: list[str]) -> dict[str, int]:
     from services.project_templates import _sync_engine
     try:
         with _sync_engine().connect() as conn:
+            # COUNTED AS THE GALLERY COUNTS (`template_gallery.stats`): an
+            # organisation once, never a review use or an app deleted since —
+            # or Smith said "used 5 times" where the Gallery said 1.
             rows = conn.execute(text(
-                "SELECT lineage, count(*) FROM template_uses WHERE lineage = ANY(:l) GROUP BY lineage"),
+                "SELECT lineage, count(DISTINCT org_id) FROM template_uses WHERE lineage = ANY(:l) "
+                "AND is_review IS FALSE AND project_id IS NOT NULL GROUP BY lineage"),
                 {"l": lineages}).all()
     except Exception:  # noqa: BLE001 — the count is a nicety
         return {}

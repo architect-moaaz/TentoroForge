@@ -510,7 +510,7 @@ VERB_HELP: dict[str, str] = {
         "<rule> in <workflow>\". A rule is checked AUTOMATICALLY by every workflow step "
         "that saves its record, so it is often linked already — that is said, with the step; a workflow's "
         "own older check that does not match is shown to the person and kept, and it is replaced by the "
-        "rule only when they say so (put \"replace the old check\" in `change`); otherwise the rule becomes an extra "
+        "rule only when the person says so in their own message (\"replace the old check…\"); otherwise the rule becomes an extra "
         "check step at the start of the workflow. NOT a question about where a rule is used (read "
         "`rule_links` and answer). Needs the rule and the workflow."
     ),

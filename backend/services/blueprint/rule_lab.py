@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 import subprocess
 import threading
@@ -74,22 +75,36 @@ def _bundle() -> Path:
             raise LabUnavailable("esbuild is not installed (npm install at the repository root, "
                                  "or esbuild on the PATH)")
         cmd = [esbuild]
-        tmp = _BUNDLE.with_suffix(".tmp.cjs")
+        # ONE FILE PER PROCESS: `_BUILD_LOCK` holds within a worker only, and
+        # two workers writing one temporary bundle at once broke each other's
+        # (PR #29 review). Each writes its own, and the rename is atomic.
+        tmp = _BUNDLE.with_name(f"{_BUNDLE.stem}.{os.getpid()}.{threading.get_ident()}.tmp.cjs")
         try:
             subprocess.run(cmd + [str(_ENTRY), "--bundle", "--platform=node", "--format=cjs",
                                   f"--outfile={tmp}", "--log-level=error"],
                            check=True, capture_output=True, timeout=120)
             tmp.replace(_BUNDLE)
         except Exception as exc:  # noqa: BLE001
+            tmp.unlink(missing_ok=True)
             raise LabUnavailable(f"the rule lab could not be built: {exc}") from exc
         return _BUNDLE
 
 
+#: How many lab runs one worker has going at once. Each is a `node` process of
+#: up to its timeout; "Test it" is a member's button, and without a cap a few
+#: of them pressed together held every worker thread (PR #29 review).
+MAX_RUNNING = 3
+_RUNNING = threading.BoundedSemaphore(MAX_RUNNING)
+
+
 def run(request: dict[str, Any], timeout: float = 20) -> dict[str, Any]:
-    """Send one request to the lab; its answer, or LabUnavailable."""
+    """Send one request to the lab; its answer, or LabUnavailable (also when
+    `MAX_RUNNING` runs are going and none ends within a few seconds)."""
     if not shutil.which("node"):
         raise LabUnavailable("node is not installed")
     bundle = _bundle()
+    if not _RUNNING.acquire(timeout=5):
+        raise LabUnavailable("the rule lab is busy with other checks — try again in a moment")
     try:
         proc = subprocess.run(["node", str(bundle)], input=json.dumps(request), capture_output=True,
                               text=True, timeout=timeout, check=True)
@@ -98,6 +113,8 @@ def run(request: dict[str, Any], timeout: float = 20) -> dict[str, Any]:
         raise LabUnavailable("the rule lab took too long") from exc
     except Exception as exc:  # noqa: BLE001
         raise LabUnavailable(f"the rule lab failed: {exc}") from exc
+    finally:
+        _RUNNING.release()
     if out.get("error"):
         raise LabUnavailable(str(out["error"]))
     return out

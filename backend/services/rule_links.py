@@ -526,9 +526,15 @@ def _plan(doc: dict, rule: dict, c: dict) -> tuple[list[dict], list[dict], list[
     return cases, conditions, saves
 
 
-def _key(rule: dict, c: dict) -> str:
+def _key(doc: dict, rule: dict, c: dict) -> str:
+    """The question, whole: the rule, the step, and the record's fields as they
+    are now. The samples are drawn from the fields (their kinds, which are
+    required, their choices), so a field changed from required to optional or
+    from a number to text is a new question, not a remembered "same" (PR #29
+    review)."""
+    fields = (_entities(doc).get(str(rule.get("entity"))) or {}).get("fields") or []
     return json.dumps([rule.get("when"), rule.get("then"), rule.get("otherwise"), rule.get("entity"),
-                       c["expression"], c["goOnIsYes"], c["event"], c["save"].get("config", {}).get("values")],
+                       c["expression"], c["goOnIsYes"], c["event"], c["save"].get("config", {}).get("values"), fields],
                       sort_keys=True, default=str)
 
 
@@ -542,7 +548,7 @@ def judge_all(doc: dict, pairs: list[tuple[dict, dict]], *, timeout: float = 90)
     out: list[dict | None] = [None] * len(pairs)
     todo, conditions, saves = [], [], []
     for i, (rule, c) in enumerate(pairs):
-        k = _key(rule, c)
+        k = _key(doc, rule, c)
         if k in _JUDGED:
             out[i] = {**c, **_JUDGED[k], "rule": str(rule.get("id"))}
             continue

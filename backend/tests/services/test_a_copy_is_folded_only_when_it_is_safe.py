@@ -164,8 +164,14 @@ def test_smith_asks_before_taking_out_a_check_that_differs(tmp_path, monkeypatch
     out = perform(ctx, "link_rule", {"verb": "link_rule", "rule": "positive amount", "workflow": "log an expense"})
     assert out.status == "needs_user" and not followed
     assert "amount < 10000" in out.said and "amount 10000" in out.said and "replace the old check" in out.said
+    # The planner's reading alone is not the person saying so.
     out = perform(ctx, "link_rule", {"verb": "link_rule", "rule": "positive amount", "workflow": "log an expense",
                                      "change": "replace the old check with the rule"})
+    assert out.status == "needs_user" and not followed
+    said = Ctx(output_dir=str(tmp_path), project_id="p", message="replace the old check in Log an expense with the rule",
+               ask="")
+    out = perform(said, "link_rule", {"verb": "link_rule", "rule": "positive amount", "workflow": "log an expense",
+                                      "change": "replace the old check with the rule"})
     assert out.status == "resolved" and followed == [("RULE-001", "check_amount")]
 
 
@@ -271,3 +277,19 @@ def test_a_comparison_the_engine_could_not_make_is_not_asked_again_at_once(monke
     monkeypatch.setattr(L, "_RETRY_AFTER", 0.0)
     L.review_all(doc)
     assert asked == [20, 90]
+
+
+def test_a_remembered_verdict_is_for_the_fields_as_they_were():
+    """PR #29 review: "same" was remembered by the rule and the step alone, so a
+    field changed from required to optional (or a number to text) kept an old
+    verdict, and a later fold could take out a check no longer the same."""
+    import copy as _copy
+    doc = _doc()
+    rule = next(r for r in doc["businessRules"] if r["id"] == "RULE-001")
+    c = next(c for c in L.candidates(doc, rule))
+    before = L._key(doc, rule, c)
+    changed = _copy.deepcopy(doc)
+    ent = next(e for e in changed["data"]["entities"] if str(e["id"]) == str(rule["entity"]))
+    ent["fields"][0] = {**ent["fields"][0], "required": not ent["fields"][0].get("required", False)}
+    assert L._key(changed, rule, c) != before
+    assert L._key(_copy.deepcopy(doc), rule, c) == before, "the same question is still remembered"
