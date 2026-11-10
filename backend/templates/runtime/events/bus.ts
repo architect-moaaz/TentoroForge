@@ -91,30 +91,10 @@ export async function emitEvent(
     // A key the table has seen: the same delivery again, not a failure.
     return key ? { duplicate: true } : null;
   } catch (err) {
-    // A TABLE FROM BEFORE `dedupe_key` (an app built earlier, its engine
-    // brought current since): the column is added once and the event written,
-    // not lost — a payment's outcome rides on this.
-    const code = String((err as any)?.code ?? "");
-    if ((code === "42703" || code === "42P10") && !_dedupeAdded) {
-      _dedupeAdded = true;
-      try {
-        await db.execute(sql`ALTER TABLE forge_events ADD COLUMN IF NOT EXISTS dedupe_key text`);
-        // As drizzle declares `.unique()`, by its name, so a later push finds it there.
-        await db.execute(sql`DO $$ BEGIN
-          ALTER TABLE forge_events ADD CONSTRAINT forge_events_dedupe_key_unique UNIQUE (dedupe_key);
-        EXCEPTION WHEN duplicate_object OR duplicate_table THEN NULL; END $$`);
-        return await emitEvent(type, opts);
-      } catch (again) {
-        console.warn(`[events] forge_events could not be given dedupe_key (non-fatal):`, again);
-      }
-    }
     console.warn(`[events] emitEvent(${t}) failed (non-fatal):`, err);
     return null;
   }
 }
-
-/** Added once per process at most; a second failure is reported, not retried. */
-let _dedupeAdded = false;
 
 /**
  * Emit + kick inline processing (fire-and-forget). The kick is

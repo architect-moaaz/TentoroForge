@@ -39,14 +39,8 @@ TEST_TWINS = {
     "STRIPE_WEBHOOK_SECRET": "STRIPE_TEST_WEBHOOK_SECRET",
 }
 #: Keys that reach real people outside the organisation and have no test twin:
-#: never on the test side. Razorpay's and PayPal's keys set under Integrations
-#: (an app from before Settings → Integrations → Payments) are one set for both sides, and
-#: may be live: the test side takes payments through the stand-in instead.
-#: (An app whose payments are Settings → Integrations → Payments' gets its TEST keys after
-#: these rules, from `services.payments`.)
-TEST_NEVER = ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_FROM_NUMBER",
-              "RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET", "RAZORPAY_WEBHOOK_SECRET",
-              "PAYPAL_CLIENT_ID", "PAYPAL_CLIENT_SECRET", "PAYPAL_WEBHOOK_ID")
+#: never on the test side.
+TEST_NEVER = ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_FROM_NUMBER")
 
 
 def normalise(environment: str | None) -> str:

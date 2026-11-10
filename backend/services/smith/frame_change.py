@@ -46,7 +46,6 @@ FRAME_PARTS: dict[str, str] = {
     "src/app/(dashboard)/MobileTabBar.tsx": "the phone's bottom tab bar",
     "src/app/(dashboard)/PersonaChrome.tsx": "the persona frame some applications use instead of a rail",
     "src/app/(dashboard)/RouteBreadcrumb.tsx": "the breadcrumb above each signed-in screen",
-    "src/app/(dashboard)/PlanPrompt.tsx": "the \"Choose a plan\" button a person without a plan sees, in an app that sells plans",
     "src/components/PublicPageFrame.tsx": "the public pages' header (brand, links, sign in) and footer",
     "src/components/PublicNavLinks.tsx": "the links in the public header",
     "src/components/AppNavigator.tsx": "the quick navigator (jump to a screen)",

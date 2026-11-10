@@ -133,27 +133,6 @@ async def test_preserves_user_supplied_lines(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_a_line_the_app_appended_below_the_block_survives_a_rewrite(tmp_path):
-    """The app's start.sh appends DATABASE_URL to the end of .env.local — below the
-    managed block. A rewrite of the block keeps it, and still drops the old block."""
-    (tmp_path / ".env.local").write_text(
-        "NEXTAUTH_SECRET=abc\n"
-        "\n# --- managed by Forge platform (integrations) --- do not edit below by hand\n"
-        "RESEND_API_KEY=old_value\n"
-        "DATABASE_URL=postgresql://postgres:postgres@localhost:5433/app_x\n"
-    )
-    await _call(tmp_path, [_row("resend", "RESEND_API_KEY", "new_value")])
-    env = (tmp_path / ".env.local").read_text()
-    assert "DATABASE_URL=postgresql://postgres:postgres@localhost:5433/app_x" in env, "the app's database was dropped"
-    assert env.index("DATABASE_URL=") < env.index("managed by Forge platform"), "kept above the block, as the app's own"
-    assert "old_value" not in env and env.count("RESEND_API_KEY=") == 1 and "RESEND_API_KEY=new_value" in env
-    assert env.count("managed by Forge platform") == 1
-    # And again: nothing moves.
-    result = await _call(tmp_path, [_row("resend", "RESEND_API_KEY", "new_value")])
-    assert result["written"] is False
-
-
-@pytest.mark.asyncio
 async def test_updates_existing_managed_value(tmp_path):
     (tmp_path / ".env.local").write_text(
         "DATABASE_URL=x\n"

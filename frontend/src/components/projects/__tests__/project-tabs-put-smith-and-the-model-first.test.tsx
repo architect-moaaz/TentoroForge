@@ -28,7 +28,7 @@ describe("project tabs", () => {
     render();
     expect(labels()).toEqual(["Smith", "Data Model", "Editor", "Workflows", "Agents", "More"]);
     expect(MORE_TABS.map((t) => t.label)).toEqual(
-      ["Preview", "Versions", "App Map", "Business Rules", "Payments", "Access & Rules", "Files", "Settings"]);
+      ["Preview", "Versions", "App Map", "Business Rules", "Access & Rules", "Files", "Settings"]);
     expect(host.textContent).not.toContain("Chat");
   });
 

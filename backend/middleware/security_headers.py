@@ -1,6 +1,5 @@
 """Security headers middleware — adds standard security headers to all responses."""
 
-import os
 import uuid
 
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -69,29 +68,14 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # Fonts, as the published app loads them; refused here, every drawn
         # screen in the preview fell back to a serif (DITANS, 2026-10-30).
         app_fonts = (" https://fonts.googleapis.com", " https://fonts.gstatic.com") if is_preview_serve else ("", "")
-        # A PAYER PAYS IN THE PREVIEW TOO. Razorpay takes the money in its own
-        # Checkout window — its script, and the frames it opens over the app's
-        # page; refused here, an owner trying the app's payments with test
-        # keys met "Razorpay's checkout could not be loaded" on every payment.
-        # Against the local gateway emulator, its stand-in of that window.
-        pay_script, pay_frame, pay_connect = "", "", ""
-        if is_preview_serve:
-            # Razorpay's window loads its parts from more than one razorpay.com address.
-            pay_script = " https://checkout.razorpay.com https://*.razorpay.com"
-            pay_frame = " https://api.razorpay.com https://checkout.razorpay.com https://*.razorpay.com"
-            emulator = (os.environ.get("FORGE_PAYMENTS_EMULATOR") or "").rstrip("/")
-            if emulator:
-                pay_script += f" {emulator}"
-                pay_connect = f" {emulator}"
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
-            f"script-src 'self' 'unsafe-inline' 'unsafe-eval'{pay_script}; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
             f"style-src 'self' 'unsafe-inline'{app_fonts[0]}; "
             "img-src 'self' data: https:; "
             f"font-src 'self' data:{app_fonts[1]}; "
-            f"connect-src 'self' https:{pay_connect}"
-            + (f"; frame-src 'self'{pay_frame}" if pay_frame else "")
-            + f"{frame_ancestors}"
+            "connect-src 'self' https:"
+            f"{frame_ancestors}"
         )
 
         return response

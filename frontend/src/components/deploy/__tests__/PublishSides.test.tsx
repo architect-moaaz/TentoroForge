@@ -26,8 +26,6 @@ if (typeof Element !== "undefined" && !(Element.prototype as any).hasPointerCapt
 
 let status: any;
 let latest: any = null;
-// What GET /payments says about live money (null: the app takes none).
-let payments: any = null;
 const started: unknown[] = [];
 const puts: [string, unknown][] = [];
 
@@ -38,7 +36,6 @@ vi.mock("@/lib/api", () => ({
       if (u.endsWith("/check")) return { checked: false, pages: 0, working: 0, failing: [], processes: [] };
       if (u.endsWith("/api/projects/p1")) return { status: "ready" };
       if (u.includes("/deployments/latest")) return latest;
-      if (u.endsWith("/payments")) return payments;
       return null;
     },
     put: async (u: string, b: unknown) => { puts.push([u, b]); return { target: (b as any).target }; },
@@ -83,7 +80,6 @@ beforeEach(() => {
   started.length = 0;
   puts.length = 0;
   latest = null;
-  payments = null;
 });
 afterEach(() => {
   act(() => root.unmount());
@@ -199,30 +195,5 @@ describe("Publish, Test and Production", () => {
     await render();
     expect(started).toEqual([]);
     expect(button("Publish to Test")).toBeUndefined();
-  });
-});
-
-describe("Publish, and money", () => {
-  it("says before production when the app cannot take real money yet — a warning, never a gate", async () => {
-    status = { target: "production", test: null, production: null, test_address: "https://acme-test.vercel.app",
-               untested_changes: false, test_ahead: false };
-    payments = { readiness: { needed: true, liveReady: false, gateways: [], missing: [{ label: "Stripe US", state: "test_only", removed: false }] } };
-    await render();
-    const note = document.body.querySelector("[data-publish-payments]")?.textContent ?? "";
-    expect(note).toContain("cannot take real money yet");
-    expect(note).toContain("Stripe US has no live keys");
-    expect(button("Publish to Production")).toBeTruthy();
-  });
-  it("says nothing on Test, or when live payments are ready", async () => {
-    status = { target: "test", test: null, production: null, test_address: "https://acme-test.vercel.app", untested_changes: false, test_ahead: false };
-    payments = { readiness: { needed: true, liveReady: false, gateways: [], missing: [{ label: "Stripe US", state: "test_only", removed: false }] } };
-    await render();
-    expect(document.body.querySelector("[data-publish-payments]")).toBeNull();
-    act(() => root.unmount());
-    root = createRoot(host);
-    status = { ...status, target: "production" };
-    payments = { readiness: { needed: true, liveReady: true, gateways: [], missing: [] } };
-    await render();
-    expect(document.body.querySelector("[data-publish-payments]")).toBeNull();
   });
 });

@@ -112,8 +112,6 @@ export function PublishDialog({
   const [priorFinishedAt, setPriorFinishedAt] = useState<string | null>(null);
   const { events, status, start, reset } = useDeployStream(projectId);
   const [check, setCheck] = useState<CheckNote | null>(null);
-  // Whether the live app can take money: each chosen gateway's live keys (GET /payments).
-  const [payReady, setPayReady] = useState<{ needed: boolean; liveReady: boolean; missing: { label: string; state: string; removed: boolean }[] } | null>(null);
   const reconcilePoll = useRef<number | null>(null);
   const openSettings = useAppSettingsStore((s) => s.open);
 
@@ -156,9 +154,6 @@ export function PublishDialog({
     api.get<CheckNote>(`/api/projects/${projectId}/check`)
       .then((note) => { if (!cancelled) setCheck(note); })
       .catch(() => { if (!cancelled) setCheck(null); });
-    api.get<{ readiness?: { needed: boolean; liveReady: boolean; missing: { label: string; state: string; removed: boolean }[] } }>(`/api/projects/${projectId}/payments`)
-      .then((v) => { if (!cancelled) setPayReady(v.readiness ?? null); })
-      .catch(() => { if (!cancelled) setPayReady(null); });
     return () => { cancelled = true; };
   }, [open, projectId]);
 
@@ -370,19 +365,6 @@ export function PublishDialog({
               ))}
             </ul>
             <p className="mt-1">Publishing puts them live as they are. Tell Smith &ldquo;check the app again and fix everything that still fails&rdquo; first.</p>
-          </div>
-        )}
-
-        {/* MONEY BEFORE IT GOES LIVE: an app whose gateways have no live keys refuses payments in production. A warning, never a gate. */}
-        {!started && side === "production" && payReady?.needed && !payReady.liveReady && (
-          <div role="status" data-publish-payments="" className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200">
-            <p className="font-medium">This app cannot take real money yet.</p>
-            <p className="mt-1">
-              {payReady.missing.length
-                ? payReady.missing.map((m) => `${m.label} ${m.removed ? "was removed" : m.state === "attention" ? "has keys its gateway refused" : m.state === "unchecked" ? "has live keys that were never confirmed" : "has no live keys"}`).join("; ") + "."
-                : "No payment gateway is chosen for it."}
-              {" "}Live, its payers are told payments are not switched on, and nobody is charged. Add live keys in Settings → Integrations → Payments, then publish.
-            </p>
           </div>
         )}
 

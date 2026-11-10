@@ -60,7 +60,6 @@ import { AIFeaturesPanel } from "@/components/ai-features/AIFeaturesPanel";
 import { CostTrackingPanel } from "@/components/monitoring/CostTrackingPanel";
 import { DRDEditorPanel } from "@/components/decision/DRDEditorPanel";
 import { BusinessRulesPanel } from "@/components/business-rules/BusinessRulesPanel";
-import { PaymentsPanel } from "@/components/payments/PaymentsPanel";
 import { ExportDialog } from "@/components/projects/ExportDialog";
 import { moreTabs, PRIMARY_TABS, TabRow, type Tab } from "@/components/projects/ProjectTabs";
 import { PhonePreview, phoneStatusKey } from "@/components/phone/PhonePreview";
@@ -600,9 +599,6 @@ function ProjectWorkspace({
         )}
         {activeTab === "business-rules" && (
           <BusinessRulesPanel projectId={projectId} orgId={orgId} />
-        )}
-        {activeTab === "payments" && (
-          <PaymentsPanel projectId={projectId} orgId={orgId} />
         )}
         {activeTab === "decisions" && (
           <DRDEditorPanel projectId={projectId} />

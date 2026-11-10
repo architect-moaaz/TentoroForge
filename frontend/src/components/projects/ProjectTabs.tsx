@@ -8,13 +8,13 @@
  */
 import { useState } from "react";
 import {
-  Bot, ChevronDown, Code, CreditCard, Database, Eye, GitBranch, Layout, MessageSquare, Route, Scale, Settings, Shield, Smartphone, Workflow,
+  Bot, ChevronDown, Code, Database, Eye, GitBranch, Layout, MessageSquare, Route, Scale, Settings, Shield, Smartphone, Workflow,
 } from "lucide-react";
 
 import { LockBadge } from "@/components/features/Locked";
 import type { FeatureKey } from "@/lib/features";
 
-export type Tab = "chat" | "preview" | "phone" | "code" | "data" | "rules" | "business-rules" | "payments" | "decisions" | "workflows" | "editor" | "schema-editor" | "design" | "design-editor" | "ir-editor" | "navigation" | "app-flow" | "agents" | "ai" | "monitoring" | "versions" | "office" | "app-settings";
+export type Tab = "chat" | "preview" | "phone" | "code" | "data" | "rules" | "business-rules" | "decisions" | "workflows" | "editor" | "schema-editor" | "design" | "design-editor" | "ir-editor" | "navigation" | "app-flow" | "agents" | "ai" | "monitoring" | "versions" | "office" | "app-settings";
 
 export type TabSpec = {
   id: Tab; label: string; icon: React.ComponentType<{ className?: string }>; shortcut?: string; feature?: FeatureKey;
@@ -41,7 +41,6 @@ export const MORE_TABS: TabSpec[] = [
   // ONE MAP OF THE APP: Pages & Nav and App Flow each drew half of it.
   { id: "app-flow", label: "App Map", icon: Route, group: "How it works", hint: "Every screen and the paths through them" },
   { id: "business-rules", label: "Business Rules", icon: Scale, group: "How it works", hint: "What the app checks and works out" },
-  { id: "payments", label: "Payments", icon: CreditCard, group: "How it works", hint: "How the app takes money" },
   { id: "rules", label: "Access & Rules", icon: Shield, group: "How it works", hint: "Who may see and do what" },
   { id: "code", label: "Files", icon: Code, shortcut: "⌘3", feature: "code_view", group: "Project", hint: "The app's source files" },
   { id: "app-settings", label: "Settings", icon: Settings, group: "Project", hint: "Name, addresses, sign-in and more" },

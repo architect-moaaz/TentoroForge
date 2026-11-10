@@ -283,22 +283,6 @@ export const authOptions: NextAuthOptions = {
         }
         (token as any).refreshedAt = Date.now();
       }
-      // WHETHER THE PERSON HOLDS A PLAN, for the rules and pages that ask
-      // (`user.subscribed`, `user.plan`): read from the app's own subscriptions
-      // at most once a minute — a new subscriber is a member within the minute.
-      if (token.id && (user || trigger === "update" || Date.now() - Number((token as any).billingAt ?? 0) > 60_000)) {
-        try {
-          const billing = await import("@/lib/payments/billing");
-          if (billing.subscriptionsOffered()) {
-            const row = await billing.current(String(token.id));
-            const held = billing.grants(row);
-            (token as any).profile = { ...((token as any).profile ?? {}), subscribed: held, plan: held ? row?.plan_id ?? null : null };
-          }
-        } catch {
-          // No subscriptions here (or not yet a table): nothing to say.
-        }
-        (token as any).billingAt = Date.now();
-      }
       return token;
     },
     async session({ session, token }) {

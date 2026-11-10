@@ -54,9 +54,7 @@ export const PROVIDERS: Record<string, ProviderInfo> = {
   smtp: { name: "SMTP server", purpose: "Email through your own mail server. When a host is set, it is used instead of Resend.", group: "email" },
   anthropic: { name: "Anthropic", purpose: "The Claude model that builds the apps and powers their AI features.", group: "ai" },
   embeddings: { name: "Embeddings", purpose: "The service that turns images and text into vectors for similarity search in the apps.", group: "ai" },
-  // Not drawn as a card: the Payments group is the gateways, and these older
-  // keys show there while any is set (`GatewaysSection`). Named for its dialog.
-  stripe: { name: "Stripe keys from before gateways", purpose: "The Stripe keys apps built before payment gateways read from their environment. Apps built since take money through a gateway.", group: "payments" },
+  stripe: { name: "Stripe", purpose: "Card payments in the apps: live keys for production, test keys for the test deployment.", group: "payments" },
   unsplash: { name: "Unsplash", purpose: "Photographs for sign-in panels, hero bands and empty states, credited to their photographers.", group: "design",
               note: "Used by Forge while it builds; without a key, pages use the brand gradient." },
   cloudflare: { name: "Cloudflare", purpose: "Adds the DNS records an app's own domain needs (App settings → Domains → Add the records for me).", group: "domains",

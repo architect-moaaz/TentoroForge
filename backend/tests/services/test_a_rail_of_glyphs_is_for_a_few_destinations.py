@@ -76,8 +76,6 @@ def test_a_sixty_four_pixel_foot_holds_the_bell_and_the_avatar_only():
     # right of a rail that sits on the left edge.
     assert "extras?: React.ReactNode;" in ACCOUNT
     assert 'data-account-extras=""' in ACCOUNT
-    # The name (and a member's plan beside it) only where there is room.
-    named = ACCOUNT[ACCOUNT.index("{!compact && ("):]
-    assert 'className="hidden min-w-0 items-center gap-1.5 sm:inline-flex"' in named[:200] and "max-w-[12ch] truncate" in named[:400]
+    assert '{!compact && <span className="hidden max-w-[12ch] truncate sm:inline">' in ACCOUNT
     assert '(compact ? "left-0" : "right-0")' in ACCOUNT
     assert ACCOUNT.index('data-account-extras=""') < ACCOUNT.index("Sign out")

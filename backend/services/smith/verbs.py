@@ -100,8 +100,6 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     # Money: a refund through the payment service; the currency money is in.
     "refund": {"change"},
     "set_currency": {"change"},
-    # How it takes money: which of the organisation's gateways, what it sells.
-    "set_up_payments": {"change"},
     "show_audit": {"change"},
     "export_audit": set(),
     "verify_audit": set(),
@@ -438,14 +436,6 @@ VERB_HELP: dict[str, str] = {
     "set_currency": (
         "The currency money is kept and shown in: \"prices are in dirhams\", "
         "\"use GBP\". Needs the currency."
-    ),
-    "set_up_payments": (
-        "How the application takes money, through the organisation's own payment "
-        "gateways (Settings → Integrations → Payments): \"take payments through Razorpay\", \"add "
-        "a Pro plan at 499 rupees a month\", \"members must subscribe to use it\", "
-        "\"stop taking payments\". One-time payments, subscriptions with their "
-        "plans, or both; payers are routed to the right gateway by currency. Never "
-        "takes a key in the chat. Needs what to change, in the user's words."
     ),
     "show_audit": (
         "Read the audit trail: \"who changed the invoices yesterday\", \"what did "
@@ -890,10 +880,6 @@ VERB_EXAMPLES: dict[str, tuple[str, ...]] = {
     'set_currency': (
         'prices are in dirhams',
         'use GBP',
-    ),
-    'set_up_payments': (
-        'take payments through razorpay',
-        'let people subscribe for 9 dollars a month',
     ),
     'show_audit': (
         'who changed the invoices yesterday',

@@ -1051,16 +1051,29 @@ def _inject_file_storage(output_path: Path) -> list[str]:
             shutil.copy2(src, target)
             written.append(f"src/app/api/{dst}")
 
-    # 5a-iv. Payments: the ledger (forge_payments), subscriptions
-    #        (forge_subscriptions, forge_plan_refs), the stand-in, the
-    #        return/confirm routes, the billing API and pages, and the app's
-    #        payments config — one installer, the same one a sync and a
-    #        publish use (`services.payments.app_payments.install_runtime`).
-    try:
-        from services.payments.app_payments import install_runtime as _install_payments
-        written.extend(_install_payments(output_path))
-    except Exception:  # noqa: BLE001 — an app without payment files still builds; the next sync adds them
-        logger.exception("[runtime_injector] payment files could not be installed")
+    # 5a-iv. forge_payments: the application's own ledger of payments; the
+    #        stand-in's route and page, so a checkout works before any key.
+    pay_schema = _TEMPLATE_DIR / "db" / "forge-payments.schema.ts"
+    if pay_schema.exists() and schema_dir.exists():
+        shutil.copy2(pay_schema, schema_dir / "_forge_payments.ts")
+        written.append("src/db/schema/_forge_payments.ts")
+        barrel = schema_dir / "index.ts"
+        if barrel.exists():
+            txt = barrel.read_text(encoding="utf-8")
+            if "_forge_payments" not in txt:
+                barrel.write_text(txt.rstrip() + '\nexport { forgePayments } from "./_forge_payments";\n', encoding="utf-8")
+    standin_route = _TEMPLATE_DIR / "api-pay" / "stand-in" / "route.ts"
+    if standin_route.exists():
+        dst = output_path / "src" / "app" / "api" / "pay" / "stand-in" / "route.ts"
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(standin_route, dst)
+        written.append("src/app/api/pay/stand-in/route.ts")
+    standin_page = _TEMPLATE_DIR / "pages" / "pay" / "stand-in" / "page.tsx"
+    if standin_page.exists():
+        dst = output_path / "src" / "app" / "pay" / "stand-in" / "page.tsx"
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(standin_page, dst)
+        written.append("src/app/pay/stand-in/page.tsx")
     # 5a-v. forge_mews_properties: the hotels the application reaches in Mews,
     #        managed by its administrator — the routes, their guard, the page.
     mews_schema = _TEMPLATE_DIR / "db" / "forge-mews-properties.schema.ts"

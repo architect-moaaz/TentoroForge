@@ -158,8 +158,6 @@ export interface RunMessage {
    *  turn runs, drawn quieter than an answer. */
   status?: string;
   secret?: SecretField;
-  /** The build waits for the owner to choose the app's payment gateways. */
-  paymentChoice?: boolean;
 }
 
 /**
@@ -772,8 +770,6 @@ export function reduce(
           diffSummary: (data.diffSummary as string) || undefined,
           status: (data.status as string) || undefined,
           secret: (data.secret as SecretField) ?? undefined,
-          // The build waits for the owner to choose how the app takes money.
-          paymentChoice: data.paymentChoice ? true : undefined,
         }].filter((m) => m.text),
       };
 

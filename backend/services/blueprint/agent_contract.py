@@ -3046,19 +3046,6 @@ def apply_agent_result(
         except AuthorRefusal as exc:
             refusals.append(exc)
 
-    # A PAYMENT SERVICE IS THE OWNER'S CHOICE, NEVER AN AGENT'S. In an app whose
-    # payments are Settings → Integrations → Payments' (`payments.decidedBy` set), the
-    # platform declares one integration per gateway the owner chose; an agent
-    # asked to "take payments" declared Razorpay itself, and the model showed
-    # "Razorpay · ready to connect" for an account nobody chose.
-    if isinstance(svc.doc.get("payments"), dict) and svc.doc["payments"].get("decidedBy") is not None:
-        kept = [p for p in result.proposals
-                if not (p.section == "integrations" and str((p.body or {}).get("serves") or "") == "take_payment")]
-        if len(kept) != len(result.proposals):
-            logger.info("[agent_contract] %d payment integration(s) an agent proposed were set aside: "
-                        "the owner chooses the gateways", len(result.proposals) - len(kept))
-            result.proposals = kept
-
     mended = mend_mechanics(result, svc.doc)
     if mended:
         logger.info("[contract] mended before checking: %s", "; ".join(mended[:12]))

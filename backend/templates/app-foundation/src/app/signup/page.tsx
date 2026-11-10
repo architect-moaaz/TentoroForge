@@ -220,7 +220,7 @@ export default function SignupPage() {
             <AccountFieldInput key={f.name} field={f} value={account[f.name]}
               onChange={(v) => setAccount((a) => ({ ...a, [f.name]: v }))} />
           ))}
-          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+          {error && <p className="text-sm text-destructive">{error}</p>}
           <button type="submit" disabled={loading}
             className="w-full rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground shadow-sm transition hover:opacity-90 disabled:opacity-50">
             {loading ? "Creating…" : "Create account"}

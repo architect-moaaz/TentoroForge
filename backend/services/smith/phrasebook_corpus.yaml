@@ -574,18 +574,6 @@ sentences:
     source: code
     reaches: {verb: set_currency, states: [change]}
 
-  - id: does-take-payments-through-razorpay
-    say: "take payments through razorpay"
-    checked: {colour: acts, via: handler}
-    source: code
-    reaches: {verb: set_up_payments, states: [change]}
-
-  - id: does-subscribe-monthly
-    say: "let people subscribe for 9 dollars a month"
-    checked: {colour: acts, via: handler}
-    source: code
-    reaches: {verb: set_up_payments, states: [change]}
-
   - id: does-add-organisation
     say: "add an organisation called Northside Clinic"
     checked: {colour: acts, via: handler}
