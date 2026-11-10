@@ -177,6 +177,9 @@ ENGINE_FOUNDATION_FILES: tuple[str, ...] = (
     "src/auth.ts", "src/db/schema/user.ts", "src/sdk/auth.tsx",
 )
 
+#: The users table: the foundation's columns and the app's own, merged (`schema_builder.merge_user_schema`).
+USER_SCHEMA = "src/db/schema/user.ts"
+
 #: Ways in the platform adds after an app was built: template (under
 #: templates/runtime) -> where the app keeps it, written into every app people
 #: sign in to. The code a new account proves its address with arrived after
@@ -285,6 +288,17 @@ def refresh_engine(app_root: str | Path, doc: dict | None = None, *, complete: b
     for rel in ENGINE_FOUNDATION_FILES:
         src, dst = foundation / rel, root / rel
         if not src.is_file() or not dst.is_file() or dst.read_bytes() == src.read_bytes():
+            continue
+        if rel == USER_SCHEMA:
+            # THE USERS TABLE IS MERGED, NEVER COPIED OVER. A build writes the
+            # app's own User columns (a role, profile fields) into it beside the
+            # foundation's; the template's file over it took them away, and the
+            # next publish's push would have dropped them from the database.
+            from services.schema_builder import merge_user_schema
+            text = merge_user_schema(dst.read_text("utf-8"))
+            if dst.read_text("utf-8") != text:
+                dst.write_text(text, "utf-8")
+                changed.append(rel)
             continue
         shutil.copyfile(src, dst)
         changed.append(rel)

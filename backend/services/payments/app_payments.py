@@ -292,9 +292,23 @@ def choose(svc: Any, *, gateways: list[Any], needed: bool, models: list[str] | N
         app = Path(output_dir) / "app"
         if app.is_dir():
             try:
-                project_into(svc.doc, app)
+                files = project_into(svc.doc, app)
             except Exception:  # noqa: BLE001 — the choice stands; the next sync writes it
                 logger.exception("[payments] projecting the choice failed")
+                files = []
+            # THE DATABASE FOLLOWS ITS SCHEMA. Bringing the engine current can
+            # change the app's tables (the payment ledger's, the users table's
+            # newer columns); a sync pushes after it, and this did not, so the
+            # app's sign-up wrote columns its database did not have and every
+            # new account failed (Task Board, 2026-11-11).
+            if any(str(f).startswith("src/db/") for f in files):
+                try:
+                    from services.blueprint.schema_push import push_now
+                    pushed = push_now(app)
+                    if not pushed.get("applied"):
+                        logger.warning("[payments] %s: the schema was not pushed: %s", app, pushed.get("reason"))
+                except Exception:  # noqa: BLE001 — the next sync pushes it
+                    logger.exception("[payments] pushing the schema failed")
     return {**state(svc.doc), "version": int(record.get("version") or 0) if isinstance(record, dict) else 0}
 
 

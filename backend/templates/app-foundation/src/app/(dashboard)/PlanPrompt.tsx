@@ -86,7 +86,7 @@ export function planLine(s: PlanStatus): string {
 export function MemberCrown({ size = 10 }: { size?: number }) {
   return (
     <span aria-hidden data-member-crown=""
-      className="absolute -right-1 -top-1 grid place-items-center rounded-full bg-gradient-to-br from-amber-300 to-amber-500 p-[3px] text-amber-950 shadow ring-2 ring-background">
+      className="absolute -right-1.5 -top-1.5 grid place-items-center rounded-full bg-gradient-to-br from-amber-300 to-amber-500 p-[3px] text-amber-950 shadow ring-2 ring-background">
       <Crown size={size} strokeWidth={2.5} />
     </span>
   );

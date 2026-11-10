@@ -98,9 +98,14 @@ function IntegrationsSettings({ orgId }: { orgId: string }) {
   // OPENED AT #payments (the old Payments tab, the build dialog, Smith's
   // answers): once the cards are drawn, the Payments group is in view.
   useEffect(() => {
-    if (isLoading || gatewayList.isLoading || typeof window === "undefined" || window.location.hash !== "#payments") return;
-    const t = window.setTimeout(() => document.getElementById("payments")?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
-    return () => window.clearTimeout(t);
+    if (isLoading || gatewayList.isLoading || typeof window === "undefined") return;
+    // The address is read when each timer fires: after a redirect the router
+    // sets `#payments` after this first runs, and then puts the page back at
+    // the top, which undid a single early scroll.
+    const go = () => { if (window.location.hash === "#payments") document.getElementById("payments")?.scrollIntoView({ block: "start" }); };
+    const timers = [window.setTimeout(go, 60), window.setTimeout(go, 450)];
+    window.addEventListener("hashchange", go);
+    return () => { timers.forEach((t) => window.clearTimeout(t)); window.removeEventListener("hashchange", go); };
   }, [isLoading, gatewayList.isLoading]);
 
   if (isLoading) {
@@ -240,7 +245,11 @@ function ProviderDialog({ orgId, provider, entries, onClose }: { orgId: string; 
   const [values, setValues] = useState<Record<string, string>>({});
   const [shown, setShown] = useState<Record<string, boolean>>({});
   const changes = Object.entries(values).filter(([, v]) => v !== "");
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["orgIntegrations", orgId] });
+  const invalidate = () => {
+    void queryClient.invalidateQueries({ queryKey: ["orgIntegrations", orgId] });
+    // The older Stripe keys are drawn from the gateways' answer (`olderStripe`).
+    if (provider === OLDER_STRIPE) void queryClient.invalidateQueries({ queryKey: gatewaysKey(orgId) });
+  };
 
   const save = useMutation({
     mutationFn: async () => {
