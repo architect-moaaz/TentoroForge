@@ -762,6 +762,20 @@ export function _resolveRef(ref: unknown, ctx: WorkflowExecutionContext): unknow
     // literal ("text", a number, true/false); the first that is not empty wins.
     const soleOr = ref.match(/^\s*\{\{([^{}]*\?\?[^{}]*)\}\}\s*$/);
     if (soleOr) return _firstPresent(soleOr[1], ctx);
+    // A FORMULA AS A VALUE: `{{severity = "Severe" or escalated}}`,
+    // `{{if tier = "A" then "GM" else "Ops"}}`, `{{totalCents / 100}}`. Only a
+    // path or `??` was worked out; any other template was kept as its own
+    // text, and a db_insert/db_update then wrote that text or dropped it —
+    // CARES (kkb5mzo3, 2026-11-10) moved every such value into a set_variable
+    // step to get it evaluated. A sole template is a formula over the
+    // variables; one that does not parse (`{{x|date:en}}`) is left as before,
+    // and so is anything shaped like a name (`{{node-3.id}}`), never subtraction.
+    const soleExpr = ref.match(/^\s*\{\{([^{}]*)\}\}\s*$/);
+    if (soleExpr && !/^\s*[\w$.[\]-]+\s*$/.test(soleExpr[1])) {
+      try {
+        return evaluateExpression(soleExpr[1], (ctx.variables ?? {}) as Record<string, unknown>);
+      } catch { /* not a formula: left as written */ }
+    }
     // Accept dotted paths PLUS bracket-index segments: `search.result.data.web[0].url`.
     // Feel-lite (used elsewhere for expressions) refuses `[` in identifier
     // paths — but a workflow binding is a walk, not an expression, so route

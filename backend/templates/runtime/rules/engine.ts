@@ -8,7 +8,7 @@
  * - canTransition(model, field, from, to, user) — state machine check
  */
 
-import { evaluateExpression } from "../feel-lite";
+import { evaluateExpression, parse, tokenize } from "../feel-lite";
 import type {
   ProjectRule,
   ValidationRuleConfig,
@@ -1013,6 +1013,28 @@ function _matchDecisionCell(binding: string, cell: string, ctx: Record<string, u
   return false;
 }
 
+/**
+ * Is this output cell a WORD, not a formula? A word is one or more names
+ * joined only by `+`/`-` (`Severe`, `GeneralManager+AMIR`, `High-Risk`),
+ * none of which names anything on the record. Read as a formula each name is
+ * an unknown variable and the cell comes out null: CARES (kkb5mzo3,
+ * 2026-11-10) wrote null over a case's severityTier from a cell spelled
+ * `Severe`, and the insert failed. A cell that names a field the record has,
+ * or uses a number, function, comparison or `if`, is still a formula.
+ */
+function _isWordCell(cell: string, ctx: Record<string, unknown>): boolean {
+  let ast: any;
+  try { ast = parse(tokenize(cell)); } catch { return false; }
+  const names: string[] = [];
+  const wordy = (n: any): boolean => {
+    if (!n) return false;
+    if (n.type === "Identifier") { names.push(String(n.name)); return true; }
+    if (n.type === "BinaryExpression" && (n.operator === "+" || n.operator === "-")) return wordy(n.left) && wordy(n.right);
+    return false;
+  };
+  return wordy(ast) && names.every((name) => !Object.prototype.hasOwnProperty.call(ctx, name));
+}
+
 function _decisionOutputValue(cell: string, ctx: Record<string, unknown>): unknown {
   const c = (cell ?? "").trim();
   if (c === "" || c === "-") return undefined;
@@ -1020,6 +1042,7 @@ function _decisionOutputValue(cell: string, ctx: Record<string, unknown>): unkno
   if (/^-?\d+(\.\d+)?$/.test(c)) return Number(c);
   if (c === "true") return true;
   if (c === "false") return false;
+  if (_isWordCell(c, ctx)) return c;
   try {
     return evaluateExpression(c, ctx as any);
   } catch {
