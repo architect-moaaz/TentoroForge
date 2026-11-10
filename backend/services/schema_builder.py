@@ -40,25 +40,91 @@ RESERVED_TABLES = {"users"}
 # not the registry's "./users" slug (which the builder never writes).
 RESERVED_IMPORT_SLUG = {"users": "user"}
 
-# The auth foundation's canonical `users` columns (mirrors the template's
-# src/db/schema/user.ts). When the planner models a domain `User` entity with
-# extra columns (notably a `role`), the builder MERGES those over this base into a
-# SINGLE pgTable("users") so `password`/`email`/`id` stay auth-correct while the
-# app-specific columns land — never a second pgTable("users").
-_AUTH_USERS_BASE_LINES = [
-    '  id: uuid("id").primaryKey().defaultRandom(),',
-    '  email: text("email").notNull().unique(),',
-    '  password: text("password").notNull(),',
-    '  name: text("name"),',
-    '  isActive: boolean("is_active").default(true),',
-    '  createdAt: timestamp("created_at").defaultNow(),',
-]
-_AUTH_USERS_BASE_BUILDERS = ["uuid", "text", "boolean", "timestamp"]
+# The auth foundation's canonical `users` columns: READ FROM the template's
+# src/db/schema/user.ts, the one place they are written. When the planner models
+# a domain `User` entity with extra columns (notably a `role`), the builder
+# MERGES those over this base into a SINGLE pgTable("users") so `password`/
+# `email`/`id` stay auth-correct while the app-specific columns land — never a
+# second pgTable("users"). A copy of the list here fell behind the template:
+# the columns sign-up writes for proving an address (`email_verification`,
+# `email_code_*`), the organisation acted in and the account type were missing
+# from every merged table, so sign-up failed in any app with a role column.
+_FOUNDATION_USER = Path(__file__).resolve().parents[1] / "templates" / "app-foundation" / "src" / "db" / "schema" / "user.ts"
+_COLUMN_LINE = re.compile(r"^\s+([A-Za-z_][A-Za-z0-9_]*):\s*([A-Za-z]+)\(")
+
+
+def _table_body(text: str) -> list[str] | None:
+    """The lines between `pgTable("users", {` and its `});`, or None."""
+    lines = text.splitlines()
+    try:
+        start = next(i for i, l in enumerate(lines) if 'pgTable("users"' in l)
+        end = next(i for i in range(start + 1, len(lines)) if lines[i].strip().startswith("});"))
+    except StopIteration:
+        return None
+    return lines[start + 1:end]
+
+
+def user_columns(text: str) -> list[tuple[str, str, str]]:
+    """`(property, builder, line)` for every column of a users table's source."""
+    out: list[tuple[str, str, str]] = []
+    for line in _table_body(text) or []:
+        m = _COLUMN_LINE.match(line)
+        if m:
+            out.append((m.group(1), m.group(2), line.rstrip()))
+    return out
+
+
+def _foundation_columns() -> list[tuple[str, str, str]]:
+    try:
+        cols = user_columns(_FOUNDATION_USER.read_text("utf-8"))
+    except OSError:
+        cols = []
+    return cols or [  # the template unreadable: its six oldest columns
+        ("id", "uuid", '  id: uuid("id").primaryKey().defaultRandom(),'),
+        ("email", "text", '  email: text("email").notNull().unique(),'),
+        ("password", "text", '  password: text("password").notNull(),'),
+        ("name", "text", '  name: text("name"),'),
+        ("isActive", "boolean", '  isActive: boolean("is_active").default(true),'),
+        ("createdAt", "timestamp", '  createdAt: timestamp("created_at").defaultNow(),'),
+    ]
+
+
+_AUTH_USERS_BASE_LINES = [line for _, _, line in _foundation_columns()]
+_AUTH_USERS_BASE_BUILDERS = sorted({b for _, b, _ in _foundation_columns()})
 # Normalised names already present in the auth base — a domain column matching one
 # of these is dropped (the auth-correct definition wins).
-_AUTH_USERS_BASE_NAMES = {
-    "id", "email", "password", "name", "isactive", "createdat", "updatedat",
-}
+_AUTH_USERS_BASE_NAMES = {re.sub(r"[^a-z0-9]", "", n.lower()) for n, _, _ in _foundation_columns()} | {"updatedat"}
+
+_MERGED_HEAD = ("// Users table — auth foundation base columns MERGED with the app's domain\n"
+                "// User columns (role, profile fields). Auth owns id/email/password; the\n"
+                "// deterministic schema builder appends the planner's columns. Single table.")
+_BUILDER_ORDER = ["pgTable", "serial", "uuid", "varchar", "char", "text", "integer", "bigint", "boolean",
+                  "timestamp", "jsonb", "decimal", "real", "doublePrecision"]
+
+
+def merge_user_schema(app_text: str | None) -> str:
+    """An app's `src/db/schema/user.ts` brought up to the foundation's columns,
+    KEEPING its own. The foundation's file when the app's adds nothing; else
+    the foundation's columns, then each column the app's declares that the
+    foundation does not (a `role`, a profile field), with the app's other
+    imports (a referenced table's). Never drops an app's column: copying the
+    template over a merged table took the app's `role` away, and a publish's
+    `drizzle-kit push --force` would then have dropped it from the database."""
+    foundation = _FOUNDATION_USER.read_text("utf-8")
+    if not app_text:
+        return foundation
+    base = _foundation_columns()
+    have = {_norm_col(n) for n, _, _ in base} | {"updatedat"}
+    extras = [(n, b, l) for n, b, l in user_columns(app_text) if _norm_col(n) not in have]
+    if not extras:
+        return foundation
+    builders = {b for _, b, _ in base} | {b for _, b, _ in extras} | {"pgTable"}
+    imports = [b for b in _BUILDER_ORDER if b in builders] + sorted(builders - set(_BUILDER_ORDER))
+    others = [l for l in app_text.splitlines()
+              if l.startswith("import ") and "drizzle-orm/pg-core" not in l]
+    lines = [_MERGED_HEAD, f'import {{ {", ".join(imports)} }} from "drizzle-orm/pg-core";', *others, "",
+             'export const users = pgTable("users", {', *[l for _, _, l in base], *[l for _, _, l in extras], "});", ""]
+    return "\n".join(lines)
 
 
 def _norm_col(name: str) -> str:
@@ -773,12 +839,7 @@ def _emit_merged_users(schema_dir, reserved_models, reg_entities, id_to_name,
             chain += ".unique()"
         domain_lines.append(f"  {fname}: {chain},")
 
-    builder_order = [
-        "pgTable", "serial", "uuid", "varchar", "char", "text", "integer",
-        "bigint", "boolean", "timestamp", "jsonb", "decimal", "real",
-        "doublePrecision",
-    ]
-    imports = ["pgTable"] + [b for b in builder_order
+    imports = ["pgTable"] + [b for b in _BUILDER_ORDER
                              if b != "pgTable" and b in used_builders]
     lines = [
         "// Users table — auth foundation base columns MERGED with the app's "

@@ -73,7 +73,8 @@ GROUPS: tuple[tuple[str, str, frozenset[str]], ...] = (
      "letting it look connected.",
      frozenset({"edit_product", "add_requirement", "edit_requirement",
                 "remove_requirement", "add_api", "edit_api", "remove_api",
-                "add_integration", "remove_integration", "connect_service", "add_webhook", "refund", "set_currency"})),
+                "add_integration", "remove_integration", "connect_service", "add_webhook", "refund", "set_currency",
+                "set_up_payments"})),
     ("Its own address",
      "Put the published app on your domain or a subdomain of it. I say the DNS "
      "record to add, watch until it answers with a valid certificate, and move "

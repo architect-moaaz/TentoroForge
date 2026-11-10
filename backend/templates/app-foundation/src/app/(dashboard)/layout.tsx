@@ -27,6 +27,7 @@ import { OrgSwitcher } from "./OrgSwitcher";
 import { OutsideOrganisation } from "./OutsideOrganisation";
 import { LanguageSwitch } from "@/sdk/i18n";
 import { AccountMenu } from "./AccountMenu";
+import { PlanPrompt } from "./PlanPrompt";
 import { MobileTabBar } from "./MobileTabBar";
 import { PersonaChrome } from "./PersonaChrome";
 import { RouteBreadcrumb, type RouteNode } from "./RouteBreadcrumb";
@@ -477,8 +478,8 @@ function TopNav({ items, appName, id, right }: { items: Sub[]; appName: string; 
  * This wrapper is kept only for the (unlikely) call sites that still
  * type against the old signature; it just forwards to PersonaChrome.
  */
-function PersonaPillsNav({ personas, appName, id, userInitials }: {
-  personas: NavPersona[]; appName: string; id: ShellIdentity; userInitials?: string;
+function PersonaPillsNav({ personas, appName, id, userInitials, plans = false }: {
+  personas: NavPersona[]; appName: string; id: ShellIdentity; userInitials?: string; plans?: boolean;
 }) {
   const bg = id.bg ?? "#ffffff";
   const text = id.text ?? "#1a1f28";
@@ -489,6 +490,7 @@ function PersonaPillsNav({ personas, appName, id, userInitials }: {
       appName={appName}
       chrome={{ bg, text, accent }}
       userInitials={userInitials}
+      plans={plans}
     />
   );
 }
@@ -653,6 +655,16 @@ async function readNavPersonas(): Promise<NavPersona[]> {
 }
 
 // A mobile-first application's bottom tabs (shell.json `mobile.tabs`), or none.
+/** Does the app sell plans? The platform's payment files say; every app the
+ *  frame is refreshed in carries them (`install_runtime`), as `auth.ts` does. */
+async function sellsPlans(): Promise<boolean> {
+  try {
+    return (await import("@/lib/payments/billing")).subscriptionsOffered();
+  } catch {
+    return false;
+  }
+}
+
 async function readMobileTabs(): Promise<Sub[]> {
   try {
     const sp = path.join(process.cwd(), "src", "schemas", "shell.json");
@@ -1006,13 +1018,14 @@ export default async function DashboardLayout({
       <LanguageSwitch />
     </>
   );
+  const plansOnSale = await sellsPlans();
   const cluster = session?.user ? (
     <>
       {!compact && extras}
       <NotificationBell />
       <AccountMenu name={session.user.name} email={session.user.email}
                    role={(session.user as { role?: string }).role}
-                   compact={compact} extras={compact ? extras : undefined} />
+                   compact={compact} extras={compact ? extras : undefined} plans={plansOnSale} />
     </>
   ) : null;
   const clusterInRail = ["wide-rail", "icon-rail", "right-rail", "floating-rail"].includes(chromeName);
@@ -1030,6 +1043,9 @@ export default async function DashboardLayout({
       {/* The frame's own row: where you are, and what the app told you. */}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1"><RouteBreadcrumb routes={routeTree} {...({ screens } as Record<string, unknown>)} /></div>
+        {/* THE WAY TO A PLAN, where the app sells plans and this person may
+            hold none (an app's sign-in from before plans never says). */}
+        {plansOnSale && (session.user as { subscribed?: boolean } | undefined)?.subscribed !== true && <PlanPrompt />}
         {/* THE WAY OUT. Only the persona frame had one; every other app
             shipped with no way to sign out at all. */}
         {cluster && !clusterInRail && !clusterInBar && (
@@ -1122,6 +1138,7 @@ export default async function DashboardLayout({
                 appName={appName}
                 id={identity}
                 userInitials={userInitials}
+                plans={plansOnSale}
               />
               <main data-shell-main className="min-h-0 flex-1 overflow-y-auto">
                 <div className={frameClass(identity.density)}>{body}</div>

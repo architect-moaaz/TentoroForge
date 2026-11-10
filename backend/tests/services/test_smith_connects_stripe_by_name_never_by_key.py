@@ -24,8 +24,10 @@ def test_connect_stripe_declares_the_integration_with_names_only(tmp_path):
                               "verify": "provider", "signingSecretRef": "STRIPE_WEBHOOK_SECRET"}
     said = payment_connect.summarise(out)
     assert "/api/webhooks/stripe" in said and "STRIPE_SECRET_KEY" in said and "sk_" not in said
-    why, options = payment_connect.refusal("PayPal", svc.doc)
-    assert "Stripe" in why and options == ["Connect Stripe"]
+    # A gateway with no adapter is refused, naming every one there is.
+    why, options = payment_connect.refusal("Square", svc.doc)
+    assert "Stripe" in why and "Razorpay" in why and "PayPal" in why
+    assert options == ["Connect Stripe", "Connect Razorpay", "Connect PayPal"]
 
 
 def test_the_currency_is_set_from_words_or_a_code(tmp_path):
