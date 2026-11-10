@@ -172,6 +172,17 @@ ENGINE_FOUNDATION_FILES: tuple[str, ...] = (
     "src/sdk/client.tsx", "src/hooks/useEntityList.ts", "src/hooks/useEntityDetail.ts",
     # The form asks it which rules hold while the person types.
     "src/app/api/form-rules/route.ts",
+    # Who is signed in and what the session says of them (the address still
+    # to be proved among it), and the columns that keep it.
+    "src/auth.ts", "src/db/schema/user.ts", "src/sdk/auth.tsx",
+)
+
+#: Ways in the platform adds after an app was built: template (under
+#: templates/runtime) -> where the app keeps it, written into every app people
+#: sign in to. The code a new account proves its address with arrived after
+#: DITANS was built (QA DIT-005, 2026-11-05).
+AUTH_ROUTES: tuple[tuple[str, str], ...] = (
+    ("api-auth-email-code/route.ts", "src/app/api/auth/email-code/route.ts"),
 )
 
 
@@ -288,6 +299,16 @@ def refresh_engine(app_root: str | Path, doc: dict | None = None, *, complete: b
     else:
         signs_in = (root / "src" / "auth.ts").is_file()
     if signs_in:
+        for tmpl, rel in AUTH_ROUTES:
+            src, dst = _TEMPLATE_DIR / tmpl, root / rel
+            try:
+                if not src.is_file() or (dst.is_file() and dst.read_bytes() == src.read_bytes()):
+                    continue
+            except OSError:
+                pass
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(src, dst)
+            changed.append(rel)
         for rel in MCP_FILES:
             src, dst = foundation / rel, root / rel
             try:

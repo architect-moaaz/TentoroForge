@@ -1512,7 +1512,17 @@ NODE_TASKS: dict[str, str] = {
         "`typography.headingWeight` (\"400\" light and editorial, \"600\" firm, \"700\" bold — a display serif is "
         "usually best at 400 or 500), `typography.headingColor` (\"primary\" to set page titles in the brand "
         "colour, or \"foreground\" for the text colour) and `typography.titleSize` (a page title in px, 28 to "
-        "40: \"36px\"). Choose them with the faces, from the same personality.\n\n"
+        "64: \"36px\"). A dense console lives near 28-32; most products sit around 36-44; a product whose "
+        "type is meant to carry the page — editorial, a shop, a landing — earns 48-64, and the rest of "
+        "the ramp follows it. Choose them with the faces, from the same personality.\n\n"
+        "AND HOW A CORNER LOOKS, because it is half of whether a product reads soft or exact. "
+        "`radius` as `{\"md\": \"…\", \"card\": \"…\", \"control\": \"…\", \"pill\": \"…\"}` in px — the base "
+        "step, then the three things cut differently on purpose: a panel, a button or input, and a "
+        "chip or avatar. A card and a chip at the same corner is the tell of a template; a designed "
+        "product cuts the panel generously and the control tighter, or the reverse, and means it. "
+        "A utility console is nearly square (4/6/4/999); most products are gentle (6/10/8/999); a "
+        "warm or playful one is generously round (14/22/12/999) and a luxe one restrained. "
+        "State it, or every application is cut to the same corner.\n\n"
         "THE REGISTER IS THE FIRST DECISION, AND DEPTH, RHYTHM AND MOTION EXPRESS IT. "
         "Name `register` — the design LANGUAGE this product is built in, chosen for its field and "
         "audience, never a colour: `editorial` (big imagery, a display face, generous whitespace — "
@@ -1526,7 +1536,10 @@ NODE_TASKS: dict[str, str] = {
         "only in hue and typeface:\n"
         "- `elevation` as `{\"scheme\": \"…\"}` — how surfaces lift off the page: `flat` (borders, "
         "almost no shadow; utility, minimal), `soft` (a gentle lift; most apps), `layered` (rich, "
-        "stacked shadow; editorial, warm), `dramatic` (deep; luxe).\n"
+        "stacked shadow; editorial, warm), `dramatic` (deep; luxe). `layered` and `dramatic` cast "
+        "the shadow in the brand's own hue, because a shadow is light the surface blocked; add "
+        "`\"tint\": \"neutral\"` if this product wants plain grey depth, or `\"tint\": \"brand\"` to "
+        "colour a `soft` one.\n"
         "- `typography.scaleMode` — how far the type sizes step apart: `tight` (dense tools), "
         "`comfortable` (most apps), `expressive` or `editorial` (content and marketing, where the "
         "display type carries the page).\n"
@@ -1537,7 +1550,17 @@ NODE_TASKS: dict[str, str] = {
         "with quiet `tight` type; a playful one is `layered` depth with `expressive` motion; a "
         "utility console is `flat` with `tight` type and `subtle` or `none` motion. Choose them "
         "together, as one considered thing — this, with the palette and the faces, is what stops "
-        "every generated application from reading at the same depth and rhythm."
+        "every generated application from reading at the same depth and rhythm.\n\n"
+        "THE SIGN-IN SCREEN SAYS WHAT THIS PRODUCT IS, AND IT IS THE ONE SCREEN EVERY USER SEES. "
+        "Write `authCopy` — four short strings in the register you just named. `headline` and "
+        "`subhead` carry the brand half: what this product is FOR, said to someone who has not "
+        "signed in yet and may not know. `title` and `sub` sit over the form itself. Write "
+        "`{app}` where the application's name belongs and it is filled in. Every generated "
+        "application so far has opened on \"Welcome to {app}\" above \"Welcome back / Sign in to "
+        "{app}\" — words built from the name because nothing else was written, and the quickest "
+        "way to recognise that two products came out of one generator. A booking app and a "
+        "finance console do not greet a person the same way: say something only THIS product "
+        "could say, in its own voice, and keep the headline short enough to set large."
     ),
     "requirements": (
         "Extract the application's requirements from the description. Each is one "
@@ -4287,6 +4310,16 @@ EFFORT_BY_NODE: dict[str, str] = {
     "drawn_views": "medium",
     # Matching drawings by what they show is reading, not deliberating.
     "drawn_pairs": "medium",
+    # THE LARGEST SINGLE ANSWER IN THE BUILD: a dozen component files in one
+    # reply, re-sent whole every compile round. At `high` it spent the cap on
+    # deliberation and was cut off mid-answer — Stay's kit came back as 12,885
+    # characters against `output_tokens=64000`, the ceiling exactly, and the
+    # node lost an attempt to a `JSONDecodeError` before the parts it did get
+    # failed to compile and were dropped (2026-11-04; its application shipped
+    # with no kit at all). Adaptive thinking and the answer share one ceiling,
+    # so the room has to be taken from the thinking. The compiler is what
+    # holds this node to its work, and it runs three rounds.
+    "component_kit": "medium",
     # Tests are enumerated from what the Blueprint already claims, not invented.
     # A short list of named third parties.
     "integrations": "low",
@@ -4385,6 +4418,9 @@ MAX_TOKENS_BY_NODE: dict[str, int] = {
     "page_code": 64000,
     # The same page for the phone: one screen's thinking and its whole file.
     "native_code": 64000,
+    # Eight to twelve whole component files in ONE reply, and a compile round
+    # re-sends all of them — more in a call than any single page writes.
+    "component_kit": 64000,
 }
 
 
@@ -4928,6 +4964,19 @@ def make_executor(
             return AgentResult(task_id=spec.task_id, agent=spec.agent, confidence=0.9,
                                proposals=[ArtifactProposal(section="composition",
                                                            natural_key="composition", body=body)])
+        if spec.agent == "kit_engineer":
+            from services.blueprint import component_kit
+            t0 = time.monotonic()
+            tell(reasoning, "Building this product's own set of parts.", "step", spec.node)
+            # The files are written where they live, not into a scratch tree:
+            # the pages composed next import them, and they must be on disk for
+            # `ui_engineer.typecheck` to resolve `@/components/app/*` at all.
+            body, u = component_kit.compose_kit(
+                doc, client, Path(svc.output_dir) / "app")
+            record(u, time.monotonic() - t0)
+            return AgentResult(task_id=spec.task_id, agent=spec.agent, confidence=0.9,
+                               proposals=[ArtifactProposal(section="componentKit",
+                                                           natural_key="componentKit", body=body)])
         page = next((p for p in doc.get("pages") or [] if str(p.get("id")) == spec.subject), None)
         if page is None:
             raise ValueError(f"{spec.subject} is not a page of this application")
@@ -5218,7 +5267,7 @@ def make_executor(
             return _convert_drawn(spec)
         if spec.node == "drawn_pairs":
             return _pair_drawn(spec)
-        if spec.agent in ("ui_director", "ui_engineer"):
+        if spec.agent in ("ui_director", "ui_engineer", "kit_engineer"):
             return _compose_ui(spec)
         if spec.agent == "native_engineer":
             return _compose_native(spec)

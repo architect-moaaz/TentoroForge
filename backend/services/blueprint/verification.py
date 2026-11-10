@@ -506,6 +506,18 @@ PALETTE_ROLES: dict[str, str] = {
     "surface": "cards and panels, one step off the ground",
     "textPrimary": "body text, the palette's ink",
     "textSecondary": "supporting text",
+    # A DENSE PAGE HAS MORE THAN TWO VOICES. With only these two, every quiet
+    # thing on a screen was the same quiet: the table header, the timestamp,
+    # the unit and the helper line all `textSecondary`. The one application a
+    # person designed by hand works four inks and keeps its hairline apart
+    # from its structural border, which is its single most-used value — 77
+    # uses of one `border-[#ece7f2]` (CARES, 2026-11-04).
+    "inkFaint": "a THIRD level of ink, quieter than textSecondary: timestamps, units, "
+                "counts, the line a reader skips",
+    "inkBrand": "the primary's hue at ink darkness, for a heading or a figure that should "
+                "carry the brand without becoming a button",
+    "hairline": "the line INSIDE a component — a table's row rules, a panel's internal "
+                "divider — lighter than `border`, which stays the edge of things",
     "primary": "the brand anchor: navigation, the default button, links",
     "accent": "the ONE thing to act on now: the main call to action, the active status, the selected option",
     "accentSubtle": "a tint of the accent for selected chips and highlighted items, with accent-toned text",

@@ -48,7 +48,17 @@ def test_login_uses_the_real_hook_contract():
     assert "disabled={loading}" not in _LOGIN
 
 
-def test_auth_layout_placeholder_present():
-    """Composition placeholder must survive so runtime_injector can fill it."""
-    assert "__AUTH_LAYOUT__" in _LOGIN
-    assert "__AUTH_LAYOUT__" in _SIGNUP
+def test_the_composition_comes_from_the_projected_module():
+    """The composition must reach both pages — as a module, not a placeholder.
+
+    It was `__AUTH_LAYOUT__`, filled once by `runtime_injector`. A token is
+    substituted exactly once, so a design changed after the first build had
+    nothing left to write to and the sign-in screen kept its first
+    composition for ever (Mark 8: design-dna says `centered-minimal`, the page
+    says `split-editorial`). `src/contracts/auth-identity.ts` is re-projected
+    on every build instead, the way `tokens.css` and `brand.ts` are.
+    """
+    for page in (_LOGIN, _SIGNUP):
+        assert 'from "@/contracts/auth-identity"' in page
+        assert "AUTH_IDENTITY.layout" in page
+        assert "__AUTH_LAYOUT__" not in page

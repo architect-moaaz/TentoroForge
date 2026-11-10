@@ -1042,7 +1042,8 @@ def _inject_file_storage(output_path: Path) -> list[str]:
     #        foundation and is rewritten by the projection.
     for sub, dst in (("api-org/route.ts", "org/route.ts"), ("api-org/members/route.ts", "org/members/route.ts"),
                      ("api-org/address/route.ts", "org/address/route.ts"),
-                     ("api-auth-methods/route.ts", "auth/methods/route.ts"), ("api-auth-magic/route.ts", "auth/magic/route.ts")):
+                     ("api-auth-methods/route.ts", "auth/methods/route.ts"), ("api-auth-magic/route.ts", "auth/magic/route.ts"),
+                     ("api-auth-email-code/route.ts", "auth/email-code/route.ts")):
         src = _TEMPLATE_DIR / sub
         if src.exists():
             target = output_path / "src" / "app" / "api" / dst
@@ -3052,10 +3053,18 @@ def _substitute_auth_copy(output_path: Path, app_name: str | None,
         headline, subhead = "Welcome back", "Sign in to continue."
 
     form_title, form_sub = "Welcome back", f"Sign in to {name}" if name != "App" else "Sign in to continue"
+    # ALL FOUR, NOT TWO. The brand half of the sign-in page — the large words
+    # beside the form — was built from the application's name and could not be
+    # overridden at all, so writing the design's own voice into `authCopy`
+    # still left "Welcome to {app}" set in display type above it.
     try:
         dna = json.loads((output_path / "src" / "contracts" / "design-dna.json")
                          .read_text(encoding="utf-8"))
         ac = dna.get("authCopy") or {}
+        if ac.get("headline"):
+            headline = str(ac["headline"]).replace("{app}", name)
+        if ac.get("subhead"):
+            subhead = str(ac["subhead"]).replace("{app}", name)
         if ac.get("title"):
             form_title = str(ac["title"]).replace("{app}", name)
         if ac.get("sub"):

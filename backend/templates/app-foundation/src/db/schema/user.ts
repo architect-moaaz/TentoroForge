@@ -1,7 +1,7 @@
 // Default users table — required by auth.ts. Generated apps may extend
 // or override per-project; this default keeps a fresh stamp-out compilable
 // without forcing the schema agent to run before first build.
-import { pgTable, text, boolean, timestamp, uuid } from "drizzle-orm/pg-core";
+import { pgTable, text, boolean, timestamp, uuid, integer } from "drizzle-orm/pg-core";
 
 export const users = pgTable("users", {
   // uuid to match the id convention every generated entity uses — otherwise a
@@ -23,5 +23,14 @@ export const users = pgTable("users", {
   // several side by side (`security.tenancy`); their membership there gives
   // their role. Null for an application with none.
   activeOrgId: text("active_org_id"),
+  // A NEW ACCOUNT PROVES ITS ADDRESS (`signIn.verifyEmail`): "pending" from
+  // sign-up until the six-digit code is entered, then "verified". Null for an
+  // account made before the application asked — it is never shut out after
+  // the fact. Only the code's digest is kept, with its expiry and attempts.
+  emailVerification: text("email_verification"),
+  emailCodeHash: text("email_code_hash"),
+  emailCodeExpiresAt: timestamp("email_code_expires_at"),
+  emailCodeSentAt: timestamp("email_code_sent_at"),
+  emailCodeAttempts: integer("email_code_attempts").default(0),
   createdAt: timestamp("created_at").defaultNow(),
 });

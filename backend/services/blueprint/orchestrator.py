@@ -442,16 +442,30 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     _n("ui_direction", "ui_director",
        ("page_details", "design_system", "imagery"), ("composition",),
        optional=True, note="§34; the whole app's look and conventions, one call"),
+    # THIS APPLICATION'S OWN PARTS, BEFORE ANY PAGE USES THEM. One call for the
+    # whole app, between the direction and the pages: a page assembled from the
+    # house kit is the page every other app has, and a page that invents its own
+    # panel agrees with no other page. `install` because the kit is type-checked
+    # like a page, against the compiler in the app's node_modules.
+    _n("component_kit", "kit_engineer",
+       ("ui_direction", "install"), ("componentKit",),
+       optional=True, note="§34; the app's own parts and palette, one call"),
     _n("page_code", "ui_engineer",
-       ("ui_direction", "page_layouts", "workflow_steps", "install", "app_flows"), ("pageCode",),
+       ("ui_direction", "component_kit", "page_layouts", "workflow_steps", "install",
+        "app_flows"), ("pageCode",),
        fanout="pages", optional=True,
        note="§34; each page as React, type-checked against the app SDK"),
     # THE SAME PAGES, FOR THE PHONE. Beside `page_code`, never after it: both
     # read the same Blueprint page and write nothing the other reads, so they
     # run side by side. A fan-out with no subjects completes without calling
     # anything, which is what an application whose `mobile.native` is off gets.
+    # `component_kit` is in that list for the same reason the rest of it is:
+    # the two must have the SAME inputs or they stop being side by side, and
+    # the phone would start a screen while the web's parts were still unwritten.
+    # The native screens are built from the native kit, not this one.
     _n("native_code", "native_engineer",
-       ("ui_direction", "page_layouts", "workflow_steps", "install", "app_flows"), ("nativeCode",),
+       ("ui_direction", "component_kit", "page_layouts", "workflow_steps", "install",
+        "app_flows"), ("nativeCode",),
        fanout="native_pages", optional=True,
        note="one React Native screen per page, against the native SDK and kit (opt-in: mobile.native)"),
     _n("frontend", "frontend", ("page_layouts", "page_code", "native_code"), ("codeMap/pages",), kind="projection",
@@ -3687,6 +3701,12 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
     out = project_drawn(svc.doc, svc.output_dir, app_root)
     if out.get("shell") or out.get("assets"):
         logger.info("[drawn] projected %s", out)
+    # THE APPLICATION'S OWN PARTS. The kit node already wrote these — the pages
+    # could not have compiled otherwise — so this is the re-projection that
+    # makes them survive: a rebuild from the Blueprint alone, and an undo.
+    from services.blueprint.component_kit import project_component_kit
+    if kit := project_component_kit(svc.doc, app_root):
+        logger.info("[component_kit] projected %d file(s)", len(kit))
 
 
 def _project_integration(svc: BlueprintService, app_root: str) -> None:

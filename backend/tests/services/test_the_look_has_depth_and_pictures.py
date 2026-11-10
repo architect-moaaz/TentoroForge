@@ -31,6 +31,8 @@ ROOT = Path(__file__).resolve().parents[2]
 FOREST = {
     "background": "#F4F1EA", "surface": "#FFFFFF", "textPrimary": "#1F2A24", "textSecondary": "#5C6B63",
     "primary": "#1B4332", "accent": "#C97B3D", "accentSubtle": "#F6E7DA", "inverse": "#14261D",
+    # The quiet three a dense page is mostly made of; required since 2026-11-04.
+    "inkFaint": "#8A978F", "inkBrand": "#2D5F47", "hairline": "#E4E0D6",
 }
 
 

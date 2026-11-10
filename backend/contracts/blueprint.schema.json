@@ -3126,6 +3126,15 @@
               "type": "boolean",
               "default": false
             },
+            "verifyEmail": {
+              "type": "boolean",
+              "description": "A new account confirms its email with a six-digit code before it can use the application.",
+              "default": false
+            },
+            "verifyPath": {
+              "type": "string",
+              "description": "The page that asks for the code, when the application draws its own (\"/signup?step=verify\"); else the platform's /verify-email."
+            },
             "sso": {
               "type": "array",
               "items": {
@@ -3954,6 +3963,28 @@
             "file"
           ],
           "additionalProperties": false
+        },
+        "authCopy": {
+          "type": "object",
+          "properties": {
+            "headline": {
+              "type": "string",
+              "default": ""
+            },
+            "subhead": {
+              "type": "string",
+              "default": ""
+            },
+            "title": {
+              "type": "string",
+              "default": ""
+            },
+            "sub": {
+              "type": "string",
+              "default": ""
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false,
@@ -4435,6 +4466,55 @@
               "page",
               "layout",
               "sections"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        }
+      },
+      "additionalProperties": false,
+      "default": {}
+    },
+    "componentKit": {
+      "type": "object",
+      "properties": {
+        "rationale": {
+          "type": "string",
+          "default": ""
+        },
+        "palette": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        },
+        "parts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "file": {
+                "type": "string"
+              },
+              "purpose": {
+                "type": "string",
+                "default": ""
+              },
+              "exports": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "code": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "file",
+              "code"
             ],
             "additionalProperties": false
           },
