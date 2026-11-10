@@ -23,15 +23,11 @@ def _wire(monkeypatch, svc, reds, answers):
 
     def run_turn(pid, output_dir, ask, **k):
         asked.append(ask)
-        # Page groups are worked IN PARALLEL, so the order the turns arrive in
-        # is not the order of the reds: an answer meant for one page reached
-        # the other about one run in thirty. Answers keyed by what the ask
-        # names go to that ask; a list is handed out in order.
-        if isinstance(answers, dict):
-            answer = next((a for key, a in answers.items() if key in ask), None) or {"answer": "nothing",
-                                                                                   "edited_paths": []}
-        else:
-            answer = answers.pop(0) if answers else {"answer": "nothing", "edited_paths": []}
+        # The answer belongs to the red it is about, not to the order the repairs
+        # run in: page repairs run in parallel, and keying on the turn's order
+        # handed the engine's answer to whichever thread asked first.
+        cause = next((c for c in answers if c in ask), None)
+        answer = answers.pop(cause) if cause else {"answer": "nothing", "edited_paths": []}
         # A turn that reaches into the engine leaves a platform patch on record.
         for path in answer.get("patched", []):
             from services.smith import file_edit
@@ -49,11 +45,9 @@ def test_a_platform_fault_is_said_recorded_marked_and_left_alone(tmp_path, monke
     sc.seed_from_boot(svc)
     reds = {"pages": [sc.item("PAGE-002", "Transaction History", "it shows 'NaN'", "PAGE-002"),
                       sc.item("PAGE-003", "Calendar", "button errors", "PAGE-003")]}
-    # The first repair edits the engine; the second edits the app and still fails.
-    answers = {"PAGE-002": {"answer": "Changed the platform's `src/lib/data-engine.ts` for this app: "
-                                                 "Dates to strings.",
-                                       "edited_paths": ["src/lib/data-engine.ts"],
-                                       "patched": ["src/lib/data-engine.ts"]},
+    # Transaction History's repair edits the engine; Calendar's edits the app and still fails.
+    answers = {"PAGE-002": {"answer": "Changed the platform's `src/lib/data-engine.ts` for this app: Dates to strings.",
+                            "edited_paths": ["src/lib/data-engine.ts"], "patched": ["src/lib/data-engine.ts"]},
                "PAGE-003": {"answer": "Rewrote /calendar", "edited_paths": ["src/app/(dashboard)/calendar/view.tsx"]}}
     # The app's classifier: the engine's file is the platform's, a page file is the app's.
     monkeypatch.setattr("services.smith.file_edit.classify",
@@ -95,3 +89,43 @@ def test_only_a_patch_the_turn_made_names_a_platform_fault(tmp_path):
          "at": "2026-10-22T08:25:00+00:00"}])
     assert ftg.platform_fault(str(tmp_path), {"answer": "x"}, before={"old"}) == "src/lib/data-engine.ts"
     assert ftg.platform_fault(str(tmp_path), None, before={"old"}) is None
+
+
+def test_a_patch_a_sibling_repair_made_is_not_this_ones_fault(tmp_path):
+    """The repairs run side by side. Calendar's turn reached into the engine
+    after Transaction History's turn had looked at the record and before it
+    finished, so the engine's fault was read as Transaction History's too:
+    the wrong page was named and a red that was the app's to fix was marked
+    platform and never worked again."""
+    from services.smith import file_edit
+    file_edit._save_patches(str(tmp_path), [
+        {"id": "sibling", "kind": "platform", "path": "src/lib/data-engine.ts", "status": "pending",
+         "turn": "PAGE-003:beefcafe", "at": file_edit._now()}])
+    assert ftg.platform_fault(str(tmp_path), {"answer": "x"}, before=set(), turn="PAGE-002:0ddba11") is None
+    # The turn that made it still has it named as its own.
+    assert ftg.platform_fault(str(tmp_path), {"answer": "x"}, before=set(),
+                              turn="PAGE-003:beefcafe") == "src/lib/data-engine.ts"
+    # A patch from before turns were stamped is told apart by the record alone.
+    file_edit._save_patches(str(tmp_path), [
+        {"id": "unstamped", "kind": "platform", "path": "src/sdk/client.tsx", "status": "pending",
+         "at": file_edit._now()}])
+    assert ftg.platform_fault(str(tmp_path), {"answer": "x"}, before=set(),
+                              turn="PAGE-002:0ddba11") == "src/sdk/client.tsx"
+
+
+def test_a_repair_puts_its_own_name_on_the_patches_it_makes(tmp_path):
+    """So `platform_fault` can tell them from a sibling repair's."""
+    from services.smith import file_edit
+    engine = tmp_path / "app" / "src" / "lib" / "workflows" / "engine.ts"
+    engine.parent.mkdir(parents=True, exist_ok=True)
+    engine.write_text("const v = read(path);\n")
+    with file_edit.patches_by("PAGE-002:0ddba11"):
+        out = file_edit.edit_file(str(tmp_path), "src/lib/workflows/engine.ts", "read(path)", "evaluate(path)", "")
+    assert out["applied"] and out["kind"] == "platform"
+    (patch,) = file_edit.load_patches(tmp_path)
+    assert patch["turn"] == "PAGE-002:0ddba11"
+    # Outside a repair nothing is stamped: the record alone tells them apart.
+    engine.write_text("const v = read(path);\n")
+    file_edit._save_patches(str(tmp_path), [])
+    file_edit.edit_file(str(tmp_path), "src/lib/workflows/engine.ts", "read(path)", "evaluate(path)", "")
+    assert "turn" not in file_edit.load_patches(tmp_path)[0]

@@ -515,7 +515,34 @@ export async function loadRecordRow(table: string, id: string): Promise<Record<s
   const idColumn = (resolved as any).id;
   if (!idColumn) return null;
   const rows = await (db as any).select().from(resolved).where(eq(idColumn, id)).limit(1);
-  return (rows?.[0] as Record<string, unknown>) ?? null;
+  const row = (rows?.[0] as Record<string, unknown>) ?? null;
+  return row ? await openSealed(row) : null;
+}
+
+/**
+ * A PROCESS READS WHAT WAS SEALED. A sensitive field is kept as ciphertext
+ * (`<field>_encrypted`) with its plain column empty, so a process reading the
+ * row saw nothing there: "the signatory's name is set" was false for every
+ * organisation that had named one, and no DITANS employer could ever submit
+ * for verification (QA DIT-004, 2026-11-05). The process runs on the server,
+ * as the application; it reads the value, as it must to check it or to write
+ * to the person. A screen still reads masks through the data engine.
+ */
+export async function openSealed<T extends Record<string, unknown>>(row: T): Promise<T> {
+  const out: Record<string, unknown> = { ...row };
+  for (const [key, blob] of Object.entries(row)) {
+    if (!key.endsWith("_encrypted") || typeof blob !== "string" || !blob) continue;
+    const plain = key.slice(0, -"_encrypted".length);
+    if (out[plain] !== null && out[plain] !== undefined && out[plain] !== "") continue;
+    try {
+      const { decryptSensitive } = await import("../sensitive-crypto");
+      out[plain] = await decryptSensitive(blob);
+    } catch {
+      // A value that cannot be opened (key rotated) reads as present but unknown.
+      out[plain] = (row as Record<string, unknown>)[`${plain}_mask`] ?? "••••";
+    }
+  }
+  return out as T;
 }
 
 
@@ -581,6 +608,12 @@ function _firstRowFallback(path: string, vars: Record<string, unknown>): unknown
  *  the workflow's variables, or a literal ("text", 'text', a number, true,
  *  false). Empty text and null count as nothing, as a missing value does. */
 export function _firstPresent(inner: string, ctx: WorkflowExecutionContext): unknown {
+  // NOTHING HELD, BUT SOMETHING WAS EMPTY TEXT: the answer is that empty text,
+  // and the column decides what it becomes (_coerceValue: null where null may
+  // go, "" in a required text column). Null here refused DITANS's second
+  // "Save draft" — `{{description ?? job.description}}` over a job saved with
+  // an empty description (QA DIT-007, 2026-11-06).
+  let emptyText = false;
   for (const raw of inner.split("??")) {
     const part = raw.trim();
     let v: unknown;
@@ -599,9 +632,10 @@ export function _firstPresent(inner: string, ctx: WorkflowExecutionContext): unk
         if (v === undefined) v = _firstRowFallback(part, ctx.variables) ?? _recordIdFallback(part, ctx.variables);
       }
     }
-    if (v !== undefined && v !== null && v !== "") return v;
+    if (v === "") emptyText = true;
+    else if (v !== undefined && v !== null) return v;
   }
-  return null;
+  return emptyText ? "" : null;
 }
 
 function _walkPath(root: unknown, path: string): unknown {
@@ -728,6 +762,20 @@ export function _resolveRef(ref: unknown, ctx: WorkflowExecutionContext): unknow
     // literal ("text", a number, true/false); the first that is not empty wins.
     const soleOr = ref.match(/^\s*\{\{([^{}]*\?\?[^{}]*)\}\}\s*$/);
     if (soleOr) return _firstPresent(soleOr[1], ctx);
+    // A FORMULA AS A VALUE: `{{severity = "Severe" or escalated}}`,
+    // `{{if tier = "A" then "GM" else "Ops"}}`, `{{totalCents / 100}}`. Only a
+    // path or `??` was worked out; any other template was kept as its own
+    // text, and a db_insert/db_update then wrote that text or dropped it —
+    // CARES (kkb5mzo3, 2026-11-10) moved every such value into a set_variable
+    // step to get it evaluated. A sole template is a formula over the
+    // variables; one that does not parse (`{{x|date:en}}`) is left as before,
+    // and so is anything shaped like a name (`{{node-3.id}}`), never subtraction.
+    const soleExpr = ref.match(/^\s*\{\{([^{}]*)\}\}\s*$/);
+    if (soleExpr && !/^\s*[\w$.[\]-]+\s*$/.test(soleExpr[1])) {
+      try {
+        return evaluateExpression(soleExpr[1], (ctx.variables ?? {}) as Record<string, unknown>);
+      } catch { /* not a formula: left as written */ }
+    }
     // Accept dotted paths PLUS bracket-index segments: `search.result.data.web[0].url`.
     // Feel-lite (used elsewhere for expressions) refuses `[` in identifier
     // paths — but a workflow binding is a walk, not an expression, so route
@@ -1011,7 +1059,16 @@ export function _finalizeInsert(
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(values)) {
-    if (!(k in table) || v === "" || v === undefined) continue;
+    if (!(k in table) || v === undefined) continue;
+    // AN EMPTY FIELD IS LEFT OUT — except where null cannot go: a required text
+    // column keeps the empty text it was given. Dropped, DITANS's "Save draft"
+    // inserted a job with no description and Postgres refused every new job
+    // (QA DIT-007, 2026-11-05).
+    if (v === "") {
+      const c = (table as any)[k] as { notNull?: unknown; columnType?: unknown } | undefined;
+      if (c?.notNull && /^Pg(Text|Varchar|Char)$/.test(String(c?.columnType ?? ""))) out[k] = "";
+      continue;
+    }
     // Drizzle timestamp columns crash with "value.toISOString is not a
     // function" when they receive anything that isn't a Date (or null).
     // Detect the column type via drizzle's internal `columnType` /
@@ -1724,7 +1781,7 @@ export function registerDefaultActions(): void {
       // `rows`, which keep their own names when a column shares one — the
       // first row whenever there is one, the row a template reads too
       // (`_firstRowFallback`; AquaTrack's three active goals, m1dck85j).
-      return queryResult(rows);
+      return queryResult(await Promise.all((rows ?? []).map((r: Record<string, unknown>) => openSealed(r))));
     } catch (err) { console.error("[workflow] db_query failed:", err); return { error: String(err), rows: [], count: 0 }; }
   });
 
@@ -2126,7 +2183,10 @@ export function registerDefaultActions(): void {
     // addresses; a message to anybody else is held back and saved as a
     // notification, so a tester never emails a real customer.
     let heldForTest = "";
-    if (to && process.env.FORGE_ENVIRONMENT === "test") {
+    // A CODE TO THE PERSON'S OWN ADDRESS goes out on the test version too: it
+    // is the tester's own sign-up, and held back no tester could ever verify
+    // (DITANS QA DIT-005, 2026-11-05). Only the platform's sign-in routes set it.
+    if (to && process.env.FORGE_ENVIRONMENT === "test" && !(config as any).toTheirOwnAddress) {
       const allowed = String(process.env.FORGE_TEST_RECIPIENTS ?? "").toLowerCase().split(",")
         .map((s) => s.trim()).filter(Boolean);
       const recipients = to.toLowerCase().split(",").map((s) => s.trim()).filter(Boolean);
@@ -2139,11 +2199,16 @@ export function registerDefaultActions(): void {
     const { connectedService } = await import("@/lib/integrations/connected");
     const service = connectedService("send_email");
     const ownFrom = await getSecret("resend", "FORGE_EMAIL_FROM");
-    const from = ownFrom || "notifications@example.com";
+    // NO ADDRESS SET, A MAILBOX SIGNED IN: a mail server sends as the account
+    // it signed in, and refuses or rewrites any other sender — the stand-in
+    // below never reached anyone through SMTP (DITANS's verification codes,
+    // 2026-11-06). An SMTP user that is an address is the sender.
+    const smtpUser = ownFrom ? "" : String((await getSecret("smtp", "SMTP_USER")) ?? "");
+    const from = ownFrom || (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(smtpUser) ? smtpUser : "notifications@example.com");
     // The from-address an owner never set: the mail goes out from a stand-in,
     // which is the "it's sending from a weird address" complaint. Said once,
     // on a send that actually happened, rather than guessed at afterwards.
-    const fromNotice = ownFrom
+    const fromNotice = ownFrom || from === smtpUser
       ? undefined
       : `sent from ${from} — set FORGE_EMAIL_FROM to the address you want people to see`;
 

@@ -101,14 +101,17 @@ def test_a_rewrite_that_scores_lower_is_not_kept(monkeypatch, tmp_path):
                       {"rationale": "", "load": GOOD_LOAD, "view": BETTER_VIEW}])
     body, _ = compose_page(_doc(), _doc()["pages"][0], tmp_path, writer, critic=critic)
     assert body["view"] == GOOD_VIEW, "the version the reviewer ranked higher"
-    assert len(critic.seen) == page_look.LOOKS, "looks are bounded"
+    assert len(critic.seen) == 2, (
+        "and it stops THERE — not because the budget ran out (that is 5 now) but "
+        "because the rewrite scored lower, so another one buys nothing")
 
 
 def test_a_rewrite_that_does_not_compile_keeps_the_judged_version(monkeypatch, tmp_path):
     critic = _looks(monkeypatch, [REVISE])
-    seen = iter([[], ["view.tsx(1,1): error TS2304"], ["view.tsx(1,1): error TS2304"], ["view.tsx(1,1): error TS2304"]])
+    seen = iter([[]] + [["view.tsx(1,1): error TS2304"]] * 12)
     monkeypatch.setattr(ui_engineer, "typecheck", lambda *a, **k: next(seen))
-    writer = _Writer([{"rationale": "", "load": GOOD_LOAD, "view": GOOD_VIEW}] + [{"rationale": "", "load": GOOD_LOAD, "view": BETTER_VIEW}] * 4)
+    writer = _Writer([{"rationale": "", "load": GOOD_LOAD, "view": GOOD_VIEW}]
+                     + [{"rationale": "", "load": GOOD_LOAD, "view": BETTER_VIEW}] * 12)
     body, _ = compose_page(_doc(), _doc()["pages"][0], tmp_path, writer, critic=critic)
     assert body["view"] == GOOD_VIEW
 
@@ -265,3 +268,122 @@ def test_a_look_lays_down_feel_lite_where_there_is_no_frontend_checkout(monkeypa
     with pytest.raises(page_look.LookUnavailable):
         page_look.render(_doc(), _doc()["pages"][0], app, GOOD_LOAD, GOOD_VIEW, tmp_path / "out")
     assert seen["laid"] is True, "feel-lite came from the runtime templates"
+
+
+# --- a page is looked at while it is getting better -------------------------
+#
+# The budget was a flat two — one look at the compiled page, one at its
+# rewrite — and the page shipped whatever it had. Measured over two whole
+# builds (Claimsdesk and Stay, 2026-11-04): FIFTEEN OF EIGHTEEN PAGES WERE
+# STILL `revise` when their looks ran out, at a median of 5/10 and 6.5/10,
+# and both builds reported no failures. Every one stopped because it ran out
+# of looks, never because it was good enough. Of the eighteen, seven were
+# still climbing (1→5, 4→7, 4→5…) and three had gone BACKWARDS (6→5, 7→5,
+# 4→2), because a look rewrites the page whole and a rewrite loses what was
+# already right.
+
+def _trail(monkeypatch, tmp_path, scores):
+    """Drive the loop with a given score trail; return how many looks it took."""
+    verdicts = [dict(REVISE, score=s) if s < 8 else dict(PASS, score=s) for s in scores]
+    critic = _looks(monkeypatch, verdicts)
+    writer = _Writer([{"rationale": "", "load": GOOD_LOAD, "view": GOOD_VIEW}] * (len(scores) + 2))
+    body, _ = compose_page(_doc(), _doc()["pages"][0], tmp_path, writer, critic=critic)
+    return len(critic.seen), body
+
+
+def test_a_page_that_keeps_improving_keeps_being_looked_at(monkeypatch, tmp_path):
+    """Claimsdesk's Decision Panel went 1 → 5 and shipped at 5, with the
+    budget spent rather than the page finished."""
+    seen, _ = _trail(monkeypatch, tmp_path, [1, 3, 5, 6, 7])
+    assert seen == 5, seen
+
+
+def test_a_page_a_rewrite_made_worse_stops_there(monkeypatch, tmp_path):
+    """Supervisor 6→5, Escalations 7→5, Users 4→2. Spending the rest of the
+    budget on the same reading of the same page buys nothing."""
+    seen, _ = _trail(monkeypatch, tmp_path, [6, 5, 9])
+    assert seen == 2, seen
+
+
+def test_a_page_that_stalls_stops_there(monkeypatch, tmp_path):
+    """Stay's My Stay went 6 → 6: the writer has shown it cannot get past
+    this reading of its own page."""
+    seen, _ = _trail(monkeypatch, tmp_path, [6, 6, 9])
+    assert seen == 2, seen
+
+
+def test_a_page_good_enough_is_not_rewritten(monkeypatch, tmp_path):
+    seen, _ = _trail(monkeypatch, tmp_path, [8, 9])
+    assert seen == 1, seen
+
+
+def test_the_budget_is_a_ceiling_a_climbing_page_cannot_pass(monkeypatch, tmp_path):
+    """A page that improves by a point every time still has to stop."""
+    seen, _ = _trail(monkeypatch, tmp_path, [1, 2, 3, 4, 5, 6, 7])
+    assert seen == page_look.LOOKS, seen
+
+
+def test_the_rounds_budget_grows_with_the_looks():
+    """`rounds = COMPILE_ROUNDS + looks - 1` gates the loop too, so raising
+    the looks alone would have changed nothing — and a page that took every
+    compile round used to have no round left to act on its review at all
+    (Claimsdesk's Claims Queue was looked at once, scored 5, and shipped)."""
+    from services.blueprint.ui_engineer import COMPILE_ROUNDS
+    assert page_look.LOOKS > 2
+    assert COMPILE_ROUNDS + page_look.LOOKS - 1 >= 7
+
+
+def test_what_the_rule_would_have_done_to_the_builds_that_prompted_it():
+    """The real trails, replayed. The eight that stop are exactly the ones a
+    further look could not have helped."""
+    kept_going = {"1,5": True, "4,7": True, "4,5": True, "6,7": True, "5": True,
+                  "6,5": False, "7,5": False, "4,2": False, "6,6": False,
+                  "7,7": False, "5,8": False, "8": False}
+    for trail, expected in kept_going.items():
+        scores, best = [int(x) for x in trail.split(",")], None
+        for s in scores:
+            keep = page_look.worth_another_look({"score": s}, best)
+            best = s if best is None else max(best, s)
+        assert keep is expected, (trail, keep)
+
+
+def test_a_page_that_ships_below_the_bar_says_so(monkeypatch, tmp_path, caplog):
+    """Both builds reported no failures while their own reviewer had rejected
+    most of their pages. The verdicts were in the ledger and nothing read
+    them back."""
+    import logging
+    with caplog.at_level(logging.WARNING, logger="services.blueprint.ui_engineer"):
+        _trail(monkeypatch, tmp_path, [5, 4])
+    said = [r.getMessage() for r in caplog.records]
+    assert any("ships at 4/10, still `revise` after 2 look(s)" in m for m in said), said
+    assert any("no sort affordance" in m for m in said), said
+
+
+def test_a_page_the_browser_proved_broken_keeps_its_looks(monkeypatch, tmp_path):
+    """A CRASH IS NOT A STALL. The climbing rule reads a score that has
+    stopped moving as "the writer cannot get past this reading of its own
+    page" — true of taste, false of a stack trace, which names one concrete
+    thing to fix. Stay's booking page scored 1 twice while throwing `Cannot
+    read properties of undefined (reading 'tone')` and was let go as stalled
+    (2026-11-04)."""
+    crash = dict(REVISE, score=1, broken=["view.tsx: Cannot read properties of undefined"])
+    assert page_look.worth_another_look(crash, 1) is True, "stalled, but crashing"
+    assert page_look.worth_another_look(dict(crash, score=9), 9) is True, \
+        "a high score does not excuse a page that does not render"
+    assert page_look.worth_another_look(dict(REVISE, score=1), 1) is False, \
+        "and a page that merely stalls still stops"
+    seen, _ = _trail_broken(monkeypatch, tmp_path)
+    assert seen == page_look.LOOKS, seen
+
+
+def _trail_broken(monkeypatch, tmp_path):
+    """`broken` is the BROWSER's word, not the critic's: `look_at` fills it
+    from the render's own console errors (`body["broken"] = look["errors"]`),
+    so a crash is staged on the render, not on the verdict."""
+    critic = _Critic([dict(REVISE, score=1)] * (page_look.LOOKS + 1))
+    monkeypatch.setattr(page_look, "render", lambda *a, **k: {
+        "shots": {"desktop": "d.png", "mobile": "m.png"},
+        "errors": ["view.tsx: Cannot read properties of undefined (reading 'tone')"]})
+    writer = _Writer([{"rationale": "", "load": GOOD_LOAD, "view": GOOD_VIEW}] * 12)
+    body, _ = compose_page(_doc(), _doc()["pages"][0], tmp_path, writer, critic=critic)
+    return len(critic.seen), body

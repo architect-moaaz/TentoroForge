@@ -113,6 +113,14 @@ eqJson(out.sent, true, "a send with no from-address still goes");
 ok(String(out.notice).includes("FORGE_EMAIL_FROM"),
    "but the weird address is called out, not left for a customer to notice");
 
+// ── 4b. no from-address, a mailbox signed in: it sends as that mailbox ─────
+// A mail server refuses a sender other than the account it signed in, so the
+// stand-in never reached anyone (DITANS's verification codes, 2026-11-06).
+reset({ SMTP_HOST: "smtp.gmail.com", SMTP_USER: "desk@ward.test", SMTP_PASSWORD: "p" }, outlook);
+out = await send(config, ctx);
+eqJson((globalThis as any).__mailed[0]?.from, "desk@ward.test", "the signed-in mailbox is the sender");
+eqJson(out.notice, undefined, "and that is not a weird address to call out");
+
 // ── a declared provider is not rescued by the other one's stray key ───────
 reset({ RESEND_API_KEY: "re_xxx" }, outlook);
 out = await send(config, ctx);

@@ -61,6 +61,12 @@
       "room": "design_studio",
       "intro": "I'm Uma. I set the conventions the whole app shares — how pages open, where actions go, how dense things are — so it feels like one product."
     },
+    "kit_engineer": {
+      "name": "Kit",
+      "title": "Design engineer",
+      "room": "design_studio",
+      "intro": "I'm Kit. I build the product's own parts — its page head, its panels, its rows and chips, and the way it writes money and dates — so every page is made of the same things."
+    },
     "data_model": {
       "name": "Bob",
       "title": "Data modeller",

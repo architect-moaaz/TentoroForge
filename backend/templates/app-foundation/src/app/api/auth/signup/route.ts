@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { db } from "@/db";
 import { users } from "@/db/schema/user";
+import { policy as signInPolicy } from "@/lib/sign-in";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import * as accountModule from "@/lib/account";
@@ -129,6 +130,8 @@ export async function POST(request: Request) {
           ...("name" in (users as any) ? { name: data.name } : {}),
           ...("firstName" in (users as any) ? { firstName: data.name.split(" ")[0], lastName: data.name.split(" ").slice(1).join(" ") || "" } : {}),
           ...("accountType" in (users as any) && role ? { accountType: role } : {}),
+          // The address is proved by a code before the account reaches anything.
+          ...("emailVerification" in (users as any) && signInPolicy().verifyEmail ? { emailVerification: "pending" } : {}),
         } as any)
         .returning();
       if (ACCOUNT && accountTable && account.values) {

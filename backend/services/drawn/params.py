@@ -27,8 +27,11 @@ path the contract does not have, a prop nothing reads.
 """
 from __future__ import annotations
 
+import colorsys
+import copy
 import json
 import re
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -104,6 +107,7 @@ def _schema(children: bool) -> dict[str, Any]:
                 "kind": {"type": "string", "enum": ["text", "select", "toggle", "choice"]},
                 "value": {"type": "string"}, "placeholder": {"type": "boolean"},
                 "on_look": {"type": "string"}, "off_look": {"type": "string"}, "prop": {"type": "string"},
+                "on": {"type": "boolean"},
             }}},
         "shows": {"type": "array", "items": {
             "type": "object", "additionalProperties": False, "required": ["node", "when"],
@@ -155,7 +159,7 @@ Pressed inside a list's template row, it is given that row.
 INPUTS — what the person sets is a field of a `form`: `{node, form, field, kind}`. `text` and `select`: `node` is
 the text showing the value (it becomes the input; `placeholder: true` when the drawn words are a hint such as
 "Search…", not a value), or a shared component drawn as a field, with `prop` the one of its words that is the
-value. `toggle`: `node` is the switch. `choice`: `node` is one option (a chip, a radio row,
+value. `toggle`: `node` is the switch or check box, `on: true` when it is drawn switched on or ticked. `choice`: `node` is one option (a chip, a radio row,
 a segment) and `value` the option it sets; `on_look` / `off_look` are the numbers of an option drawn selected
 and one drawn not selected, so the selection shows. When several options may be chosen together (more than one
 drawn selected, "pick up to 3"), the form's field says `many: true`: it holds a list, and each option adds or
@@ -657,11 +661,111 @@ def _shown_as_words(plan: _Plan) -> None:
                 f["type"] = "string"
 
 
+#: What `present(props.x)` asks of a record a view draws a card for.
+PRESENT = """
+/** A record is there when anything in it is: not null, not only empty words. */
+function present(record: unknown): boolean {
+  return !!record && Object.values(record as Record<string, unknown>).some(
+    (v) => v !== "" && v != null && v !== false && !(Array.isArray(v) && v.length === 0));
+}
+"""
+
+
+def _guard_records(plan: _Plan) -> None:
+    """A CARD ABOUT ONE RECORD IS SHOWN WHILE THERE IS ONE. A new DITANS
+    candidate's home drew its next step, an invitation and an unfinished
+    application as cards of empty words and wordless buttons, because the
+    drawing shows one of each and nothing said they could be missing (QA
+    2026-11-06). The card is the largest element holding everything bound to
+    the record and nothing bound to anything else; it is drawn while the
+    record is there, and the page gives `null` when it is not."""
+    reads: dict[str, set[str]] = {}
+
+    def note(nid: str, expr: Any) -> None:
+        m = _PATH.match(str(expr or "").strip())
+        if m and m.group(1) == "props":
+            reads.setdefault(nid, set()).add(m.group(2))
+
+    for nid, values in plan.values.items():
+        for v in values:
+            note(nid, v["expr"])
+    for nid, a in plan.actions.items():
+        if a.get("on"):
+            reads.setdefault(nid, set()).add(str(a["on"]).split(".")[0])
+    for nid, t in plan.templates.items():
+        reads.setdefault(nid, set()).add(str(t.get("prop") or "").split(".")[0])
+    for nid, inp in plan.inputs.items():
+        reads.setdefault(nid, set()).add(str(inp["form"]))
+    for nid, s in plan.shows.items():
+        note(nid, s["when"])
+    asked = {_PATH.match(str(s["when"])).group(2) for s in plan.shows.values() if _PATH.match(str(s["when"]))}
+
+    def chain(n: M.Node) -> list[M.Node]:
+        out = []
+        while n is not None:
+            out.append(n)
+            n = n.parent
+        return out[::-1]
+
+    for name, slot in plan.slots.items():
+        if slot.get("kind") != "record" or "." in name or name in asked:
+            continue
+        bound = [plan.nodes[nid] for nid, slots in reads.items() if name in slots]
+        if not bound or any(n.id in plan.scope for n in bound):
+            continue
+        chains = [chain(n) for n in bound]
+        card = None
+        for level in zip(*chains):
+            if any(n is not level[0] for n in level):
+                break
+            card = level[0]
+        if card is None:
+            continue
+
+        def others(n: M.Node) -> bool:
+            return any(reads.get(t.id, set()) - {name} for t in n.walk())
+
+        top = card
+        while top.parent is not None and top.parent is not plan.root and not others(top.parent):
+            top = top.parent
+        if top is plan.root or others(top):
+            continue
+        # A CARD IS WHAT THE DRAWING DRAWS AS ONE: a box with its own fill, edge or
+        # shadow, or a shared component. Climbing to whatever held nothing else
+        # took page headers and whole bodies with it — a 90-day check-in lost its
+        # question when there was no placement, and 124 of DITANS' 226 guards were
+        # a "Header", "Body" or "KPI row" (2026-11-06). With no box, nothing hides.
+        span = chain(card)[chain(card).index(top):] if top is not card else [card]
+        card = next((n for n in span if _surface(n)), None)
+        if card is None or card.id in plan.shows:
+            continue
+        # THERE WHILE ANYTHING IN IT IS. `null` is none; so is an object of empty
+        # words, which is what a page gives that wrote `x?.title ?? ""` for one
+        # it does not have. A record being written has no id yet but has words
+        # — a new job's title, its "Draft" — and keeps its card.
+        plan.shows[card.id] = {"node": card.id, "when": f"present(props.{name})"}
+
+
+_SURFACE = re.compile(r"(?:^|\s)(?:bg-|border(?:-\[|\s|$)|shadow)")
+
+
+def _surface(n: M.Node) -> bool:
+    """The element draws a box of its own: a fill, an edge, a shadow, or it is
+    (or only sizes) a shared component."""
+    return n.unit().is_component or bool(_SURFACE.search(n.classes()))
+
+
 def _attrs(attrs: list[tuple[str, str]]) -> str:
     return "".join(f" {k}={v}" for k, v in attrs)
 
 
-def _with(attrs: list[tuple[str, str]], **extra: str) -> list[tuple[str, str]]:
+#: Elements the browser already lets a person reach with Tab and press with a key.
+_NATIVE = frozenset({"button", "a", "input", "select", "textarea", "label", "summary", "option"})
+_KEYS = ('{(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); '
+         '(e.currentTarget as HTMLElement).click(); } }}')
+
+
+def _with(attrs: list[tuple[str, str]], tag: str = "div", **extra: str) -> list[tuple[str, str]]:
     out = [(k, v) for k, v in attrs if k not in extra]
     if extra.get("onClick"):
         # A PRESSABLE DRAWING SHOWS THE HAND. The drawn controls are divs, and a
@@ -670,6 +774,14 @@ def _with(attrs: list[tuple[str, str]], **extra: str) -> list[tuple[str, str]]:
         out = [(k, _pointer(v) if k == "className" else v) for k, v in out]
         if not any(k == "className" for k, _ in out):
             out.insert(0, ("className", '"cursor-pointer"'))
+        # AND IT IS A BUTTON TO THE KEYBOARD AND A SCREEN READER. A drawn div with
+        # a press handler was a "generic" Tab never reached: 4,218 of them on
+        # DITANS, every action of the app out of a keyboard's reach (QA DIT-015,
+        # 2026-11-05).
+        if tag not in _NATIVE:
+            have = {k for k, _ in out} | {k for k, v in extra.items() if v}
+            out += [(k, v) for k, v in (("role", '"button"'), ("tabIndex", "{0}"), ("onKeyDown", _KEYS))
+                    if k not in have]
     return out + [(k, v) for k, v in extra.items() if v]
 
 
@@ -691,10 +803,97 @@ def _cond(expr: str, negate: bool = False) -> str:
     return f"!{expr}" if negate else expr
 
 
+def _face(node: M.Node) -> tuple:
+    """How a node is drawn, whatever its words and whichever picture it shows:
+    options of one group with their own icons are drawn alike."""
+    return (node.tag, node.attr("className"), node.attr("style"),
+            tuple(_face(c) for c in node.children))
+
+
+def _px(node: M.Node, dim: str) -> float | None:
+    m = re.search(rf"(?:^|\s){dim}-\[(\d+(?:\.\d+)?)px\]", node.classes())
+    return float(m.group(1)) if m else None
+
+
+def _is_switch(node: M.Node) -> bool:
+    """A track with a knob in it, wider than tall; a check box otherwise."""
+    w, h = _px(node, "w"), _px(node, "h")
+    return bool(node.children) and w is not None and h is not None and w >= 1.5 * h
+
+
+_FILL = re.compile(r"bg-\[#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})\]")
+_LINE = re.compile(r"border-\[#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})\]")
+
+
+def _accent(root: M.Node) -> str | None:
+    """The screen's own accent: the strong colour it fills most often."""
+    counts: Counter = Counter()
+    for node in root.walk():
+        for c in node.classes().split():
+            m = _FILL.fullmatch(c)
+            if not m or len(m.group(1)) != 6:
+                continue
+            r, g, b = (int(m.group(1)[i:i + 2], 16) / 255 for i in (0, 2, 4))
+            _h, light, sat = colorsys.rgb_to_hls(r, g, b)
+            if sat >= 0.4 and 0.2 <= light <= 0.8:
+                counts["#" + m.group(1).lower()] += 1
+    return counts.most_common(1)[0][0] if counts else None
+
+
+def _other_state(node: M.Node, drawn_on: bool, accent: str | None) -> M.Node | None:
+    """A switch or check box drawn in one state, in the other.
+
+    A DRAWING SHOWS A CONTROL ONCE. Drawn ticked it stayed ticked, drawn off it
+    stayed off, whatever the person did: 72 on DITANS, 9 with the other state
+    drawn anywhere on their screen (QA DIT-004, 2026-11-05). The other state is
+    the drawn one turned over in the drawing's own colour — its fill becomes its
+    outline (a check box loses its tick, a switch's track pales and its knob goes
+    to the start), or its outline (else the screen's accent) becomes its fill.
+    """
+    other = copy.deepcopy(node)
+    classes = node.classes().split()
+    fill = next((c for c in classes if _FILL.fullmatch(c)), None)
+    line = next((c for c in classes if _LINE.fullmatch(c)), None)
+    switch = _is_switch(node)
+    if drawn_on:
+        if fill is None:
+            return None
+        colour = "#" + _FILL.fullmatch(fill).group(1)
+        classes = [c for c in classes if c != fill]
+        if switch:
+            classes.append(f"bg-[{colour}]/25")
+        else:
+            classes.append("bg-transparent")
+            if not any(c == "border" or re.fullmatch(r"border-\[\d+(\.\d+)?px\]", c) for c in classes):
+                classes.append("border-[1.5px]")
+            if line is None:
+                classes.append(f"border-[{colour}]")
+            other.children = []
+    else:
+        colour = "#" + _LINE.fullmatch(line).group(1) if line else accent
+        if colour is None:
+            return None
+        classes = [c for c in classes if c not in (fill, "bg-transparent")] + [f"bg-[{colour}]"]
+        if not switch and not other.children:
+            other.children = [M.Node(tag="p", id=f"{node.id}.tick", parent=other, body="\u2713", attrs=[
+                ("className", '"shrink-0 text-[12px] leading-[16px] font-[600] text-[#ffffff]"')])]
+    if switch:
+        swap = {"justify-start": "justify-end", "justify-end": "justify-start"}
+        if not any(c in swap for c in classes):
+            classes.append("justify-start" if drawn_on else "justify-end")
+        else:
+            classes = [swap.get(c, c) for c in classes]
+    other.attrs = [(k, json.dumps(" ".join(classes)) if k == "className" else v) for k, v in other.attrs]
+    if not any(k == "className" for k, _ in other.attrs):
+        other.attrs.insert(0, ("className", json.dumps(" ".join(classes))))
+    return other
+
+
 class _Writer:
     def __init__(self, plan: _Plan):
         self.plan = plan
         self.first_control = True
+        self.accent = _accent(plan.root)
 
     def _many(self, inp: dict) -> bool:
         slot = self.plan.slots.get(inp.get("form"))
@@ -714,6 +913,59 @@ class _Writer:
                 if found is not None:
                     return found
         return None
+
+    def _test(self, inp: dict) -> str:
+        """Whether this option is chosen, or this switch on."""
+        value = f"props.{inp['form']}.{inp['field']}"
+        if inp["kind"] == "toggle":
+            return f"!!{value}"
+        if self._many(inp):
+            return f"({value} ?? []).includes({json.dumps(inp['value'])} as never)"
+        return f"{value} === {json.dumps(inp['value'])}"
+
+    def _states(self, inp: dict, n: M.Node) -> tuple[M.Node, M.Node]:
+        """The element drawn chosen (on) and not chosen (off)."""
+        plan = self.plan
+        if inp["kind"] == "choice":
+            on, off = self._look_of(inp, "on_look"), self._look_of(inp, "off_look")
+            if on is not None and off is not None and _face(on) != _face(off):
+                return on, off
+            # THE GROUP SAYS WHICH LOOK IS CHOSEN. Given one look, or the same
+            # look twice, both branches drew the option the same and picking it
+            # showed nothing (DITANS: 30 chip groups, QA 2026-11-05). Among the
+            # options drawn two ways, the fewer are the chosen.
+            group = [plan.nodes[i] for i, o in plan.inputs.items() if i in plan.nodes and o.get("kind") == "choice"
+                     and o.get("form") == inp["form"] and o.get("field") == inp["field"]]
+            faces: dict[tuple, list[M.Node]] = {}
+            for g in group:
+                faces.setdefault(_face(g), []).append(g)
+            if len(faces) == 2:
+                few, most = sorted(faces.values(), key=len)
+                if len(few) < len(most):
+                    return few[0], most[0]
+                known = on if on is not None else off
+                if known is not None:
+                    rest = next(g for g in group if _face(g) != _face(known))
+                    return (known, rest) if on is not None else (rest, known)
+            return on or n, off or n
+        on = plan.nodes.get(str(inp.get("on_look") or ""))
+        off = plan.nodes.get(str(inp.get("off_look") or ""))
+        if on is not None and off is not None and _face(on) != _face(off):
+            return on, off
+        drawn_on = bool(inp["on"]) if "on" in inp else (on is not None and _face(n) == _face(on))
+        # ANOTHER SWITCH OF THE SAME KIND ON THE SCREEN, DRAWN THE OTHER WAY.
+        for i, o in plan.inputs.items():
+            m = plan.nodes.get(i)
+            if m is None or m is n or o.get("kind") != "toggle" or not M.same_kind(m, n) \
+                    or (_px(m, "w"), _px(m, "h")) != (_px(n, "w"), _px(n, "h")) or _face(m) == _face(n):
+                continue
+            if "on" in o and bool(o["on"]) == drawn_on:
+                continue
+            return (n, m) if drawn_on else (m, n)
+        other = _other_state(n, drawn_on, self.accent)
+        if other is None:
+            return n, n
+        return (n, other) if drawn_on else (other, n)
 
     def press(self, n: M.Node, row: str | None) -> str:
         a = self.plan.actions.get(n.id)
@@ -760,14 +1012,10 @@ class _Writer:
             inner = self.piece(n, depth + 1, listed["prop"], done | {(n.id, "list")}, child=False, key=True)
             return wrapped(f"{source}.map((row) => (", inner, "))")
         inp = plan.inputs.get(n.id)
-        if inp and inp["kind"] in ("choice", "toggle") and (self._look_of(inp, "on_look") or self._look_of(inp, "off_look")) \
-                and (n.id, "look") not in done:
-            on = self._look_of(inp, "on_look") or n
-            off = self._look_of(inp, "off_look") or n
-            value = f"props.{inp['form']}.{inp['field']}"
-            test = value if inp["kind"] == "toggle" else \
-                f"({value} ?? []).includes({json.dumps(inp['value'])} as never)" if self._many(inp) else \
-                f"{value} === {json.dumps(inp['value'])}"
+        if inp and inp["kind"] in ("choice", "toggle") and (n.id, "look") not in done \
+                and _face((states := self._states(inp, n))[0]) != _face(states[1]):
+            on, off = states
+            test = self._test(inp)
             yes = self.piece(M.relook(n, on, set(plan.values), own_pictures=True), depth + 1, row, done | {(n.id, "look")},
                              child=False)
             no = self.piece(M.relook(n, off, set(plan.values), own_pictures=True), depth + 1, row, done | {(n.id, "look")},
@@ -810,6 +1058,12 @@ class _Writer:
         values = plan.values.get(n.id) or []
         press = self.press(n, row)
         extra = {"key": "{row.id}" if key else "", "onClick": press}
+        state = plan.inputs.get(n.id)
+        if press and state and state["kind"] == "toggle":
+            extra["role"] = '"switch"' if _is_switch(n) else '"checkbox"'
+            extra["aria-checked"] = "{" + self._test(state) + "}"
+        elif press and state and state["kind"] == "choice":
+            extra["aria-pressed"] = "{" + self._test(state) + "}"
         unit = n.unit()
         if unit.is_component:
             plan.components.add(unit.tag)
@@ -819,12 +1073,13 @@ class _Writer:
             typed = plan.inputs.get(n.id)
             if typed and typed["kind"] in ("text", "select") and typed.get("prop"):
                 form, field_name, word = typed["form"], typed["field"], typed["prop"]
-                options = ""
-                if typed["kind"] == "select":
-                    drawn = M.prop_value(unit, word)
-                    choices = list(dict.fromkeys([*(_fields(plan.slots[form])[field_name].get("options") or []), drawn]))
-                    options = f", options: {json.dumps(choices)}"
-                hint = f", placeholder: {json.dumps(M.prop_value(unit, word))}" if typed.get("placeholder") else ""
+                # THE DRAWN WORDS ARE AN EXAMPLE: a hint in an empty field, never a
+                # choice of their own. A select offers what its field declares and
+                # starts on none; with nothing declared it is typed into.
+                drawn = M.prop_value(unit, word)
+                declared = _fields(plan.slots[form])[field_name].get("options") or []
+                options = f", options: {json.dumps(declared)}" if typed["kind"] == "select" and declared else ""
+                hint = f", placeholder: {json.dumps(drawn)}" if drawn and (not options or typed.get("placeholder")) else ""
                 u_attrs.append((f"{word}Input", "{{ value: String(props." + form + "." + field_name + ' ?? ""), '
                                 "onChange: (v: string) => props." + change_handler(form) + "("
                                 + json.dumps(field_name) + ", v)" + hint + options + " }}"))
@@ -834,17 +1089,17 @@ class _Writer:
                     return [pad + comp]
                 return [pad + f'<div{_attrs(_with([("className", chr(34) + "contents" + chr(34))], **extra))}>'
                         + comp + "</div>"]
-            return [pad + f"<{n.tag}{_attrs(_with(n.attrs, **extra))}>{comp}</{n.tag}>"]
+            return [pad + f"<{n.tag}{_attrs(_with(n.attrs, n.tag, **extra))}>{comp}</{n.tag}>"]
         if n.tag == "img":
             src = next((v["expr"] for v in values if v["prop"] == "src"), None)
-            attrs = _with(n.attrs, **extra, **({"src": "{" + src + "}"} if src else {}))
+            attrs = _with(n.attrs, "img", **extra, **({"src": "{" + src + "}"} if src else {}))
             return [pad + f"<img{_attrs(attrs)} />"]
         inp = plan.inputs.get(n.id)
         if inp and inp["kind"] in ("text", "select") and n.body is not None:
             return [pad + self.field(n, inp, extra)]
         if n.body is not None:
             body = "{" + values[0]["expr"] + "}" if values else n.body
-            return [pad + f"<{n.tag}{_attrs(_with(n.attrs, **extra))}>{body}</{n.tag}>"]
+            return [pad + f"<{n.tag}{_attrs(_with(n.attrs, n.tag, **extra))}>{body}</{n.tag}>"]
         inner = [line for c in n.children for line in self.piece(c, depth + 1, row, done)]
         attrs = n.attrs
         if re.search(r"(^|\s)h-\[", n.classes()) and any(d.id in plan.controls for d in n.walk() if d is not n):
@@ -854,7 +1109,7 @@ class _Writer:
             # box of fixed height ends above the menu — the shell and its columns
             # keep clipping, so a wide page still does not scroll the window.
             attrs = [(k, _unclipped(v) if k == "className" else v) for k, v in attrs]
-        head = f"<{n.tag}{_attrs(_with(attrs, **extra))}"
+        head = f"<{n.tag}{_attrs(_with(attrs, n.tag, **extra))}"
         return [pad + head + ">", *inner, pad + f"</{n.tag}>"] if inner else [pad + head + " />"]
 
     def field(self, n: M.Node, inp: dict, extra: dict) -> str:
@@ -866,13 +1121,23 @@ class _Writer:
         attrs = [(k, v) for k, v in n.attrs if k not in ("className",)]
         value = f"{{props.{form}.{name} ?? \"\"}}"
         change = f"{{(e) => props.{change_handler(form)}({json.dumps(name)}, e.target.value)}}"
-        base = _with([("className", json.dumps(classes)), *attrs], onClick=extra.get("onClick", ""))
-        if inp["kind"] == "select":
-            options = list(dict.fromkeys([*(_fields(self.plan.slots[form])[name].get("options") or []), M.plain(n)]))
-            opts = "".join(f"<option value={{{json.dumps(o)}}}>{{{json.dumps(o)}}}</option>" for o in options)
+        drawn = M.plain(n)
+        declared = _fields(self.plan.slots[form])[name].get("options") or []
+        # THE DRAWN WORDS ARE AN EXAMPLE, NOT A CHOICE. A field drawn with a
+        # chevron became a select of the one value the designer typed: an empty
+        # field showed "Egyptian" as chosen and nothing else could be picked
+        # (DITANS: 211 selects, QA DIT-012, 2026-11-05). A select offers what its
+        # field declares and starts on none; with nothing declared it is typed
+        # into, the drawn words its hint.
+        if inp["kind"] == "select" and declared:
+            base = _with([("className", json.dumps(classes)), *attrs], "select", onClick=extra.get("onClick", ""))
+            first = drawn if inp.get("placeholder") and drawn else "Choose\u2026"
+            opts = f"<option value=\"\">{{{json.dumps(first)}}}</option>" + "".join(
+                f"<option value={{{json.dumps(o)}}}>{{{json.dumps(o)}}}</option>" for o in declared)
             return (f"<select{_attrs(base)} value={value} onChange={change}>{opts}</select>")
+        base = _with([("className", json.dumps(classes)), *attrs], "input", onClick=extra.get("onClick", ""))
         # As an expression: a JSX attribute string does not read `\u2026`.
-        hint = f" placeholder={{{json.dumps(M.plain(n))}}}" if inp.get("placeholder") else ""
+        hint = f" placeholder={{{json.dumps(drawn)}}}" if drawn else ""
         return f"<input{_attrs(base)} value={value}{hint} onChange={change} />"
 
 
@@ -975,30 +1240,12 @@ def _sample(plan: _Plan, contract: dict) -> dict[str, Any]:
         n = plan.nodes[nid]
         for v in values:
             put(v["expr"], M.prop_value(n, v["prop"]) if n.unit().is_component else M.plain(n))
-    for nid, inp in plan.inputs.items():
-        n = plan.nodes[nid]
-        if inp["form"] not in plan.slots:
-            continue
-        path = f"props.{inp['form']}.{inp['field']}"
-        if inp["kind"] in ("text", "select"):
-            drawn = M.prop_value(n, inp["prop"]) if inp.get("prop") and n.unit().is_component else M.plain(n)
-            put(path, "" if inp.get("placeholder") else drawn)
-        elif inp["kind"] == "choice":
-            def look_of(key: str) -> M.Node | None:
-                keys = [inp.get(key)] + [o.get(key) for o in plan.inputs.values()
-                                         if o.get("form") == inp["form"] and o.get("field") == inp["field"]]
-                return next((plan.nodes[str(k)] for k in keys if k and str(k) in plan.nodes), None)
-            on, off = look_of("on_look"), look_of("off_look")
-            chosen = (M.look(n) == M.look(on)) if on is not None else (off is not None and M.look(n) != M.look(off))
-            many = bool(_fields(plan.slots[inp["form"]]).get(inp["field"], {}).get("many"))
-            if many:
-                have = (out.get(inp["form"]) or {}).get(inp["field"])
-                put(path, [*(have if isinstance(have, list) else []), *([str(inp["value"])] if chosen else [])])
-            elif chosen or (on is None and off is None):
-                put(path, str(inp["value"]))
-        else:
-            on = plan.nodes.get(str(inp.get("on_look") or ""))
-            put(path, on is not None and M.look(n) == M.look(on))
+    # A FORM STARTS EMPTY. What the designer typed into a field, the chip drawn
+    # chosen and the box drawn ticked are examples: taken as the sample, the page
+    # writer started every new form with them — a new account's profile already
+    # "Staff Nurse" at "Kasr Al Ainy Hospital", "Female" chosen (DITANS QA DIT-009,
+    # DIT-013, 2026-11-05). The drawn words are each field's hint instead
+    # (`_Writer.field`); a form's fields are given their empty values below.
     for nid, show in plan.shows.items():
         if nid not in plan.scope:
             put(show["when"], not show.get("not"))
@@ -1024,6 +1271,7 @@ def apply(static: str, reply: dict, name: str, *, components: dict[str, list[str
     if problems:
         return None, problems
     _shown_as_words(plan)
+    _guard_records(plan)
     writer = _Writer(plan)
     body = writer.piece(root, 2, None, child=False)
     imports = "".join(f'import {c} from "./{c}";\n' for c in sorted(plan.components)
@@ -1031,6 +1279,8 @@ def apply(static: str, reply: dict, name: str, *, components: dict[str, list[str
     code = (f'"use client";\nimport type * as React from "react";\n{imports}\n'
             f"export default function {name}(props: {name}Props) {{\n  return (\n"
             + "\n".join(body) + "\n  );\n}\n")
+    if "present(props." in code:
+        code += PRESENT
     for a in contract["actions"]:
         a.pop("nodes", None)
     # WHAT NOTHING READS IS NOT IN THE CONTRACT. An action with no element to
@@ -1104,7 +1354,7 @@ def parameterise(client: Any, name: str, static: str, *, heading: str, image: st
 
 def finish(name: str, code: str, contract: dict, *, children: bool = False) -> str:
     """The view's file with its generated Props type in place."""
-    typed = props_type(name, contract, children=children)
+    typed = props_type(name, contract, children=children, code=code)
     code = code.lstrip()
     head = ""
     for directive in ('"use client";', "'use client';"):

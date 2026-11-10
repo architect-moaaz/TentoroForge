@@ -397,6 +397,7 @@ def emit_standalone_app(*, output_dir: str | Path, project_short_id: str) -> Non
             '  out: "./drizzle",\n'
             '  dialect: "postgresql",\n'
             '  dbCredentials: { url: process.env.DATABASE_URL! },\n'
+            '  tablesFilter: ["!_forge_seed_meta", "!_forge_import_log"],\n'
             '});\n',
             encoding="utf-8",
         )

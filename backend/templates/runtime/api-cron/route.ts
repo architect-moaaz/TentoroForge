@@ -189,6 +189,16 @@ async function handler(req: Request): Promise<Response> {
     }
   }
 
+  // THE STAYS A DESK SEARCHES, kept fresh from Mews (`syncAllStays`): only in
+  // an application that declares Mews and has its client token.
+  let mewsStays: unknown = null;
+  try {
+    const mews = await import("@/lib/mews");
+    mewsStays = await mews.syncAllStays({ now });
+  } catch (err) {
+    console.warn("[cron] the Mews stays could not be refreshed:", err);
+  }
+
   // THE TRAIL'S RETENTION, through its one door.
   let pruned = 0;
   try {
@@ -203,6 +213,7 @@ async function handler(req: Request): Promise<Response> {
     ...(forced ? { forced } : {}),
     escalated,
     pruned,
+    mewsStays,
     checked: scheduled.length,
     fired,
     cronFired,

@@ -252,7 +252,10 @@ def test_the_sample_is_read_from_the_drawing():
     assert out["sample"]["tenants"] == [{"id": "1", "name": "MedStaff", "status": "Live"},
                                         {"id": "2", "name": "CarePoint", "status": "Paused"},
                                         {"id": "3", "name": "Nile Health", "status": "Live"}]
-    assert out["sample"]["promo"] == {"code": "GULFNURSE30", "market": "Egypt"}
+    # A form starts empty: the drawn code and the chip drawn chosen are examples
+    # (QA DIT-009, DIT-013); the code's drawn words are its field's hint.
+    assert out["sample"]["promo"] == {"code": "", "market": ""}
+    assert 'placeholder={"GULFNURSE30"}' in out["code"]
     # an enum's options are the values the drawing shows
     status = out["contract"]["data"][0]["fields"][1]
     assert status["options"] == ["Live", "Paused"] and '"Live" | "Paused"' in out["code"]
@@ -583,8 +586,8 @@ def test_a_component_drawn_as_a_field_is_the_input_and_a_list_in_a_lists_rows_is
     code = out["code"]
     # the text field's value word is the input, the form and its field declared by it
     assert 'valueInput={{ value: String(props.organisation.legalName ?? ""), onChange: (v: string) => ' \
-           'props.onOrganisationChange("legalName", v) }}' in code
-    assert out["sample"]["organisation"] == {"legalName": "Al Noor Healthcare LLC"}
+           'props.onOrganisationChange("legalName", v), placeholder: "Al Noor Healthcare LLC" }}' in code
+    assert out["sample"]["organisation"] == {"legalName": ""}
     # the steps are drawn as they are; the tasks inside them are the list
     assert code.count(".map((row) => (") == 1 and "props.tasks.map" in code and ">Licence</p>" in code
     assert out["sample"]["tasks"] == [{"id": "1", "title": "Upload passport"}, {"id": "2", "title": "Upload degree"}]
@@ -752,6 +755,8 @@ def test_a_drawn_page_is_its_views_and_their_components_as_parts():
     prompt = binder.user_prompt(doc, page)
     assert "`onNewTenant` “New tenant”: navigate → page `/tenants/new`" in prompt
     assert "its dialog “Add override”" in prompt and "export type TenantsViewProps" in prompt
+    # QA DIT-009 (2026-11-05): the drawing's examples were a new form's values
+    assert "A form — what the person sets — starts as the record it changes, or empty for a new one" in prompt
 
 
 def test_the_page_around_the_drawing_draws_nothing(monkeypatch):
@@ -827,6 +832,30 @@ def test_the_layout_shows_the_drawn_frame_when_there_is_one():
     assert "<DrawnShell controls={cluster} role={role} data={shellData}>{children}</DrawnShell>" in layout
     default = Path(__file__).resolve().parents[3] / "templates/app-foundation/src/components/DrawnShell.tsx"
     assert "DRAWN_SHELL = false" in default.read_text()
+
+
+def test_without_a_drawing_the_layout_reads_the_flag_as_false_and_keeps_its_menu(tmp_path):
+    """The layout is a server component. Read across a "use client" boundary,
+    `DRAWN_SHELL = false` arrived as a client reference — truthy — so every app
+    without a drawing took the drawn-frame branch and showed no menu
+    (kkb5mzo3, 2026-11-03). The stub is a server module, and an app carrying
+    the old one is given the new one."""
+    from services.drawn.project import DEFAULT_WRAPPER, WRAPPER, settle_default_wrapper
+    from services.smith.reproject import _drawn
+
+    template = Path(__file__).resolve().parents[3] / "templates/app-foundation/src/components/DrawnShell.tsx"
+    assert '"use client"' not in DEFAULT_WRAPPER and template.read_text() == DEFAULT_WRAPPER
+    old = tmp_path / "app" / WRAPPER
+    old.parent.mkdir(parents=True)
+    old.write_text('"use client";\nimport * as React from "react";\n\nexport const DRAWN_SHELL = false;\n')
+
+    class Svc:
+        doc: dict = {}
+    assert _drawn(Svc(), str(tmp_path / "app")) == {"files": ["src/components/DrawnShell.tsx"]}
+    assert old.read_text() == DEFAULT_WRAPPER
+    assert settle_default_wrapper(tmp_path / "app") is False      # settled once
+    old.write_text("export const DRAWN_SHELL = false; // someone's own\n")
+    assert settle_default_wrapper(tmp_path / "app") is False      # a hand-written one is left alone
 
 
 def test_the_build_converts_the_frames_first_and_the_requirements_read_the_journey():
@@ -1048,9 +1077,16 @@ def test_a_pressable_drawing_shows_the_hand():
     import re
     out, _ = P.apply(STATIC, json.loads(json.dumps(ANSWER)), "TenantsView",
                      components={"DhTagSuccess": ["label"], "DhTagWarning": ["label"], "DhButtonPrimary": ["label"]})
-    tags = re.findall(r"<\w+[^<>]*onClick=[^<>]*>", out["code"])
+    pressable = r"<(\w+)[^<]*?onClick=\{[^{}]*\}(?:\s[\w-]+=(?:\"[^\"]*\"|\{[^{}]*\}))*\s*/?>"
+    tags = [m.group(0) for m in re.finditer(pressable, out["code"])]
     assert tags and all("cursor-pointer" in t for t in tags)
-    assert "cursor-pointer" not in re.sub(r"<\w+[^<>]*onClick=[^<>]*>", "", out["code"])
+    assert "cursor-pointer" not in re.sub(pressable, "", out["code"])
+    # QA DIT-015 (2026-11-05): and a button to the keyboard and a screen reader,
+    # unless the browser already makes it one.
+    for m in re.finditer(pressable, out["code"]):
+        if m.group(1) not in ("button", "a", "input", "select"):
+            assert 'role="button"' in m.group(0) and "tabIndex={0}" in m.group(0) \
+                and 'e.key === "Enter"' in m.group(0), m.group(0)
 
 
 def test_the_bar_holding_the_account_menu_does_not_clip_it():
@@ -1146,7 +1182,7 @@ def test_chips_drawn_with_several_chosen_hold_a_list_and_every_chip_shows_its_ch
     for country in ("UAE", "Saudi", "Qatar"):   # each chip shows whether it is chosen, own look or not
         assert f'.includes("{country}" as never) ? (\n' in code, country
     assert '.filter((x) => x !== "Saudi") : [...' in code
-    assert out["sample"]["prefs"]["countries"] == ["UAE", "Saudi"]
+    assert out["sample"]["prefs"]["countries"] == []
     assert "countries?: (" in code or "countries: (" in code
 
 
@@ -1171,3 +1207,19 @@ def test_what_is_not_the_app_is_left_out():
     assert problems == [], problems
     assert "9:41" not in out["code"] and "{props.job.title}" in out["code"]
     assert "leave_out" in P.REPLY_SCHEMA["properties"] and "status bar" in P.SYSTEM
+
+
+def test_a_placed_shape_is_absolute_and_the_row_it_is_placed_in_holds_it():
+    """DITANS D2 (2026-11-03): the menu's guide line came out `relative absolute`
+    and sat in the flow over the labels."""
+    row = {"id": "1", "type": "FRAME", "layoutMode": "HORIZONTAL", "absoluteBoundingBox": {"x": 0, "y": 0, "width": 200, "height": 32},
+           "children": [{"id": "2", "type": "RECTANGLE", "layoutPositioning": "ABSOLUTE",
+                         "absoluteBoundingBox": {"x": 21, "y": 0, "width": 2, "height": 32}},
+                        {"id": "3", "type": "TEXT", "characters": "Find jobs", "style": {},
+                         "absoluteBoundingBox": {"x": 40, "y": 6, "width": 80, "height": 20}}]}
+    out = Emitter().element(row, {"id": "0", "type": "FRAME", "layoutMode": "VERTICAL"})
+    first = out.splitlines()[0]
+    assert "relative" in first.split('className="')[1].split('"')[0].split()
+    guide = next(l for l in out.splitlines() if "left-[21px]" in l)
+    assert "absolute" in guide and "relative" not in guide
+

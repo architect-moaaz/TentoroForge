@@ -58,10 +58,19 @@ def _app_mcp() -> Any:
 
 def _drawn(svc: Any, app_root: str) -> dict:
     if not any(isinstance(v, dict) for v in svc.doc.get("drawnViews") or []):
-        return {}
+        # No drawing, but the wrapper may be the old client stub that hid
+        # every app's menu (`drawn.project.settle_default_wrapper`).
+        from services.drawn.project import settle_default_wrapper
+        return {"files": ["src/components/DrawnShell.tsx"]} if settle_default_wrapper(app_root) else {}
     from services.drawn.project import project_drawn
     project_drawn(svc.doc, svc.output_dir, app_root)
     return {"files": ["src/components/DrawnShell.tsx"]}
+
+
+def _component_kit(svc: Any, app_root: str) -> list[str]:
+    """The app's own parts, rewritten from `componentKit` (`component_kit`)."""
+    from services.blueprint.component_kit import project_component_kit
+    return project_component_kit(svc.doc, app_root)
 
 
 def everything(svc: Any, app_root: str | None) -> list[str]:
@@ -110,6 +119,11 @@ def everything(svc: Any, app_root: str | None) -> list[str]:
     # projected them: a menu entry bound or a shell changed in the document
     # stayed out of the app until the next build (2026-10-31).
     _run("drawn", lambda: _drawn(svc, app_root))
+    # THIS APPLICATION'S OWN PARTS, which every page imports. Without this an
+    # undo that restored an earlier kit left the app compiling against the
+    # newer files, and a part the restored kit never had would still be on
+    # disk for a page to reach.
+    _run("component_kit", lambda: {"files": _component_kit(svc, app_root)})
     _run("account", lambda: _account(svc, app_root))
     _run("business_rules", lambda: project_business_rules(svc.doc, app_root))
     # WHO REACHES WHICH ROWS, AND WHAT IS HIDDEN IN THEM. The build writes

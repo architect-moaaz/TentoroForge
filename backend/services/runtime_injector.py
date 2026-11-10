@@ -1042,7 +1042,8 @@ def _inject_file_storage(output_path: Path) -> list[str]:
     #        foundation and is rewritten by the projection.
     for sub, dst in (("api-org/route.ts", "org/route.ts"), ("api-org/members/route.ts", "org/members/route.ts"),
                      ("api-org/address/route.ts", "org/address/route.ts"),
-                     ("api-auth-methods/route.ts", "auth/methods/route.ts"), ("api-auth-magic/route.ts", "auth/magic/route.ts")):
+                     ("api-auth-methods/route.ts", "auth/methods/route.ts"), ("api-auth-magic/route.ts", "auth/magic/route.ts"),
+                     ("api-auth-email-code/route.ts", "auth/email-code/route.ts")):
         src = _TEMPLATE_DIR / sub
         if src.exists():
             target = output_path / "src" / "app" / "api" / dst
@@ -1084,11 +1085,23 @@ def _inject_file_storage(output_path: Path) -> list[str]:
             txt = barrel.read_text(encoding="utf-8")
             if "_forge_mews_properties" not in txt:
                 barrel.write_text(txt.rstrip() + '\nexport { forgeMewsProperties } from "./_forge_mews_properties";\n', encoding="utf-8")
+    # The stays a desk searches (`suggestStays`), kept beside the properties.
+    stays_schema = _TEMPLATE_DIR / "db" / "forge-mews-stays.schema.ts"
+    if stays_schema.exists() and schema_dir.exists():
+        shutil.copy2(stays_schema, schema_dir / "_forge_mews_stays.ts")
+        written.append("src/db/schema/_forge_mews_stays.ts")
+        barrel = schema_dir / "index.ts"
+        if barrel.exists():
+            txt = barrel.read_text(encoding="utf-8")
+            if "_forge_mews_stays" not in txt:
+                barrel.write_text(txt.rstrip() + '\nexport { forgeMewsStays, forgeMewsSync } from "./_forge_mews_stays";\n', encoding="utf-8")
     for rel_src, rel_dst in (
         (("api-mews", "guard.ts"), "src/app/api/mews/guard.ts"),
         (("api-mews", "properties", "route.ts"), "src/app/api/mews/properties/route.ts"),
         (("api-mews", "properties", "[id]", "route.ts"), "src/app/api/mews/properties/[id]/route.ts"),
         (("api-mews", "properties", "[id]", "check", "route.ts"), "src/app/api/mews/properties/[id]/check/route.ts"),
+        (("api-mews", "stays", "route.ts"), "src/app/api/mews/stays/route.ts"),
+        (("api-mews", "stays", "suggest", "route.ts"), "src/app/api/mews/stays/suggest/route.ts"),
         (("pages", "mews-properties", "page.tsx"), "src/app/(dashboard)/mews-properties/page.tsx"),
         (("pages", "mews-properties", "MewsPropertiesPanel.tsx"), "src/app/(dashboard)/mews-properties/MewsPropertiesPanel.tsx"),
     ):
@@ -3053,10 +3066,18 @@ def _substitute_auth_copy(output_path: Path, app_name: str | None,
         headline, subhead = "Welcome back", "Sign in to continue."
 
     form_title, form_sub = "Welcome back", f"Sign in to {name}" if name != "App" else "Sign in to continue"
+    # ALL FOUR, NOT TWO. The brand half of the sign-in page — the large words
+    # beside the form — was built from the application's name and could not be
+    # overridden at all, so writing the design's own voice into `authCopy`
+    # still left "Welcome to {app}" set in display type above it.
     try:
         dna = json.loads((output_path / "src" / "contracts" / "design-dna.json")
                          .read_text(encoding="utf-8"))
         ac = dna.get("authCopy") or {}
+        if ac.get("headline"):
+            headline = str(ac["headline"]).replace("{app}", name)
+        if ac.get("subhead"):
+            subhead = str(ac["subhead"]).replace("{app}", name)
         if ac.get("title"):
             form_title = str(ac["title"]).replace("{app}", name)
         if ac.get("sub"):
@@ -3250,10 +3271,12 @@ def _ensure_env_file(output_path: Path, project_id: str | None = None) -> None:
         # pair now; one that has a pair keeps it (a new pair would orphan
         # every subscribed device).
         from services.push_keys import VAPID_KEYS, generate_vapid
-        present = {line.split("=", 1)[0].strip() for line in env_file.read_text("utf-8").splitlines() if "=" in line}
+        present = {line.split("=", 1)[0].strip() for line in env_file.read_text("utf-8").splitlines()
+                   if "=" in line and line.split("=", 1)[1].strip() and not line.lstrip().startswith("#")}
         if not all(k in present for k in VAPID_KEYS):
             pair = generate_vapid()
-            _upsert_env_keys(env_file, {k: v for k, v in pair.items() if k not in present})
+            _write_app_keys(env_file, {k: v for k, v in pair.items() if k not in present})
+        ensure_sensitive_key(env_file)
         return
 
     # Use a concrete port: postgres-js can't expand shell vars at runtime.
@@ -3374,6 +3397,41 @@ def _ensure_providers_import(providers_file: Path, module: str, why: str) -> Non
             break
     lines.insert(insert_at, f'// Auto-added by runtime_injector: {why}\nimport "{module}";')
     providers_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def ensure_sensitive_key(env_file: Path) -> bool:
+    """THE SEALING KEY, ONCE. An app whose `.env.local` already existed when
+    the runtime was injected got its push keys filled in and never this one,
+    so nothing it held could be sealed: the Case Management apps on forge-v3
+    could not store a Mews property's token (500, gvrhwft9, 2026-11-03).
+    Written only where the file has no non-empty value for it — a key that is
+    there is never replaced, or every value sealed with it is lost. Returns
+    whether one was written."""
+    if not env_file.is_file():
+        return False
+    for line in env_file.read_text("utf-8").splitlines():
+        name, _, value = line.partition("=")
+        if name.strip() == "SENSITIVE_ENCRYPTION_KEY" and value.strip():
+            return False
+    import base64
+    import secrets
+    _write_app_keys(env_file, {"SENSITIVE_ENCRYPTION_KEY": base64.b64encode(secrets.token_bytes(32)).decode("ascii")})
+    return True
+
+
+def _write_app_keys(env_file: Path, keys: dict[str, str]) -> None:
+    """Keys the application owns, written ABOVE the platform's managed block:
+    everything below its marker is rewritten by `services.env_writer`, so a
+    key appended there is lost on the next integrations sync. Replaces an
+    empty line for the same name; never a line with a value."""
+    from services.env_writer import _MANAGED_MARKER
+    lines = env_file.read_text("utf-8").splitlines() if env_file.is_file() else []
+    lines = [ln for ln in lines if not (ln.partition("=")[0].strip() in keys and not ln.partition("=")[2].strip())]
+    at = next((i for i, ln in enumerate(lines) if ln.strip() == _MANAGED_MARKER), len(lines))
+    while at > 0 and not lines[at - 1].strip():
+        at -= 1
+    lines[at:at] = [f"{k}={v}" for k, v in keys.items()]
+    env_file.write_text("\n".join(lines).rstrip() + "\n", "utf-8")
 
 
 def _upsert_env_keys(env_file: Path, updates: dict[str, str]) -> None:

@@ -322,6 +322,27 @@ DIRECTION_SCHEMA: dict[str, Any] = {
 # What the engineer is told
 # ---------------------------------------------------------------------------
 
+def _app_kit_block(doc: dict) -> str:
+    """THIS application's own parts, above the house kit — because they come
+    first. The kit engineer wrote them from the same direction and rhythm this
+    page is held to, so a page that builds its own panel beside them is a page
+    that disagrees with every other page of the product."""
+    from services.blueprint.component_kit import kit_vocabulary
+
+    vocabulary = kit_vocabulary(doc)
+    if not vocabulary:
+        return ""
+    return (
+        "# This product's own parts — compose from these first\n"
+        "Written once for THIS application, from the same direction and rhythm you are held\n"
+        "to, and used by every other page. They carry the product's colours, depth and\n"
+        "spacing already, so reach for one before building the same thing again: a page that\n"
+        "draws its own panel beside these is the page that does not match the rest.\n"
+        "Where none fits, write your own markup in the token classes as usual.\n"
+        f"```ts\n{vocabulary}\n```\n"
+    )
+
+
 def _kit_exports() -> str:
     lines = []
     for f in sorted(_UI_KIT.glob("*.tsx")):
@@ -652,9 +673,46 @@ What a finished page looks like:
   links), bg-accent / bg-accent-subtle (what to do now, see above), bg-inverse (the
   one leading card), ring-ring, and the success / warning / destructive / info
   families. Never a hex colour or an arbitrary palette like bg-blue-500.
+- AND THREE MORE, FOR THE QUIET PARTS A DENSE PAGE IS MOSTLY MADE OF. `text-faint`
+  is a third level under text-muted-foreground — a timestamp, a unit, a count, the
+  line a reader's eye skips. `text-brand` is the brand's hue at ink darkness, for a
+  heading or a figure that should carry the brand without becoming a button.
+  `border-hairline` is the line INSIDE a component — a table's row rules, a panel's
+  internal divider — where plain `border` stays the edge of things. Two inks and one
+  line is why a full page of real data reads flat: every quiet thing on it is the
+  same quiet, and every rule is the weight of the panel's own edge.
 - TYPE IN TWO VOICES. Page titles and card titles are `font-heading` (the design's
   display face; h1–h3 get it by default); everything else is the body face. Never
   `font-serif` or `font-mono` for a title — they are the browser's, not the design's.
+- AND SIZE IS THE DESIGN'S, BY ROLE. This application has its own type ramp, worked out
+  from its register: `text-display` (the one title that carries a page — a hero, a
+  landing, a sign-in), `text-h1` a page title, `text-h2` a section, `text-h3` a card
+  title, `text-body`, `text-caption` (helper text and secondary lines) — and then the
+  two steps BELOW it, which is where a dense screen spends most of its type:
+  `text-label` for a table header, an eyebrow, a field label or a chip (it carries the
+  design's positive tracking, so it is the one to pair with `uppercase`), and
+  `text-micro` for a timestamp, a unit, a badge or a count. Ask for the ROLE
+  and the design decides the size, the line height and the letter-spacing together —
+  an editorial product's `text-h1` is 64px where a dense console's is 31px. Reach for
+  `text-2xl`/`text-3xl` and you have overridden the design with a number you picked,
+  which is why every application's titles used to come out the same size. Tailwind's
+  own sizes are still right for everything the ramp does not name.
+- AND A CORNER IS CHOSEN TOO. `rounded-card` for a panel, `rounded-control` for a
+  button or an input, `rounded-pill` for a chip, a tag or an avatar. The design cuts
+  these differently on purpose; `rounded-lg` everywhere is the tell of a template.
+- DEPTH CARRIES THE LAYERS, AND IT IS THE DESIGN'S. Lift surfaces with the shadow scale —
+  `shadow-sm` a resting card, `shadow-md` on hover, `shadow-lg`/`shadow-xl` a dialog or a
+  raised hero — never a hand-rolled `shadow-[0_…]`. The scale is the register's (a flat
+  tool barely lifts; a layered or luxe product stacks deeper), so the same classes read
+  differently per app: use them, never override them. A card that opens lifts a step on
+  hover (`hover:shadow-md transition-shadow`).
+- MOTION IS THE DESIGN'S, AND SPARING. Transitions already carry the design's duration and
+  easing — let them (`transition`, `transition-shadow`, `transition-colors`) rather than
+  naming a long fixed duration, and never animate more than a couple of things on a screen.
+  For a surface that LEADS a page — a hero band, the first dashboard row, an empty state —
+  reach for the kit's made parts (Hero, the elevated cards, FadeIn/Stagger for a list that
+  appears) before hand-rolling flat markup: they carry the depth and the entrance the
+  design asks for. An app whose motion is `none` gets none, and you add none.
 """
 
 
@@ -685,7 +743,8 @@ view.tsx — "use client" on the first line.
   Imports that resolve in this application:
     react, next/link, next/navigation (useRouter, useSearchParams, usePathname),
     lucide-react (icons), clsx, tailwind-merge, class-variance-authority, sonner (toast),
-    the @radix-ui primitives the kit is built on, the UI kit and the library below (optional),
+    the @radix-ui primitives the kit is built on, this product's own parts under
+    "@/components/app/*" (listed below, when it has any), the UI kit and the library below (optional),
     @dnd-kit/core + @dnd-kit/sortable (drag a card across a board, reorder a list — the move
     itself still runs a workflow), motion/react (`motion.div`, `AnimatePresence`: a panel
     sliding in, a row arriving), "@/sdk/map" (MapView: places as pins, a path as a line —
@@ -769,6 +828,11 @@ def _language(doc: dict) -> str:
     return f"# Its language\n{rule}\n\n" if rule else ""
 
 
+def _kebab_role(name: str) -> str:
+    """`inkFaint` → `ink-faint`, the name the projector writes it under."""
+    return re.sub(r"(?<!^)(?=[A-Z])", "-", str(name)).lower()
+
+
 def _look(doc: dict) -> str:
     """The design system as the page author uses it: the personality, each
     colour role with the class that draws it, and the two type faces."""
@@ -779,12 +843,19 @@ def _look(doc: dict) -> str:
                "textSecondary": "text-muted-foreground", "primary": "bg-primary / text-primary",
                "accent": "bg-accent / variant=\"accent\"", "accentSubtle": "bg-accent-subtle",
                "inverse": "bg-inverse", "gradientStart": "from-gradient-start",
-               "gradientEnd": "to-gradient-end"}
+               "gradientEnd": "to-gradient-end", "inkFaint": "text-faint",
+               "inkBrand": "text-brand", "hairline": "border-hairline"}
     from services.blueprint.verification import PALETTE_ROLES
     lines = [str(design.get("visualPersonality") or "")[:600]]
     for role, job in PALETTE_ROLES.items():
         value = colors.get(role)
-        lines.append(f"- {classes[role]}{f' ({value})' if value else ''}: {job}")
+        # A ROLE WITH NO CLASS IS STILL A ROLE. This was `classes[role]`, so
+        # adding a colour to `PALETTE_ROLES` raised a KeyError out of the page
+        # writer's own prompt — the table is in `verification` and nothing tied
+        # the two together. Fall back to the kebab of the role, which is the
+        # name the projector emits it under anyway.
+        drawn = classes.get(role) or f"var(--{_kebab_role(role)})"
+        lines.append(f"- {drawn}{f' ({value})' if value else ''}: {job}")
     head = typo.get("fontFamilyHeading") or typo.get("fontFamilyDisplay") or typo.get("headingFontFamily")
     body = typo.get("fontFamilyBase") or typo.get("fontFamily") or typo.get("fontFamilyBody")
     if head or body:
@@ -795,8 +866,15 @@ def _look(doc: dict) -> str:
     if any(typo.get(k) for k in ("headingWeight", "headingColor", "titleSize")):
         weight = {"regular": "font-normal", "medium": "font-medium", "semibold": "font-semibold", "bold": "font-bold"}[look["weight"]]
         colour = {"primary": "text-primary", "accent": "text-accent"}.get(look["tone"], "text-foreground")
-        size = f"{look['titleSize']}px (text-4xl is 36px, text-3xl 30px)" if look["titleSize"] else "text-3xl or text-4xl"
-        lines.append(f"- a page title (`h1`): `font-heading {weight} {colour}`, {size} - the design says so, and the phone draws it the same")
+        # `text-h1` IS this design's title size — the ramp is projected per app
+        # (look_scale.type_scale_vars → tokens.css → the Tailwind config). Naming
+        # a px value here used to send the writer to the nearest `text-Nxl`,
+        # which overrode the ramp on every heading and made every app's titles
+        # the same size. Say the class; mention the px only so the choice reads
+        # as deliberate.
+        size = f"`text-h1` (this design: {look['titleSize']}px)" if look["titleSize"] else "`text-h1`"
+        lines.append(f"- a page title (`h1`): `font-heading {weight} {colour}` at {size}"
+                     " - the design says so, and the phone draws it the same")
     gs, ge = colors.get("gradientStart"), colors.get("gradientEnd")
     lines.append("- bg-brand-gradient" + (f" ({gs} → {ge})" if gs and ge else " (primary → accent)")
                  + ": the brand gradient — the leading card, the sign-in panel, a hero band; its text is set")
@@ -859,6 +937,7 @@ This application's entities, workflows and pages:
 {sdk_reference(doc)}
 ```
 
+{_app_kit_block(doc)}
 # Ready-made parts — there if one fits, never required
 A UI kit (shadcn, themed by the app's tokens). Use a part when it is exactly what the page needs;
 otherwise write the element yourself in Tailwind — your own button, badge, table or panel is as
@@ -1614,10 +1693,37 @@ def _static_findings(load: str, view: str, *, exact: bool = False) -> list[str]:
     # read "app \\u2014 verified listings" (2026-10-01): JSX text and attribute
     # strings are not JavaScript strings, so `\u2014` reaches the screen as six
     # characters. Write the character itself (— · ₹), or {"\u2014"} in braces.
-    if re.search(r">[^<{}]*\\u[0-9a-fA-F]{4}[^<{}]*<", view) or re.search(r'\s[a-zA-Z]+="[^"]*\\u[0-9a-fA-F]{4}', view):
+    if escaped_in_jsx_text(view):
         out.append("view.tsx: a `\\uXXXX` escape in JSX text or an attribute string is shown literally — "
                    "write the character itself.")
     return out
+
+
+#: A `{ … }` with no tag inside it — a value dropped into JSX text. One that
+#: CONTAINS markup is a component body or a conditional branch, and stripping
+#: those swallows the very text being checked.
+_JSX_EXPR = re.compile(r"\{[^{}<>]*\}")
+_JSX_TEXT_ESCAPE = re.compile(r">[^<>]*\\u[0-9a-fA-F]{4}[^<>]*<")
+_ATTR_ESCAPE = re.compile(r'\s[a-zA-Z-]+="[^"]*\\u[0-9a-fA-F]{4}')
+
+
+def escaped_in_jsx_text(code: str) -> bool:
+    """True when a `\\uXXXX` would be PRINTED rather than decoded.
+
+    This looked for `>…\\uXXXX…<` with no brace between the tags, and every real
+    case has one — the escape sits beside a value, as in `>\\u00b7 {nights}<`.
+    SnapIT's home read "app \\u2014 verified listings" (2026-10-01) and Stay's
+    lead card "Nov 1 – Nov 1 \\u00b7 0 nights" (2026-11-04) with the rule in
+    place both times. So the expressions are cut out first and the rule applied
+    to the text that is left, which is the text the reader sees. An escape
+    INSIDE an expression (`{facts.join(" \\u00b7 ")}`) is a real string: left alone.
+    """
+    bare = code
+    for _ in range(6):
+        bare, n = _JSX_EXPR.subn(" ", bare)
+        if not n:
+            break
+    return bool(_JSX_TEXT_ESCAPE.search(bare) or _ATTR_ESCAPE.search(code))
 
 
 #: An id shown to a reader: a helper that shortens one, a `#` before a
@@ -1777,6 +1883,10 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
     drawing = reference if (reference or {}).get("exact") and current is None and relayout_of is None else None
     looks = page_look.looks_for(drawing)
     looks_left = looks if critic is not None else 0
+    #: The best the reviewer has scored this page, so a look is only spent
+    #: while the page is still getting better (`page_look.worth_another_look`).
+    best_score: int | None = None
+    looks_taken = 0
     #: A page that already existed is being CHANGED: the reviewer checks the
     #: change did not break it, and sends it back only for that. Its taste
     #: notes are about the page as it was — sent back for a 7/10 the first
@@ -1895,6 +2005,7 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
                 # review as the brief. The reviewer's rank decides between
                 # the versions it saw — a rewrite is not always better.
                 looks_left -= 1
+                looks_taken += 1
                 try:
                     verdict, cost = page_look.look_at(doc, page, Path(app_root), load, view, critic,
                                                       attempt=looks - looks_left,
@@ -1911,8 +2022,20 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
                         except Exception:  # noqa: BLE001 — narration never fails a page
                             pass
                     seen = (page_look.rank(verdict), body)
+                    climbing = page_look.worth_another_look(
+                        verdict, None if best is None else best_score)
                     if best is None or seen[0] > best[0]:
                         best = seen
+                    if isinstance(verdict.get("score"), (int, float)):
+                        best_score = max(best_score or 0, int(verdict["score"]))
+                    # A LOOK IS SPENT ON A PAGE THAT IS STILL CLIMBING. The
+                    # budget used to be a flat two and the page shipped
+                    # whatever it had: fifteen of eighteen were still `revise`
+                    # when they ran out (2026-11-04). It is a ceiling now, and
+                    # a page that a rewrite failed to improve stops here
+                    # rather than spending the rest on the same reading.
+                    if not climbing:
+                        looks_left = 0
                     # A CHANGE GOES BACK FOR WHAT IT CAUSED: something proved
                     # broken, or an issue the reviewer marks as the change's.
                     must_fix = (verdict.get("verdict") != "pass" and not changing) or (
@@ -1922,6 +2045,17 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
                         # or, for a drawing reproduced, one that does not look like it.
                         must_fix = bool(verdict.get("broken")) or (
                             drawing is not None and verdict.get("verdict") != "pass")
+                    if must_fix and not looks_left:
+                        # SAID OUT LOUD. Both builds of 2026-11-04 reported no
+                        # failures while their own reviewer had rejected most
+                        # of their pages; the verdicts were in the ledger and
+                        # nothing read them back. A page that ships below the
+                        # bar says so in the log of the run that shipped it.
+                        logger.warning("[ui_engineer] %s ships at %s/10, still `revise` after "
+                                       "%d look(s): %s", page.get("id"), verdict.get("score"),
+                                       looks_taken,
+                                       "; ".join(str(i.get("problem") or "")
+                                                 for i in (verdict.get("issues") or [])[:3]))
                     if must_fix and looks_left and round_ < rounds:
                         # THE REVIEW IS A REFUSAL, NOT A WISH. Handed as the
                         # brief ("what is wanted of it now") the first trial's

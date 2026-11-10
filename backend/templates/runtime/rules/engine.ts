@@ -1093,6 +1093,24 @@ async function applyTypedRules(
   }
 }
 
+/**
+ * ON A CREATE, NOTHING CHANGED. `previous.gridCodeId != gridCodeId` asks
+ * whether a field changed; on a create there is no previous record, every
+ * `previous.x` is null, and the test held for every new case — "the grid code
+ * cannot be changed once submitted" refused the creation of every submitted
+ * case (kkb5mzo3, 2026-11-03). A field compared with its own previous value is
+ * read as unchanged on a create. Every other use of `previous` stays as it is:
+ * `previous.status = null` is how a rule recognises a create, and it holds.
+ */
+export function unchangedOnCreate(whenFeel: string, previous: Record<string, unknown> | null | undefined): string {
+  if (previous) return whenFeel;
+  return whenFeel
+    .replace(/\bprevious\.(\w+)\s*(!=|<>)\s*(\w+)\b/g, (m, a, _op, b) => (a === b ? "false" : m))
+    .replace(/\b(\w+)\s*(!=|<>)\s*previous\.(\w+)\b/g, (m, a, _op, b) => (a === b ? "false" : m))
+    .replace(/\bprevious\.(\w+)\s*=\s*(\w+)\b(?!\s*\()/g, (m, a, b) => (a === b ? "true" : m))
+    .replace(/\b(\w+)\s*=\s*previous\.(\w+)\b/g, (m, a, b) => (a === b ? "true" : m));
+}
+
 export async function evaluateRuleSet(
   modelName: string,
   event: "create" | "update" | "read",
@@ -1130,8 +1148,7 @@ export async function evaluateRuleSet(
 
   // `previous` is the record as it stood before this update — what a rule
   // about a change reads ("a done task cannot go back to todo"). On a create
-  // there is no previous record: every `previous.x` is null.
-  const before = previous ?? {};
+  // there is no previous record: every `previous.x` is null (`holds`).
   void ctx;
   // VALUES FIRST, JUDGEMENT LAST. A refusal used to be decided before a
   // decision table filled in the field it checks ("category must be one of…"
@@ -1142,7 +1159,7 @@ export async function evaluateRuleSet(
   const decided = new Map<string, boolean>();
   for (const rule of rules) {
     const config = rule.config as ConditionActionConfig;
-    const matched = holds(rule, config, working, user, before);
+    const matched = holds(rule, config, working, user, previous);
     if (matched === null) continue;
     const acts = (matched ? config.then : config.otherwise) ?? [];
     if (acts.some(isValueAction)) decided.set(String(rule.id), matched);
@@ -1156,7 +1173,7 @@ export async function evaluateRuleSet(
     const config = rule.config as ConditionActionConfig;
     // A rule that set a value keeps the answer it acted on (its own value
     // must not flip it); the others are asked about the record as it now is.
-    const matched = decided.has(String(rule.id)) ? decided.get(String(rule.id))! : holds(rule, config, working, user, before);
+    const matched = decided.has(String(rule.id)) ? decided.get(String(rule.id))! : holds(rule, config, working, user, previous);
     if (matched === null) continue;
     const acts = ((matched ? config.then : config.otherwise) ?? []).filter((a) => !isValueAction(a));
     dispatchActions(acts, working, out, true, claims, config.salience ?? 0);
@@ -1172,10 +1189,10 @@ function isValueAction(a: { type?: string } | null | undefined): boolean {
 
 /** Does the rule's condition hold — or null when it cannot be read (logged, the rule skipped). */
 function holds(rule: ProjectRule, config: ConditionActionConfig, working: Record<string, unknown>,
-               user: unknown, before: Record<string, unknown>): boolean | null {
-  const whenFeel = normalizeBlankChecks((config.whenFeel ?? "true").trim() || "true");
+               user: unknown, previous: Record<string, unknown> | null | undefined): boolean | null {
+  const whenFeel = unchangedOnCreate(normalizeBlankChecks((config.whenFeel ?? "true").trim() || "true"), previous);
   try {
-    return Boolean(evaluateExpression(whenFeel, { ...working, user, previous: before } as any));
+    return Boolean(evaluateExpression(whenFeel, { ...working, user, previous: previous ?? {} } as any));
   } catch (err) {
     // A broken condition must not silently pass — skip the rule, keep going.
     console.error(`[rules] condition of "${rule.name}" failed:`, err);
@@ -1215,13 +1232,12 @@ export async function evaluateFormRules(
     })
     .sort(byFiringOrder);
   const working: Record<string, unknown> = { ...entity };
-  const before = previous ?? {};
   // In the save's order (values, then tables, then judgement), so the form
   // shows a table's value as it is typed and says only what the save would refuse.
   const decided = new Map<string, boolean>();
   for (const rule of rules) {
     const config = rule.config as ConditionActionConfig;
-    const matched = holds(rule, config, working, user, before);
+    const matched = holds(rule, config, working, user, previous);
     if (matched === null) continue;
     const acts = (matched ? config.then : config.otherwise) ?? [];
     if (acts.some(isValueAction)) decided.set(String(rule.id), matched);
@@ -1234,7 +1250,7 @@ export async function evaluateFormRules(
   }
   for (const rule of rules) {
     const config = rule.config as ConditionActionConfig;
-    const matched = decided.has(String(rule.id)) ? decided.get(String(rule.id))! : holds(rule, config, working, user, before);
+    const matched = decided.has(String(rule.id)) ? decided.get(String(rule.id))! : holds(rule, config, working, user, previous);
     if (matched === null) continue;
     const acts = ((matched ? config.then : config.otherwise) ?? []).filter((a) => !isValueAction(a));
     dispatchActions(acts, working, out, false);

@@ -4,11 +4,12 @@ import { useSearchParams } from "next/navigation";
 import { useLogin } from "@/hooks/useLogin";
 import { BrandMark, BRAND_LOGO } from "@/components/BrandMark";
 import { SignInMethods } from "@/sdk/auth";
+import { AUTH_IDENTITY } from "@/contracts/auth-identity";
 
 /**
  * Auth page — COMPOSED PER APP.
  *
- * `__AUTH_LAYOUT__` is replaced at generation time with the layout chosen by
+ * an auth placeholder is replaced at generation time with the layout chosen by
  * the project's design DNA, so no two generated apps share a sign-in screen.
  * The brand panel is painted from the app's OWN palette (CSS gradients over
  * --primary/--accent) rather than a stock photo, which is what made every
@@ -17,14 +18,25 @@ import { SignInMethods } from "@/sdk/auth";
  * Layouts: split-editorial | centered-minimal | brand-wash | side-panel |
  *          top-anchored | split-reversed
  */
-const AUTH_LAYOUT = "__AUTH_LAYOUT__";
 const APP_NAME = "__APP_NAME__";
-const HEADLINE = "__AUTH_HEADLINE__";
-const SUBHEAD = "__AUTH_SUBHEAD__";
-// Form copy comes from the app's design DNA (per-archetype voice), so no two
-// apps greet users with the identical "Welcome back / Sign in to X".
-const FORM_TITLE = "__AUTH_FORM_TITLE__";
-const FORM_SUB = "__AUTH_FORM_SUB__";
+
+/**
+ * THE PROJECTED MODULE FIRST, THE PLACEHOLDER SECOND, A PLAIN SENTENCE LAST.
+ *
+ * `AUTH_IDENTITY` is rewritten from the Blueprint on every projection, so a
+ * design changed after the first build reaches this screen — which a
+ * an auth placeholder placeholder could not, being replaced once and then
+ * gone. The sentence beside each is what an application that states nothing
+ * keeps, and it is a real sentence rather than a placeholder, so there is
+ * nothing left that could ship unfilled (`assembly` refuses that, rightly).
+ */
+const said = (stated: string, fallback: string) => stated.trim() || fallback;
+
+const AUTH_LAYOUT = said(AUTH_IDENTITY.layout, "split-editorial");
+const HEADLINE = said(AUTH_IDENTITY.headline, `Welcome to ${APP_NAME}`);
+const SUBHEAD = said(AUTH_IDENTITY.subhead, `Sign in to continue to ${APP_NAME}.`);
+const FORM_TITLE = said(AUTH_IDENTITY.title, "Welcome back");
+const FORM_SUB = said(AUTH_IDENTITY.sub, `Sign in to ${APP_NAME}`);
 
 function LoginForm() {
   // Honour ?callbackUrl=… and fall back to "/" — a REAL route. (The hook's own
@@ -39,10 +51,10 @@ function LoginForm() {
     <form onSubmit={handleSubmit} className="w-full max-w-sm space-y-5">
       <div className="space-y-1.5">
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-          {FORM_TITLE.startsWith("__") ? "Welcome back" : FORM_TITLE}
+          {FORM_TITLE}
         </h1>
         <p className="text-sm text-muted-foreground">
-          {FORM_SUB.startsWith("__") ? `Sign in to ${APP_NAME}` : FORM_SUB}
+          {FORM_SUB}
         </p>
       </div>
       {error && <p className="text-sm text-destructive">{error}</p>}

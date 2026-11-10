@@ -1371,6 +1371,49 @@ export const FrameCode = z.object({
   code: z.string(),
 });
 
+/**
+ * ONE PART OF THIS APPLICATION'S OWN COMPONENT KIT — its page head, its stat
+ * card, its list row, its status pill, written once for this product and
+ * composed by every page.
+ *
+ * Every page used to be designed alone by a writer optimising for correctness,
+ * so consistency could only happen by luck and each page re-decided what a
+ * panel looks like. Measured against a hand-designed application (Criterion
+ * CARES, 2026-11-04): its kit is 34 exports imported by 14 of its 22 pages, and
+ * the one move that turned it from plain to designed. The pipeline had no stage
+ * that did this and no generated application had a single shared component.
+ */
+export const KitPart = z.object({
+  /** Natural key — the file's name under `src/components/app/`, e.g. `Panel.tsx`. */
+  file: z.string(),
+  /** What this part is for, in one line. */
+  purpose: z.string().default(""),
+  /** The names it exports, so a page writer can be handed the kit's vocabulary. */
+  exports: z.array(z.string()).default([]),
+  /** The whole file. */
+  code: z.string(),
+});
+
+/**
+ * The kit itself: the application's own parts, and the colours they are drawn
+ * in.
+ *
+ * `palette` is the one place those colours live. A page is held to the semantic
+ * token classes and may never name a colour; the kit MAY, because a kit is one
+ * file set that can be read, contrast-checked and rethemed at once — but only
+ * through here. The projector writes each entry as `--kit-<name>` beside the
+ * design tokens and as a `C` constant for inline styles, so a part says
+ * `bg-[var(--kit-wash)]`, never a hex of its own. This is the same bargain the
+ * drawn-page path already makes: your own values, enumerated in advance.
+ */
+export const ComponentKit = z.object({
+  /** Why the kit is shaped this way — the register and rhythm it serves. */
+  rationale: z.string().default(""),
+  /** Name → `#rrggbb`. Tints, washes and inks this product needs beyond the roles. */
+  palette: z.record(z.string(), z.string()).default({}),
+  parts: z.array(KitPart).default([]),
+});
+
 export const PageCode = z.object({
   /** Natural key — the page this code renders. */
   page: PageId,
@@ -1465,6 +1508,10 @@ export const DrawnView = z.object({
   /** A frame's reference (`1:2`, `FIGMA-002/1:2`), `shell`, or `component:<Name>`. */
   key: z.string().min(1),
   kind: z.enum(["screen", "shell", "component"]),
+  /** For a screen: drawn inside its portal's sidebar and top bar. A screen
+   *  drawn without them (onboarding, a public page) is shown as drawn, with
+   *  no shell around it (DITANS D2, 2026-11-03). */
+  framed: z.boolean().optional(),
   /** The React component's name: `TenantsEntitlementsView`. */
   name: z.string().min(1),
   /** The frame it was converted from (a screen's own; a shell's or a
@@ -2445,10 +2492,12 @@ export const RecordScopeRule = z.object({
     .default("scope"),
   /** The actor's own id, or the workspace/tenant id their session carries. */
   scope: z
-    .enum(["user", "workspace"])
+    .enum(["user", "workspace", "member"])
     .describe(
-      "What `column` is compared to: the acting user's own id, or the " +
-      "workspace/tenant id their session carries.",
+      "What `column` is compared to: the acting user's own id, the " +
+      "workspace/tenant id their session carries, or (\"member\") the " +
+      "organisations the actor is a member of, read from the membership " +
+      "record named in `members`.",
     )
     .default("user"),
   /** Roles exempt from the rule — they read unscoped, and may write the column. */
@@ -2475,6 +2524,46 @@ export const RecordScopeRule = z.object({
       "the actor's workspace — homePropertyId, organisationId, tenantId. The " +
       "session carries that column and the engine compares `column` to it. " +
       "Omit for scope \"user\", where the actor's id is the value.",
+    )
+    .optional(),
+  /**
+   * MEMBERSHIP IS A RECORD OF THE APPLICATION. DITANS keeps who belongs to
+   * which employer or agency in OrganisationMember (organisationId, email);
+   * the users row carries no organisation, so no rule could say "my
+   * organisation's rows". Its rules were all per person, and a brand-new
+   * employer's Home, Approvals and Messages listed every organisation's jobs,
+   * offers and threads (QA D-59/60/65/67/70/71, 2026-11-02). With
+   * `scope: "member"` the row's `column` must be one of the `memberColumn`
+   * values of the `members` rows that are the actor's — matched on
+   * `memberEmailColumn` (their sign-in email) or `memberUserColumn` (their id).
+   */
+  members: z
+    .string()
+    .describe(
+      "For scope \"member\": the entity recording who belongs to which " +
+      "organisation (OrganisationMember, TeamMember). The actor reaches a row " +
+      "when `column` is an organisation they have a row in.",
+    )
+    .optional(),
+  memberColumn: z
+    .string()
+    .describe(
+      "For scope \"member\": the column of the `members` entity holding the " +
+      "organisation a member belongs to (organisationId).",
+    )
+    .optional(),
+  memberEmailColumn: z
+    .string()
+    .describe(
+      "For scope \"member\": the column of the `members` entity holding the " +
+      "member's sign-in email. Give this or memberUserColumn.",
+    )
+    .optional(),
+  memberUserColumn: z
+    .string()
+    .describe(
+      "For scope \"member\": the column of the `members` entity holding the " +
+      "member's user id. Give this or memberEmailColumn.",
     )
     .optional(),
   /**
@@ -2505,13 +2594,16 @@ export const RecordScopeRule = z.object({
    */
   /** Who may READ the rows: the same people who may write them, or everyone. */
   reads: z
-    .enum(["scoped", "everyone"])
+    .enum(["scoped", "everyone", "visitors"])
     .describe(
       'Who may read the rows. "scoped": the same people who may write them (the default). ' +
       '"everyone": anyone, signed in or not, reads every row — a catalogue, a listing, a ' +
       "public profile — while `column` still decides who may change or remove it. Say " +
       '"everyone" wherever visitors browse what owners manage; without it a signed-out ' +
-      "visitor, who holds no role, reaches no row at all.",
+      "visitor, who holds no role, reaches no row at all. " +
+      '"visitors": people who are not signed in read every row (a public job board), while ' +
+      "each signed-in person still reads only what the rule gives them — an employer's " +
+      "workspace lists its own jobs, not every employer's.",
     )
     .default("scoped"),
   guestColumn: z
@@ -2572,6 +2664,21 @@ export const Security = z.object({
     .object({
       password: z.boolean().default(true),
       magicLink: z.boolean().default(false),
+      /**
+       * A NEW ACCOUNT PROVES ITS ADDRESS. DITANS made and signed in every
+       * account at once, with no code sent, and testers found an unverified
+       * example.com address let straight in (QA DIT-005/016, 2026-11-05).
+       * On: a six-digit code goes to the address at sign-up and the account
+       * reaches nothing but the code step until it is entered.
+       */
+      verifyEmail: z
+        .boolean()
+        .describe("A new account confirms its email with a six-digit code before it can use the application.")
+        .default(false),
+      verifyPath: z
+        .string()
+        .describe("The page that asks for the code, when the application draws its own (\"/signup?step=verify\"); else the platform's /verify-email.")
+        .optional(),
       sso: z
         .array(
           z.object({
@@ -2898,6 +3005,28 @@ export const DesignSystem = z.object({
   radius: z.record(z.string(), z.string()).default({}),
   borders: z.record(z.string(), z.string()).default({}),
   elevation: z.record(z.string(), z.string()).default({}),
+  /**
+   * How motion is used, as a free record the projector reads into the app's
+   * motion tokens: `level` (`none` | `subtle` | `expressive` — how much the UI
+   * moves at all), and optionally `durationFast`/`durationNormal`/`easing`.
+   * Every generated app shared one fixed, library-default motion regardless of
+   * personality; a playful consumer app and a restrained finance tool moved
+   * identically. Chosen by the design system agent from the register and the
+   * personality, projected to `--motion-*` and the `data-motion-level` the kit
+   * reads.
+   */
+  motion: z.record(z.string(), z.string()).default({}),
+  /**
+   * The design LANGUAGE this application is built in — a coherent register
+   * that bundles how it reads, not a colour. One of the director's known
+   * registers (e.g. `editorial`, `utility`, `warm`, `luxe`, `playful`,
+   * `minimal`) or a short phrase when none fits. It is chosen for the domain
+   * and audience and then expressed through the palette, type pairing,
+   * elevation, motion and density — so a fashion shop and an admin tool reach
+   * for different languages instead of the one dashboard look. Kept here so
+   * the page writer and reviewer hold the app to the register it declared.
+   */
+  register: z.string().default(""),
   navigationApproach: z.string().default(""),
   /**
    * The photographs the application uses, by the job each does: the sign-in
@@ -2962,6 +3091,32 @@ export const DesignSystem = z.object({
    * application's initial rather than an empty box.
    */
   logo: BrandLogo.optional(),
+  /**
+   * What the sign-in screen says, in this product's own voice.
+   *
+   * The sign-in page is the first screen anyone sees and it was the last one
+   * anybody wrote: every generated app greeted its users with "Welcome to
+   * {app}" beside "Welcome back / Sign in to {app}", because the only words
+   * the page could reach were built from the application's name. A table of
+   * per-archetype greetings was written to end that (`services.design_dna`)
+   * and the Blueprint path never wrote it, so the greeting stayed. It is the
+   * fastest same-generator tell there is, and the cheapest to lose.
+   *
+   * Four strings, because the page has two halves: `headline` and `subhead`
+   * carry the brand panel — what this product IS, to someone who has not
+   * signed in yet — and `title` and `sub` sit over the form. `{app}` in any
+   * of them is replaced with the application's name. Left empty, the old
+   * built-from-the-name wording stands, so nothing regresses.
+   */
+  authCopy: z
+    .object({
+      headline: z.string().default(""),
+      subhead: z.string().default(""),
+      title: z.string().default(""),
+      sub: z.string().default(""),
+    })
+    .partial()
+    .optional(),
 });
 
 // ===========================================================================
@@ -3543,6 +3698,9 @@ export const Blueprint = z.object({
   /** §34 — the whole app sketched once: per-page skeletons and the
    *  conventions every page inherits. Authored by A2UI before any page is. */
   composition: Composition.default({}),
+  /** §34 — this application's own component kit, composed by every page
+   *  (see `ComponentKit`). Written after the direction and before any page. */
+  componentKit: ComponentKit.default({}),
   /** §34 — pages written as React against the library and the typed SDK.
    *  Takes precedence over the page's `pageLayouts` tree when both exist. */
   pageCode: z.array(PageCode).default([]),

@@ -247,8 +247,13 @@ def turn(ctx: Ctx, *, choose: Choose, history: list | None = None,
     # A PLATFORM PATCH IS KEPT ONLY ON PROOF: a try after the last edit that
     # passed, and nothing that failed before still failing.
     patches = file_edit.load_patches(ctx.out)
-    pending = [p["id"] for p in patches if p.get("id") not in started and p.get("status") == "pending"]
-    older = [p["id"] for p in patches if p.get("id") in started and p.get("status") == "pending"]
+    # AND ONLY THIS TURN'S PATCHES ARE ITS OWN TO SETTLE. The repairs run side
+    # by side on one application: a patch another repair's turn is still
+    # proving would be kept here on a try that was not its own, or have its
+    # engine edit taken back from under it.
+    mine = [p for p in patches if not file_edit.another_turns(p, file_edit.current_turn())]
+    pending = [p["id"] for p in mine if p.get("id") not in started and p.get("status") == "pending"]
+    older = [p["id"] for p in mine if p.get("id") in started and p.get("status") == "pending"]
     if pending or older:
         verdict = patch_verdict(observations)
         said: list[str] = []

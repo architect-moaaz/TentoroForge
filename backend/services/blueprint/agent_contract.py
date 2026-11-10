@@ -55,8 +55,8 @@ WRITABLE_SECTIONS: frozenset[str] = frozenset(
     | {"data.entities", "data.relationships", "data.constraints",
        "navigation", "designSystem", "security",
        "runtime", "database", "deployment", "product", "codeMap",
-       "pageLayouts", "pageCode", "nativeCode", "composition", "completeness", "drawnViews",
-       "drawnPairs",
+       "pageLayouts", "pageCode", "nativeCode", "composition", "componentKit",
+       "completeness", "drawnViews", "drawnPairs",
        "domainReference", "mobile"}
 )
 
@@ -317,6 +317,17 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
         {"pageCode", "drawnViews", "drawnPairs"},
         tools={"blueprint:read", "page_contract:read", "design_system:read",
                "sdk:read", "tsc:check"},
+    ),
+    # §34 — this application's OWN parts, written once from the direction and
+    # composed by every page: the page head, the panel, the row, the status
+    # pill, and the words and numbers it formats. Beside `ui_engineer` rather
+    # than inside it, because this is one call for the whole app where a page is
+    # one call each, and because the kit is the one file set allowed to name the
+    # product's own colours — a page never is.
+    "kit_engineer": _cap(
+        "kit_engineer",
+        {"componentKit"},
+        tools={"blueprint:read", "design_system:read", "sdk:read", "tsc:check"},
     ),
     # One native screen per page, written as React Native against the native SDK
     # and kit, beside `ui_engineer`'s web page. It writes `nativeCode` and
@@ -1858,6 +1869,23 @@ def ownership_findings(security: dict, doc: dict) -> list[str]:
                 f"record it references, name that reference as `column` and the referenced entity as "
                 f"`through`")
             continue
+        # A MEMBER SCOPE READS A MEMBERSHIP RECORD: it, the column naming the
+        # organisation and the one naming the person must all exist, or every
+        # row compares to nothing.
+        if str(r.get("scope") or "user") == "member" and r.get("kind", "scope") != "attribution":
+            members = find(str(r.get("members") or ""))
+            if members is None:
+                problems.append(f"{named}.{column}: a member scope names `members`, the record of who belongs to "
+                                f"which organisation — {r.get('members')!r} is not one the data model has")
+            else:
+                have = _field_names(members)
+                if str(r.get("memberColumn") or "") not in have:
+                    problems.append(f"{named}.{column}: `memberColumn` must be the field of {members.get('name')} "
+                                    f"naming the organisation, not {r.get('memberColumn')!r}")
+                who = [str(r.get(k) or "") for k in ("memberEmailColumn", "memberUserColumn") if r.get(k)]
+                if not who or any(w not in have for w in who):
+                    problems.append(f"{named}.{column}: name the field of {members.get('name')} holding the "
+                                    f"member's sign-in email (`memberEmailColumn`) or user id (`memberUserColumn`)")
         guest = str(r.get("guestColumn") or "")
         if guest and guest not in _field_names(entity):
             problems.append(f"ownership rule for {entity.get('name')}: guestColumn {guest!r} is not a field of "
