@@ -35,7 +35,9 @@
  *
  * Pure: no I/O, no imports beyond the FEEL evaluator.
  */
-import { evaluateExpression } from "../feel-lite";
+import * as feel from "../feel-lite";
+
+const { evaluateExpression } = feel;
 
 export type HitPolicy = "U" | "F" | "P" | "A" | "C" | "R";
 export type Aggregation = "SUM" | "COUNT" | "MIN" | "MAX";
@@ -275,6 +277,31 @@ export function matchConstraint(c: Constraint, value: unknown, ctx: Record<strin
   }
 }
 
+/**
+ * Is this output cell a WORD, not a formula? A word is one or more names
+ * joined only by `+`/`-` (`Severe`, `GeneralManager+AMIR`, `High-Risk`),
+ * none of which names anything on the record. Read as a formula each name is
+ * an unknown variable and the cell comes out null: CARES (kkb5mzo3,
+ * 2026-11-10) wrote null over a case's severityTier from a cell spelled
+ * `Severe`, and the insert failed. A cell that names a field the record has,
+ * or uses a number, function, comparison or `if`, is still a formula.
+ */
+function isWordCell(cell: string, ctx: Record<string, unknown>): boolean {
+  // A stand-in for the evaluator (a test's) may carry no parser: one name alone, then.
+  const f = feel as { parse?: (t: unknown) => unknown; tokenize?: (s: string) => unknown };
+  if (!f.parse || !f.tokenize) return IDENT.test(cell) && !Object.prototype.hasOwnProperty.call(ctx, cell);
+  let ast: any;
+  try { ast = f.parse(f.tokenize(cell)); } catch { return false; }
+  const names: string[] = [];
+  const wordy = (n: any): boolean => {
+    if (!n) return false;
+    if (n.type === "Identifier") { names.push(String(n.name)); return true; }
+    if (n.type === "BinaryExpression" && (n.operator === "+" || n.operator === "-")) return wordy(n.left) && wordy(n.right);
+    return false;
+  };
+  return wordy(ast) && names.every((name) => !Object.prototype.hasOwnProperty.call(ctx, name));
+}
+
 /** An output cell's value: text, number, yes/no, null — or a FEEL expression over the data. */
 export function outputValue(cell: unknown, ctx: Record<string, unknown> = {}): unknown {
   const c = String(cell ?? "").trim();
@@ -285,7 +312,7 @@ export function outputValue(cell: unknown, ctx: Record<string, unknown> = {}): u
   if (c === "true") return true;
   if (c === "false") return false;
   if (c === "null") return null;
-  if (IDENT.test(c) && !(c in ctx)) return c; // a bare word is text: approved
+  if (isWordCell(c, ctx)) return c; // a bare word is text: approved, GeneralManager+AMIR
   try {
     const v = evaluateExpression(c, ctx as any);
     return v === undefined ? c : v;
