@@ -15,7 +15,7 @@ import { ArrowRight, CheckCircle2, Copy, CreditCard, ExternalLink, Info, Message
 import { Button } from "@/components/ui/button";
 import { GatewayMark } from "./GatewayMark";
 import { PaymentChoiceDialog, paymentsApi, paymentsKey, type PaymentsView } from "./PaymentChoiceDialog";
-import { STATUS_WORDS, routingLines } from "@/lib/payment-gateways";
+import { STATUS_WORDS, paymentsSettingsHref, routingLines } from "@/lib/payment-gateways";
 import { askSmith } from "@/lib/ask-smith";
 
 function copy(text: string, what: string) {
@@ -92,7 +92,7 @@ export function PaymentsPanel({ projectId, orgId }: { projectId: string; orgId: 
                   {ready.missing.map((m) => `${m.label} ${m.removed ? "was removed" : m.state === "attention" ? "has keys its gateway refused" : m.state === "unchecked" ? "has live keys that were never confirmed" : "has no live keys"}`).join("; ")}.
                   {" "}Previews and the test version take test payments. In production, payers are told payments are not switched on and nobody is charged.
                 </p>
-                <a className="mt-2 inline-flex items-center gap-1 font-medium underline" href={`/org/${orgId}/settings/payments`}>Add live keys in Settings → Payments</a>
+                <a className="mt-2 inline-flex items-center gap-1 font-medium underline" href={paymentsSettingsHref(orgId)}>Add live keys in Settings → Integrations → Payments</a>
               </div>
             </section>
           )}
@@ -201,7 +201,7 @@ export function PaymentsPanel({ projectId, orgId }: { projectId: string; orgId: 
         </>
       )}
 
-      <p className="text-xs text-muted-foreground">Gateways and their keys are your organisation's: <a className="text-primary hover:underline" href={`/org/${orgId}/settings/payments`}>Settings → Payments</a>.</p>
+      <p className="text-xs text-muted-foreground">Gateways and their keys are your organisation's: <a className="text-primary hover:underline" href={paymentsSettingsHref(orgId)}>Settings → Integrations → Payments</a>.</p>
 
       {editing && (
         <PaymentChoiceDialog projectId={projectId} mode="edit" onClose={() => setEditing(false)}

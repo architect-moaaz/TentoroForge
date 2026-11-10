@@ -110,7 +110,7 @@ export async function gatewayFor(opts: { currency?: string; country?: string | n
   }
   const secrets = await secretsFor(gw.provider);
   if (!secrets) {
-    if (liveSide()) throw new PaymentsNotReady(`${gw.label}'s live keys are not set — add them in Forge, Settings → Payments, and publish again`);
+    if (liveSide()) throw new PaymentsNotReady(`${gw.label}'s live keys are not set — add them in Forge, Settings → Integrations → Payments, and publish again`);
     return { adapter: standInAdapter, secrets: { secret: "" }, live: false, declared: gw.provider, gateway: gw,
       notice: `Payments go through ${gw.label}, but its keys are not set where this copy runs — a stand-in took the payment and nobody was charged.` };
   }

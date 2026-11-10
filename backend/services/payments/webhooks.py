@@ -61,7 +61,7 @@ def load_doc(output_dir: str | Path) -> dict | None:
 
 
 def governs(doc: dict | None) -> bool:
-    """Do this app's payments come from Settings → Payments? (An app built
+    """Do this app's payments come from Settings → Integrations → Payments? (An app built
     before that keeps the Stripe keys it had, untouched.)"""
     return bool(doc) and AP.section(doc).get("decidedBy") is not None
 

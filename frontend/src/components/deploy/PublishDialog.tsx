@@ -381,7 +381,7 @@ export function PublishDialog({
               {payReady.missing.length
                 ? payReady.missing.map((m) => `${m.label} ${m.removed ? "was removed" : m.state === "attention" ? "has keys its gateway refused" : m.state === "unchecked" ? "has live keys that were never confirmed" : "has no live keys"}`).join("; ") + "."
                 : "No payment gateway is chosen for it."}
-              {" "}Live, its payers are told payments are not switched on, and nobody is charged. Add live keys in Settings → Payments, then publish.
+              {" "}Live, its payers are told payments are not switched on, and nobody is charged. Add live keys in Settings → Integrations → Payments, then publish.
             </p>
           </div>
         )}

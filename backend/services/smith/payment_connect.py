@@ -119,7 +119,7 @@ def summarise(out: dict[str, Any]) -> str:
     missing = ", ".join(out.get("missing") or [])
     return (f"Payments now go through {out.get('name')}. "
             + ("It is live. " if out.get("connected") else
-               (f"Connect {out.get('name')} under Settings → Payments (test and live keys, checked when saved) to make it live; "
+               (f"Connect {out.get('name')} under Settings → Integrations → Payments (test and live keys, checked when saved) to make it live; "
                 if out.get("provider") in ("razorpay", "paypal") else f"Set {missing} under Settings → Integrations to make it live; ")
                + "until then a stand-in takes payments and says so. ")
             + f"Register this address at {out.get('name')} for its events: `/api/webhooks/{slug}` (its signed calls settle the ledger).")

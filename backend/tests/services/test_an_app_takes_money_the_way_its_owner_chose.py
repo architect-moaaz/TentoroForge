@@ -447,7 +447,7 @@ def test_smith_sets_payments_up_from_words_through_the_orgs_gateways(tmp_path, m
     assert off["applied"] and BlueprintService.load(output_dir=tmp_path).doc["payments"]["needed"] is False
     monkeypatch.setattr(S, "_org_gateways", lambda _o: [])
     none = S.run(str(tmp_path), change="take payments")
-    assert not none["applied"] and "Settings → Payments" in none["reason"] and "sk_" not in json.dumps(none)
+    assert not none["applied"] and "Settings → Integrations → Payments" in none["reason"] and "sk_" not in json.dumps(none)
 
 
 # --------------------------------------------------------------------------- #
@@ -678,6 +678,12 @@ def test_a_member_without_a_plan_is_shown_the_way_to_one():
     shell = Path(__file__).resolve().parents[2] / "templates" / "app-foundation" / "src" / "app" / "(dashboard)"
     layout, prompt = (shell / "layout.tsx").read_text(), (shell / "PlanPrompt.tsx").read_text()
     assert "subscriptionsOffered()" in layout and "plansOnSale &&" in layout and "<PlanPrompt />" in layout
-    assert "/api/billing/status" in prompt and "!j.access" in prompt, "shown once the app says the person holds no plan"
+    assert "/api/billing/status" in prompt and "status.held" in prompt, "shown once the app says the person holds no plan"
     assert "(billing|pay)" in prompt, "never on the plan page or a payment page"
+    # A holder is marked as a member in the account menu (and the persona frame), with the plan in words.
+    menu, persona = (shell / "AccountMenu.tsx").read_text(), (shell / "PersonaChrome.tsx").read_text()
+    assert "usePlanStatus(sellsPlans)" in menu and "<MemberCrown" in menu and "planLine(plan)" in menu
+    assert "usePlanStatus(plans)" in persona and "<MemberCrown" in persona
+    assert "plans={plansOnSale}" in layout and layout.index("const plansOnSale") < layout.index("const cluster = ")
+    assert "let asked: Promise<PlanStatus>" in prompt, "the frame asks once per page load, however many parts show the plan"
     assert "src/app/(dashboard)/PlanPrompt.tsx" in FRAME_FILES, "an app's refreshed layout brings the file it imports"

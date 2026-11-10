@@ -3047,7 +3047,7 @@ def apply_agent_result(
             refusals.append(exc)
 
     # A PAYMENT SERVICE IS THE OWNER'S CHOICE, NEVER AN AGENT'S. In an app whose
-    # payments are Settings → Payments' (`payments.decidedBy` set), the
+    # payments are Settings → Integrations → Payments' (`payments.decidedBy` set), the
     # platform declares one integration per gateway the owner chose; an agent
     # asked to "take payments" declared Razorpay itself, and the model showed
     # "Razorpay · ready to connect" for an account nobody chose.

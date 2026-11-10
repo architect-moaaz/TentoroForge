@@ -183,7 +183,7 @@ async def write_env_local_from_platform(
     from services import app_settings
     switches = app_settings.env_for(output_dir)
     desired.update(switches)
-    # THE APP'S PAYMENT GATEWAYS, as its owner chose them (Settings → Payments):
+    # THE APP'S PAYMENT GATEWAYS, as its owner chose them (Settings → Integrations → Payments):
     # their TEST keys only — a preview never carries a live key — and every
     # payment variable the app should not carry removed (None).
     payment_names: set[str] = set()
@@ -193,7 +193,7 @@ async def write_env_local_from_platform(
     except Exception as exc:  # noqa: BLE001 — the rest of the environment is still written
         log.warning("[env_writer] payment keys unavailable: %s", exc)
         pay = None
-        # FAILING CLOSED for an app whose payments are Settings → Payments':
+        # FAILING CLOSED for an app whose payments are Settings → Integrations → Payments':
         # every payment variable is removed rather than left as it was (an old
         # live key from Integrations would have stayed in the preview).
         try:

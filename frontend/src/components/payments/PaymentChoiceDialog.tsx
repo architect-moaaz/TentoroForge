@@ -19,7 +19,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { GatewayMark } from "./GatewayMark";
-import { STATUS_WORDS, type Gateway, coverageWords, routingLines, suggested } from "@/lib/payment-gateways";
+import { STATUS_WORDS, type Gateway, coverageWords, paymentsSettingsHref, routingLines, suggested } from "@/lib/payment-gateways";
 
 export type Model = "one_time" | "subscription";
 
@@ -222,7 +222,7 @@ export function PaymentChoiceDialog({ projectId, appName, mode, onClose, onDone 
   };
   const setPlan = (i: number, patch: Partial<Plan>) => setPlans((cur) => (cur ?? []).map((pl, j) => (j === i ? { ...pl, ...patch } : pl)));
 
-  const settingsHref = data ? `/org/${data.orgId}/settings/payments` : "#";
+  const settingsHref = data ? paymentsSettingsHref(data.orgId) : "#";
   const title = mode === "build" ? `How should ${appName || "this app"} take payments?` : "Payments";
 
   return (
@@ -288,8 +288,8 @@ export function PaymentChoiceDialog({ projectId, appName, mode, onClose, onDone 
                 <div className="rounded-lg border border-dashed p-4 text-sm" data-no-gateways="">
                   <p className="font-medium">No payment gateway is connected yet.</p>
                   <p className="mt-1 text-muted-foreground">
-                    {data?.canManageGateways ? "Connect Razorpay, Stripe or PayPal in Settings → Payments (it opens in a new tab; come back and it appears here)."
-                                             : "Ask an admin of your organisation to connect one in Settings → Payments."}{" "}
+                    {data?.canManageGateways ? "Connect Razorpay, Stripe or PayPal in Settings → Integrations → Payments (it opens in a new tab; come back and it appears here)."
+                                             : "Ask an admin of your organisation to connect one in Settings → Integrations → Payments."}{" "}
                     Or build now: the app uses a test checkout that charges nobody until a gateway is chosen.
                   </p>
                 </div>

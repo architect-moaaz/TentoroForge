@@ -478,8 +478,8 @@ function TopNav({ items, appName, id, right }: { items: Sub[]; appName: string; 
  * This wrapper is kept only for the (unlikely) call sites that still
  * type against the old signature; it just forwards to PersonaChrome.
  */
-function PersonaPillsNav({ personas, appName, id, userInitials }: {
-  personas: NavPersona[]; appName: string; id: ShellIdentity; userInitials?: string;
+function PersonaPillsNav({ personas, appName, id, userInitials, plans = false }: {
+  personas: NavPersona[]; appName: string; id: ShellIdentity; userInitials?: string; plans?: boolean;
 }) {
   const bg = id.bg ?? "#ffffff";
   const text = id.text ?? "#1a1f28";
@@ -490,6 +490,7 @@ function PersonaPillsNav({ personas, appName, id, userInitials }: {
       appName={appName}
       chrome={{ bg, text, accent }}
       userInitials={userInitials}
+      plans={plans}
     />
   );
 }
@@ -1017,13 +1018,14 @@ export default async function DashboardLayout({
       <LanguageSwitch />
     </>
   );
+  const plansOnSale = await sellsPlans();
   const cluster = session?.user ? (
     <>
       {!compact && extras}
       <NotificationBell />
       <AccountMenu name={session.user.name} email={session.user.email}
                    role={(session.user as { role?: string }).role}
-                   compact={compact} extras={compact ? extras : undefined} />
+                   compact={compact} extras={compact ? extras : undefined} plans={plansOnSale} />
     </>
   ) : null;
   const clusterInRail = ["wide-rail", "icon-rail", "right-rail", "floating-rail"].includes(chromeName);
@@ -1034,7 +1036,6 @@ export default async function DashboardLayout({
   // Every frame below renders `body` rather than `children` directly, so
   // the crumb lands above page content in all four shell shapes without
   // four copies of the same JSX.
-  const plansOnSale = await sellsPlans();
   const mobileTabs = (await readMobileTabs()).filter(
     (t) => !t.roles?.length || t.roles.includes(String((session.user as { role?: string } | undefined)?.role ?? "")));
   const body = (
@@ -1137,6 +1138,7 @@ export default async function DashboardLayout({
                 appName={appName}
                 id={identity}
                 userInitials={userInitials}
+                plans={plansOnSale}
               />
               <main data-shell-main className="min-h-0 flex-1 overflow-y-auto">
                 <div className={frameClass(identity.density)}>{body}</div>

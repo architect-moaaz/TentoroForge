@@ -1,8 +1,10 @@
-"""Settings → Payments: an organisation's payment gateways.
+"""Settings → Integrations → Payments: an organisation's payment gateways.
 
   GET    /api/payment-gateways/providers           what can be connected (no auth needed beyond sign-in)
-  GET    /api/orgs/{org}/payment-gateways          every member: to choose one for an app (no keys)
+  GET    /api/orgs/{org}/payment-gateways          every member: to choose one for an app (no keys);
+                                                   an admin also hears of older Stripe keys (`olderStripe`)
   POST   /api/orgs/{org}/payment-gateways          admin: add one (its keys are checked first)
+  POST   /api/orgs/{org}/payment-gateways/from-older-keys   admin: the older Stripe keys become a gateway
   PATCH  /api/orgs/{org}/payment-gateways/{id}     admin: name, coverage, currencies, keys, default
   POST   /api/orgs/{org}/payment-gateways/{id}/check   admin: ask the gateway again
   DELETE /api/orgs/{org}/payment-gateways/{id}     admin: remove (the apps that chose it are named)
@@ -68,7 +70,46 @@ async def list_gateways(org_id: uuid.UUID, user: PlatformUser = Depends(get_curr
     membership = await _member(org_id, user, db, admin=False)
     admin = _is_admin(membership)
     rows = await G.listing(db, org_id)
-    return {"gateways": [G.view(r, admin=admin) for r in rows], "canManage": admin}
+    out: dict[str, Any] = {"gateways": [G.view(r, admin=admin) for r in rows], "canManage": admin}
+    if admin:
+        out["olderStripe"] = await _older_stripe(db, org_id)
+    return out
+
+
+async def _older_stripe(db: AsyncSession, org_id: uuid.UUID) -> dict[str, Any] | None:
+    """The Stripe keys typed under Integrations before gateways, if any are
+    set: which, and the apps from before gateways they still serve."""
+    from services.payments import older_keys as O
+    values = await O.stored(db, org_id)
+    if not values:
+        return None
+    return {"keys": sorted(values), "apps": O.apps_relying(await _project_dirs(db, org_id))}
+
+
+@router.post("/api/orgs/{org_id}/payment-gateways/from-older-keys", status_code=201)
+async def gateway_from_older_keys(org_id: uuid.UUID, user: PlatformUser = Depends(get_current_user),
+                                  db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+    """ONE STRIPE, NOT TWO. The Stripe keys typed under Integrations before
+    gateways become a Stripe gateway, checked with Stripe like any other. The
+    older keys stay where they are: apps built before gateways read them, and
+    clearing them is the admin's call once none does."""
+    from services.payments import older_keys as O
+    await _member(org_id, user, db, admin=True)
+    values = await O.stored(db, org_id)
+    keys = O.sorted_keys(values)
+    if not any(k.get("secret_key") for k in keys.values()):
+        raise HTTPException(status_code=400, detail="There is no older Stripe secret key to move. Add a Stripe gateway instead.")
+    body: dict[str, Any] = {"provider": "stripe", "label": "Stripe",
+                            **{mode: k for mode, k in keys.items() if k.get("secret_key")}}
+    try:
+        row = await G.create(db, org_id, user.id, body)
+    except G.GatewayError as exc:
+        await db.rollback()
+        raise _fail(exc) from exc
+    await db.commit()
+    await db.refresh(row)
+    log.info("[payments] org %s moved its older Stripe keys into gateway %s", org_id, row.id)
+    return {**G.view(row, admin=True), "apps": O.apps_relying(await _project_dirs(db, org_id))}
 
 
 @router.post("/api/orgs/{org_id}/payment-gateways", status_code=201)
@@ -168,7 +209,7 @@ async def _refresh_apps(db: AsyncSession, org_id: uuid.UUID, gateway_id: str) ->
     return done
 
 
-async def _apps_using(db: AsyncSession, org_id: uuid.UUID, gateway_id: str) -> list[dict[str, str]]:
+async def _project_dirs(db: AsyncSession, org_id: uuid.UUID) -> list[tuple[str, str, str]]:
     from models.project import Project
     from routers.blueprint_generate import _output_dir
     rows = (await db.execute(select(Project).where(Project.org_id == org_id))).scalars().all()
@@ -178,7 +219,11 @@ async def _apps_using(db: AsyncSession, org_id: uuid.UUID, gateway_id: str) -> l
             dirs.append((str(p.id), p.name or "", str(_output_dir(p))))
         except Exception:  # noqa: BLE001 — a project with no folder chose nothing
             continue
-    return G.apps_using(dirs, gateway_id)
+    return dirs
+
+
+async def _apps_using(db: AsyncSession, org_id: uuid.UUID, gateway_id: str) -> list[dict[str, str]]:
+    return G.apps_using(await _project_dirs(db, org_id), gateway_id)
 
 
 # --------------------------------------------------------------------------- #
@@ -275,7 +320,7 @@ async def choose_project_payments(project_id: uuid.UUID, body: ChoiceBody, user:
             raise HTTPException(status_code=400, detail="That gateway is not one of your organisation's. Reload and choose again.") from None
         if G.status_of(row) == "attention":
             raise HTTPException(status_code=400, detail=f"{row.label}'s keys were refused by {row.provider.title()}. "
-                                                        "Fix them in Settings → Payments, then choose it.")
+                                                        "Fix them in Settings → Integrations → Payments, then choose it.")
         rows.append(row)
     def locked() -> None:
         with business_rules.write_lock(out, timeout=business_rules.TAB_LOCK_WAIT):

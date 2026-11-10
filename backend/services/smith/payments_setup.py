@@ -1,5 +1,5 @@
 """Smith sets up how an application takes money — through the organisation's
-own gateways (Settings → Payments), never a key typed into the chat.
+own gateways (Settings → Integrations → Payments), never a key typed into the chat.
 
 "Take payments through Razorpay", "add a Pro plan at 499 rupees a month",
 "let people subscribe yearly", "members must subscribe to use it", "stop
@@ -89,7 +89,7 @@ def run(output_dir: str, *, change: str = "", reasoning: Any = None) -> dict[str
         names = ", ".join(r.label for r in refused)
         return {"applied": False, "edited_paths": [], "options": [AP.PAYMENT_CHIP],
                 "reason": f"{names}'s keys were refused by the gateway, so it cannot take payments yet. An admin fixes them in "
-                          "Settings → Payments; then ask me again, or choose another gateway."}
+                          "Settings → Integrations → Payments; then ask me again, or choose another gateway."}
     chosen = named or [r for r in usable if str(r.id) in {str(g.get("gateway")) for g in current.get("gateways") or []}]
     if not chosen and len(usable) == 1:
         chosen = usable
@@ -114,7 +114,7 @@ def run(output_dir: str, *, change: str = "", reasoning: Any = None) -> dict[str
     if not rows:
         return {"applied": False, "edited_paths": [], "options": [AP.PAYMENT_CHIP],
                 "reason": ("Your organisation has no payment gateway connected yet. An admin connects Razorpay, Stripe or PayPal "
-                           "once in Settings → Payments; then I build it in. Until then the app can take test payments that "
+                           "once in Settings → Integrations → Payments; then I build it in. Until then the app can take test payments that "
                            "charge nobody.")}
     if not chosen:
         names = ", ".join(r.label for r in rows)

@@ -181,7 +181,7 @@ async def _collect_integrations(
 async def _payments_for(project: Any, side: str, db: AsyncSession) -> tuple[dict[str, str], tuple[str, ...]]:
     """The app's payment gateways for this side: their webhooks registered (or
     reused), and their keys by name — or nothing, for an app whose payments
-    predate Settings → Payments. Never fails a publish."""
+    predate Settings → Integrations → Payments. Never fails a publish."""
     try:
         from services.deploy import environments as envs
         from services.deploy.sign_in_address import main_domain, production_alias
@@ -198,7 +198,7 @@ async def _payments_for(project: Any, side: str, db: AsyncSession) -> tuple[dict
         return {k: v for k, v in env.items() if v}, tuple(k for k, v in env.items() if not v)
     except Exception:  # noqa: BLE001 — the app publishes; its payments say what is missing
         log.exception("[publish] payment gateways for %s could not be prepared", project.id)
-        # Failing closed for an app whose payments are Settings → Payments': no
+        # Failing closed for an app whose payments are Settings → Integrations → Payments': no
         # payment variable carried over from before (the live app then refuses
         # payments and says so, rather than taking them on stale keys).
         try:

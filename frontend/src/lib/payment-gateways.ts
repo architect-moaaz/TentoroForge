@@ -1,5 +1,5 @@
 /**
- * Payment gateways — what Settings → Payments and the build dialog share:
+ * Payment gateways — what Settings → Integrations → Payments and the build dialog share:
  * the shapes the API answers with, the calls, and the one rule that decides
  * which gateway a payer is sent to (the same rule the generated app runs:
  * `backend/templates/runtime/payments/routing.ts`).
@@ -76,11 +76,27 @@ export interface GatewayBody {
   clear?: Mode[];
 }
 
+/** The Stripe keys typed under Integrations before gateways (admins only), and the older apps they still serve. */
+export interface OlderStripe {
+  keys: string[];
+  apps: { id: string; name: string }[];
+}
+
+export interface GatewayList {
+  gateways: Gateway[];
+  canManage: boolean;
+  olderStripe?: OlderStripe | null;
+}
+
+/** Where the gateways are managed: one place, with every other integration. */
+export const paymentsSettingsHref = (orgId: string) => `/org/${orgId}/settings/integrations#payments`;
+
 export const gatewaysKey = (orgId: string) => ["paymentGateways", orgId] as const;
 
 export const gatewayApi = {
   providers: () => api.get<ProviderInfo[]>("/api/payment-gateways/providers"),
-  list: (orgId: string) => api.get<{ gateways: Gateway[]; canManage: boolean }>(`/api/orgs/${orgId}/payment-gateways`),
+  list: (orgId: string) => api.get<GatewayList>(`/api/orgs/${orgId}/payment-gateways`),
+  fromOlderKeys: (orgId: string) => api.post<Gateway & { apps: { id: string; name: string }[] }>(`/api/orgs/${orgId}/payment-gateways/from-older-keys`),
   create: (orgId: string, body: GatewayBody) => api.post<Gateway>(`/api/orgs/${orgId}/payment-gateways`, body),
   edit: (orgId: string, id: string, body: GatewayBody) => api.patch<Gateway>(`/api/orgs/${orgId}/payment-gateways/${id}`, body),
   check: (orgId: string, id: string) => api.post<Gateway>(`/api/orgs/${orgId}/payment-gateways/${id}/check`),

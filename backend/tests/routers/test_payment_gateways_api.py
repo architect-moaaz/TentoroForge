@@ -1,4 +1,4 @@
-"""Settings → Payments: an organisation's gateways, through the API.
+"""Settings → Integrations → Payments: an organisation's gateways, through the API.
 
 Every answer the gateway can give a key (accepted, refused, unreachable) and
 every kind of person (admin, member, another organisation, signed out) is
@@ -373,3 +373,88 @@ async def test_a_gateway_whose_keys_were_refused_is_not_chosen_until_fixed(peopl
     assert r.status_code == 400 and "Fix them in Settings" in r.json()["detail"]
     r = await admin.put(f"/api/projects/{pid}/payments", json={"needed": False, "gateways": []})
     assert r.status_code == 200 and r.json()["payments"]["needed"] is False
+
+
+# --------------------------------------------------------------------------- #
+# Stripe keys typed under Integrations before gateways
+# --------------------------------------------------------------------------- #
+
+async def _put_older(client, org_id: str, **values: str) -> None:
+    for key, value in values.items():
+        r = await client.put(f"/api/orgs/{org_id}/integrations", json={"provider": "stripe", "key": key, "value": value})
+        assert r.status_code == 200, r.text
+
+
+def test_older_keys_go_to_the_slot_their_prefix_names():
+    from services.payments.older_keys import sorted_keys
+    test_sk, live_sk = "sk_test_" "51Older", "sk_live_" "51Older"
+    # A test key typed into the live name (the old form's commonest slip) is a test key.
+    out = sorted_keys({"STRIPE_SECRET_KEY": test_sk, "STRIPE_PUBLISHABLE_KEY": "pk_test_" "51Pub"})
+    assert out == {"test": {"secret_key": test_sk, "publishable_key": "pk_test_" "51Pub"}, "live": {}}
+    out = sorted_keys({"STRIPE_SECRET_KEY": live_sk, "STRIPE_TEST_SECRET_KEY": test_sk})
+    assert out["live"] == {"secret_key": live_sk} and out["test"] == {"secret_key": test_sk}
+    # Two keys claiming one slot: the one typed into that slot wins.
+    out = sorted_keys({"STRIPE_SECRET_KEY": "sk_test_" "51Stray", "STRIPE_TEST_SECRET_KEY": test_sk})
+    assert out["test"]["secret_key"] == test_sk
+    assert sorted_keys({}) == {"test": {}, "live": {}}
+
+
+async def test_older_stripe_keys_are_shown_to_admins_with_the_apps_they_serve(people, org_id, gateway):
+    r = await people["admin"].get(_base(org_id))
+    assert r.json().get("olderStripe") is None, "nothing set: nothing said"
+    await _put_older(people["admin"], org_id, STRIPE_TEST_SECRET_KEY=STRIPE_TEST["secret_key"])
+    r = await people["admin"].get(_base(org_id))
+    older = r.json()["olderStripe"]
+    assert older["keys"] == ["STRIPE_TEST_SECRET_KEY"] and older["apps"] == []
+    _no_secret_in(r.text, STRIPE_TEST["secret_key"])
+    r = await people["member"].get(_base(org_id))
+    assert r.status_code == 200 and "olderStripe" not in r.json(), "a member never hears of keys"
+
+
+async def test_older_stripe_keys_become_a_checked_gateway_and_stay_for_older_apps(people, org_id, gateway):
+    await _put_older(people["admin"], org_id, STRIPE_SECRET_KEY=STRIPE_TEST["secret_key"],
+                     STRIPE_PUBLISHABLE_KEY=STRIPE_TEST["publishable_key"])
+    gateway.answer["/v1/account"] = (200, {"id": "acct_1Old", "country": "US", "default_currency": "usd",
+                                           "settings": {"dashboard": {"display_name": "Older Shop"}}})
+    r = await people["member"].post(f"{_base(org_id)}/from-older-keys")
+    assert r.status_code == 403, "only an admin moves keys"
+    r = await people["admin"].post(f"{_base(org_id)}/from-older-keys")
+    assert r.status_code == 201, r.text
+    body = r.json()
+    _no_secret_in(r.text, STRIPE_TEST["secret_key"])
+    assert body["provider"] == "stripe" and body["status"] == "test_only" and body["isDefault"] is True
+    assert body["modes"]["test"]["set"] and not body["modes"]["live"]["set"], "a test key typed as live is filed as test"
+    assert any("/v1/account" in str(q.url) for q in gateway.requests), "checked with Stripe like any gateway"
+    # The older values are not taken away: apps built before gateways read them.
+    entries = (await people["admin"].get(f"/api/orgs/{org_id}/integrations")).json()
+    assert {e["key"] for e in entries if e["provider"] == "stripe" and e["is_set"]} == {"STRIPE_SECRET_KEY", "STRIPE_PUBLISHABLE_KEY"}
+
+
+async def test_older_keys_stripe_refuses_make_no_gateway(people, org_id, gateway):
+    await _put_older(people["admin"], org_id, STRIPE_TEST_SECRET_KEY=STRIPE_TEST["secret_key"])
+    gateway.answer["/v1/account"] = (401, {"error": {"message": "Invalid API Key provided: sk_test_****"}})
+    gateway.answer["/v1/balance"] = (401, {"error": {"message": "Invalid API Key provided: sk_test_****"}})
+    r = await people["admin"].post(f"{_base(org_id)}/from-older-keys")
+    assert r.status_code == 400 and "Invalid API Key" in r.json()["detail"]
+    assert (await people["admin"].get(_base(org_id))).json()["gateways"] == []
+
+
+async def test_without_an_older_secret_key_there_is_nothing_to_move(people, org_id, gateway):
+    await _put_older(people["admin"], org_id, STRIPE_TEST_PUBLISHABLE_KEY=STRIPE_TEST["publishable_key"])
+    r = await people["admin"].post(f"{_base(org_id)}/from-older-keys")
+    assert r.status_code == 400 and "no older Stripe secret key" in r.json()["detail"]
+
+
+def test_an_app_from_before_gateways_that_takes_stripe_relies_on_the_older_keys(tmp_path):
+    from services.payments.older_keys import apps_relying
+    def app(name: str, doc: dict) -> tuple[str, str, str]:
+        d = tmp_path / name / ".forge" / "blueprint"
+        d.mkdir(parents=True)
+        (d / "current.json").write_text(json.dumps(doc))
+        return (name, name.title(), str(tmp_path / name))
+    stripe = {"id": "INT-1", "provider": "stripe", "serves": "take_payment", "status": "ACTIVE"}
+    older = app("older", {"integrations": [stripe]})
+    chose = app("chose", {"integrations": [stripe], "payments": {"needed": True, "decidedBy": "person", "gateways": []}})
+    retired = app("retired", {"integrations": [{**stripe, "status": "DEPRECATED"}]})
+    plain = app("plain", {"integrations": []})
+    assert apps_relying([older, chose, retired, plain, ("gone", "Gone", str(tmp_path / "nope"))]) == [{"id": "older", "name": "Older"}]

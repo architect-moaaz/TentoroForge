@@ -441,7 +441,7 @@ VERB_HELP: dict[str, str] = {
     ),
     "set_up_payments": (
         "How the application takes money, through the organisation's own payment "
-        "gateways (Settings → Payments): \"take payments through Razorpay\", \"add "
+        "gateways (Settings → Integrations → Payments): \"take payments through Razorpay\", \"add "
         "a Pro plan at 499 rupees a month\", \"members must subscribe to use it\", "
         "\"stop taking payments\". One-time payments, subscriptions with their "
         "plans, or both; payers are routed to the right gateway by currency. Never "

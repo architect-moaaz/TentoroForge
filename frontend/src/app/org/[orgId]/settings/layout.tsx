@@ -12,7 +12,7 @@
 import { use } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, Building2, CreditCard, KeyRound, Palette, Server } from "lucide-react";
+import { BarChart3, Building2, KeyRound, Palette, Server } from "lucide-react";
 import { useIsOrgAdmin } from "@/lib/org-admin";
 import { useOrgFeatures, type FeatureKey } from "@/lib/features";
 import { LockBadge, LockedPanel, explainLock } from "@/components/features/Locked";
@@ -27,7 +27,6 @@ interface Tab {
 const TABS: Tab[] = [
   { href: "",              label: "General",      icon: Building2 },
   { href: "/brand",        label: "Brand",        icon: Palette,  feature: "brand" },
-  { href: "/payments",     label: "Payments",     icon: CreditCard },
   { href: "/integrations", label: "Integrations", icon: KeyRound, feature: "integrations" },
   { href: "/mcp-servers",  label: "MCP Servers",  icon: Server,   feature: "mcp_servers" },
   // Usage & Cost is admin-only — filtered out of the bar for members

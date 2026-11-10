@@ -40,9 +40,9 @@ TEST_TWINS = {
 }
 #: Keys that reach real people outside the organisation and have no test twin:
 #: never on the test side. Razorpay's and PayPal's keys set under Integrations
-#: (an app from before Settings → Payments) are one set for both sides, and
+#: (an app from before Settings → Integrations → Payments) are one set for both sides, and
 #: may be live: the test side takes payments through the stand-in instead.
-#: (An app whose payments are Settings → Payments' gets its TEST keys after
+#: (An app whose payments are Settings → Integrations → Payments' gets its TEST keys after
 #: these rules, from `services.payments`.)
 TEST_NEVER = ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_FROM_NUMBER",
               "RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET", "RAZORPAY_WEBHOOK_SECRET",
