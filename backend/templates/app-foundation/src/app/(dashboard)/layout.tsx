@@ -655,11 +655,16 @@ async function readNavPersonas(): Promise<NavPersona[]> {
 }
 
 // A mobile-first application's bottom tabs (shell.json `mobile.tabs`), or none.
-/** Does the app sell plans? The platform's payment files say; every app the
- *  frame is refreshed in carries them (`install_runtime`), as `auth.ts` does. */
+/** Does the app sell plans? Its payments settings say (`@/lib/payments-config`,
+ *  which every app the frame is refreshed in carries — `install_runtime`).
+ *  Read as data: importing the billing library for this also opened the
+ *  database, and when that import failed the frame said the app sold nothing,
+ *  so a member's plan went unshown on some loads (Zenith Yoga, 2026-11-11). */
 async function sellsPlans(): Promise<boolean> {
   try {
-    return (await import("@/lib/payments/billing")).subscriptionsOffered();
+    const { PAYMENTS } = await import("@/lib/payments-config");
+    const plans = (PAYMENTS?.plans ?? []).filter((p) => p && p.id && Object.keys(p.prices ?? {}).length);
+    return Boolean(PAYMENTS?.needed) && (PAYMENTS?.models ?? []).includes("subscription") && plans.length > 0;
   } catch {
     return false;
   }

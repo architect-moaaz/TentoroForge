@@ -677,7 +677,7 @@ def test_a_member_without_a_plan_is_shown_the_way_to_one():
     from services.smith.sync_app import FRAME_FILES
     shell = Path(__file__).resolve().parents[2] / "templates" / "app-foundation" / "src" / "app" / "(dashboard)"
     layout, prompt = (shell / "layout.tsx").read_text(), (shell / "PlanPrompt.tsx").read_text()
-    assert "subscriptionsOffered()" in layout and "plansOnSale &&" in layout and "<PlanPrompt />" in layout
+    assert "@/lib/payments-config" in layout and "plansOnSale &&" in layout and "<PlanPrompt />" in layout
     assert "/api/billing/status" in prompt and "status.held" in prompt, "shown once the app says the person holds no plan"
     assert "(billing|pay)" in prompt, "never on the plan page or a payment page"
     # A holder is marked as a member in the account menu (and the persona frame), with the plan in words.
@@ -687,3 +687,22 @@ def test_a_member_without_a_plan_is_shown_the_way_to_one():
     assert "plans={plansOnSale}" in layout and layout.index("const plansOnSale") < layout.index("const cluster = ")
     assert "let asked: Promise<PlanStatus>" in prompt, "the frame asks once per page load, however many parts show the plan"
     assert "src/app/(dashboard)/PlanPrompt.tsx" in FRAME_FILES, "an app's refreshed layout brings the file it imports"
+
+
+def test_a_new_app_has_its_gateways_keys_before_its_checks_run():
+    """Zenith Yoga, 2026-11-11: a freshly built app's preview had no gateway
+    keys (the settings were written only at the next Smith turn), so it took
+    payments through the stand-in. The build now writes them first."""
+    src = (Path(__file__).resolve().parents[2] / "routers" / "blueprint_generate.py").read_text()
+    hook = src[src.index("def _after_turn(result: Any) -> None:"):src.index("async def turn() -> None:")]
+    assert "write_env_local_from_platform" in hook
+    assert hook.index("write_env_local_from_platform") < hook.index("_start_checks(")
+
+
+def test_the_root_sends_a_signed_in_person_to_their_roles_page():
+    """A new visitor's first sight of Zenith Yoga was the "not allowed" page:
+    "/" sent everyone to the navigation's first page, which their role could
+    not open. It sends a signed-in person to their role's landing page."""
+    page = (Path(__file__).resolve().parents[2] / "templates" / "standalone-app" / "src" / "app" / "[[...slug]]" / "page.tsx").read_text()
+    assert 'import { landingFor } from "@/lib/landing";' in page and "await auth()" in page
+    assert "redirect(own && own !== \"/\" ? own : entryRoute)" in page

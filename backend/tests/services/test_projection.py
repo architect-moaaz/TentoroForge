@@ -507,7 +507,7 @@ def test_a_role_restricted_page_names_who_may_open_it(tmp_path):
     assert '{ route: new RegExp("^/income-auditor-queue$"), roles: ["Income Auditor"] }' in text
     assert '{ route: new RegExp("^/users/[^/]+$"), roles: ["Admin"] }' in text
     assert "/refund-cases" not in text.split("ROLE_ROUTES")[1].split("];")[0]
-    assert 'NextResponse.redirect(new URL("/403", req.url))' in text
+    assert 'forbidden.pathname = "/403"' in text and "NextResponse.redirect(forbidden)" in text
     assert "req.nextauth.token" in text
 
 

@@ -85,7 +85,7 @@ export function AccountMenu({ name, email, role, compact = false, extras, plans:
             <span className={"max-w-[12ch] truncate" + (member ? " font-semibold bg-gradient-to-r from-amber-600 to-amber-500 bg-clip-text text-transparent dark:from-amber-300 dark:to-amber-400" : "")}>
               {who || "Account"}</span>
             {member && plan?.plan && (
-              <span data-member-plan="" className="max-w-[14ch] truncate rounded-full bg-amber-100 px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-amber-800 dark:bg-amber-900/50 dark:text-amber-200">
+              <span data-member-plan="" className="max-w-[17ch] truncate rounded-full bg-amber-100 px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-amber-800 dark:bg-amber-900/50 dark:text-amber-200">
                 {plan.status === "trialing" ? `${plan.plan.name} trial` : plan.plan.name}</span>
             )}
           </span>
@@ -97,11 +97,11 @@ export function AccountMenu({ name, email, role, compact = false, extras, plans:
             <p className="truncate text-sm font-medium text-foreground">{who || "Signed in"}</p>
             {role && <p className="mt-0.5 text-xs text-muted-foreground">{role}</p>}
             {plan?.plan && (
-              <p data-account-plan="" className={"mt-1.5 inline-flex max-w-full items-center gap-1 truncate rounded-md px-1.5 py-0.5 text-xs font-medium "
+              <p data-account-plan="" className={"mt-1.5 flex max-w-full items-start gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium leading-snug "
                 + (plan.status === "past_due" ? "bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200"
                   : member ? "bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-300/60 dark:bg-amber-950/40 dark:text-amber-200"
                   : "bg-muted text-muted-foreground")}>
-                {member && <Crown size={11} aria-hidden />}{planLine(plan)}
+                {member && <Crown size={11} aria-hidden className="mt-0.5 shrink-0" />}<span>{planLine(plan)}</span>
               </p>
             )}
           </div>

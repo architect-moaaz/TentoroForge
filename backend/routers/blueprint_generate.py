@@ -2037,9 +2037,25 @@ async def smith_chat(
         checks = result.get("checks") if isinstance(result, dict) else None
         if not isinstance(checks, dict) or not checks.get("pending"):
             return
-        _start_checks(loop, str(project_id), checks["output_dir"], checks["app_root"],
-                      memory_lock=memory_lock, app_name=getattr(project, "name", "") or "",
-                      actor=_actor_of(user, project, ceiling))
+
+        async def settings_then_checks() -> None:
+            # THE ORGANISATION'S SETTINGS REACH THE NEW APP FIRST: its payment
+            # gateways' test keys, its integrations, its MCP servers. They were
+            # written only at the start of a later Smith turn, so a freshly
+            # built app's preview had no gateway keys and took payments through
+            # the stand-in (Zenith Yoga, 2026-11-11) — and its checks ran on it.
+            try:
+                from database import async_session
+                from services.env_writer import write_env_local_from_platform
+                async with async_session() as sess:
+                    await write_env_local_from_platform(Path(checks["output_dir"]), project.org_id, sess)
+            except Exception:  # noqa: BLE001 — the next turn writes them; the checks still run
+                logger.warning("[smith-chat] the new app's settings were not written for %s", project_id,
+                               exc_info=True)
+            _start_checks(loop, str(project_id), checks["output_dir"], checks["app_root"],
+                          memory_lock=memory_lock, app_name=getattr(project, "name", "") or "",
+                          actor=_actor_of(user, project, ceiling))
+        asyncio.ensure_future(settings_then_checks())
 
     async def turn() -> None:
 
