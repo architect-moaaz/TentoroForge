@@ -145,12 +145,47 @@ async def list_business_rules(project_id: uuid.UUID, user: PlatformUser = Depend
     out = _dir(project)
     if not rules.has_definition(out):
         return {"mode": "legacy", "rules": [], "catalogue": None, "building": False, "version": 0}
+    # A READ WRITES NOTHING (PR #29 review): rules the tab saved to the old
+    # table are counted here and brought in by the person ("Bring them in"),
+    # or by the next change made in the tab.
+    try:
+        listed = await asyncio.to_thread(rules.read, out)
+    except Exception as exc:  # noqa: BLE001
+        raise _fail(exc) from exc
+    listed["olderRules"] = await _old_rows_waiting(project, db)
+    return listed
+
+
+async def _old_rows_waiting(project: Any, db: AsyncSession) -> int:
+    from sqlalchemy import func
+    return int((await db.execute(select(func.count()).select_from(ProjectRule).where(
+        ProjectRule.project_id == project.id,
+        ProjectRule.rule_type.in_(("condition_action", "decision_table"))))).scalar() or 0)
+
+
+async def _bring_in_older(project: Any, db: AsyncSession) -> None:
+    """Before a change in the tab, the old table's rules join the definition,
+    so the change is made to the whole set. Never fails the change."""
+    out = _dir(project)
+    if not rules.has_definition(out):
+        return
     try:
         await _adopt_old_rows(project, out, db)
-    except Exception:  # noqa: BLE001 — the list is still read
-        logger.exception("[business-rules] adopting old rows failed for %s", project_id)
+    except Exception:  # noqa: BLE001 — the change is still made
+        logger.exception("[business-rules] bringing in old rows failed for %s", project.id)
+        await db.rollback()
+
+
+@router.post("/api/projects/{project_id}/business-rules/bring-in-older-rules")
+async def bring_in_older_rules(project_id: uuid.UUID, user: PlatformUser = Depends(get_current_user),
+                               db: AsyncSession = Depends(get_db)):
+    """The person's "Bring them in": rules saved to the old table join the definition."""
+    project = await get_project_with_auth(project_id, user, db)
+    out = _dir(project)
+    if not rules.has_definition(out):
+        raise HTTPException(status_code=409, detail="This app has no definition to bring the rules into yet.")
     try:
-        return await asyncio.to_thread(rules.read, out)
+        return {"adopted": await _adopt_old_rows(project, out, db)}
     except Exception as exc:  # noqa: BLE001
         raise _fail(exc) from exc
 
@@ -161,6 +196,7 @@ async def use_rules_in_workflows(project_id: uuid.UUID, user: PlatformUser = Dep
     """The person's "Use the rules": workflow checks that say exactly what a
     rule says are handed to the rule, with a change record. Never on a read."""
     project = await get_project_with_auth(project_id, user, db)
+    await _bring_in_older(project, db)
     try:
         return {"linked": await asyncio.to_thread(rules.link_copies, _dir(project))}
     except Exception as exc:  # noqa: BLE001
@@ -172,6 +208,7 @@ async def create_business_rule(project_id: uuid.UUID, req: RulePayload,
                                user: PlatformUser = Depends(get_current_user),
                                db: AsyncSession = Depends(get_db)):
     project = await get_project_with_auth(project_id, user, db)
+    await _bring_in_older(project, db)
     try:
         return await asyncio.to_thread(rules.create, _dir(project), req.body(), actor=user.name or "")
     except Exception as exc:  # noqa: BLE001
@@ -196,6 +233,7 @@ async def update_business_rule(project_id: uuid.UUID, rule_id: str, req: EditPay
                                user: PlatformUser = Depends(get_current_user),
                                db: AsyncSession = Depends(get_db)):
     project = await get_project_with_auth(project_id, user, db)
+    await _bring_in_older(project, db)
     body = req.body()
     expected = body.pop("revision", None)
     try:
@@ -210,6 +248,7 @@ async def toggle_business_rule(project_id: uuid.UUID, rule_id: str, req: Enabled
                                user: PlatformUser = Depends(get_current_user),
                                db: AsyncSession = Depends(get_db)):
     project = await get_project_with_auth(project_id, user, db)
+    await _bring_in_older(project, db)
     try:
         return await asyncio.to_thread(rules.set_enabled, _dir(project), rule_id, req.enabled,
                                        expected=req.revision, actor=user.name or "")
@@ -223,6 +262,7 @@ async def delete_business_rule(project_id: uuid.UUID, rule_id: str,
                                user: PlatformUser = Depends(get_current_user),
                                db: AsyncSession = Depends(get_db)):
     project = await get_project_with_auth(project_id, user, db)
+    await _bring_in_older(project, db)
     try:
         return await asyncio.to_thread(rules.remove, _dir(project), rule_id,
                                        expected=revision, actor=user.name or "")
@@ -252,6 +292,7 @@ async def attach_business_rule(project_id: uuid.UUID, rule_id: str, req: AttachP
                                db: AsyncSession = Depends(get_db)):
     """Run the rule as a step of a workflow, after a step of it."""
     project = await get_project_with_auth(project_id, user, db)
+    await _bring_in_older(project, db)
     try:
         return await asyncio.to_thread(rules.attach, _dir(project), rule_id, workflow=req.workflow, path=req.path,
                                        after=req.after, on_refusal=req.on_refusal, actor=user.name or "")
@@ -264,6 +305,7 @@ async def detach_business_rule(project_id: uuid.UUID, rule_id: str, workflow_id:
                                user: PlatformUser = Depends(get_current_user),
                                db: AsyncSession = Depends(get_db)):
     project = await get_project_with_auth(project_id, user, db)
+    await _bring_in_older(project, db)
     try:
         return await asyncio.to_thread(rules.detach, _dir(project), rule_id, workflow=workflow_id,
                                        actor=user.name or "")
@@ -281,6 +323,7 @@ async def follow_business_rule(project_id: uuid.UUID, rule_id: str, workflow_id:
                                db: AsyncSession = Depends(get_db)):
     """Take a workflow's own check out, so the rule decides there."""
     project = await get_project_with_auth(project_id, user, db)
+    await _bring_in_older(project, db)
     try:
         return await asyncio.to_thread(rules.follow_rule, _dir(project), rule_id, workflow=workflow_id,
                                        step=req.step, actor=user.name or "")

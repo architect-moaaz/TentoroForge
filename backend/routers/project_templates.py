@@ -440,6 +440,14 @@ async def cancel_request(template_id: str, request: Request, user: PlatformUser 
         await db.rollback()
         raise _fail(exc)
     await db.commit()
+    # A REQUEST TAKEN BACK IS DECIDED TOO, for the admins' test copies: they
+    # were made to review it, and nothing else would ever remove them (PR #29
+    # review). Only copies marked `review_copy` for this template go.
+    try:
+        await _remove_test_copies(db, template_id)
+    except Exception:  # noqa: BLE001 — the request is taken back; a copy left is only clutter
+        logger.exception("[templates] removing the test copies of %s failed", template_id)
+        await db.rollback()
     return await _card(db, meta, row, who)
 
 

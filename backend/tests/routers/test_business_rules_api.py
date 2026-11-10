@@ -100,13 +100,36 @@ async def test_rules_saved_to_the_old_table_move_into_the_definition(auth_client
                    "otherwise": []},
         "is_active": True})
     assert res.status_code in (200, 201), res.text
+    current = p["out"] / ".forge" / "blueprint" / "current.json"
+    before = current.read_text()
+    # A read writes nothing (PR #29 review): the old rule is counted, not moved.
+    listed = (await auth_client.get(f"/api/projects/{p['id']}/business-rules")).json()
+    assert listed["olderRules"] == 1 and current.read_text() == before
+    assert not [v for v in listed["rules"] if v["rule"]["name"] == "Old tab rule"]
+    res = await auth_client.post(f"/api/projects/{p['id']}/business-rules/bring-in-older-rules")
+    assert res.status_code == 200 and res.json()["adopted"] == 1, res.text
     listed = (await auth_client.get(f"/api/projects/{p['id']}/business-rules")).json()
     adopted = [v for v in listed["rules"] if v["rule"]["name"] == "Old tab rule"]
     assert len(adopted) == 1 and adopted[0]["origin"] == "editor" and adopted[0]["entityName"] == "Role"
+    assert listed["olderRules"] == 0
     left = (await auth_client.get(f"/api/projects/{p['id']}/rules")).json()
     assert all(r["name"] != "Old tab rule" for r in left), "moved, not copied"
     again = (await auth_client.get(f"/api/projects/{p['id']}/business-rules")).json()
     assert len([v for v in again["rules"] if v["rule"]["name"] == "Old tab rule"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_change_in_the_tab_brings_the_older_rules_in_first(auth_client, org_id):
+    p = await _project(auth_client, org_id)
+    await auth_client.post(f"/api/projects/{p['id']}/rules", json={
+        "name": "Old tab rule", "rule_type": "condition_action", "model_name": "roles",
+        "config": {"source": "manual", "whenFeel": "openingsCount > 50", "scope": "entity", "salience": 0,
+                   "then": [{"id": "a", "type": "show_error", "message": "Too many openings."}], "otherwise": []},
+        "is_active": True})
+    res = await auth_client.post(f"/api/projects/{p['id']}/business-rules", json=RULE)
+    assert res.status_code == 201, res.text
+    listed = (await auth_client.get(f"/api/projects/{p['id']}/business-rules")).json()
+    assert listed["olderRules"] == 0 and [v for v in listed["rules"] if v["rule"]["name"] == "Old tab rule"]
 
 
 @pytest.mark.asyncio
@@ -185,3 +208,37 @@ async def test_use_the_rules_waits_for_a_build(auth_client, org_id, monkeypatch)
     monkeypatch.setattr(rules, "busy", lambda out: "building")
     res = await auth_client.post(f"/api/projects/{p['id']}/business-rules/use-rules-in-workflows")
     assert res.status_code == 423
+
+
+def _steps(out: Path, wid: str) -> list[str]:
+    doc = json.loads((out / ".forge" / "blueprint" / "current.json").read_text())
+    return [s["key"] for s in next(w for w in doc["workflows"] if w["id"] == wid)["steps"]]
+
+
+@pytest.mark.asyncio
+@needs_lab
+async def test_switching_a_rule_off_or_removing_it_keeps_the_workflows_own_check(auth_client, org_id):
+    """PR #29 review: switching a rule off, or removing it, also took out the
+    workflow step that repeated it. Then nothing checked what the workflow had
+    checked, and nobody was asked. The step is the check left: it stays."""
+    p = await _project(auth_client, org_id)
+    _with_a_copy(p["out"])
+    base = f"/api/projects/{p['id']}/business-rules"
+    res = await auth_client.put(f"{base}/RULE-900", json={"enabled": False})
+    assert res.status_code == 200, res.text
+    assert _steps(p["out"], "FLOW-900") == ["check_openings", "no_openings", "add_role"], "switched off: the check stays"
+    res = await auth_client.delete(f"{base}/RULE-900")
+    assert res.status_code == 200, res.text
+    assert "FLOW-900" not in res.json()["workflows"]
+    assert _steps(p["out"], "FLOW-900") == ["check_openings", "no_openings", "add_role"], "removed: the check stays"
+
+
+@pytest.mark.asyncio
+@needs_lab
+async def test_an_edit_that_keeps_the_rule_on_still_hands_its_copy_to_the_rule(auth_client, org_id):
+    p = await _project(auth_client, org_id)
+    _with_a_copy(p["out"])
+    res = await auth_client.put(f"/api/projects/{p['id']}/business-rules/RULE-900",
+                                json={"message": "Every role needs one opening or more."})
+    assert res.status_code == 200, res.text
+    assert _steps(p["out"], "FLOW-900") == ["add_role"], "the edited rule, still on, is the workflow's check now"

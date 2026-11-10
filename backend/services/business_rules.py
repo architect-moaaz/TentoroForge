@@ -68,6 +68,10 @@ ACTION_TYPES = (
 DATA_ACTIONS = frozenset({"show_error", "set_field", "set_default", "clear_field",
                           "set_required", "trigger_workflow", "send_notification"})
 _RETIRED = ("DEPRECATED", "SUPERSEDED", "REJECTED")
+#: How long the tab gives the rule lab, reading or writing. A write holds the
+#: rules lock and every other tab write waits at most `TAB_LOCK_WAIT` behind
+#: it: the build's 90 seconds held them all up on a large app (PR #29 review).
+TAB_LAB_TIMEOUT = 20
 _ACTION_KEYS = ("type", "field", "valueMode", "value", "message", "visible", "required",
                 "readonly", "options", "workflow")
 #: Words of the condition language that are not field names.
@@ -335,7 +339,7 @@ def read(output_dir: str | Path) -> dict:
     from services import rule_links
     # The tab opens without waiting long for the engine: what it cannot answer
     # in 20 s is shown as not compared, and not asked again for a while.
-    judged = rule_links.review_all(doc, timeout=20) if rule_links.has_candidates(doc) else []
+    judged = rule_links.review_all(doc, timeout=TAB_LAB_TIMEOUT) if rule_links.has_candidates(doc) else []
     copies = rule_links.stale(doc, judged)
     rules = [view(r, doc, copies) for r in _live(doc.get("businessRules"))]
     names = {str(r.get("id")): r.get("name") for r in _live(doc.get("businessRules"))}
@@ -1288,13 +1292,20 @@ def _find(doc: dict, rule_id: str) -> dict:
 
 
 def _fold_own_copies(svc: Any, rule_id: str) -> list[str]:
-    """Before a rule changes, is switched off or is removed: a workflow step
-    that says exactly what the rule says now is the rule's copy — it goes, so
-    the workflow follows the rule from now on (otherwise the old copy would
-    go on stopping saves the rule no longer stops). The workflows changed."""
+    """Before a rule is edited and stays on: a workflow step that says exactly
+    what the rule says now is the rule's copy — it goes, so the workflow
+    follows the rule from now on (otherwise the old copy would go on stopping
+    saves the edited rule no longer stops). The workflows changed.
+
+    NEVER WHEN THE RULE IS SWITCHED OFF OR REMOVED. Then the copy is the only
+    check left: taking it too left nothing checking what the workflow had
+    checked, unasked (PR #29 review). It stays, and the tab shows it as the
+    workflow's own check. A comparison the lab cannot finish in
+    `TAB_LAB_TIMEOUT` folds nothing."""
     from services import rule_links
     try:
-        done = rule_links.fold_copies(svc.doc, rule_ids={str(rule_id)})
+        judged = rule_links.review_all(svc.doc, {str(rule_id)}, timeout=TAB_LAB_TIMEOUT)
+        done = rule_links.fold_copies(svc.doc, rule_ids={str(rule_id)}, judged=judged)
     except Exception:  # noqa: BLE001 — the rule still changes; the copy stays as it was
         logger.exception("[rules] could not hand %s's workflow copies to the rule", rule_id)
         return []
@@ -1315,13 +1326,13 @@ def link_copies(output_dir: str | Path) -> list[dict]:
     svc = BlueprintService.load(output_dir=str(output_dir))
     if not rule_links.has_candidates(svc.doc):
         return []
-    if not any(c.get("same") is True for c in rule_links.review_all(svc.doc)):
+    if not any(c.get("same") is True for c in rule_links.review_all(svc.doc, timeout=TAB_LAB_TIMEOUT)):
         return []
     with write_lock(output_dir, timeout=TAB_LOCK_WAIT):
         _refuse_if_building(output_dir)
         svc = BlueprintService.load(output_dir=str(output_dir))
         before = svc.snapshot()
-        done = rule_links.fold_copies(svc.doc)
+        done = rule_links.fold_copies(svc.doc, judged=rule_links.review_all(svc.doc, timeout=TAB_LAB_TIMEOUT))
         if not done:
             return []
         svc.validate()
@@ -1348,7 +1359,7 @@ def follow_rule(output_dir: str | Path, rule_id: str, *, workflow: str, step: st
         _refuse_if_building(output_dir)
         svc = BlueprintService.load(output_dir=str(output_dir))
         rule = _find(svc.doc, rule_id)
-        mine = rule_links.stale(svc.doc, rule_links.review_all(svc.doc))
+        mine = rule_links.stale(svc.doc, rule_links.review_all(svc.doc, timeout=TAB_LAB_TIMEOUT))
         cand = next((c for c in mine if c["rule"] == str(rule_id)
                      and c["workflow"] == str(workflow) and c["step"] == str(step)), None)
         flow = next((w for w in _live(svc.doc.get("workflows")) if str(w.get("id")) == str(workflow)), None)
@@ -1431,7 +1442,8 @@ def update(output_dir: str | Path, rule_id: str, payload: dict, *, expected: str
             return {"rule": view(current, svc.doc), "version": int(svc.doc.get("version") or 1),
                     "files": [], "unchanged": True}
         before = svc.snapshot()
-        folded = _fold_own_copies(svc, rule_id)
+        stays_on = rule.get("enabled", True) is not False and str(rule.get("status") or "").upper() not in _RETIRED
+        folded = _fold_own_copies(svc, rule_id) if stays_on else []
         rows = svc.doc.get("businessRules") or []
         for i, r in enumerate(rows):
             if isinstance(r, dict) and str(r.get("id")) == str(rule_id):
@@ -1474,7 +1486,7 @@ def remove(output_dir: str | Path, rule_id: str, *, expected: str | None, actor:
             raise RuleError("This rule was changed since you opened it. Reload, then remove it again.",
                             status=409)
         before = svc.snapshot()
-        folded = _fold_own_copies(svc, rule_id)
+        folded: list[str] = []            # a removed rule's copies are the checks left (`_fold_own_copies`)
         for r in svc.doc.get("businessRules") or []:
             if isinstance(r, dict) and str(r.get("id")) == str(rule_id):
                 r["status"] = "DEPRECATED"

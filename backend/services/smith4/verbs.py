@@ -263,10 +263,13 @@ def link_rule(ctx: Ctx, u: dict) -> Outcome:
         return Outcome(status="needs_user", said=f"“{name}” is a written note the app does not check, so it "
                        "cannot be used in a workflow yet. Ask me to make it a real rule first.")
     here = [x for x in L.links(doc, rule) if x["workflow"] == str(flow.get("id"))]
-    copies = [c for c in L.stale(doc, L.review_all(doc))
+    copies = [c for c in L.stale(doc, L.review_all(doc, timeout=rules_svc.TAB_LAB_TIMEOUT))
               if c["rule"] == str(rule["id"]) and c["workflow"] == str(flow.get("id"))]
     try:
-        if copies and not _REPLACE_OLD_CHECK.search(_s(u, "change")):
+        # THE PERSON'S OWN WORDS, THIS TURN. The planner's `change` slot is
+        # the model's reading of them: a check it took to mean "replace" would
+        # have taken out a stricter check nobody asked to lose (PR #29 review).
+        if copies and not _REPLACE_OLD_CHECK.search(ctx.message or ""):
             # Never taken out unasked: the old check may be the stricter one
             # (PR #29 review: an "amount < 10000" limit went, said only after).
             c = copies[0]

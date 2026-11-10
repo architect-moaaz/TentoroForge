@@ -106,6 +106,14 @@ export function RulesStudio({ projectId, initial }: { projectId: string; initial
     onError: (e) => { toast.error(problemsOf(e)[0]); refresh(); },
   });
   const repeats = data.repeats ?? [];
+  // Rules this tab saved to the old table: opening the tab moves nothing
+  // (a read writes nothing); the person brings them in, or the next change does.
+  const older = data.olderRules ?? 0;
+  const bringIn = useMutation({
+    mutationFn: () => api.post<{ adopted: number }>(`/api/projects/${projectId}/business-rules/bring-in-older-rules`, {}),
+    onSuccess: (r) => { toast.success(`${r.adopted} rule${r.adopted === 1 ? "" : "s"} brought in.`); refresh(); },
+    onError: (e) => { toast.error(problemsOf(e)[0]); refresh(); },
+  });
 
   const toggle = useMutation({
     mutationFn: (v: StudioView) =>
@@ -200,6 +208,21 @@ export function RulesStudio({ projectId, initial }: { projectId: string; initial
           </div>
         </div>
       </div>
+
+      {older > 0 && (
+        <div className="flex items-start gap-2 border-b border-amber-200 bg-amber-50 px-6 py-2.5 text-xs text-amber-950 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100" data-testid="rules-older-note">
+          <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span className="flex-1">
+            {older} rule{older === 1 ? " was" : "s were"} saved here before your app kept its rules in one place, and {older === 1 ? "isn't" : "aren't"} listed yet.
+            {" "}Bring {older === 1 ? "it" : "them"} in to see and change {older === 1 ? "it" : "them"} with the rest (your next change here does it too).
+          </span>
+          <Button size="sm" className="h-7 text-xs" disabled={building || bringIn.isPending} onClick={() => bringIn.mutate()}
+                  data-testid="bring-in-older-rules">
+            {bringIn.isPending ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : null}
+            Bring {older === 1 ? "it" : "them"} in
+          </Button>
+        </div>
+      )}
 
       {!linkedNote && repeats.length > 0 && (
         <div className="flex items-start gap-2 border-b border-sky-200 bg-sky-50 px-6 py-2.5 text-xs text-sky-950 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-100" data-testid="rules-repeats-note">

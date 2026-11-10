@@ -746,3 +746,24 @@ async def test_tentoros_admins_judge_the_gallery_and_do_not_rate_it(auth_client,
     assert (await admin.get(f"/api/project-templates/{tpl['id']}")).json()["can_rate"] is False
     r = await admin.put(f"/api/project-templates/{tpl['id']}/reviews/mine", json={"rating": 5})
     assert r.status_code == 403 and "do not rate" in r.text
+
+
+@pytest.mark.asyncio
+async def test_a_request_taken_back_removes_the_admins_test_copies_only(auth_client, org_id, super_admin_client):
+    """PR #29 review: test copies were removed only when a request was decided;
+    a builder who took it back left them for good."""
+    _src, tpl = await _ready_template(auth_client, org_id)
+    await auth_client.post(f"/api/project-templates/{tpl['id']}/submit", json={})
+    admin_org = await _org(super_admin_client, "tentoro")
+    r = await super_admin_client.post(f"/api/orgs/{admin_org}/projects/from-project-template",
+                                      json={"template_id": tpl["id"], "name": "Review copy"})
+    assert r.status_code == 201, r.text
+    listed = (await super_admin_client.get(f"/api/orgs/{admin_org}/projects")).json()
+    listed = listed.get("items", listed) if isinstance(listed, dict) else listed
+    (review_copy,) = [p for p in listed if p["name"] == "Review copy"]
+    ours = (await auth_client.post(f"/api/orgs/{org_id}/projects/from-project-template",
+                                   json={"template_id": tpl["id"], "name": "Ours"})).json()
+    r = await auth_client.post(f"/api/project-templates/{tpl['id']}/cancel-request")
+    assert r.status_code == 200, r.text
+    assert (await super_admin_client.get(f"/api/projects/{review_copy['id']}")).status_code == 404
+    assert (await auth_client.get(f"/api/projects/{ours['id']}")).status_code == 200
