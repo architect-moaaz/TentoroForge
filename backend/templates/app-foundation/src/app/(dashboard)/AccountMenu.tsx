@@ -85,8 +85,8 @@ export function AccountMenu({ name, email, role, compact = false, extras, plans:
             <span className={"max-w-[12ch] truncate" + (member ? " font-semibold bg-gradient-to-r from-amber-600 to-amber-500 bg-clip-text text-transparent dark:from-amber-300 dark:to-amber-400" : "")}>
               {who || "Account"}</span>
             {member && plan?.plan && (
-              <span data-member-plan="" className="max-w-[10ch] truncate rounded-full bg-amber-100 px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-amber-800 dark:bg-amber-900/50 dark:text-amber-200">
-                {plan.plan.name}</span>
+              <span data-member-plan="" className="max-w-[14ch] truncate rounded-full bg-amber-100 px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-amber-800 dark:bg-amber-900/50 dark:text-amber-200">
+                {plan.status === "trialing" ? `${plan.plan.name} trial` : plan.plan.name}</span>
             )}
           </span>
         )}

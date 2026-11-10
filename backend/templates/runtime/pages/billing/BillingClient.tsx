@@ -126,7 +126,10 @@ export function BillingClient(props: { plans: Plan[]; currencies: string[]; curr
   // WHAT HAPPENED TO THEIR MONEY COMES FIRST: "Choose a plan" to someone whose
   // payment is still clearing is an invitation to pay twice.
   const banner = props.flags.welcome && access && !sub?.cancelAtPeriodEnd && sub?.status !== "cancelled" ? { tone: "border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-100",
-      text: `You're subscribed${plan ? ` to ${plan.name}` : ""}. Thank you!` }
+      // A trial is said as a trial, with the day the first payment is taken.
+      text: sub?.status === "trialing"
+        ? `Your free trial${plan ? ` of ${plan.name}` : ""} has started${sub.currentPeriodEnd ? `. It runs until ${date(sub.currentPeriodEnd)}, and the first payment is taken then unless you cancel` : ""}.`
+        : `You're subscribed${plan ? ` to ${plan.name}` : ""}. Thank you!` }
     : waiting ? { tone: sky, text: "Your payment is being confirmed with the gateway — this page updates on its own. There is no need to pay again." }
     : slow || props.flags.problem ? { tone: amber,
       text: "We could not confirm that payment yet. If money left your account, your plan will show here within a few minutes — please don't pay again. Refresh this page in a little while." }
