@@ -15,7 +15,13 @@ export async function POST(req: Request) {
   const who = await person();
   if (!who) return NextResponse.json({ error: "Sign in first." }, { status: 401 });
   const billing = await import("@/lib/payments/billing");
-  const row = await billing.current(who.id);
+  let row;
+  try {
+    row = await billing.current(who.id);
+  } catch (err) {
+    console.error("[billing] manage could not read the subscription:", err);
+    return NextResponse.json({ url: null, error: "The payment settings page could not be opened just now. Please try again in a moment." }, { status: 503 });
+  }
   if (!row) return NextResponse.json({ url: null });
   try {
     return NextResponse.json({ url: await billing.manageUrl(row, `${originOf(req)}${basePath()}/billing`) });

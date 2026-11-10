@@ -11,7 +11,7 @@ the owner which account an app should be paid into.
 
 | Stage | What happens |
 |---|---|
-| **Settings → Payments** (organisation) | Add as many gateways as the business uses: Stripe, Razorpay, PayPal. Each has a name, where it takes money (domestic, international or both, with a home country), its currencies, and two sets of keys: **test** (for previews and the test version) and **live** (for production). Keys are checked against the gateway the moment they are saved: the card says *Verified — Acme Pvt Ltd, test mode* or exactly what is wrong. One is the default. |
+| **Settings → Integrations → Payments** (organisation) | Add as many gateways as the business uses: Stripe, Razorpay, PayPal. Each has a name, where it takes money (domestic, international or both, with a home country), its currencies, and two sets of keys: **test** (for previews and the test version) and **live** (for production). Keys are checked against the gateway the moment they are saved: the card says *Verified — Acme Pvt Ltd, test mode* or exactly what is wrong. One is the default. |
 | **While an app is being made** | Forge works out from the request and the definition whether the app takes money, and how: one-time payments (an order, a booking, a fee), subscriptions (memberships, plans), or both. It says why in a sentence. |
 | **"Build app"** | When the app takes money, a dialog asks which gateway(s) it should be paid into, before anything is built. The best choice is already ticked: the default gateway, or a domestic and an international one together. Subscriptions show their plans (name, price, every month/year), editable there. Choices: build with these, or build without payments. With no gateway set up yet, the dialog says so and offers to set one up (opens Settings, comes back ticked) or to build now with test payments and connect later. |
 | **The built app** | A payer is sent to the gateway's own secure page (no card ever touches the app). With two gateways the app routes each payer automatically: the domestic gateway for payers in its home country or currency, the international one for everyone else. Subscriptions get a pricing page, a billing page (current plan, next charge, cancel), and access that follows the subscription. |
@@ -111,7 +111,7 @@ choice.
   which chosen gateways cannot take live money (no live keys, refused keys,
   live keys never confirmed, removed) — `readiness` on GET /payments.
 - Preparing a publish's payment keys never fails open: an error removes every
-  payment variable of an app whose payments are Settings → Payments'.
+  payment variable of an app whose payments are Settings → Integrations → Payments'.
 
 **What the review round (5 Nov 2026) closed**
 - The payment question is asked in `_run_dag` for every build door (the
@@ -147,7 +147,7 @@ choice.
 - Billing POSTs are refused from another site (`Sec-Fetch-Site`/`Origin`).
 - `amount_minor` is a bigint (IDR 25,000,000 is past 32 bits).
 - An agent never declares a payment service in an app whose payments are
-  Settings → Payments' (`apply_agent_result` sets it aside): "take payments
+  Settings → Integrations → Payments' (`apply_agent_result` sets it aside): "take payments
   for the memberships" had an agent add Razorpay on its own. An owner's
   choice retires every payment service they did not choose, "test payments"
   included. A change Smith makes before the app is modelled ends with the
@@ -168,9 +168,32 @@ choice.
 - Test keys never reach production and live keys never reach a preview or
   the test version.
 
+## One place for payments, and the plan in every app (11 Nov 2026)
+
+- **Gateways are the Payments group of Settings → Integrations**, beside every
+  other service an app is wired to; there is no Payments tab (its address
+  opens Integrations at `#payments`). A member sees the gateways they may
+  choose; keys stay an admin's.
+- **Stripe is set up once.** The six `STRIPE_*` values typed under
+  Integrations before gateways are not a card of their own: while any is set
+  they show in the Payments group with the apps built before gateways that
+  still read them, and **Make them a gateway** (`POST …/payment-gateways/
+  from-older-keys`) turns them into a Stripe gateway checked with Stripe, each
+  key filed by its own prefix. The older values stay until the admin clears them.
+- **The frame shows the person's plan** (`(dashboard)/PlanPrompt.tsx`, a frame
+  file): asked once per page load from `/api/billing/status`. A holder is
+  marked as a member (gold ring and crown, the plan's name beside the name);
+  the account menu says the plan and its date — *Pro · renews 3 Dec*, *Free
+  trial of Pro · until 20 Nov*, *Pro · ends 3 Dec*, *Pro · payment due*.
+  Someone without a plan sees **Choose a plan**. The billing page says a trial
+  as a trial.
+- **A payments save that changes the app's schema pushes it**, and the
+  engine refresh merges the users table instead of copying the template over
+  it (`schema_builder.merge_user_schema`).
+
 ## Build order
 1. Migration + model + service + router for gateways; verification per provider.
-2. Settings → Payments page.
+2. Settings → Integrations → Payments page.
 3. Blueprint `payments` section (Zod, JSON contract) + need detection + gate payload.
 4. Runtime adapters (Razorpay, PayPal), subscriptions, routing, pages; injector + sync.
 5. The dialog at "Build app" and the server-side gate; projection into the app.
@@ -201,7 +224,7 @@ choice.
 - App runtime: `backend/templates/runtime/payments/` (`stripe`, `razorpay`, `paypal`, `stand-in`, `routing`,
   `units`, `billing`), `api-billing/*`, `api-pay/{return,confirm,stand-in}`, `pages/billing`, `pages/pay/*`,
   `db/forge-billing.schema.ts`. Installed by `app_payments.install_runtime` (build, Smith's sync, publish).
-- Frontend: Settings → Payments (`app/org/[orgId]/settings/payments`), the build dialog and the app's Payments
+- Frontend: the Payments group of Settings → Integrations (`components/payments/GatewaysSection.tsx`, drawn by `app/org/[orgId]/settings/integrations`; the old `/settings/payments` address redirects there), the build dialog and the app's Payments
   tab (`components/payments/*`), the shared rule (`lib/payment-gateways.ts`).
 
 ## Testing locally without gateway accounts

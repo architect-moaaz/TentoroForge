@@ -109,7 +109,11 @@ export function BillingClient(props: { plans: Plan[]; currencies: string[]; curr
       const r = await fetch(`${base()}/api/billing/manage`, { method: "POST" });
       const j = await r.json().catch(() => ({}));
       if (j?.url) { window.location.assign(j.url); return; }
-      setError(j?.error || "Your payment method is managed with your bank or wallet for this gateway. To change it, cancel and subscribe again.");
+      // "Managed with your bank" only when the gateway answered and has no
+      // such page (Razorpay, PayPal); a failure is said as one (a down
+      // database read as Stripe having no portal, 2026-11-11).
+      setError(j?.error || (r.ok ? "Your payment method is managed with your bank or wallet for this gateway. To change it, cancel and subscribe again."
+                                 : "The payment settings page could not be opened just now. Please try again in a moment."));
     } catch {
       setError("The payment settings page could not be opened. Check your connection and try again.");
     } finally {

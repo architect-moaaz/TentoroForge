@@ -154,8 +154,7 @@ function IntegrationsSettings({ orgId }: { orgId: string }) {
 
       {keysHidden && (
         <p data-keys-admin-only="" className="mb-8 rounded-lg bg-slate-50 p-3 text-sm text-muted-foreground dark:bg-slate-900">
-          The keys of your organisation's integrations are seen and changed by its admins. The payment gateways below are the ones
-          you can choose for the apps you build.
+          Only your organisation's admins see and change the keys of its integrations.
         </p>
       )}
       {isError && !keysHidden && (
