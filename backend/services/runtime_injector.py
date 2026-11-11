@@ -252,7 +252,7 @@ def inject_runtime(output_dir: str, app_name: str | None = None, domain: str | N
     # "events" = the durable event bus + cron scheduler (R1/R2/R3):
     # workflows/index.ts imports ../events/emit-node and engine resumes
     # ride through events/bus.ts, so it MUST ship with the workflows dir.
-    for subdir in ["feel-lite", "workflows", "rules", "events", "payments"]:
+    for subdir in ["feel-lite", "workflows", "rules", "events", "payments", "tracking"]:
         src = _TEMPLATE_DIR / subdir
         dst = src_lib / subdir
 
@@ -968,6 +968,16 @@ def _inject_file_storage(output_path: Path) -> list[str]:
         stream_dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(stream_route, stream_dst)
         written.append("src/app/api/events/stream/route.ts")
+
+    # Live tracking: the driver posts "I am here", the customer's map listens.
+    # Two routes over one in-memory hub (src/lib/tracking/hub.ts, copied above).
+    for _tmpl, _dst in (("api-tracking-update", "update"), ("api-tracking-stream", "stream")):
+        _src = _TEMPLATE_DIR / _tmpl / "route.ts"
+        if _src.exists():
+            _out = output_path / "src" / "app" / "api" / "tracking" / _dst / "route.ts"
+            _out.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(_src, _out)
+            written.append(f"src/app/api/tracking/{_dst}/route.ts")
 
     # 5a'. forge_events table: the durable event bus (R1). emitEvent
     #      (runtime/events/bus.ts) inserts one row per domain event; the

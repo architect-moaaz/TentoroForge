@@ -33,6 +33,8 @@ export type MapViewProps = {
   zoom?: number;
   /** Frame every point and the route (default true when there is more than one). */
   fit?: boolean;
+  /** Frame once, then only move the view when a pin leaves it (a driver driving away). */
+  keepInView?: boolean;
   onPointClick?: (id: string) => void;
   height?: number | string;
   className?: string;
@@ -61,8 +63,9 @@ function middle(points: GeoPoint[]): GeoPoint {
 type Lib = typeof import("maplibre-gl");
 
 export function MapView({
-  points = [], route = [], center, zoom = 12, fit, onPointClick, height = 320, className,
+  points = [], route = [], center, zoom = 12, fit, keepInView, onPointClick, height = 320, className,
 }: MapViewProps) {
+  const framed = React.useRef(false);
   const box = React.useRef<HTMLDivElement | null>(null);
   const map = React.useRef<import("maplibre-gl").Map | null>(null);
   const lib = React.useRef<Lib | null>(null);
@@ -128,14 +131,22 @@ export function MapView({
                    paint: { "line-color": colour("accent"), "line-width": 4, "line-opacity": 0.85 } });
     }
     const all = [...points, ...route];
-    if ((fit ?? all.length > 1) && all.length > 1) {
+    if (keepInView && all.length > 1) {
+      const view = m.getBounds();
+      if (!framed.current || all.some((p) => !view.contains([p.lng, p.lat]))) {
+        const bounds = new maplibre.LngLatBounds();
+        for (const p of all) bounds.extend([p.lng, p.lat]);
+        m.fitBounds(bounds, { padding: 64, maxZoom: 15, duration: framed.current ? 500 : 0 });
+        framed.current = true;
+      }
+    } else if ((fit ?? all.length > 1) && all.length > 1) {
       const bounds = new maplibre.LngLatBounds();
       for (const p of all) bounds.extend([p.lng, p.lat]);
       m.fitBounds(bounds, { padding: 48, maxZoom: 15, duration: 0 });
     } else if (all.length === 1) {
       m.setCenter([all[0].lng, all[0].lat]);
     }
-  }, [points, route, fit, ready]);
+  }, [points, route, fit, keepInView, ready]);
 
   return (
     <div

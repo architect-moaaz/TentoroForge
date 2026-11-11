@@ -562,6 +562,23 @@ What a finished page looks like:
   near(…, await whereAmI(ctx)), offer <NearMe /> beside the search on a list of
   nearby things, and in a form it is { label, kind: "location" } — the person
   shares an approximate position with a button.
+- LIVE TRACKING is the one exception to "places are distances", and only while a
+  job runs. When someone follows a person on the move — a delivery partner, a
+  rider, a courier, a technician on the way — the job is ONE record (the order,
+  the ride, the visit) and its id is the trip:
+    the follower's screen: `<LiveTrackingMap entity="Order" trip={order.id} pickup={…} dropoff={…} />`
+    the mover's screen for that job: `<ShareLocation entity="Order" trip={order.id} />`
+  both from "@/sdk/tracking"; `entity` is the record's kind exactly as the data
+  model names it. `pickup` and `dropoff` are the record's `location` values
+  ({ lat, lng }); pass them as they are. The server decides who may follow (whoever
+  may open the record) and who may share (the person the record names as being on
+  the move), so a screen never checks that itself. Never build your own map pin,
+  stream, timer or position fetch for a person — the component listens, moves
+  the dot, says "Waiting for the driver…", greys it when the signal is lost and
+  stops when the job ends. Show it only while the job is under way (accepted,
+  on the way, picked up) and never after it is delivered, cancelled or done; a
+  finished job shows a distance or nothing. Outside an active job a person's
+  position is still never shown.
 - NAMES, NEVER IDS. A reader never sees an id or a shortened one ("Order #a1b2…"). A
   foreign key is shown as the record it points at — its name, its owner, its
   picture: load them with recordsById(Entity, rows.map(r => r.customerId)) in load.ts
@@ -693,6 +710,8 @@ view.tsx — "use client" on the first line.
     itself still runs a workflow), motion/react (`motion.div`, `AnimatePresence`: a panel
     sliding in, a row arriving), "@/sdk/map" (MapView: places as pins, a path as a line —
     `<MapView points={[{ id, lat, lng, label }]} route={[{ lat, lng }, …]} onPointClick={…} />`),
+    "@/sdk/tracking" (LiveTrackingMap, ShareLocation: a driver's dot moving on a map while a job
+    runs — see LIVE TRACKING below),
     "@/sdk" (entity types, workflows, pages, widgets, href, fileUrl), "@/sdk/client" (useWorkflow,
     WorkflowForm, WorkflowButton, WidgetView, ImageSearch, NearMe, formatDistance, distanceKm,
     useLive — `useLive(10)` in a view whose records change while someone watches: it re-reads
@@ -1305,6 +1324,7 @@ SDK_PACKAGES: dict[str, tuple[str, ...]] = {
     # the kit file or SDK module (filled in by `fill_scaffold_defaults` /
     # `ensure_sdk`) but not the package, until a page imports it — then here.
     "@/sdk/map": ("maplibre-gl",),
+    "@/sdk/tracking": ("maplibre-gl",),
     "@/components/ui/calendar": ("react-day-picker",),
     "@/components/ui/command": ("cmdk",),
     "@dnd-kit/core": ("@dnd-kit/core",),
