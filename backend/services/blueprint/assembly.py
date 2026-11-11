@@ -149,6 +149,12 @@ SCAFFOLD_DEFAULTS: tuple[str, ...] = (
     # `null` body when no logo was given; this stands in when that projection
     # did not run at all.
     "src/contracts/brand.ts",
+    # What the sign-in screen is composed as and what it says, for the same
+    # reason and on the same terms: `login/page.tsx` and `signup/page.tsx`
+    # import it, so a tree without it does not compile.
+    # `project_shell_identity` writes it on every build; every field empty is
+    # what an application that stated nothing keeps.
+    "src/contracts/auth-identity.ts",
     # The drawn shell's wrapper (`services.drawn.project`): the layout imports
     # it, and the template's says `DRAWN_SHELL = false`. Overwritten at
     # assembly, a design's own sidebar and top bar never showed (d6drawn).

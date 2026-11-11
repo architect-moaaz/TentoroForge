@@ -27,6 +27,7 @@ import os
 import logging
 import threading
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable
@@ -512,12 +513,14 @@ def ask_for(group: dict, doc: dict) -> str:
             "holds for them. Nobody is waiting to answer questions: decide from the definition and act.")
 
 
-def platform_fault(output_dir: str, result: Any, *, before: set[str] | None = None) -> str | None:
+def platform_fault(output_dir: str, result: Any, *, before: set[str] | None = None,
+                   turn: str | None = None) -> str | None:
     """The engine file a repair turn had to change — the fault is the
     platform's, not the app's — or None.
 
     A platform patch THIS TURN MADE (`file_edit`'s record, not among the
-    patches there were `before` it) is the one sign. Neither the files the turn touched nor its
+    patches there were `before` it, and not one stamped with another `turn`)
+    is the one sign. Neither the files the turn touched nor its
     words are: a change to the definition writes the app out again, platform
     files included, and Personal Finance's Create Category — fixed in its own
     rule, tried and passing — was reported as a fault in `src/sdk/widget-view.tsx`,
@@ -525,9 +528,10 @@ def platform_fault(output_dir: str, result: Any, *, before: set[str] | None = No
     if not isinstance(result, dict):
         return None
     try:
-        from services.smith.file_edit import load_patches
+        from services.smith.file_edit import another_turns, load_patches
         made = [p for p in load_patches(output_dir)
-                if p.get("kind") == "platform" and str(p.get("id")) not in (before or set())]
+                if p.get("kind") == "platform" and str(p.get("id")) not in (before or set())
+                and not another_turns(p, turn)]
     except Exception:  # noqa: BLE001 — unknown is not a platform fault
         logger.debug("[fix-to-green] could not read the platform patches", exc_info=True)
         return None
@@ -544,10 +548,14 @@ def _fix(batch: list[dict], output_dir: str, *, run_turn: Callable, say: Callabl
         label = str(group["items"][0].get("label") or group["cause"])
         why = str(group["items"][0].get("why") or "")[:160]
         say(f"{label} — {why}. Fixing it.")
-        from services.smith.file_edit import load_patches
+        from services.smith.file_edit import load_patches, patches_by
         before = {str(p.get("id")) for p in load_patches(output_dir)}
+        # This repair's own name on the record: the repairs here run side by
+        # side, so `before` alone would read a sibling's patch as this one's.
+        turn = f"{group['cause']}:{uuid.uuid4().hex[:8]}"
         try:
-            result = run_turn("", output_dir, ask_for(group, doc), max_steps=STEPS, unattended=True)
+            with patches_by(turn):
+                result = run_turn("", output_dir, ask_for(group, doc), max_steps=STEPS, unattended=True)
         except Exception as exc:  # noqa: BLE001 — one repair never ends the loop
             logger.warning("[fix-to-green] %s: %s", group["cause"], exc)
             return
@@ -560,7 +568,7 @@ def _fix(batch: list[dict], output_dir: str, *, run_turn: Callable, say: Callabl
         # is a platform fault: said as such, on the record, and left alone —
         # thirty reds were worked twice and fixed zero times because every
         # one of them was the engine's (pcn4owv7, 2026-10-14).
-        where = platform_fault(output_dir, result, before=before)
+        where = platform_fault(output_dir, result, before=before, turn=turn)
         if where:
             group["platform"] = where
             say(f"{label} — the fault is in the platform's engine (`{where}`), not in the app; I cannot fix it "

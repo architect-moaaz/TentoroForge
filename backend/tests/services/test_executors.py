@@ -1617,7 +1617,11 @@ def test_headroom_goes_only_to_nodes_measured_at_the_ceiling():
                                        "page_code", "native_code",   # a page's two whole files
                                        # measured at the ceiling on DITANS (2026-10-30): a dense
                                        # screen's bindings, and 194 phones against 381 desktops
-                                       "drawn_views", "drawn_pairs"}
+                                       "drawn_views", "drawn_pairs",
+                                       # the design check's room to answer (a011c8d8)
+                                       "figma_coverage",
+                                       # the app's whole kit in one reply, re-sent on a round
+                                       "component_kit"}
 
 
 def test_raising_the_ceiling_did_not_disturb_effort():

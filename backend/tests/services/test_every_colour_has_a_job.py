@@ -26,6 +26,8 @@ FOREST = {
     "background": "#F7F4EE", "surface": "#FFFFFF", "textPrimary": "#1F2A24", "textSecondary": "#5B6560",
     "primary": "#24382F", "accent": "#B4623F", "accentSubtle": "#F6E3D9", "inverse": "#24382F",
     "border": "#E4E0D8",
+    # The quiet three a dense page is mostly made of; required since 2026-11-04.
+    "inkFaint": "#8C958F", "inkBrand": "#2F5343", "hairline": "#EDE9E1",
 }
 
 

@@ -13,5 +13,7 @@ export interface SsoEntry {
   roleFrom: { claim: string; map: Record<string, string>; default: string | null } | null;
   provisioning: "invite_only" | "just_in_time";
 }
-export interface SignInPolicy { password: boolean; magicLink: boolean; sso: SsoEntry[] }
+/** `verifyEmail`: a new account enters a six-digit code sent to its address
+ *  before it reaches anything; `verifyPath` is the page that asks for it. */
+export interface SignInPolicy { password: boolean; magicLink: boolean; sso: SsoEntry[]; verifyEmail?: boolean; verifyPath?: string }
 export const SIGN_IN: SignInPolicy = { password: true, magicLink: false, sso: [] };

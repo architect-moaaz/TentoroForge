@@ -112,6 +112,26 @@ def _box(node: dict) -> dict:
     return box if isinstance(box, dict) else {}
 
 
+def _flow_child(frame: dict) -> str | None:
+    """The child of a frame without auto layout that holds its content: a
+    column that grows with what it holds (auto layout, hugging its height)
+    drawn at the frame's top — the tallest, when there are several."""
+    fbox, best = _box(frame), None
+    for child in frame.get("children") or []:
+        if not isinstance(child, dict) or child.get("visible") is False \
+                or str(child.get("layoutMode") or "") not in ("HORIZONTAL", "VERTICAL") \
+                or str(child.get("layoutSizingVertical") or "") != "HUG":
+            continue
+        box = _box(child)
+        try:
+            top, height = float(box["y"]) - float(fbox["y"]), float(box.get("height") or 0)
+        except (KeyError, TypeError, ValueError):
+            continue
+        if abs(top) <= 1 and (best is None or height > best[0]):
+            best = (height, str(child.get("id")))
+    return best[1] if best else None
+
+
 @dataclass
 class Emitter:
     """One conversion: the assets it found, what it was told to leave out,
@@ -249,6 +269,22 @@ class Emitter:
                                            or node.get("layoutPositioning") == "ABSOLUTE")
         h_mode = str(node.get("layoutSizingHorizontal") or "FIXED")
         v_mode = str(node.get("layoutSizingVertical") or "FIXED")
+        if absolute and pmode not in ("HORIZONTAL", "VERTICAL") and str(node.get("id")) == _flow_child(parent or {}):
+            # THE COLUMN THAT HOLDS A FRAME'S CONTENT STAYS IN THE FLOW. A page
+            # drawn as a free frame — glows and shapes placed about, its content
+            # one column at the top — placed that column too, and an absolute box
+            # never makes its parent taller: everything below the first screenful
+            # was cut off (DITANS: 53 pages, QA DIT-003, 2026-11-05). In the flow
+            # at the top it stands where it was drawn, and the page grows with it.
+            pbox = _box(parent or {})
+            out.append("relative")
+            try:
+                out.append(_arb("left", _px(float(box["x"]) - float(pbox["x"]))))
+            except (KeyError, TypeError, ValueError):
+                pass
+            if box.get("width") is not None and h_mode != "HUG":
+                out.append(_arb("w", _px(box["width"])))
+            return out
         if absolute:
             pbox = _box(parent or {})
             out.append("absolute")

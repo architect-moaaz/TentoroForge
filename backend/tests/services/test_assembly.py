@@ -353,8 +353,14 @@ def test_prepare_app_root_fills_the_scaffold_when_given_the_blueprint(tmp_path, 
 
 def test_the_token_contract_is_read_off_the_templates():
     tokens = assembly.scaffold_tokens()
-    assert {"__APP_NAME__", "{{app_name}}", "{{home_route}}", "__AUTH_HEADLINE__"} <= tokens
+    assert {"__APP_NAME__", "{{app_name}}", "{{home_route}}"} <= tokens
     assert all(t.startswith("__") or t.startswith("{{") for t in tokens)
+    # The sign-in screen's wording and composition used to be tokens here too.
+    # They are a projected module now (`src/contracts/auth-identity.ts`),
+    # because a token is substituted ONCE: a design changed after the first
+    # build had nothing left to write to, and the first screen kept its first
+    # value for ever. A module is re-projected like tokens.css.
+    assert not {t for t in tokens if t.startswith("__AUTH_")}
 
 
 def test_a_shipped_placeholder_refuses_the_assembly_by_file_and_token(tmp_path):

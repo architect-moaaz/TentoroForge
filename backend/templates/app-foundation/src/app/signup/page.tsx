@@ -6,18 +6,21 @@ import { useState } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { BrandMark, BRAND_LOGO } from "@/components/BrandMark";
+import { AUTH_IDENTITY } from "@/contracts/auth-identity";
 
 // Design adapts to the app: brand panel shows an industry-relevant photo
-// (__AUTH_IMAGE_URL__) under a primary-colour overlay; app name (__APP_NAME__) +
+// (an auth placeholder) under a primary-colour overlay; app name (__APP_NAME__) +
 // button use the app's palette via shadcn theme tokens.
 
 
 /**
  * Signup composition — the layout is chosen per app by the design DNA
- * (`__AUTH_LAYOUT__`), and the brand surface is painted from the app's OWN
+ * (an auth placeholder), and the brand surface is painted from the app's OWN
  * palette rather than a stock photo, so no two generated apps share this screen.
  */
-const AUTH_LAYOUT = "__AUTH_LAYOUT__";
+// The projection rewrites this on every build; the placeholder is the
+// floor for a tree built before the module existed (see login/page.tsx).
+const AUTH_LAYOUT = AUTH_IDENTITY.layout.trim() || "split-editorial";
 
 type AccountType = { value: string; label: string; description?: string };
 

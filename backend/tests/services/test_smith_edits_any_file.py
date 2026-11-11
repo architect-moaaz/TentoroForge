@@ -104,6 +104,22 @@ def test_a_platform_patch_waits_for_proof_and_is_taken_back_without_it(tmp_path)
     assert file_edit.load_patches(tmp_path)[0]["status"] == "reverted"
 
 
+def test_patches_made_side_by_side_all_stay_on_the_record(tmp_path):
+    """A change to the record is a read, a change and a write of the whole
+    list, and the repairs run side by side (`fix_to_green._fix`): without a
+    writer at a time they read the same list and wrote each other's patches
+    away, and a patch nobody has a row for is never settled or filed."""
+    from concurrent.futures import ThreadPoolExecutor
+    files = [f"src/components/C{i}.tsx" for i in range(12)]
+    for rel in files:
+        _app(tmp_path, rel, "const label = 'Add to bag';\n")
+    with ThreadPoolExecutor(max_workers=12) as pool:
+        out = list(pool.map(lambda rel: file_edit.edit_file(
+            str(tmp_path), rel, "'Add to bag'", "'Add to basket'", ""), files))
+    assert all(o["applied"] for o in out)
+    assert {p["path"] for p in file_edit.load_patches(tmp_path)} == set(files)
+
+
 def test_a_proven_platform_patch_is_filed_and_retires_when_the_platform_has_the_fix(tmp_path, monkeypatch):
     tmp_path = tmp_path / "output" / "app1"                         # one app under its own output root
     engine = _app(tmp_path, ENGINE, "const v = read(path);\n")
@@ -221,6 +237,27 @@ def test_a_change_not_tried_since_is_not_done(tmp_path, tries):
     chooser = _Chooser(_TRY, _edit("src/components/A.tsx", "a", "b"), {"tool": "done", "args": {}})
     _turn(tmp_path, chooser)
     assert chooser.seen[3][-1].said == TRY_AFTER
+
+
+def test_a_turn_settles_its_own_patches_and_not_a_sibling_repairs(tmp_path, tries):
+    """The repairs run side by side on one application. A patch the repair
+    next door is still proving was settled here on a try that was not its
+    own — kept on this turn's proof, or its engine edit taken back from
+    under it while that repair was still working."""
+    _repo(tmp_path)
+    engine = _app(tmp_path, ENGINE, "const v = read(path);\n")
+    file_edit._save_patches(str(tmp_path), [
+        {"id": "sibling", "kind": "platform", "path": "src/sdk/client.tsx", "status": "pending",
+         "turn": "PAGE-003:beefcafe", "find": "a", "replace": "b", "at": file_edit._now()}])
+    tries += [_FAILS, "Add to Cart (FLOW-001) run as Customer: HTTP 200"]
+    steps = [_TRY, _edit(ENGINE), _TRY] + [{"tool": "done", "args": {}}] * 3
+    with file_edit.patches_by("PAGE-002:0ddba11"):
+        _turn(tmp_path, _Chooser(*steps))
+    by_id = {p["id"]: p for p in file_edit.load_patches(tmp_path)}
+    assert by_id.pop("sibling")["status"] == "pending"        # still the other repair's to settle
+    (mine,) = by_id.values()
+    assert mine["status"] == "active" and mine["turn"] == "PAGE-002:0ddba11"
+    assert engine.read_text() == "const v = evaluate(path);\n"
 
 
 @pytest.mark.parametrize("after,kept", [("Add to Cart (FLOW-001) run as Customer: HTTP 200", True),

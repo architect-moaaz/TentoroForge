@@ -101,6 +101,9 @@ SINGLETON_SECTIONS: frozenset[str] = frozenset({
     "runtime", "database", "deployment", "completeness",
     # §34 — the whole app sketched once. One object per app, like designSystem.
     "composition",
+    # §34 — this application's own component kit: its palette and its parts,
+    # one object per app, written whole each time rather than part by part.
+    "componentKit",
     # What a practitioner expects of such a product — written first, held to.
     "domainReference",
     # The application on a phone — one object per app, like designSystem.

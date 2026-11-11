@@ -237,7 +237,15 @@
     "colors": {
       "primary": "#125E8A",
       "surface": "#FFFFFF",
-      "textPrimary": "#1A1A1A", "background": "#F6F8FA", "textSecondary": "#5B6570", "accent": "#B4541A", "accentSubtle": "#FCEBDD", "inverse": "#0F2F45"
+      "textPrimary": "#1A1A1A",
+      "background": "#F6F8FA",
+      "textSecondary": "#5B6570",
+      "accent": "#B4541A",
+      "accentSubtle": "#FCEBDD",
+      "inverse": "#0F2F45",
+      "inkFaint": "#8B949E",
+      "inkBrand": "#0E4A6E",
+      "hairline": "#E6EBF0"
     },
     "spacing": {
       "unit": "4px",

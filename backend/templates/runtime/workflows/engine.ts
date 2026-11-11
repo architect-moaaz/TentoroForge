@@ -317,6 +317,14 @@ export function interpolateValue(value: unknown, variables: Record<string, unkno
     return null;
   };
   const whole = value.match(/^\s*\{\{\s*([^{}]+?)\s*\}\}\s*$/);
+  // A WHOLE VALUE THAT IS A FORMULA is worked out, as the workflow module's
+  // `_resolveRef` does (`{{totalCents / 100}}`, `{{if a = "b" then "c" else
+  // "d"}}`); read as one path it was nothing, and an end's reply or a
+  // set_variable's value came out null. One that does not parse is read as
+  // before, and so is anything shaped like a path (`node-3.output`, `rows.0.id`).
+  if (whole && !whole[1].includes("??") && !/^[\w$.[\]-]+$/.test(whole[1])) {
+    try { return evaluateExpression(whole[1], variables) ?? null; } catch { /* read as before */ }
+  }
   if (whole) {
     const v = evaluate(whole[1]);
     return v === undefined ? null : v;

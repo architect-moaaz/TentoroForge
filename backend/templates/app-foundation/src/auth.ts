@@ -16,7 +16,8 @@ import { connected, digest, domainAllowed, issuerOf, roleFromClaims, ssoEntries,
 function profileOf(row: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(row)) {
-    if (["password", "passwordHash", "id", "email", "name", "role", "accountType"].includes(k)) continue;
+    if (["password", "passwordHash", "id", "email", "name", "role", "accountType",
+         "emailCodeHash", "emailCodeExpiresAt", "emailCodeSentAt", "emailCodeAttempts"].includes(k)) continue;
     if (v === null || ["string", "number", "boolean"].includes(typeof v)) out[k] = v;
     // A LIST OF IDS rides along too — the properties a person is assigned to
     // are an `actorColumn` of their own; left behind, a person of several

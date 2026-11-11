@@ -130,16 +130,37 @@ def test_signup_completes_the_login_row_when_the_account_lives_in_it():
     assert '!["id", "email", "password"].includes(k)' in route
 
 
-def test_a_template_that_computes_is_refused():
-    """`{{count(list_results)}}` reached the database as that text."""
+def test_a_template_that_computes_inside_text_is_refused():
+    """`{{count(list_results)}}` reached the database as that text. The engine
+    now works out a formula that is the WHOLE value; inside other text it is
+    still never worked out, so there it is refused."""
     from services.blueprint.functional_completeness import template_findings
     flow = {"id": "F", "name": "Snap", "inputs": [], "steps": [
         {"key": "list_results", "type": "action", "config": {"actionType": "db_query", "table": "search_results"}},
         {"key": "finalize", "type": "action", "config": {"actionType": "db_update", "table": "searches",
-            "values": {"resultCount": "{{count(list_results)}}", "fine": "{{list_results.count}}",
+            "values": {"summary": "Found {{count(list_results.rows)}} results", "fine": "{{list_results.count}}",
                        "also": "{{ list_results.rows[0].id }}"}}}]}
     found = [f["detail"] for f in template_findings({"workflows": [flow]})]
-    assert len(found) == 1 and "{{count(list_results)}} computes" in found[0]
+    assert len(found) == 1 and "{{count(list_results.rows)}} computes" in found[0]
+    assert "only as the whole value" in found[0]
+
+
+def test_a_whole_value_formula_is_read_by_the_engines_parser():
+    """CARES (kkb5mzo3, 2026-11-10) wrote `{{x = "y" or z}}` and an `if` as
+    insert values; the engine kept them as text. It works them out now, so the
+    author may write them — and one its parser refuses is said before it runs."""
+    import shutil
+    from services.blueprint.functional_completeness import template_findings
+    flow = {"id": "F", "name": "Raise case", "inputs": [{"name": "severity"}, {"name": "tier"}], "steps": [
+        {"key": "save", "type": "action", "config": {"actionType": "db_insert", "table": "cases", "values": {
+            "isUrgent": '{{severity = "Severe" or tier = "A"}}',
+            "approver": '{{if tier = "A" then "GeneralManager" else "Ops"}}'}}}]}
+    assert template_findings({"workflows": [flow]}) == []
+    if not shutil.which("node"):
+        return  # the parser check reports nothing without node
+    flow["steps"][0]["config"]["values"]["broken"] = '{{severity == "Severe" && tier}}'
+    found = [f["detail"] for f in template_findings({"workflows": [flow]})]
+    assert len(found) == 1 and "cannot parse" in found[0] and "stored as its own text" in found[0]
 
 
 def test_a_run_reply_carries_the_id_of_what_it_created(tmp_path):

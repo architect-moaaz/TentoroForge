@@ -1887,6 +1887,7 @@ def record_event(doc: dict, wf: dict) -> tuple[set[str], dict | None]:
 
 def template_findings(doc: dict) -> list[dict]:
     out: list[dict] = []
+    formulas: list[tuple[str, dict, dict, str]] = []
     for wf in _live(doc.get("workflows")):
         steps = [st for st in wf.get("steps") or [] if isinstance(st, dict)]
         inputs = {str(i.get("name")) for i in wf.get("inputs") or [] if i.get("name")}
@@ -1931,13 +1932,25 @@ def template_findings(doc: dict) -> list[dict]:
                                               f"{{{{{inner.strip()}}}}} — `{inner.strip()}` is a whole value, "
                                               f"written without braces: `\"{inner.strip()}\"`"})
                         continue
+                    if _TEMPLATE_RE.fullmatch("{{" + inner + "}}") is None and text.strip() == "{{" + inner + "}}":
+                        # A WHOLE VALUE MAY BE A FORMULA. The engine works out a
+                        # template that is the entire value (`{{totalCents / 100}}`,
+                        # `{{if tier = "A" then "GM" else "Ops"}}`) over the
+                        # workflow's variables, as a set_variable step does — CARES
+                        # (kkb5mzo3, 2026-11-10) wrote its writes that way. What its
+                        # parser refuses would be stored as its own text: that is
+                        # read below, by the engine's parser, in one batch.
+                        formulas.append((f"{len(formulas)}", wf, st, inner.strip()))
+                        continue
                     if _TEMPLATE_RE.fullmatch("{{" + inner + "}}") is None:
                         out.append({"rule": "template-computes", "page": str(wf.get("id")),
                                     "detail": f"{wf.get('name') or wf.get('id')}, step {st.get('key')!r}: "
                                               f"{{{{{inner.strip()}}}}} computes, and a template only names a "
                                               f"value the engine holds — a step's field (`{{{{list_results.count}}}}`, "
-                                              f"`{{{{persist_listings.done}}}}`) or an input; work a value out in "
-                                              f"a `custom` step whose `code` is the formula, then name its result"})
+                                              f"`{{{{persist_listings.done}}}}`) or an input — when it sits inside "
+                                              f"other text; a formula is worked out only as the whole value "
+                                              f"(`\"{{{{{inner.strip()}}}}}\"` alone), or in a `set_variable` step "
+                                              f"whose result the text then names"})
                 for ref in _TEMPLATE_RE.findall(text):
                     root = ref.split(".")[0].split("[")[0].split("|")[0]
                     parts = ref.split("|")[0].split(".")
@@ -1972,6 +1985,17 @@ def template_findings(doc: dict) -> list[dict]:
                                               f"({', '.join(sorted(inputs)) or 'none'}), a step key "
                                               f"({', '.join(sorted(keys)) or 'none'}), or a variable a "
                                               f"set_variable step set ({', '.join(sorted(variables)) or 'none'})"})
+    if formulas:
+        from services.blueprint.feel_check import check_expressions
+        errors = check_expressions([(i, expr) for i, _wf, _st, expr in formulas])
+        for i, wf, st, expr in formulas:
+            if i in errors:
+                out.append({"rule": "template-computes", "page": str(wf.get("id")),
+                            "detail": f"{wf.get('name') or wf.get('id')}, step {st.get('key')!r}: "
+                                      f"{{{{{expr}}}}} is worked out as a formula, and the engine cannot "
+                                      f"parse it — {errors[i]}; as written it is stored as its own text. "
+                                      f"Formulas are FEEL: `=` not `==`, `and`/`or`/`not`, "
+                                      f"`if a then b else c`, names without braces"})
     return out
 
 

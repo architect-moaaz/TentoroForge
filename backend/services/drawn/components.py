@@ -25,7 +25,7 @@ MIN_USES = 3
 #: changes (`orchestrator._drawn_present`): they come from the drawing with no
 #: model, and a file written before its words could be typed into kept an app's
 #: forms read-only (DITANS, 2026-10-30).
-FORMAT = 2
+FORMAT = 3  # 3: a select starts on no option
 
 
 def _texts(node: dict) -> list[dict]:
@@ -150,10 +150,12 @@ _FIELD_CLASSES = "w-full min-w-0 bg-transparent outline-none border-0 p-0 m-0 ap
 
 
 def _typed(key: str) -> str:
-    """The word, or the input a screen made of it."""
+    """The word, or the input a screen made of it. A select starts on no
+    option: on the first, an empty field read as chosen (DITANS QA DIT-012)."""
     field = f"props.{key}Input"
     return (f"{field} ? ({field}.options ? <select className=\"{_FIELD_CLASSES}\" value={{{field}.value}} "
-            f"onChange={{(e) => {field}!.onChange(e.target.value)}}>{{{field}.options.map((o) => "
+            f"onChange={{(e) => {field}!.onChange(e.target.value)}}><option value=\"\">{{{field}.placeholder ?? "
+            f"\"Choose\\u2026\"}}</option>{{{field}.options.map((o) => "
             f"<option key={{o}} value={{o}}>{{o}}</option>)}}</select> : <input className=\"{_FIELD_CLASSES}\" "
             f"value={{{field}.value}} placeholder={{{field}.placeholder}} "
             f"onChange={{(e) => {field}!.onChange(e.target.value)}} />) : props.{key}")

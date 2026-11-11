@@ -55,8 +55,8 @@ WRITABLE_SECTIONS: frozenset[str] = frozenset(
     | {"data.entities", "data.relationships", "data.constraints",
        "navigation", "designSystem", "security",
        "runtime", "database", "deployment", "product", "codeMap",
-       "pageLayouts", "pageCode", "nativeCode", "composition", "completeness", "drawnViews",
-       "drawnPairs",
+       "pageLayouts", "pageCode", "nativeCode", "composition", "componentKit",
+       "completeness", "drawnViews", "drawnPairs",
        "domainReference", "mobile"}
 )
 
@@ -317,6 +317,17 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
         {"pageCode", "drawnViews", "drawnPairs"},
         tools={"blueprint:read", "page_contract:read", "design_system:read",
                "sdk:read", "tsc:check"},
+    ),
+    # §34 — this application's OWN parts, written once from the direction and
+    # composed by every page: the page head, the panel, the row, the status
+    # pill, and the words and numbers it formats. Beside `ui_engineer` rather
+    # than inside it, because this is one call for the whole app where a page is
+    # one call each, and because the kit is the one file set allowed to name the
+    # product's own colours — a page never is.
+    "kit_engineer": _cap(
+        "kit_engineer",
+        {"componentKit"},
+        tools={"blueprint:read", "design_system:read", "sdk:read", "tsc:check"},
     ),
     # One native screen per page, written as React Native against the native SDK
     # and kit, beside `ui_engineer`'s web page. It writes `nativeCode` and
