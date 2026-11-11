@@ -3885,10 +3885,16 @@ def _field_readers(doc: dict, field: dict) -> list[str]:
     personal details named `AdminUser` (a record type) and nobody could ever
     see a submitter's name (2026-10-12). A list that names no declared role
     is no override, and the record's readers — the access step's read
-    permissions — govern the field."""
-    roles = {str(r.get(k)): str(r.get("name")) for r in doc.get("roles") or [] if isinstance(r, dict)
-             for k in ("id", "name") if r.get(k) and r.get("name")}
-    named = [roles[str(x)] for x in field.get("readers") or [] if str(x) in roles]
+    permissions — govern the field.
+
+    A ROLE BY ITS DISPLAY NAME IS THAT ROLE, written by its name: the session
+    carries the role's `name`, and "Front Office Manager" for
+    `FrontOfficeManager` masked the field from the very role meant to read it
+    (kkb5mzo3, 2026-11-11). `resolve_role` reads the spelling."""
+    from services.blueprint.ids import resolve_role
+    roles = [r for r in doc.get("roles") or [] if isinstance(r, dict) and r.get("name")]
+    found = [resolve_role(x, roles) for x in field.get("readers") or [] if str(x) != "*"]
+    named = [str(r.get("name")) for r in found if r]
     if "*" in [str(x) for x in field.get("readers") or []]:
         named.append("*")
     return sorted(set(named))

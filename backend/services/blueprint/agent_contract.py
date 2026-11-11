@@ -1005,6 +1005,54 @@ def check_entity_fields(result: "AgentResult", doc: dict | None = None) -> None:
             pick = (texty or names)[0]
             fixes.append((lambda b=body, pick=pick: b.__setitem__("labelField", pick),
                           f"{ename} is labelled by {pick} ({label} is not one of its fields)"))
+    # A FIELD'S READERS ARE ROLES, WRITTEN BY THE ROLE'S NAME. The session
+    # carries the role's `name` and the runtime unmasks for exactly the names
+    # listed; agents wrote display names ("Front Office Manager", "F&B
+    # Manager") and every such role read `••••••••` — kkb5mzo3's evidence link
+    # became `/cases/••••••••` (2026-11-11). A spelling of a role is that role
+    # and is written as its name here, without asking. A reader that is no
+    # role is refused: dropped quietly, the field fell back to the record's
+    # readers and nobody was told whom it had been meant for.
+    from services.blueprint.ids import resolve_role
+    role_rows = [r for r in (doc or {}).get("roles") or [] if isinstance(r, dict)]
+    role_rows += [p.body for p in result.proposals if p.section == "roles" and isinstance(p.body, dict)]
+    role_names = sorted({str(r.get("name")) for r in role_rows if r.get("name")})
+    for proposal in (p for p in result.proposals if p.section == "data.entities"):
+        body = proposal.body if isinstance(proposal.body, dict) else {}
+        ename = str(body.get("name") or proposal.natural_key)
+        for f in body.get("fields") or []:
+            if not isinstance(f, dict) or not isinstance(f.get("readers"), list):
+                continue
+            unknown: list[str] = []
+            mended: list[str] = []
+            for r in f["readers"]:
+                if str(r) == "*":
+                    mended.append("*")
+                    continue
+                role = resolve_role(r, role_rows)
+                if role and role.get("name"):
+                    mended.append(str(role["name"]))
+                else:
+                    unknown.append(str(r))
+                    mended.append(str(r))
+            f["readers"] = list(dict.fromkeys(mended))
+            if not unknown:
+                continue
+            where = f"{ename}.{f.get('name')}"
+            problems.append(f"{where}: `readers` {', '.join(repr(u) for u in unknown)} "
+                            + ("is" if len(unknown) == 1 else "are") + " not a role — "
+                            + (f"name roles by their name, one of: {', '.join(role_names)}" if role_names
+                               else "no role exists yet; leave `readers` out")
+                            + ". Without readers, the roles that may read the record read this field")
+
+            def drop_unknown(f=f, bad=frozenset(unknown)):
+                kept = [r for r in f.get("readers") or [] if str(r) not in bad]
+                if kept:
+                    f["readers"] = kept
+                else:
+                    f.pop("readers", None)
+            fixes.append((drop_unknown, f"{where} is not read by {', '.join(unknown)}: "
+                                        + ("not roles the app has" if len(unknown) > 1 else "not a role the app has")))
     for said, field_ in _unique_many_side(result, doc):
         problems.append(said)
         fixes.append((lambda f=field_: f.pop("unique", None),

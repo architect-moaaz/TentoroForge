@@ -68,7 +68,7 @@ import threading
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterator, Mapping
+from typing import Any, Iterable, Iterator, Mapping
 
 try:  # POSIX only; the allocator degrades to in-process locking without it.
     import fcntl
@@ -165,6 +165,39 @@ def api_key(method: str, path: str) -> str:
 
 def role_key(name: str) -> str:
     return f"ROLE:{_norm(name)}"
+
+
+def role_spellings(text: Any) -> set[str]:
+    """The ways one role is written, reduced to compare equal: its name
+    `FrontOfficeManager`, its display name "Front Office Manager",
+    `front_office_manager`, "F&B Manager" beside `FAndBManager` or
+    `FBManager`. Case, spacing, punctuation and camel humps are ignored, `&`
+    is the word "and", and a spelling with the "and" left out is the same
+    role. Agents write a field's `readers` as display names; compared as
+    written with the session's role name they never matched, and every such
+    role read the mask (kkb5mzo3 CARES: an evidence link became
+    `/cases/••••••••`, 2026-11-11). The runtime's `_roleSpellings`
+    (templates/runtime/data-engine.ts) is this same rule."""
+    s = str(text or "").strip()
+    if not s:
+        return set()
+    s = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", s)
+    s = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", s)
+    words = ["and" if w == "&" else w for w in re.findall(r"[a-z0-9]+|&", s.lower())]
+    return {x for x in ("".join(words), "".join(w for w in words if w != "and")) if x}
+
+
+def resolve_role(text: Any, roles: Iterable[dict]) -> dict | None:
+    """The one role `text` names — by id or name exactly, else by spelling
+    (`role_spellings`) — or None when it names none, or more than one."""
+    rows = [r for r in roles if isinstance(r, dict) and (r.get("id") or r.get("name"))]
+    t = str(text or "").strip()
+    exact = [r for r in rows if t and t in (str(r.get("id") or ""), str(r.get("name") or ""))]
+    if exact:
+        return exact[0]
+    want = role_spellings(t)
+    loose = {id(r): r for r in rows if want & (role_spellings(r.get("name")) | role_spellings(r.get("id")))}
+    return next(iter(loose.values())) if len(loose) == 1 else None
 
 
 def permission_key(subject: str, action: str, name: str) -> str:

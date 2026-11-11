@@ -163,7 +163,26 @@ function _canReaderUnmask(spec: SensitiveColumnSpec, role: string | undefined): 
   if (!spec.readers || spec.readers.length === 0) return false;
   if (spec.readers.includes("*")) return true;
   if (!role) return false;
-  return spec.readers.includes(role);
+  if (spec.readers.includes(role)) return true;
+  // A READER WRITTEN BY ITS DISPLAY NAME IS THAT ROLE. The session carries
+  // the role's name (`FrontOfficeManager`); a manifest built before readers
+  // were resolved lists "Front Office Manager", and that role read the mask
+  // on every sealed field (kkb5mzo3, 2026-11-11).
+  const mine = _roleSpellings(role);
+  return spec.readers.some((r) => _roleSpellings(r).some((s) => mine.includes(s)));
+}
+
+/** The ways one role is written, reduced to compare equal: case, spacing,
+ *  punctuation and camel humps ignored, `&` read as "and", and a spelling
+ *  with the "and" left out the same role. The platform's `role_spellings`
+ *  (services/blueprint/ids.py) is this same rule. */
+function _roleSpellings(text: unknown): string[] {
+  const s = String(text ?? "").trim()
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2");
+  if (!s) return [];
+  const words = (s.toLowerCase().match(/[a-z0-9]+|&/g) ?? []).map((w) => (w === "&" ? "and" : w));
+  return Array.from(new Set([words.join(""), words.filter((w) => w !== "and").join("")])).filter(Boolean);
 }
 
 /** Structured audit line for every unmask decision the runtime honours.
