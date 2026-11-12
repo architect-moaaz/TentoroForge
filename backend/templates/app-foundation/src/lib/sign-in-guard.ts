@@ -44,6 +44,14 @@ export type Person = Record<string, any> & { id: string; email: string };
 export interface Store {
   read(id: string): Promise<Person | null>;
   write(id: string, patch: Record<string, unknown>): Promise<void>;
+  /** Read the row as it is NOW, work out the change from it and write it, with
+   *  nobody else's change in between. Two sign-ins of one person at the same
+   *  moment (a phone and a laptop, two tabs, a script's parallel workers) each
+   *  read the list of sessions, add their own and wrote the list back — the
+   *  later write dropped the earlier session, which was signed out within
+   *  thirty seconds (DITANS Test, 2026-11-12: 18 pages of a validation run
+   *  landed on the sign-in page). Optional: a store without it reads and writes. */
+  update?(id: string, change: (fresh: Person) => Record<string, unknown> | null): Promise<Person | null>;
 }
 const tableStore: Store = {
   async read(id) {
@@ -53,11 +61,29 @@ const tableStore: Store = {
   async write(id, patch) {
     await db.update(users).set(patch as any).where(eq(users.id, id));
   },
+  async update(id, change) {
+    return await (db as any).transaction(async (tx: any) => {
+      const [row] = await tx.select().from(users).where(eq(users.id, id)).limit(1).for("update");
+      if (!row) return null;
+      const patch = change(row as Person);
+      if (patch) await tx.update(users).set(patch as any).where(eq(users.id, id));
+      return { ...(row as Person), ...(patch ?? {}) } as Person;
+    });
+  },
 };
 let store: Store = tableStore;
 /** Tests only: read and write rows somewhere else. */
 export function __setStore(s: Store | null): void { store = s ?? tableStore; }
 export function readPerson(id: string): Promise<Person | null> { return store.read(id); }
+/** One change worked out from the row as it is now (see `Store.update`). */
+async function change(id: string, fn: (fresh: Person) => Record<string, unknown> | null): Promise<Person | null> {
+  if (store.update) return store.update(id, fn);
+  const fresh = await store.read(id);
+  if (!fresh) return null;
+  const patch = fn(fresh);
+  if (patch) await store.write(id, patch);
+  return { ...fresh, ...(patch ?? {}) } as Person;
+}
 
 const secret = () => process.env.NEXTAUTH_SECRET || "dev-secret";
 const mac = (text: string) => createHmac("sha256", secret()).update(text).digest("hex");
@@ -106,15 +132,19 @@ export function pausedUntil(p: Person, now = Date.now()): number | null {
 
 /** A wrong password: counted; the fifth in a row pauses sign-in. */
 export async function passwordFailed(p: Person, now = Date.now()): Promise<{ pausedUntil: number | null; left: number }> {
-  const failed = Number(p.failedSignIns ?? 0) + 1;
-  if (failed >= PAUSE_AFTER) {
-    const until = now + PAUSE_MS;
-    // The count starts again once the pause ends: five more tries, not one.
-    await store.write(p.id, { failedSignIns: 0, signInPausedUntil: new Date(until) });
-    return { pausedUntil: until, left: 0 };
-  }
-  await store.write(p.id, { failedSignIns: failed });
-  return { pausedUntil: null, left: PAUSE_AFTER - failed };
+  let out = { pausedUntil: null as number | null, left: PAUSE_AFTER };
+  await change(p.id, (fresh) => {
+    const failed = Number(fresh.failedSignIns ?? 0) + 1;
+    if (failed >= PAUSE_AFTER) {
+      const until = now + PAUSE_MS;
+      // The count starts again once the pause ends: five more tries, not one.
+      out = { pausedUntil: until, left: 0 };
+      return { failedSignIns: 0, signInPausedUntil: new Date(until) };
+    }
+    out = { pausedUntil: null, left: PAUSE_AFTER - failed };
+    return { failedSignIns: failed };
+  });
+  return out;
 }
 
 /** A right password: the count back to nought. */
@@ -285,23 +315,26 @@ export function devicesOf(p: Person | null): Device[] {
 export async function addDevice(p: Person, how: { agent?: unknown; via: string }, now = Date.now()): Promise<string> {
   const id = randomBytes(12).toString("base64url");
   const fresh: Device = { id, agent: agentOf(how.agent), at: new Date(now).toISOString(), via: how.via };
-  await store.write(p.id, { signedInDevices: [fresh, ...devicesOf(p)].slice(0, DEVICES_KEPT) });
+  await change(p.id, (now) => ({ signedInDevices: [fresh, ...devicesOf(now)].slice(0, DEVICES_KEPT) }));
   return id;
 }
 
 /** Signing out: the session's id off the row. */
 export async function dropDevice(personId: string, sid: string): Promise<void> {
-  const p = await store.read(personId);
-  if (!p) return;
-  const list = devicesOf(p);
-  if (list.some((d) => d.id === sid)) await store.write(personId, { signedInDevices: list.filter((d) => d.id !== sid) });
+  await change(personId, (p) => {
+    const list = devicesOf(p);
+    return list.some((d) => d.id === sid) ? { signedInDevices: list.filter((d) => d.id !== sid) } : null;
+  });
 }
 
 /** Sign out every other session: only `sid` stays, and the version moves on
  *  so a session from before ids and every trusted browser are withdrawn too. */
 export async function keepOnly(p: Person, sid: string): Promise<number> {
-  const version = Number(p.sessionVersion ?? 0) + 1;
-  await store.write(p.id, { signedInDevices: devicesOf(p).filter((d) => d.id === sid), sessionVersion: version });
+  let version = Number(p.sessionVersion ?? 0) + 1;
+  await change(p.id, (now) => {
+    version = Number(now.sessionVersion ?? 0) + 1;
+    return { signedInDevices: devicesOf(now).filter((d) => d.id === sid), sessionVersion: version };
+  });
   return version;
 }
 

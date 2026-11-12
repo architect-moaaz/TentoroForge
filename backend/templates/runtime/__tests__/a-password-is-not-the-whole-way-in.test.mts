@@ -39,6 +39,15 @@ const rows = new Map<string, any>();
 g.__setStore({
   read: async (id: string) => (rows.has(id) ? { ...rows.get(id) } : null),
   write: async (id: string, patch: any) => { rows.set(id, { ...rows.get(id), ...patch }); },
+  // The table store locks the row (SELECT … FOR UPDATE in a transaction); a map
+  // does the same by working the change out and writing it in one step.
+  update: async (id: string, change: (fresh: any) => any) => {
+    await new Promise((r) => setTimeout(r, 0));
+    if (!rows.has(id)) return null;
+    const patch = change({ ...rows.get(id) });
+    if (patch) rows.set(id, { ...rows.get(id), ...patch });
+    return { ...rows.get(id) };
+  },
 });
 const person = (id: string) => ({ ...rows.get(id) });
 rows.set("p1", { id: "p1", email: "ann@acme.test", failedSignIns: 0, signInPausedUntil: null, sessionVersion: 0, signedInDevices: [] });
@@ -120,6 +129,16 @@ ok(!g.stillSignedIn(person("p1"), { sid: s2 }), "signing out takes the id off th
 for (let i = 0; i < 25; i++) await g.addDevice(person("p1"), { agent: "", via: "password" }, T0 + i);
 eqJson(g.devicesOf(person("p1")).length, 20, "twenty sessions are kept; the oldest goes");
 ok(!g.stillSignedIn({ ...person("p1"), isActive: false }, { sid: g.devicesOf(person("p1"))[0].id }), "an account switched off holds no session");
+
+// Two sign-ins of one person at the same moment, each holding the row as it was
+// when its password was checked: both sessions stay (DITANS Test, 2026-11-12).
+rows.set("p2", { id: "p2", email: "bo@acme.test", sessionVersion: 0, signedInDevices: [] });
+const stale = person("p2");
+const [phone, laptop] = await Promise.all([g.addDevice(stale, { via: "password" }), g.addDevice(stale, { via: "password" })]);
+ok(g.stillSignedIn(person("p2"), { sid: phone }) && g.stillSignedIn(person("p2"), { sid: laptop }),
+   "two sign-ins at the same moment both stay signed in");
+await Promise.all([g.passwordFailed(person("p2"), T0), g.passwordFailed(person("p2"), T0)]);
+eqJson(person("p2").failedSignIns, 2, "two wrong passwords at the same moment count as two");
 
 const after = g.afterReset({ ...person("p1"), emailVerification: "pending", signInPausedUntil: new Date() }, "$2a$12$hash");
 eqJson([after.failedSignIns, after.signInPausedUntil, after.signedInDevices, after.sessionVersion, after.emailVerification],
