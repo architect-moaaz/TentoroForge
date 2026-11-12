@@ -112,3 +112,41 @@ def test_the_data_model_makes_the_person_on_the_move_nameable_and_the_end_recogn
     src = _prompts()
     for phrase in ("`driverId`", "`courierId`", "only the", "`delivered`", "let that person open it"):
         assert phrase in src, phrase
+
+
+# ---- the fleet: drivers who go online and wait for work, seen on one map --------
+
+def test_every_built_app_carries_the_fleet_route_and_the_send_route_takes_fleet_notes():
+    injector = (BACKEND / "services" / "runtime_injector.py").read_text(encoding="utf-8")
+    assert "api-tracking-fleet" in injector
+    fleet = (RUNTIME / "api-tracking-fleet" / "route.ts").read_text(encoding="utf-8")
+    # who may watch is the app's own read rule; the list is re-read so lost access stops it
+    assert "visibleMembers" in fleet and "RECHECK_MS" in fleet and "fleetListen" in fleet
+    access = (RUNTIME / "tracking" / "access.ts").read_text(encoding="utf-8")
+    assert "engine.query" in access
+    update = (RUNTIME / "api-tracking-update" / "route.ts").read_text(encoding="utf-8")
+    # a person may be on the map only as their OWN record, cleared and on duty
+    for word in ("body.fleet === true", "isSelf(", "whyNotOnDuty(", "fleetLeave(", "fleetPublish("):
+        assert word in update, word
+    assert update.index("isSelf(") < update.index("fleetPublish("), "ownership is checked before the note is kept"
+
+
+def test_the_fleet_components_exist_and_a_driver_can_go_online():
+    src = (FOUNDATION / "src/sdk/tracking.tsx").read_text(encoding="utf-8")
+    for name in ("export function FleetMap", "export function useFleet", "/api/tracking/fleet?entity="):
+        assert name in src, name
+    assert "fleet?: boolean" in src and '"Go online"' in src
+
+
+def test_the_page_agent_and_smith_know_the_fleet_and_never_store_the_position():
+    assert "A FLEET ON ONE MAP" in DESIGN_PRINCIPLES
+    for word in ("FleetMap", "FleetBeacon", "Never add a second \"Go online\" control", "never save the position as fields on the driver"):
+        assert word in DESIGN_PRINCIPLES, word
+    from services.smith.loop import _PROMPT
+    flat = _PROMPT.replace("\r\n", "\n").replace("\n", " ")
+    assert "GOES ONLINE AND WAITS FOR WORK" in flat.upper() and "`FleetMap`" in flat
+    src = _prompts()
+    assert "A FLEET IS DRIVERS WHO GO ONLINE AND WAIT FOR WORK" in src
+    assert "A FLEET NEEDS A RECORD FOR EACH PERSON ON THE MOVE" in src
+    assert "`verificationStatus`" in src and "`availabilityStatus`" in src
+    assert "the live \"\n        \"position is not stored" in src or "position is not stored" in src

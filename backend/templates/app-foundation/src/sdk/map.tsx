@@ -2,8 +2,14 @@
 
 /**
  * A map: places as pins, a path as a line — a rider on the way, restaurants
- * near you, a delivery zone's outlets. MapLibre over OpenFreeMap's tiles (no
- * key); `NEXT_PUBLIC_MAP_STYLE` names another style.
+ * near you, a delivery zone's outlets.
+ *
+ * TWO ENGINES, ONE COMPONENT. By default MapLibre over OpenFreeMap's tiles: no
+ * key, no billing. When the app has a Google Maps browser key
+ * (NEXT_PUBLIC_GOOGLE_MAPS_API_KEY) the same map is drawn by Google Maps;
+ * NEXT_PUBLIC_MAP_PROVIDER=openfreemap keeps the free one even then. If Google
+ * refuses (wrong or restricted key, billing off, the API not enabled) the free
+ * map takes over by itself. `NEXT_PUBLIC_MAP_STYLE` names another MapLibre style.
  *
  * LOADED IN THE BROWSER ONLY. A map library reaches for `window` the moment it
  * is imported, and a page's code is rendered on the server first: imported at
@@ -14,55 +20,32 @@
  *            route={trip.path} onPointClick={(id) => open(id)} />
  */
 import * as React from "react";
-import type { GeoPoint } from "./geo";
 import "maplibre-gl/dist/maplibre-gl.css";
+import { GoogleMapView } from "./map-google";
+import { colour, middle, type MapPoint, type MapViewProps } from "./map-shared";
 
-export type MapPoint = GeoPoint & {
-  id: string;
-  label?: string;
-  /** Which of the app's colours the pin takes. */
-  tone?: "primary" | "accent" | "muted" | "danger";
-};
-
-export type MapViewProps = {
-  points?: MapPoint[];
-  /** A path through these places, in order — a trip, a route. */
-  route?: GeoPoint[];
-  /** Where it opens; the points' middle when omitted. */
-  center?: GeoPoint;
-  zoom?: number;
-  /** Frame every point and the route (default true when there is more than one). */
-  fit?: boolean;
-  /** Frame once, then only move the view when a pin leaves it (a driver driving away). */
-  keepInView?: boolean;
-  onPointClick?: (id: string) => void;
-  height?: number | string;
-  className?: string;
-};
+export type { MapPoint, MapViewProps } from "./map-shared";
 
 const DEFAULT_STYLE = "https://tiles.openfreemap.org/styles/liberty";
-
-const TONE_VAR: Record<NonNullable<MapPoint["tone"]>, string> = {
-  primary: "--primary", accent: "--accent", muted: "--muted-foreground", danger: "--destructive",
-};
-
-function colour(tone: MapPoint["tone"]): string {
-  if (typeof window === "undefined") return "#2563eb";
-  const v = getComputedStyle(document.documentElement).getPropertyValue(TONE_VAR[tone ?? "primary"]).trim();
-  return v ? `hsl(${v})` : "#2563eb";
-}
-
-function middle(points: GeoPoint[]): GeoPoint {
-  if (!points.length) return { lat: 20, lng: 0 };
-  return {
-    lat: points.reduce((s, p) => s + p.lat, 0) / points.length,
-    lng: points.reduce((s, p) => s + p.lng, 0) / points.length,
-  };
-}
+const GOOGLE_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || "";
+const WANT_GOOGLE = !!GOOGLE_KEY && (process.env.NEXT_PUBLIC_MAP_PROVIDER ?? "google") !== "openfreemap";
 
 type Lib = typeof import("maplibre-gl");
 
-export function MapView({
+/** Which engine this build draws maps with: "google" or "openfreemap". */
+export function mapProvider(): "google" | "openfreemap" {
+  return WANT_GOOGLE ? "google" : "openfreemap";
+}
+
+export function MapView(props: MapViewProps) {
+  const [googleFailed, setGoogleFailed] = React.useState(false);
+  if (WANT_GOOGLE && !googleFailed) {
+    return <GoogleMapView {...props} apiKey={GOOGLE_KEY} onFail={() => setGoogleFailed(true)} />;
+  }
+  return <MapLibreView {...props} />;
+}
+
+function MapLibreView({
   points = [], route = [], center, zoom = 12, fit, keepInView, onPointClick, height = 320, className,
 }: MapViewProps) {
   const framed = React.useRef(false);
@@ -144,7 +127,8 @@ export function MapView({
       for (const p of all) bounds.extend([p.lng, p.lat]);
       m.fitBounds(bounds, { padding: 48, maxZoom: 15, duration: 0 });
     } else if (all.length === 1) {
-      m.setCenter([all[0].lng, all[0].lat]);
+      // from the zoomed-out empty view (below 5) to the first pin: come in close; otherwise keep the viewer's zoom
+      m.jumpTo({ center: [all[0].lng, all[0].lat], zoom: m.getZoom() < 5 ? 12 : m.getZoom() });
     }
   }, [points, route, fit, keepInView, ready]);
 
@@ -154,6 +138,8 @@ export function MapView({
       className={"relative overflow-hidden rounded-xl border bg-muted " + (className ?? "")}
       style={{ height }}
       aria-label="Map"
+      data-map="openfreemap"
+      data-pins={points.length}
     >
       {failed && (
         <p className="absolute inset-0 grid place-items-center p-4 text-center text-sm text-muted-foreground">
