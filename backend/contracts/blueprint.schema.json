@@ -3099,6 +3099,11 @@
                     "description": "Who may read the rows. \"scoped\": the same people who may write them (the default). \"everyone\": anyone, signed in or not, reads every row — a catalogue, a listing, a public profile — while `column` still decides who may change or remove it. Say \"everyone\" wherever visitors browse what owners manage; without it a signed-out visitor, who holds no role, reaches no row at all. \"visitors\": people who are not signed in read every row (a public job board), while each signed-in person still reads only what the rule gives them — an employer's workspace lists its own jobs, not every employer's.",
                     "default": "scoped"
                   },
+                  "readsUnclaimed": {
+                    "type": "boolean",
+                    "description": "For work that is OFFERED before anyone holds it (a ride request offered to drivers, a job offered to technicians): signed-in people read the rows that are theirs AND the rows nobody holds yet (the column is empty). Once a row is held, only its holder reads it. Writes stay limited to the holder's own rows. Use it instead of leaving the entity unscoped, which lets every holder read every other holder's rows.",
+                    "default": false
+                  },
                   "guestColumn": {
                     "type": "string",
                     "description": "For records a visitor may make before signing in (a guest's cart): the column of this entity holding the visitor's guest token. A signed-out visitor reaches the rows carrying their own token, the platform fills it on create, and the same person keeps reaching them after signing in. Omit for records only signed-in people make."

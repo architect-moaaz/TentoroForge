@@ -598,8 +598,26 @@ What a finished page looks like:
   the dot, says "Waiting for the driver…", greys it when the signal is lost and
   stops when the job ends. Show it only while the job is under way (accepted,
   on the way, picked up) and never after it is delivered, cancelled or done; a
-  finished job shows a distance or nothing. Outside an active job a person's
-  position is still never shown.
+  finished job shows a distance or nothing. Outside an active job or a duty
+  shift (below) a person's position is still never shown.
+- A FLEET ON ONE MAP is the other exception: when the request has drivers who go
+  ONLINE and wait for work, and an admin or dispatcher who sees them all, each
+  driver is their own record (a Driver entity), not a job.
+    the admin's screen: `<FleetMap entity="Driver" kinds={filter} onSelect={(id) => open(id)} />`
+    while the driver is online: `<FleetBeacon entity="Driver" trip={driver.id} />`
+  both from "@/sdk/tracking". The driver's ONE online switch is the "Go online"
+  WORKFLOW (and "Go offline" beside it); the beacon has no button of its own: it
+  sends the phone's position by itself while it is on the screen, so show it only
+  when the driver's status is online. Never add a second "Go online" control.
+  `trip` is the driver's OWN record id. The map shows
+  only the drivers that viewer may open, moving by themselves, coloured by the
+  record's vehicle type, and drops anyone who goes offline or goes quiet; the
+  server refuses a driver who is not approved or is offline, so do not check
+  that on the screen. Put the switch only on the driver's own home screen, show
+  "Go online" as disabled with the reason when the account is not approved, and
+  pass `kinds` from the filter the admin picks ("Bike", "Auto", "Sedan", "SUV").
+  Clicking a pin opens that driver's page. Never poll for positions, never draw
+  your own pins, and never save the position as fields on the driver.
 - NAMES, NEVER IDS. A reader never sees an id or a shortened one ("Order #a1b2…"). A
   foreign key is shown as the record it points at — its name, its owner, its
   picture: load them with recordsById(Entity, rows.map(r => r.customerId)) in load.ts

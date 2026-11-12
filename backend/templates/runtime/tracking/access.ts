@@ -38,3 +38,26 @@ export async function jobFor(entity: string, id: string): Promise<Job> {
     return { ok: false, status: 404, error: "No such trip." };
   }
 }
+
+export type Visible =
+  | { ok: true; userId: string; rows: Map<string, Record<string, unknown>> }
+  | { ok: false; status: 401 | 404; error: string };
+
+/**
+ * Every record of this kind the signed-in person may see, by id. The data
+ * engine's own read rules decide: an admin sees every driver, a driver sees
+ * only themselves, a stranger sees none. The fleet map shows exactly these.
+ */
+export async function visibleMembers(entity: string): Promise<Visible> {
+  const me = await whoIs();
+  if (!me) return { ok: false, status: 401, error: "Sign in to see the map." };
+  await ensureDataEngineInitialized();
+  try {
+    const res = await engine.query(entity, { limit: 500 }, actorCtx(me.user) as never);
+    const rows = new Map<string, Record<string, unknown>>();
+    for (const r of res.data as Record<string, unknown>[]) if (typeof r.id === "string") rows.set(r.id, r);
+    return { ok: true, userId: me.userId, rows };
+  } catch {
+    return { ok: false, status: 404, error: "No such fleet." };
+  }
+}

@@ -820,6 +820,21 @@ function ShellBrand({ appName, height, children }: {
   return <>{children}</>;
 }
 
+/**
+ * A RAIL IS DARK WHEN ITS COLOUR IS DARK. `props.mode` is the app's tone, and a
+ * dark app may well have a light (inverted) rail: judged by the tone, the lit
+ * entry was painted white on lavender and the menu was unreadable (the
+ * ride-hailing build, 2026-11-11).
+ */
+function railIsDark(props: { bg?: string; mode?: string }): boolean {
+  const bg = props.bg;
+  if (typeof bg === "string" && /^#[0-9a-fA-F]{6}$/.test(bg)) {
+    const r = parseInt(bg.slice(1, 3), 16), g = parseInt(bg.slice(3, 5), 16), b = parseInt(bg.slice(5, 7), 16);
+    return (0.299 * r + 0.587 * g + 0.114 * b) / 255 <= 0.6;
+  }
+  return props.mode !== "light";
+}
+
 function WideRail({ props, appName, caption, footer }: {
   props: NavProps; appName: string;
   /** Who this rail is for — the signed-in role, when the product has several. */
@@ -829,7 +844,7 @@ function WideRail({ props, appName, caption, footer }: {
    *  primary action. */
   footer?: React.ReactNode;
 }) {
-  const dark = props.mode !== "light";
+  const dark = railIsDark(props);
   const bg = props.bg ?? (dark ? "#141a18" : "#ffffff");
   const text = props.text ?? (dark ? "#c9d2ce" : "#3f4a45");
   const accent = props.accent ?? "#5B8DEF";
@@ -891,7 +906,7 @@ function WideRail({ props, appName, caption, footer }: {
 
 /** Icon-only rail: 64px of pure glyphs — dense, technical, maximal canvas. */
 function IconRail({ props, appName, footer }: { props: NavProps; appName: string; footer?: React.ReactNode }) {
-  const dark = props.mode !== "light";
+  const dark = railIsDark(props);
   const bg = props.bg ?? (dark ? "#101418" : "#ffffff");
   const text = props.text ?? (dark ? "#c7d2de" : "#334155");
   const accent = props.accent ?? "#5B8DEF";
@@ -945,7 +960,7 @@ function IconRail({ props, appName, footer }: { props: NavProps; appName: string
 /** DOCK — floating bottom-centre bar; content runs full-bleed above it.
  *  A structurally different nav pattern (not a rail, not a topbar). */
 function DockNav({ props, appName }: { props: NavProps; appName: string }) {
-  const dark = props.mode !== "light";
+  const dark = railIsDark(props);
   const bg = props.bg ?? (dark ? "rgba(16,20,24,.92)" : "rgba(255,255,255,.94)");
   const text = props.text ?? (dark ? "#c7d2de" : "#334155");
   // Show EVERY page — never silently drop menu items. The dock scrolls

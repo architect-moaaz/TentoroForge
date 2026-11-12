@@ -87,3 +87,95 @@ export function finish(trip: string, who: string): boolean {
   trips.delete(trip);
   return true;
 }
+
+/* ---------------------------------------------------------------------------
+ * THE FLEET — many people on the move, each under their own record id.
+ *
+ *   fleetPublish(fleet, id, who, note, meta)  one person says "I am here"
+ *   fleetSnapshot(fleet)                      everyone on duty right now
+ *   fleetListen(fleet, fn)                    hear every change
+ *   fleetLeave(fleet, id, who)                one person goes off duty
+ *
+ * Someone who has said nothing for FLEET_TTL_MS is taken off the map: a phone
+ * that died must not look like a driver who is still waiting for work.
+ * ------------------------------------------------------------------------- */
+export const FLEET_TTL_MS = 120_000;
+
+export type Member = Position & { id: string; label?: string; kind?: string };
+export type FleetFrame = Member | { gone: string };
+type FleetListener = (f: FleetFrame) => void;
+type Fleet = { members: Map<string, { who: string; at: number; m: Member }>; listeners: Set<FleetListener> };
+const fg = globalThis as unknown as { __forgeFleet?: Map<string, Fleet> };
+const fleets: Map<string, Fleet> = (fg.__forgeFleet ??= new Map());
+
+function fleetOf(key: string): Fleet {
+  let f = fleets.get(key);
+  if (!f) fleets.set(key, (f = { members: new Map(), listeners: new Set() }));
+  return f;
+}
+
+/** Drop everyone who has gone quiet, telling the listeners. */
+function sweep(key: string, f: Fleet, now: number) {
+  for (const [id, e] of f.members) {
+    if (now - e.at > FLEET_TTL_MS) {
+      f.members.delete(id);
+      f.listeners.forEach((fn) => fn({ gone: id }));
+    }
+  }
+  if (!f.members.size && !f.listeners.size && fleets.get(key) === f) fleets.delete(key);
+}
+
+/** The first sender for an id owns it; a note older than the newest is ignored. */
+export function fleetPublish(
+  key: string, id: string, who: string, p: Position, meta: { label?: string; kind?: string } = {},
+  now: number = Date.now(),
+): Published {
+  const f = fleetOf(key);
+  sweep(key, f, now);
+  const cur = f.members.get(id);
+  if (cur && cur.who !== who) return "not-your-trip";
+  if (cur && p.at <= cur.m.at) return "old";
+  const m: Member = { ...p, id, label: meta.label, kind: meta.kind };
+  f.members.set(id, { who, at: now, m });
+  f.listeners.forEach((fn) => fn(m));
+  return "ok";
+}
+
+export function fleetSnapshot(key: string, now: number = Date.now()): Member[] {
+  const f = fleets.get(key);
+  if (!f) return [];
+  sweep(key, f, now);
+  return [...f.members.values()].map((e) => e.m);
+}
+
+/** Returns the function that stops listening. */
+export function fleetListen(key: string, fn: FleetListener): () => void {
+  const f = fleetOf(key);
+  f.listeners.add(fn);
+  return () => {
+    f.listeners.delete(fn);
+    if (!f.members.size && !f.listeners.size && fleets.get(key) === f) fleets.delete(key);
+  };
+}
+
+/**
+ * The SERVER takes someone off the map because their record says they are no
+ * longer on duty (they pressed "Go offline", or were suspended), whoever's
+ * line noticed. Not for a person to call on another: only the fleet line does.
+ */
+export function fleetDrop(key: string, id: string): boolean {
+  const f = fleets.get(key);
+  if (!f || !f.members.delete(id)) return false;
+  f.listeners.forEach((fn) => fn({ gone: id }));
+  return true;
+}
+
+/** Only the person who owns the id may take it off the map. */
+export function fleetLeave(key: string, id: string, who: string): boolean {
+  const f = fleets.get(key);
+  const cur = f?.members.get(id);
+  if (!f || !cur || cur.who !== who) return false;
+  f.members.delete(id);
+  f.listeners.forEach((fn) => fn({ gone: id }));
+  return true;
+}

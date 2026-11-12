@@ -11,7 +11,7 @@
  */
 
 import { db } from "@/db";
-import { eq, ilike, or, and, desc, asc, count, countDistinct, sum, avg, min, max, gte, lt, inArray, sql, getTableName, getTableColumns, type SQL } from "drizzle-orm";
+import { eq, isNull, ilike, or, and, desc, asc, count, countDistinct, sum, avg, min, max, gte, lt, inArray, sql, getTableName, getTableColumns, type SQL } from "drizzle-orm";
 // FK-role authority — decides which columns to auto-fill from the current user.
 // A `domain` FK (target != users) is NEVER user-filled; only `actor` columns are.
 // Absent-table (registry-less app) → legacy name-based fallback below.
@@ -672,7 +672,12 @@ function scopeConditions(
     // A person of several workspaces reaches a row in any of them; compared
     // with `=` a list matched nothing, and Refund And Chargeback's staff, each
     // assigned a list of properties, saw no case at all (pah7lhfz, 2026-10-21).
-    const mine = Array.isArray(actor) ? inArray(col, actor as any[]) : eq(col, actor as any);
+    let mine = Array.isArray(actor) ? inArray(col, actor as any[]) : eq(col, actor as any);
+    // WORK OFFERED BEFORE IT IS HELD. A ride request is offered to every driver until one takes it: reads reach the
+    // rows that are mine AND the rows nobody holds yet; once held, only the holder reads it. A WORKFLOW may also
+    // claim a row nobody holds (its own steps check who may take it: "accept ride"); a direct write over the data API
+    // stays mine only, so nobody can reach into a request that is not theirs.
+    if (rule.readsUnclaimed === true && (op === "read" || String(ctx.via ?? "").startsWith("workflow"))) mine = or(mine, isNull(col)) as SQL;
     conds.push(guest ? (or(mine, guest) as SQL) : mine);
   }
   return conds;
@@ -838,6 +843,7 @@ export async function scopeForTable(
   table: PgTableWithColumns<any>,
   user: DataEngineContext["user"],
   op: "read" | "write" = "write",
+  via?: string,
 ): Promise<SQL | undefined> {
   if (!user?.id) return undefined;
   if (!_initialized) {
@@ -846,7 +852,7 @@ export async function scopeForTable(
   }
   for (const [name, rec] of _entities) {
     if (rec.table !== table) continue;
-    return allOf(await accessConditions(name, rec, { user }, op));
+    return allOf(await accessConditions(name, rec, { user, via }, op));
   }
   return undefined;
 }

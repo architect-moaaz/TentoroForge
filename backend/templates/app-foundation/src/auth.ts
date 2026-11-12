@@ -7,7 +7,7 @@ import bcrypt from "bcryptjs";
 import { sessionCookies } from "@/lib/session-cookie";
 import { db } from "@/db";
 import { users } from "@/db/schema/user";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { connected, digest, domainAllowed, issuerOf, roleFromClaims, ssoEntries, policy as signInPolicy, type SsoEntry } from "@/lib/sign-in";
 
 /** Every scalar column of a users row except the credential and what the
@@ -69,7 +69,8 @@ async function sessionUserOf(user: Record<string, any>): Promise<Record<string, 
 }
 
 async function userByEmail(email: string): Promise<Record<string, any> | null> {
-  const [row] = await db.select().from(users).where(eq(users.email, email)).limit(1);
+  // The address is compared without regard to capitals: an account made as "Ana@x.com" signs in as "ana@x.com".
+  const [row] = await db.select().from(users).where(sql`lower(${users.email}) = ${String(email).trim().toLowerCase()}`).limit(1);
   return (row as any) ?? null;
 }
 

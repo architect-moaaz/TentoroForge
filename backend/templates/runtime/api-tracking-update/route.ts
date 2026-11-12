@@ -3,6 +3,7 @@
  *
  *   { entity: "Order", trip: "<order id>", lat, lng, at?, heading?, speed?, accuracy?, stage? }
  *   { entity: "Order", trip: "<order id>", done: true }     ends the trip
+ *   { fleet: true, entity: "Driver", trip: "<own driver id>", lat, lng }   on duty, waiting for work
  *
  * The trip is a record in the app's own data. Who may send is the person that
  * record names as being on the move (driverId, courierId, …) — nobody else, and
@@ -15,8 +16,8 @@
  */
 import { NextRequest } from "next/server";
 import { jobFor, whoIs } from "@/lib/tracking/access";
-import { finished, mayShare, tripKey } from "@/lib/tracking/rules";
-import { finish, publish, validPosition } from "@/lib/tracking/hub";
+import { finished, fleetKey, fleetKind, fleetLabel, isSelf, mayShare, tripKey, whyNotOnDuty } from "@/lib/tracking/rules";
+import { finish, fleetLeave, fleetPublish, publish, validPosition } from "@/lib/tracking/hub";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,6 +39,32 @@ export async function POST(req: NextRequest): Promise<Response> {
   if (!entity || !trip) return no(400, "entity and trip are required");
   const found = await jobFor(entity, trip);
   if (!found.ok) return no(found.status, found.error);
+  if (body.fleet === true) {
+    // FLEET MODE: `trip` is the person's OWN record (a Driver), not a job. They
+    // may be on the map only if it is theirs and they are cleared and on duty.
+    if (!isSelf(found.job, found.userId)) return no(403, "That is not your record.");
+    const fkey = fleetKey(entity);
+    if (body.done === true) {
+      fleetLeave(fkey, trip, found.userId);
+      return Response.json({ ok: true });
+    }
+    const why = whyNotOnDuty(found.job);
+    if (why) {
+      fleetLeave(fkey, trip, found.userId); // gone from the map the moment they are not on duty
+      return no(409, why);
+    }
+    if (!validPosition(body.lat, body.lng)) return no(400, "That is not a place on Earth.");
+    const t = Date.now();
+    if (t - (last.get(fkey + ":" + trip) ?? 0) < MIN_GAP_MS) return Response.json({ ok: true, ignored: "too-fast" });
+    last.set(fkey + ":" + trip, t);
+    const when = Math.min(num(body.at) ?? t, t);
+    const out = fleetPublish(fkey, trip, found.userId, {
+      lat: body.lat as number, lng: body.lng as number, at: when,
+      heading: num(body.heading), speed: num(body.speed), accuracy: num(body.accuracy),
+    }, { label: fleetLabel(found.job), kind: fleetKind(found.job) });
+    if (out === "not-your-trip") return no(403, "That is not your record.");
+    return Response.json({ ok: true, ignored: out === "old" ? "old" : undefined });
+  }
   if (!mayShare(found.job, found.userId)) return no(403, "Only the person on the move may share their position.");
 
   const key = tripKey(entity, trip);

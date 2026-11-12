@@ -38,6 +38,32 @@ import { evaluateDecision } from "./decision";
  */
 const actionHandlers: Map<string, ActionHandler> = new Map();
 
+/**
+ * A FAILURE A PERSON READS. The database driver's own text ("PostgresError:
+ * duplicate key value violates unique constraint \"vehicles_registration_number_unique\"")
+ * named a table and a constraint to a driver filling in a form. A refusal a
+ * workflow authored is already in the person's words and passes through; a
+ * crash is turned into one sentence about what to do, and the detail stays in
+ * the server log.
+ */
+export function plainFailure(raw: string, refused = false): string {
+  if (refused) return raw;
+  const text = String(raw ?? "");
+  const unique = text.match(/duplicate key value violates unique constraint "([a-z0-9_]+?)(?:_unique|_key|_idx)?"/i);
+  if (unique) {
+    const words = unique[1].split("_");
+    const field = (words.length > 1 ? words.slice(1) : words).join(" ");
+    return `That ${field} is already in use. Check it and try again.`;
+  }
+  const missing = text.match(/null value in column "([a-z0-9_]+)"/i);
+  if (missing) return `${missing[1].replace(/_/g, " ")} is required.`.replace(/^./, (c) => c.toUpperCase());
+  if (/PostgresError|violates|SQLSTATE|ECONNREFUSED|syntax error|relation ".*" does not exist/i.test(text)) {
+    console.error("[workflow] failure hidden from the person:", text);
+    return "That could not be saved. Nothing was changed. Try again, and tell an administrator if it keeps happening.";
+  }
+  return text;
+}
+
 export function registerActionHandler(
   actionType: string,
   handler: ActionHandler,
@@ -227,7 +253,7 @@ export async function executeWorkflow(
       } : undefined,
     } as WorkflowExecutionResult;
   } catch (err) {
-    const error = err instanceof Error ? err.message : String(err);
+    const error = plainFailure(err instanceof Error ? err.message : String(err), (err as { refused?: unknown })?.refused === true);
     // Definition-level onFailure: best-effort cleanup so long multi-step
     // workflows (scan → AI → N scrapes) don't strand their tracking row in
     // "processing"/"pending" when a mid-run node throws. Runs as a synthetic

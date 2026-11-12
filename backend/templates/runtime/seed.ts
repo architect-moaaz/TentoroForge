@@ -253,6 +253,13 @@ async function ensureAccountRow(id: string | null, email: string, name: string):
   const row: Record<string, unknown> = { id };
   for (const f of ACCOUNT.fields) if (f.kind === "email" && f.name in accountTable) row[f.name] = email;
   if (ACCOUNT.labelField && ACCOUNT.labelField in accountTable) row[ACCOUNT.labelField] = name;
+  // WHERE A NEW PERSON STARTS, AS SIGNUP DOES IT: offline, pending, zero rides.
+  // Without this the generic filler below wrote the person's NAME into every
+  // required column it could not otherwise guess, including an enum: the demo
+  // admin showed up on the dashboard as a driver whose availability was
+  // "Default Admin".
+  const starting = ((accountModule as unknown as { ACCOUNT_INITIAL?: Record<string, unknown> }).ACCOUNT_INITIAL) ?? {};
+  for (const [k, v] of Object.entries(starting)) if (!(k in row) && k in (accountTable as any)) row[k] = v;
   await resolveRequiredFks(accountTable, row);
   Object.assign(row, minimalRow(accountTable, name, row, /* skipFk */ true));
   try {
@@ -950,8 +957,15 @@ async function seedDomain(adminId: string | null, imported: Set<string> = new Se
           for (let i = 0; i < keyed.length; i++) {
             try {
               const values = prepRow(table, keyed[i], ids, i);
-              const res: any = await db.insert(table).values(values)
-                .onConflictDoNothing({ target: emailCol }).returning();
+              // A person's email is NOT always a unique column (a Driver or Member
+              // record whose sign-in lives on the users table). A conflict target
+              // on a column with no unique index is refused by Postgres, so the
+              // row is looked up by email first; the plain no-target conflict
+              // clause then covers a race without naming a constraint.
+              const there: any[] = await db.select({ id: (table as any).id }).from(table)
+                .where(eq(emailCol, String(keyed[i].email))).limit(1);
+              if (there.length) continue;
+              const res: any = await db.insert(table).values(values).onConflictDoNothing().returning();
               const id = res?.[0]?.id;
               if (id != null) got.push(String(id));
             } catch (e: any) {

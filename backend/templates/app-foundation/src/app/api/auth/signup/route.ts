@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import { db } from "@/db";
 import { users } from "@/db/schema/user";
 import { policy as signInPolicy } from "@/lib/sign-in";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import * as accountModule from "@/lib/account";
 import { ACCOUNT, ACCOUNT_INITIAL, SIGNUP_ROLE } from "@/lib/account";
@@ -25,7 +25,8 @@ const SIGNUP_ROLES: string[] =
 
 const signupSchema = z.object({
   name: z.string().min(1, "Name is required"),
-  email: z.string().email("Invalid email"),
+  // ONE ADDRESS, ONE ACCOUNT: kept trimmed and lower-case, so "A@x.com" and "a@x.com" are the same person.
+  email: z.string().trim().toLowerCase().email("Invalid email"),
   password: z.string().min(6, "Password must be at least 6 characters"),
   // Only enforced when the app offers a choice; a lone or absent option means
   // signup never sends one and this stays undefined.
@@ -68,6 +69,15 @@ function accountValues(input: Record<string, unknown>, email: string, name = "")
       if (f.required) return { error: `${f.label} is required` };
       continue;
     }
+    // A PHONE IS DIGITS, AN EMAIL IS AN ADDRESS. The form's `type="tel"` checks
+    // nothing, and a server that trusts it saved "abc" as a driver's phone
+    // number. Seven to fifteen digits, with the usual + space - ( ) around them.
+    if (f.kind === "tel" && (!/^\+?[0-9\s\-()]{7,20}$/.test(String(v)) || String(v).replace(/\D/g, "").length < 7)) {
+      return { error: `${f.label} must be a phone number, for example +91 98765 43210` };
+    }
+    if (f.kind === "email" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v))) {
+      return { error: `${f.label} must be an email address` };
+    }
     values[f.name] = f.kind === "number" ? Number(v) : f.kind === "checkbox" ? Boolean(v) : v;
   }
   return { values };
@@ -82,7 +92,7 @@ export async function POST(request: Request) {
     const [existing] = await db
       .select({ id: users.id })
       .from(users)
-      .where(eq(users.email, data.email))
+      .where(sql`lower(${users.email}) = ${data.email}`)
       .limit(1);
 
     if (existing) {

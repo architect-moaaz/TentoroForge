@@ -412,7 +412,16 @@ never a second one; (2) the follower's screen, which shows the driver's dot with
 "@/sdk/tracking"; (3) the screen of the person on the move, which carries
 `ShareLocation` for that job, and the record must name that person in a field
 such as `driverId`; (4) only if they named a
-dispatcher or admin, a screen that shows everyone on a job. Say in the plan that
+dispatcher or admin, a screen that shows everyone on a job. A DRIVER WHO GOES
+ONLINE AND WAITS FOR WORK, with an admin who watches them all on one map, is a
+fleet and not a job: the driver is their own record (a Driver entity with a
+name, a `userId` linking to their sign-in, a `vehicleType`, a `verificationStatus`
+that ends `approved`, and an `availabilityStatus` of online or offline), their
+home screen has the Go online workflow as its one switch (only for approved
+drivers) and shows `FleetBeacon` while they are online, and the admin's screen carries `FleetMap` with the
+entity name and a filter by vehicle type. Plan the Driver record first, the
+admin's map second, the driver's switch third, and say in the plan that a driver
+shows only while online and approved and is gone when they go offline. Say in the plan that
 the dot shows only while the job is under way and is gone when it ends. Never
 keep the moving position in a record. It is NOT tracking when they want a
 distance, "near me", a store locator, or a status a person types, such as "out

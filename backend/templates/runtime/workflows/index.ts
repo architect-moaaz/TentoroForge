@@ -1169,7 +1169,7 @@ async function _scoped(table: any, where: any, ctx: WorkflowExecutionContext, op
   const user = (ctx as any)?.user;
   if (!user?.id) return where;
   const { scopeForTable } = await import("../data-engine");
-  const scope = await scopeForTable(table, user, op);
+  const scope = await scopeForTable(table, user, op, "workflow");
   if (!scope) return where;
   return where ? and(where, scope) : scope;
 }
