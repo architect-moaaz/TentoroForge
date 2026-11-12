@@ -3934,7 +3934,12 @@ def sensitive_columns(doc: dict) -> dict[str, dict[str, dict]]:
             name = field.get("name") or ""
             name = synonyms.get(re.sub(r"[^a-z]", "", name.lower()), name)
             mask = field.get("mask")
-            if not mask:
+            # A GUESS FROM THE NAME IS FOR TEXT. `personalEmail` is a yes/no —
+            # "the invite went to a personal address" — and was masked as an
+            # email, so the column read as "••••" for everyone (DITANS
+            # TeamInvite, 2026-11-12). Only a field that holds text can hold the
+            # address, number or phone a mask hides; a declared `mask` still wins.
+            if not mask and str(field.get("type") or "string") in ("string", "text"):
                 mask = _mask_hint(name)
             if not mask:
                 continue
