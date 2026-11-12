@@ -1601,6 +1601,29 @@ export function registerDefaultActions(): void {
       for (const step of steps) {
         const key = String(step.key || "");
         const stepCfg = { ...(step.config || {}), __nodeId: key };
+        // A VARIABLE SET INSIDE THE LOOP. `set_variable` is not a registered
+        // handler — the engine evaluates it inline for a top-level step — so
+        // inside a loop it failed "no action set_variable" and every later
+        // step read the old value: DITANS's stage builder never shifted the
+        // stages after an inserted one, and its nationalisation report
+        // computed nothing per legal entity (2026-11-12). Same reading as
+        // the engine: a precomputed value, else the expression.
+        if (String(stepCfg.actionType || "") === "set_variable") {
+          const name = String((stepCfg as any).variableName || key);
+          let value: unknown = null;
+          try {
+            if ("variableValue" in stepCfg) value = _resolveRef((stepCfg as any).variableValue, ctx);
+            else if ("value" in stepCfg) value = _resolveRef((stepCfg as any).value, ctx);
+            else if (typeof (stepCfg as any).expression === "string" && (stepCfg as any).expression.trim())
+              value = evaluateExpression(String((stepCfg as any).expression), ctx.variables as Record<string, unknown>);
+          } catch {
+            value = null;
+          }
+          if (name) ctx.variables[name] = value;
+          if (key) ctx.variables[key] = value;
+          outputs[key] = value;
+          continue;
+        }
         const handler = getActionHandler(String(stepCfg.actionType || ""));
         if (!handler) {
           errors.push({ index, step: key, error: `no action ${stepCfg.actionType}` });
