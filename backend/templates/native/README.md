@@ -184,6 +184,10 @@ import { FleetBeacon, ShareLocation, LiveTrackingMap, MapView, useRoute, useLive
 - Sharing works while the app is open in front of the person. It does not run with the screen off (that needs
   background location and a real build, not Expo Go); say so on a screen where it matters.
 - The map uses Apple Maps on iPhone and Google Maps on Android (the Android build's key is `GOOGLE_MAPS_ANDROID_KEY`).
+- `MapView` takes `height` (points; default 320) and `keepInView`. A pin's `tone` is one of `primary`, `accent`, `muted`,
+  `danger` and nothing else (there is no `neutral`); the end being driven to is `accent`, the other `muted`.
+- Some values are narrow, and a wider word fails to compile: `WorkflowForm`'s `submitVariant` is `primary` or `accent` only,
+  and a `Text` tone is one of the tones listed for `Text` (not `neutral`). `useWidget(...)` returns the widget in `.data`.
 
 ## `@/ui` — the component kit
 
