@@ -156,6 +156,8 @@ apiFetch(path, init?) / apiJson(path, { body? }) // raw calls to the app, sessio
 
 Money fields hold MAJOR units; never divide or multiply by 100.
 
+`<Avatar image={record.photo} />` takes the stored file's id or a link as it is and loads it itself: never wrap it in `fileSource(...)` (that returns an image object, which is only for an `<Image source>` you draw yourself).
+
 ### Live tracking and maps (a driver on the move, a customer watching)
 
 Use these when a page is about someone on the move: a driver, courier or technician sharing where they are, or a customer
@@ -169,7 +171,7 @@ import { FleetBeacon, ShareLocation, LiveTrackingMap, MapView, useRoute, useLive
     // the online state, once. Never add a second "Go online" button next to the workflow's own.
 <ShareLocation entity="Ride" trip={ride.id} stage={ride.status === "in_progress" ? "to_dropoff" : "to_pickup"} />
     // one trip: a Start / End button that shares for that trip only
-<LiveTrackingMap entity="Ride" trip={ride.id} pickup={{ lat, lng }} dropoff={{ lat, lng }} height={320} />
+<LiveTrackingMap entity="Ride" trip={ride.id} pickup={{ lat, lng }} dropoff={{ lat, lng }} height={320} />   // optional `heading="pickup"|"dropoff"`: which end they are going to (else read from the trip's stage)
     // the driver, both ends, the road, "To pickup: 2.1 mi · 9 min · arrives 14:05" and where the route came from
 <MapView points={[{ id, lat, lng, label, tone }]} route={path} keepInView />   // any other map: pins and a line
 ```
