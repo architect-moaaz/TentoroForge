@@ -52,24 +52,52 @@ Smith (Forge's assistant)
 - A per-role platform plan (phone app, website, both) is shown before a multi-role app is made, only when needed
   (two or more roles that would not all use the same platform, and one needs a phone). Simple apps keep the one
   question. Test: `test_smith_shows_a_platform_plan_only_when_an_app_needs_one.py`.
+- The phone app follows that plan role by role: the driver's pages are drawn as phone screens, the administrator's are
+  not (`mobile.nativeRoles`). Test: `test_the_phone_app_draws_only_the_pages_of_the_roles_the_plan_gave_it.py`.
 
-## App only (a new Forge app will NOT have these yet)
+The phone app
+- A phone app can share a driver's position and show a map with the road, the distance left and the arrival time
+  (`FleetBeacon`, `ShareLocation`, `LiveTrackingMap`, `MapView`, `useRoute`), following a trip by asking the server
+  for the newest note (`?snapshot=1`). The native builder's guide teaches when to use them. Sharing works while the app is
+  open. Test: `test_the_phone_app_can_share_a_position_and_show_the_road.py` and the native node test.
 
-These were fixed by hand in `output/n2xcrvt5` and still need moving into Forge:
-- Onboarding parts (`personal`, `vehicle`, `payout`) written with `WorkflowForm`, plus the workflows "Save my
-  details" and "Save my vehicle" (FLOW-016, FLOW-017) added to that app's blueprint by hand.
-- Driver home and live map pages using `FleetBeacon` (hand-written page code, synced into the blueprint).
-- Profile page with Sign out and an edit link.
-- `src/schemas/shell.json` and the vendored `SideNav` dist patch (the package source IS fixed in Forge:
-  `packages/library/.../SideNav.tsx`; the app copy was patched separately).
-- The "Ride" ownership rule with `readsUnclaimed`, added to the app's blueprint by hand (the Forge side is done; a new
-  app only gets it if the blueprint agent writes it, which it is now taught to do).
+A person's own details can be saved (found building the ride-hailing app by hand)
+- A page of someone's own details (onboarding, profile, settings) with no workflow that saves them is refused before the app
+  is built (`own-details-cannot-be-saved`), and the workflow-writing agent is told the pattern: a "Save my <thing>"
+  workflow that reads the record by `$user.id`, refuses unless it is theirs, updates only what they may change and keeps
+  an empty box as it was. Test: `test_a_page_of_a_persons_own_details_can_save_them.py`.
+
+## Checked and already in Forge (they were only hand edits in the test app)
+
+- The menu file `src/schemas/shell.json`: regenerated from the test app's blueprint, it is identical to what Forge makes.
+- The sidebar fix: the library SOURCE is fixed (`packages/library/.../SideNav/SideNav.tsx`) and Forge rebuilds the
+  library from source into every new app, so the hand patch to the app's copy only repeated it.
+- Sign out: Forge's account menu (`(dashboard)/AccountMenu.tsx`) has it in every app. The extra button on the test app's
+  profile page is not needed.
+- A driver who is online shares their position by themselves: the page writer is taught `FleetBeacon` (test
+  `test_live_tracking_is_offered_to_the_page_agent.py`), so the home and live-map pages that were written by hand are
+  what a new app's writer is taught to write.
+- The ride ownership rule with `readsUnclaimed`: the engine supports it and the blueprint agent is taught to use it for
+  work that is offered before anyone holds it.
+
+## App only (a new Forge app will NOT have these)
+
+These were hand-written in `output/n2xcrvt5` for that app's own data and stay there:
+- The actual contents of its "Save my details" and "Save my vehicle" workflows and onboarding form parts (FLOW-016,
+  FLOW-017). A new app gets the REFUSAL and the teaching, so Smith writes its own; it does not get a copy of these.
+- The ten driver phone screens in `output/n2xcrvt5/native` (written through Forge's native engineer, answered by hand).
 
 ## Found, not fixed yet
 
 - The test browser crashes ("Target crashed") on pages that draw the Google map several times in a row, in headless
   Chromium. Not yet known whether it is the test browser or the page.
-- A person with a customer phone: open (searching) ride requests still show the rider's phone to every driver, before
-  anyone accepts. It should show only after acceptance.
-- Position updates after a network drop: one test saw no new positions from the driver after reconnect. Needs a closer
-  look.
+- Open (searching) ride requests show the rider's phone to every driver before anyone accepts. It should show only after
+  acceptance.
+- A test saw no position updates from the driver after a dropped network, even with the retry fix in the web driver
+  page. Not yet known if the app or the test is at fault.
+- The driver's phone Profile page has no control for notification choices (no workflow exists for them).
+- The Profile page shows the last four digits of the bank account number, which assumes the field comes back in full.
+- Ride History on the phone filters the date range on the phone, so a very long history may be cut off by the list's
+  page size.
+- The native builder's compile check uses a toolchain folder that is chosen by environment; an old one missed a real type
+  error. The folder should be keyed by the template's packages every time.

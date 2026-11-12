@@ -81,3 +81,13 @@ def test_the_phone_logic_runs_under_node():
                           str(NATIVE / "__tests__" / "a-driver-keeps-sharing-and-the-road-counts-down.test.mts")],
                          capture_output=True, text=True, timeout=120)
     assert run.returncode == 0, run.stdout[-2000:] + run.stderr[-2000:]
+
+
+def test_the_web_picture_of_the_phone_app_gets_a_stand_in_map_instead_of_a_broken_bundle():
+    # react-native-maps draws on a phone only; importing it for the web fails the bundle (the Editor's phone preview)
+    web = _t(SDK / "map.web.tsx")
+    assert "react-native-maps" not in web.replace("react-native-maps draws", "")
+    for name in ("export function MapView", "export type MapPoint", "export type MapViewProps"):
+        assert name in web, name
+    native = _t(SDK / "map.tsx")
+    assert 'from "react-native-maps"' in native

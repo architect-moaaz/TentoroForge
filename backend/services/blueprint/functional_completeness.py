@@ -1132,8 +1132,9 @@ def queue_findings(doc: dict) -> list[dict]:
 
 def functional_findings(doc: dict) -> list[dict]:
     """Everything, for verification."""
+    from services.blueprint.self_service import findings as self_service_findings
     return (page_findings(doc) + launcher_findings(doc) + queue_findings(doc) + authoring_findings(doc)
-            + handoff_findings(doc))
+            + handoff_findings(doc) + self_service_findings(doc))
 
 
 # ---------------------------------------------------------------------------
