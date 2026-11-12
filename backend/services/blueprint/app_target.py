@@ -130,7 +130,7 @@ def web_pages_enabled(doc: object) -> bool:
     return has_web_pages(surface if isinstance(surface, str) else None)
 
 
-def apply(doc: dict, target: str | None) -> dict:
+def apply(doc: dict, target: str | None, native_roles: list[str] | None = None) -> dict:
     """Record the choice in the Blueprint (`mobile.surface`) and set `mobile.native.enabled` from it. An explicit False
     when there is no native app, so the choice is written down and a later reader (or Smith) sees that the owner asked
     for none, and the server's own default can never start the native agent for them.
@@ -143,6 +143,8 @@ def apply(doc: dict, target: str | None) -> dict:
         mobile = doc.setdefault("mobile", {})
         mobile["surface"] = surface
         mobile.setdefault("native", {})["enabled"] = has_native(surface)
+        if has_native(surface) and native_roles:
+            mobile["nativeRoles"] = list(native_roles)   # drawn for these roles only (the plan said which)
         if has_native(surface):
             store = mobile.setdefault("store", {})
             if not str(store.get("bundleId") or "").strip():

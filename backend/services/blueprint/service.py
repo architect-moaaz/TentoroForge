@@ -372,8 +372,8 @@ class BlueprintService:
         )
         # WHAT THE PERSON CHOSE WHEN THEY CREATED THE APP (a website, or a website and a mobile app) becomes the
         # Blueprint's own field here, once; after this the Blueprint is the only truth.
-        from services.blueprint import app_target
-        app_target.apply(svc.doc, app_target.read(output_dir))
+        from services.blueprint import app_target, platform_plan
+        app_target.apply(svc.doc, app_target.read(output_dir), platform_plan.native_roles(output_dir))
         svc.validate()
         svc.save()
         return svc

@@ -621,7 +621,23 @@ def drawn_pages(doc: dict) -> list[dict]:
     without the sign-in and sign-up pages — signing in is the SDK's."""
     from services.blueprint.orchestrator import native_page_subjects
     wanted = set(native_page_subjects(doc))
-    return [p for p in _live(doc.get("pages")) if str(p.get("id")) in wanted]
+    return [p for p in _live(doc.get("pages")) if str(p.get("id")) in wanted and for_phone_roles(doc, p)]
+
+
+def for_phone_roles(doc: dict, page: dict) -> bool:
+    """Is this page drawn on the phone, under the plan role by role? With no plan (`mobile.nativeRoles` absent) every
+    page is. With one, a page nobody in particular is kept to (a profile, a help page) is, and a page restricted to
+    roles is only when one of them has the phone app: the driver's pages are drawn, the administrator's are not."""
+    keep = (doc.get("mobile") or {}).get("nativeRoles") if isinstance(doc, dict) else None
+    if not keep:
+        return True
+    from services.blueprint.platform_plan import canonical_role
+    from services.blueprint.projection import restricted_roles
+    roles = restricted_roles(doc, page)
+    if not roles:
+        return True
+    wanted = {canonical_role(r) for r in keep}
+    return any(canonical_role(r) in wanted for r in roles)
 
 
 def auth_file(page: dict) -> str | None:

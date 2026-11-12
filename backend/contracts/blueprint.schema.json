@@ -3292,6 +3292,13 @@
             "native_only",
             "pwa_only"
           ]
+        },
+        "nativeRoles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The roles that get the phone app, when the person chose a plan role by role (a driver gets phone screens, the administrator stays on the website). A page only those roles may open is drawn as a phone screen; a page only other roles may open is not. Absent or empty: every page is drawn, as before."
         }
       },
       "additionalProperties": false,

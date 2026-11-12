@@ -259,6 +259,23 @@ def read_reply(text: str, plan: Plan) -> tuple[str, Plan] | None:
     return None
 
 
+def canonical_role(name: str) -> str:
+    """A role's name as the plan spells it: "Rider" and "Customers" are Customer, "Platform Admin" is Admin. A name
+    the plan has no word for is kept as it is, lower-cased, so it still matches itself."""
+    found = _roles_in(str(name or ""))
+    return found[0][0] if found else str(name or "").strip().lower()
+
+
+def native_roles(output_dir: str | Path) -> list[str] | None:
+    """The roles that get the phone app under the plan the person settled; None when there is no plan or they chose
+    the web only (then the phone app, if any, is drawn for every page as before)."""
+    kept = read(output_dir)
+    if not kept or kept.get("status") not in ("accepted", "edited", "recommended"):
+        return None
+    roles = [str(r["role"]) for r in kept.get("roles") or [] if r.get("platform") in ("mobile", "both")]
+    return roles or None
+
+
 def write(output_dir: str | Path, plan: Plan, status: str, decided_by: str = "person") -> None:
     path = Path(output_dir) / FILE
     path.parent.mkdir(parents=True, exist_ok=True)
