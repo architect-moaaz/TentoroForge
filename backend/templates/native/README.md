@@ -189,6 +189,42 @@ import { FleetBeacon, ShareLocation, LiveTrackingMap, MapView, useRoute, useLive
 - Some values are narrow, and a wider word fails to compile: `WorkflowForm`'s `submitVariant` is `primary` or `accent` only,
   and a `Text` tone is one of the tones listed for `Text` (not `neutral`). `useWidget(...)` returns the widget in `.data`.
 
+### A map that IS the screen (a person out and moving: a driver, a courier, a technician on the way)
+
+For someone who works from the road, the map is the app, the way every ride-hailing and delivery app is built: the map fills
+the glass, a compact panel floats on top, round buttons float at the side, and a sheet slides up from the bottom with what
+to do next. Use `MapScreen` for that screen. Do NOT use it for a form, a list or a settings page, and do not put a map
+inside a card on a page of cards for a person who is driving.
+
+```tsx
+import { MapScreen, BottomSheet, FloatingPanel, FloatingButton, Row, Text, Button, StatusBadge } from "@/ui";
+
+<MapScreen
+  points={[{ id: "pickup", lat, lng, label: "Pickup", tone: "accent" }]}   // only places the record really has
+  route={nav.route?.path}                                                  // from useRoute(from, to)
+  top={<FloatingPanel><Row>…avatar, Online / Offline, earnings today…</Row></FloatingPanel>}
+  controls={<FloatingButton icon="call" label="Call the rider" onPress={call} />}
+>
+  <BottomSheet snapPoints={[0.24, 0.55]} header={<Text variant="heading">Arrived at pickup</Text>}>
+    …who, where, how far… <Button variant="accent" onPress={start}>Start ride</Button>
+  </BottomSheet>
+</MapScreen>
+```
+
+- `MapScreen` follows this device's position (blue dot, camera) until the person drags the map, and a recentre button takes it
+  back. It says in words when the location is blocked, cannot be found, or is old. `followUser={false}` frames the places given
+  instead (a request preview). It draws no header: it is the whole screen.
+- ONE STATE, ONE SHEET. The screen is a state machine over the record's own status (waiting, request, to pickup, arrived,
+  in trip, done): each state is one `BottomSheet` with its header, the few facts that matter, and the ONE `variant="accent"`
+  action. The sheet changes when the status changes (`index` makes it controlled); never show every fact at once, never a
+  long scroll. A request is a sheet over the map with a countdown and Accept / Decline, not another page.
+- A sheet's `snapPoints` are resting heights (shares of the room, e.g. `[0.24, 0.55, 0.9]`, or points). The person drags it;
+  it never dims the map. A pick-one or a confirmation is still a `Sheet` / `Dialog`.
+- Put floating parts in `top` (a `FloatingPanel`: compact, one line of facts), round buttons in `controls`
+  (`FloatingButton`, 48 pt or more, with a `label`). Nothing else floats: the map stays visible.
+- `MapView height="fill"` is the same map without the screen around it. `useDevicePosition()` reads where the device is
+  if a screen needs the number. No made-up position, ever: with no fix show the last known spot and say so.
+
 ## `@/ui` — the component kit
 
 React Native core only; every colour/size/radius comes from the theme; 44 pt

@@ -87,7 +87,58 @@ def test_the_web_picture_of_the_phone_app_gets_a_stand_in_map_instead_of_a_broke
     # react-native-maps draws on a phone only; importing it for the web fails the bundle (the Editor's phone preview)
     web = _t(SDK / "map.web.tsx")
     assert "react-native-maps" not in web.replace("react-native-maps draws", "")
-    for name in ("export function MapView", "export type MapPoint", "export type MapViewProps"):
+    for name in ("export const MapView", "MapPoint", "MapViewProps", "MapHandle"):
         assert name in web, name
     native = _t(SDK / "map.tsx")
     assert 'from "react-native-maps"' in native
+
+
+# ---- a map that IS the screen -------------------------------------------------------------------------------------
+
+def test_the_kit_has_the_parts_of_a_map_first_screen_and_the_guide_says_when_to_use_them():
+    index = _t(NATIVE / "src" / "ui" / "index.ts")
+    for name in ("MapScreen", "BottomSheet", "FloatingPanel", "FloatingButton"):
+        assert name in index, name
+    for f in ("MapScreen.tsx", "BottomSheet.tsx", "Floating.tsx", "MapScreenContext.ts"):
+        assert (NATIVE / "src" / "ui" / f).is_file(), f
+    readme = _t(NATIVE / "README.md")
+    assert "A map that IS the screen" in readme
+    assert "ONE STATE, ONE SHEET" in readme and "Do NOT use it for a form, a list or a settings page" in readme
+
+
+def test_the_phone_and_web_maps_share_one_set_of_types_and_the_sheet_never_dims_the_map():
+    assert "map-types" in _t(SDK / "map.tsx") and "map-types" in _t(SDK / "map.web.tsx")
+    assert 'height?: number | "fill"' in _t(SDK / "map-types.ts")
+    sheet = _t(NATIVE / "src" / "ui" / "BottomSheet.tsx")
+    assert "Modal" not in sheet.replace("`Sheet` is the other one", "")   # stays on the screen, does not block what is behind
+    assert "settleSheet" in sheet and "dragShown" in sheet and "PanResponder" in sheet
+
+
+def test_the_screen_follows_the_real_position_and_says_when_it_cannot():
+    screen = _t(NATIVE / "src" / "ui" / "MapScreen.tsx")
+    assert "useDevicePosition" in screen
+    for words in ("Location is blocked", "could not be found", "No new location for a while"):
+        assert words in screen, words
+    pos = _t(SDK / "position.ts")
+    assert "ensureForegroundLocation" in pos and "watchPositionAsync" in pos
+
+
+def test_two_screens_never_both_put_the_location_question_and_a_parked_phone_is_not_stale():
+    # found on a real emulator: a map asked while the home screen's question was up and waited for ever
+    perm = _t(SDK / "permission.ts")
+    assert "getForegroundPermissionsAsync" in perm and "canAskAgain" in perm and "asking" in perm
+    for f in ("position.ts", "tracking.tsx"):
+        text = _t(SDK / f)
+        assert "ensureForegroundLocation" in text, f
+        assert "requestForegroundPermissionsAsync" not in text, f   # asked only through the one helper
+    pos = _t(SDK / "position.ts")
+    assert "distanceInterval: 0" in pos and "GIVE_UP_MS" in pos      # reports while parked; never "finding" for ever
+    assert "getLastKnownPositionAsync()\n" in pos.replace("\r\n", "\n")   # not waited for
+    screen = _t(NATIVE / "src" / "ui" / "MapScreen.tsx")
+    assert "const high" in screen and "opacity: high ? 0 : 1" in screen   # the buttons step aside when the sheet is tall
+
+
+def test_an_android_build_carries_the_maps_key_and_says_expo_go_may_stay_blank():
+    app = _t(NATIVE / "app.json")
+    assert "__GOOGLE_MAPS_ANDROID_KEY__" in app
+    assert "Expo Go's own setup does" in _t(SDK / "map.tsx")

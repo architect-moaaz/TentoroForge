@@ -17,6 +17,7 @@ import { apiJson } from "./api";
 import { formatDistance, type GeoPoint } from "./geo";
 import { MapView, type MapPoint } from "./map";
 import { minutesText, routeSource, useRoute } from "./route";
+import { ensureForegroundLocation } from "./permission";
 import { createSender, RETRY_MS } from "./tracking-core";
 import { Button } from "../ui/Button";
 import { Text } from "../ui/Text";
@@ -98,8 +99,7 @@ export function useShareLocation(entity: string, trip: string | null | undefined
       onError: (message) => { if (!gone) setError(message); },
     });
     (async () => {
-      const ask = await Location.requestForegroundPermissionsAsync();
-      if (!ask.granted) {
+      if (!(await ensureForegroundLocation())) {
         if (!gone) setError("Location is blocked — allow it for this app in Settings.");
         return;
       }

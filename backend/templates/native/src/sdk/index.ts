@@ -37,7 +37,8 @@ export { formatCell, formatDate, formatNumber, formatPercent, humanize } from ".
 export { distanceKm, formatDistance, parseNear, roundPoint, isPoint, type GeoPoint } from "./geo";
 export { askPosition } from "./location";
 // Live tracking and maps: a driver shares where they are, a customer watches the trip with the road and the time.
-export { MapView, type MapPoint, type MapViewProps } from "./map";
+export { MapView, type MapPoint, type MapViewProps, type MapHandle } from "./map";
+export { useDevicePosition, type DevicePosition, type PositionState } from "./position";
 export { useRoute, minutesText, routeSource, type Navigation, type RouteInfo } from "./route";
 export {
   useLiveTrip, useShareLocation, ShareLocation, FleetBeacon, LiveTrackingMap,

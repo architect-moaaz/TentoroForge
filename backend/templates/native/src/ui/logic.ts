@@ -161,3 +161,38 @@ export function shares(values: number[]): number[] {
   const total = values.reduce((s, v) => s + (v > 0 ? v : 0), 0);
   return values.map((v) => (total > 0 && v > 0 ? Math.round((v / total) * 1000) / 10 : 0));
 }
+
+// ---- a bottom sheet over a map ----------------------------------------------------------------------------------------
+
+/** A sheet's resting heights, ascending, in points. A number of 1 or less is a share of `room` (the height there is to
+ *  fill), anything more is points; none may be under `floor` or over `room`, and a repeat is dropped. */
+export function sheetHeights(snaps: number[], room: number, floor = 72): number[] {
+  const out = snaps
+    .map((s) => (s <= 1 ? s * room : s))
+    .map((h) => Math.round(Math.min(Math.max(h, floor), Math.max(room, floor))))
+    .sort((a, b) => a - b);
+  return out.filter((h, i) => i === 0 || h !== out[i - 1]);
+}
+
+/** Where a sheet comes to rest when the finger lifts: `shown` is how much of it is showing, `velocity` is the
+ *  finger's speed in points per millisecond (positive is downward). A flick carries it on in its direction;
+ *  a slow drag goes to the nearest resting height. Returns the index into `heights`. */
+export function settleSheet(shown: number, velocity: number, heights: number[]): number {
+  if (heights.length === 0) return 0;
+  const aimed = shown - velocity * 220;
+  let best = 0;
+  for (let i = 1; i < heights.length; i++) {
+    if (Math.abs(heights[i] - aimed) < Math.abs(heights[best] - aimed)) best = i;
+  }
+  return best;
+}
+
+/** A drag, held inside the sheet's own range: it can be pulled a little past the ends (it gives), never off. */
+export function dragShown(start: number, dy: number, heights: number[], give = 24): number {
+  if (heights.length === 0) return start;
+  const lo = heights[0], hi = heights[heights.length - 1];
+  const raw = start - dy;
+  if (raw < lo) return lo - Math.min(give, (lo - raw) / 4);
+  if (raw > hi) return hi + Math.min(give, (raw - hi) / 4);
+  return raw;
+}

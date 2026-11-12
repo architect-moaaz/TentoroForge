@@ -67,6 +67,17 @@ A person's own details can be saved (found building the ride-hailing app by hand
   workflow that reads the record by `$user.id`, refuses unless it is theirs, updates only what they may change and keeps
   an empty box as it was. Test: `test_a_page_of_a_persons_own_details_can_save_them.py`.
 
+The phone's map and live location (found trying the driver app on an Android emulator)
+- A blank map in Expo Go: Expo Go's own Maps setup did not draw tiles, and it cannot use the app's key. A development build made
+  with the app's own Maps SDK key (`GOOGLE_MAPS_ANDROID_KEY`, written into `app.json` when the phone project is made) draws
+  real tiles. Background location and push alerts will need this kind of build too.
+- Two screens asking for the location at once (the home screen's position sharing and the map) left the second waiting for
+  ever. One helper (`sdk/permission.ts`) looks first, asks once, and everyone gets the same answer. The map says in words when
+  the location is blocked, cannot be found, or is old, and a parked phone reports at its interval so it is not shown stale.
+- Map-first kit pieces: `MapScreen` (full-screen map, floating top panel, round buttons, follows the device and recentres),
+  `BottomSheet` (stays up, never dims the map, drags between resting heights), `FloatingPanel`, `FloatingButton`, a dark
+  map under a dark design. Test: `test_the_phone_app_can_share_a_position_and_show_the_road.py` and the native node tests.
+
 ## Checked and already in Forge (they were only hand edits in the test app)
 
 - The menu file `src/schemas/shell.json`: regenerated from the test app's blueprint, it is identical to what Forge makes.
