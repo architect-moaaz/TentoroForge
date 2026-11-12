@@ -275,6 +275,10 @@ def project_fixed_half(doc: dict, output_dir: str | Path) -> list[str]:
         # Where the web app is is known when it is published; the build is handed it then
         # (`EXPO_PUBLIC_APP_URL`), and a person running it locally writes a `.env`.
         "__DEPLOYED_URL__": "", "__EAS_PROJECT_ID__": prior,
+        # The Android build's key for Google Maps (the Maps SDK for Android; it is made to sit inside the app, and is
+        # restricted to the app's package in Google Cloud). Empty when not set: the app still builds, and the
+        # map on Android stays blank until it is. Never printed.
+        "__GOOGLE_MAPS_ANDROID_KEY__": os.environ.get("GOOGLE_MAPS_ANDROID_KEY", ""),
     }
     written: list[str] = []
     drawn_auth = drawn_auth_files(doc)

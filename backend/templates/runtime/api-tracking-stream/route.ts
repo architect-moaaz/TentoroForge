@@ -37,6 +37,12 @@ export async function GET(req: Request): Promise<Response> {
   const trip = tripKey(entity, id);
   const over = finished(found.job);
 
+  // A PHONE CANNOT HOLD THE OPEN LINE (its fetch does not stream), so it asks for the newest note instead, every few
+  // seconds: `?snapshot=1` answers once, with the same access checks as above, and the line is not opened.
+  if (params.get("snapshot") === "1") {
+    return Response.json({ position: over ? null : (latest(trip) ?? null), done: over }, { headers: { "cache-control": "no-store" } });
+  }
+
   const encoder = new TextEncoder();
   let stop: (() => void) | null = null;
   let timer: ReturnType<typeof setInterval> | null = null;

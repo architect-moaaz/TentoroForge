@@ -48,3 +48,62 @@ export function parseNear(value: string | null | undefined): GeoPoint | null {
   const p = { lat: Number(m[1]), lng: Number(m[2]) };
   return Math.abs(p.lat) <= 90 && Math.abs(p.lng) <= 180 ? p : null;
 }
+
+/* ------------------------------ ROUTES ------------------------------ */
+
+/**
+ * A routing service's encoded path (Google's and OSRM's "polyline" format) as
+ * places. `precision` is 5 for both of them.
+ */
+export function decodePolyline(encoded: string, precision = 5): GeoPoint[] {
+  const factor = 10 ** precision;
+  const out: GeoPoint[] = [];
+  let index = 0, lat = 0, lng = 0;
+  while (index < encoded.length) {
+    for (const axis of [0, 1]) {
+      let shift = 0, result = 0, byte: number;
+      do {
+        byte = encoded.charCodeAt(index++) - 63;
+        result |= (byte & 0x1f) << shift;
+        shift += 5;
+      } while (byte >= 0x20 && index < encoded.length + 1);
+      const delta = result & 1 ? ~(result >> 1) : result >> 1;
+      if (axis === 0) lat += delta; else lng += delta;
+    }
+    out.push({ lat: lat / factor, lng: lng / factor });
+  }
+  return out;
+}
+
+/** At most `max` points of a path, keeping its ends and its shape. */
+export function thinPath(path: GeoPoint[], max = 300): GeoPoint[] {
+  if (path.length <= max) return path;
+  const step = (path.length - 1) / (max - 1);
+  const out: GeoPoint[] = [];
+  for (let i = 0; i < max - 1; i++) out.push(path[Math.round(i * step)]);
+  out.push(path[path.length - 1]);
+  return out;
+}
+
+/** Length of a path in kilometres. */
+export function pathKm(path: GeoPoint[]): number {
+  let km = 0;
+  for (let i = 1; i < path.length; i++) km += distanceKm(path[i - 1], path[i]) ?? 0;
+  return km;
+}
+
+/**
+ * Where `here` is against a route: how far is left to go, and how far off the
+ * line the traveller is. The nearest point of the path stands for "here", so a
+ * driver who drifts more than a short way from the line is off the route and the
+ * page asks for a new one.
+ */
+export function alongPath(path: GeoPoint[], here: GeoPoint): { remainingKm: number; offRouteKm: number } {
+  if (path.length === 0) return { remainingKm: 0, offRouteKm: 0 };
+  let best = 0, bestKm = Infinity;
+  for (let i = 0; i < path.length; i++) {
+    const d = distanceKm(here, path[i]) ?? Infinity;
+    if (d < bestKm) { bestKm = d; best = i; }
+  }
+  return { remainingKm: bestKm + pathKm(path.slice(best)), offRouteKm: bestKm };
+}
