@@ -1,7 +1,7 @@
 // Default users table — required by auth.ts. Generated apps may extend
 // or override per-project; this default keeps a fresh stamp-out compilable
 // without forcing the schema agent to run before first build.
-import { pgTable, text, boolean, timestamp, uuid, integer } from "drizzle-orm/pg-core";
+import { pgTable, text, boolean, timestamp, uuid, integer, jsonb } from "drizzle-orm/pg-core";
 
 export const users = pgTable("users", {
   // uuid to match the id convention every generated entity uses — otherwise a
@@ -32,5 +32,28 @@ export const users = pgTable("users", {
   emailCodeExpiresAt: timestamp("email_code_expires_at"),
   emailCodeSentAt: timestamp("email_code_sent_at"),
   emailCodeAttempts: integer("email_code_attempts").default(0),
+  // TWO-STEP SIGN-IN (`lib/sign-in-guard.ts`): on, a password alone opens no
+  // session — a six-digit code mailed to the address must follow, unless this
+  // browser was trusted for thirty days. Off for every existing account.
+  twoStep: boolean("two_step").default(false),
+  // THE ONE CODE IN FLIGHT that is not the address proof above: a two-step
+  // sign-in, a password reset, or turning two-step on or off (`signInCodeFor`
+  // says which, so one cannot be spent as another). Only its keyed digest is
+  // kept, with its expiry, when it was sent and the wrong tries so far.
+  signInCodeHash: text("sign_in_code_hash"),
+  signInCodeFor: text("sign_in_code_for"),
+  signInCodeExpiresAt: timestamp("sign_in_code_expires_at"),
+  signInCodeSentAt: timestamp("sign_in_code_sent_at"),
+  signInCodeAttempts: integer("sign_in_code_attempts").default(0),
+  // SIGN-IN PAUSES after five wrong passwords in a row, for fifteen minutes;
+  // a right one (or a password reset) sets the count back to nought.
+  failedSignIns: integer("failed_sign_ins").default(0),
+  signInPausedUntil: timestamp("sign_in_paused_until"),
+  // EVERY SESSION THIS PERSON HOLDS, by its id: a session whose id is gone
+  // from the list is signed out at its next request ("sign out other
+  // devices"). `sessionVersion` is bumped by a password reset and by signing
+  // out elsewhere; a session or a trusted browser from before it is refused.
+  signedInDevices: jsonb("signed_in_devices").default([]),
+  sessionVersion: integer("session_version").default(0),
   createdAt: timestamp("created_at").defaultNow(),
 });

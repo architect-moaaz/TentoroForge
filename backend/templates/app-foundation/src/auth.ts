@@ -9,6 +9,7 @@ import { db } from "@/db";
 import { users } from "@/db/schema/user";
 import { eq } from "drizzle-orm";
 import { connected, digest, domainAllowed, issuerOf, roleFromClaims, ssoEntries, policy as signInPolicy, type SsoEntry } from "@/lib/sign-in";
+import { SIGN_IN_COLUMNS } from "@/lib/sign-in-guard";
 
 /** Every scalar column of a users row except the credential and what the
  *  session already names — the profile the session carries so a workspace
@@ -16,8 +17,9 @@ import { connected, digest, domainAllowed, issuerOf, roleFromClaims, ssoEntries,
 function profileOf(row: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(row)) {
-    if (["password", "passwordHash", "id", "email", "name", "role", "accountType",
-         "emailCodeHash", "emailCodeExpiresAt", "emailCodeSentAt", "emailCodeAttempts"].includes(k)) continue;
+    // The sign-in's own columns (codes, the pause, the sessions) never ride in
+    // a session: a token is readable by whoever holds it.
+    if (["id", "email", "name", "role", "accountType", ...SIGN_IN_COLUMNS].includes(k)) continue;
     if (v === null || ["string", "number", "boolean"].includes(typeof v)) out[k] = v;
     // A LIST OF IDS rides along too — the properties a person is assigned to
     // are an `actorColumn` of their own; left behind, a person of several
@@ -73,26 +75,91 @@ async function userByEmail(email: string): Promise<Record<string, any> | null> {
   return (row as any) ?? null;
 }
 
-/** Email and password: the credential checked against the stored hash. */
+/**
+ * WHAT A SESSION STARTS WITH, every way in alike: the row as the session
+ * carries it, plus the session's own id written to the person's row (so it
+ * can be listed and signed out from elsewhere) and the session version it
+ * was issued under. A row the id could not be written to (the column not
+ * there yet) still signs in, as a session from before ids.
+ */
+async function startSession(user: Record<string, any>, via: string, agent?: unknown): Promise<Record<string, any>> {
+  const out = await sessionUserOf(user);
+  try {
+    const guard = await import("@/lib/sign-in-guard");
+    out.sid = await guard.addDevice(user as any, { agent, via });
+  } catch (err) {
+    console.warn("[auth] the session could not be listed on the person's row:", err);
+  }
+  out.sv = Number(user.sessionVersion ?? 0);
+  return out;
+}
+
+/** A header of the request next-auth hands `authorize`, by name. */
+function headerOf(req: unknown, name: string): string {
+  const h = (req as { headers?: unknown } | undefined)?.headers as any;
+  if (!h) return "";
+  if (typeof h.get === "function") return String(h.get(name) ?? "");
+  return String(h[name] ?? h[name.toLowerCase()] ?? "");
+}
+
+/**
+ * Email and password: the credential checked against the stored hash — and,
+ * past it, the guard (`lib/sign-in-guard.ts`). A paused address opens to no
+ * password. A person with two-step on gets a code by email and NO SESSION
+ * until the same form comes back with it (`code`); `remember` trusts this
+ * browser for thirty days. Each stop is said in the error next-auth hands the
+ * form (`refusalOf`), never as a session the UI is trusted to hold back.
+ */
 const passwordProvider = CredentialsProvider({
   id: "credentials",
   name: "credentials",
   credentials: {
     email: { label: "Email", type: "email" },
     password: { label: "Password", type: "password" },
+    code: { label: "Code", type: "text" },
+    remember: { label: "Trust this browser", type: "text" },
   },
-  async authorize(credentials) {
+  async authorize(credentials, req) {
     if (!credentials?.email || !credentials?.password) return null;
+    const email = String(credentials.email);
     try {
-      const user = await userByEmail(String(credentials.email));
-      if (!user) { await _signIn(null, String(credentials.email), false); return null; }
+      const guard = await import("@/lib/sign-in-guard");
+      const user = await userByEmail(email);
+      if (!user) { await _signIn(null, email, false); return null; }
+      const paused = guard.pausedUntil(user as any);
+      if (paused) { await _signIn(user, email, false, "sign-in-paused"); throw new guard.SignInRefused({ code: "SIGN_IN_PAUSED", until: paused }); }
       // Only check isActive if the field exists (not all schemas have it)
-      if ("isActive" in user && !user.isActive) { await _signIn(user, String(credentials.email), false); return null; }
+      if ("isActive" in user && !user.isActive) { await _signIn(user, email, false); return null; }
       const valid = await bcrypt.compare(credentials.password, user.password);
-      if (!valid) { await _signIn(user, String(credentials.email), false); return null; }
-      await _signIn(user, String(credentials.email), true);
-      return (await sessionUserOf(user)) as any;
+      if (!valid) {
+        await _signIn(user, email, false);
+        const failed = await guard.passwordFailed(user as any);
+        if (failed.pausedUntil) throw new guard.SignInRefused({ code: "SIGN_IN_PAUSED", until: failed.pausedUntil });
+        return null;
+      }
+      await guard.passwordPassed(user as any);
+      if (user.twoStep === true && !guard.trusted(user as any, headerOf(req, "cookie"))) {
+        const code = String(credentials.code ?? "").trim();
+        if (!code) {
+          const sent = await guard.sendCode(user as any, "sign_in");
+          throw new guard.SignInRefused({ code: "TWO_STEP_REQUIRED", sentTo: sent.sentTo,
+                                          ...(sent.wait ? { wait: sent.wait } : {}), ...(sent.notice ? { notice: sent.notice } : {}) });
+        }
+        const check = await guard.checkCode(user as any, "sign_in", code);
+        if (!check.ok) {
+          await _signIn(user, email, false, "two-step");
+          throw new guard.SignInRefused({
+            code: check.code === "EXPIRED" || check.code === "NO_CODE" ? "TWO_STEP_EXPIRED"
+              : check.code === "TOO_MANY" ? "TWO_STEP_TOO_MANY" : "TWO_STEP_WRONG",
+            sentTo: user.email, ...(check.left != null ? { left: check.left } : {}),
+          });
+        }
+        if (String(credentials.remember ?? "") === "true") await guard.trustThisBrowser(user as any);
+      }
+      await _signIn(user, email, true);
+      return (await startSession(user, "password", headerOf(req, "user-agent"))) as any;
     } catch (error) {
+      if ((error as Error)?.name === "SignInRefused") throw error;
       console.error("Auth error:", error);
       return null;
     }
@@ -123,7 +190,7 @@ const magicProvider = CredentialsProvider({
       // ONE-TIME: spent the moment it signs someone in.
       await db.update(forgeInvites).set({ usedAt: new Date() }).where(eq(forgeInvites.id, row.id));
       await _signIn(user, String(row.email), true, "magic-link");
-      return (await sessionUserOf(user)) as any;
+      return (await startSession(user, "magic-link")) as any;
     } catch (error) {
       console.error("Magic link error:", error);
       return null;
@@ -147,6 +214,16 @@ function ssoProvider(e: SsoEntry): Provider | null {
   if (e.kind === "saml") {
     return BoxyHQSAMLProvider({ id: e.id, name: e.name, issuer, clientId, clientSecret });
   }
+  // MICROSOFT FOR EVERY ORGANISATION ("Continue with Microsoft"): the
+  // `common` / `organizations` / `consumers` issuer publishes a placeholder
+  // ("{tenantid}") where each token names its own tenant, so the ID token's
+  // issuer can never match; the person is read from Microsoft's userinfo
+  // instead. One tenant's own issuer is checked as usual.
+  const anyTenant = e.provider === "entra" && /\/(common|organizations|consumers)(\/|$)/.test(issuer);
+  // LINKEDIN takes the client secret in the form body only.
+  let host = "";
+  try { host = new URL(issuer).hostname; } catch { host = ""; }
+  const secretInBody = /(^|\.)linkedin\.com$/.test(host);
   return {
     id: e.id,
     name: e.name,
@@ -156,7 +233,9 @@ function ssoProvider(e: SsoEntry): Provider | null {
     clientId,
     clientSecret,
     authorization: { params: { scope: "openid email profile" } },
-    idToken: true,
+    idToken: !anyTenant,
+    ...(anyTenant ? { userinfo: "https://graph.microsoft.com/oidc/userinfo" } : {}),
+    ...(secretInBody ? { client: { token_endpoint_auth_method: "client_secret_post" } } : {}),
     checks: ["pkce", "state"],
     profile(p: Record<string, any>) {
       return { id: String(p.sub), email: p.email ?? p.preferred_username ?? p.upn ?? null, name: p.name ?? null, claims: p } as any;
@@ -214,14 +293,50 @@ async function admitSso(e: SsoEntry, user: Record<string, any>, claims: Record<s
   await _signIn(row, email, true, `sso:${e.id}`);
   // The same object next-auth hands to `jwt`: what the session carries is
   // decided here, for every way in alike.
-  Object.assign(user, await sessionUserOf(row));
+  Object.assign(user, await startSession(row, `sso:${e.id}`));
   return true;
+}
+
+/**
+ * IS THIS SESSION STILL HELD? Asked of every session read past sign-in, and
+ * answered from the person's row at most every thirty seconds per session
+ * (one read by primary key), so "sign out other devices" takes effect within
+ * half a minute without a query on every request.
+ */
+const held = new Map<string, { ok: boolean; at: number }>();
+const HELD_FOR_MS = 30_000;
+async function stillHeld(token: { id: string; sid?: string | null; sv?: number }): Promise<boolean> {
+  const key = `${token.id}:${token.sid ?? `v${token.sv ?? 0}`}`;
+  const known = held.get(key);
+  if (known && Date.now() - known.at < HELD_FOR_MS) return known.ok;
+  let ok = true;
+  try {
+    const guard = await import("@/lib/sign-in-guard");
+    ok = guard.stillSignedIn(await guard.readPerson(String(token.id)), token);
+  } catch {
+    ok = true;   // the row could not be read: a database hiccup signs nobody out
+  }
+  if (held.size > 5000) held.clear();
+  held.set(key, { ok, at: Date.now() });
+  return ok;
 }
 
 export const authOptions: NextAuthOptions = {
   providers: providers(),
   session: { strategy: "jwt" },
   pages: { signIn: "/login", error: "/login" },
+  events: {
+    // Signing out takes the session's id off the person's row.
+    async signOut({ token }) {
+      const t = token as { id?: unknown; sid?: unknown } | null;
+      if (!t?.id || typeof t.sid !== "string") return;
+      try {
+        const guard = await import("@/lib/sign-in-guard");
+        await guard.dropDevice(String(t.id), t.sid);
+        held.delete(`${t.id}:${t.sid}`);
+      } catch { /* the cookie is cleared either way */ }
+    },
+  },
   callbacks: {
     // AN ORGANISATION'S OWN ADDRESS IS THIS APP TOO: after signing in at
     // acme.clinicapp.com the person stays there, not on the main address.
@@ -255,6 +370,13 @@ export const authOptions: NextAuthOptions = {
         (token as any).activeOrgId = (user as any).activeOrgId ?? null;
         (token as any).orgRole = (user as any).orgRole ?? null;
         (token as any).refreshedAt = Date.now();
+        (token as any).sid = (user as any).sid ?? null;
+        (token as any).sv = Number((user as any).sv ?? 0);
+      } else if (token.id && !(await stillHeld(token as any))) {
+        // SIGNED OUT ELSEWHERE: "sign out other devices", a password reset,
+        // an account switched off. next-auth answers a throw here with no
+        // session and clears the cookie.
+        throw new Error("This session was signed out.");
       }
       // A CHANGED MEMBERSHIP REACHES THE SESSION: on `update()` (a switch, a
       // re-role) and every fifteen minutes, the organisation and the role
@@ -293,6 +415,8 @@ export const authOptions: NextAuthOptions = {
         (session.user as any).accountType = (token as any).accountType ?? null;
         (session.user as any).activeOrgId = (token as any).activeOrgId ?? null;
         (session.user as any).orgRole = (token as any).orgRole ?? null;
+        // Which of the person's sessions this is, so the device list can say "this device".
+        (session.user as any).sid = (token as any).sid ?? null;
       }
       return session;
     },

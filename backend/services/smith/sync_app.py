@@ -167,8 +167,15 @@ ENGINE_FOUNDATION_FILES: tuple[str, ...] = (
     "src/app/api/form-rules/route.ts",
     # Who is signed in and what the session says of them (the address still
     # to be proved among it), and the columns that keep it.
-    "src/auth.ts", "src/db/schema/user.ts", "src/sdk/auth.tsx",
+    "src/auth.ts", "src/db/schema/user.ts", "src/sdk/auth.tsx", "src/lib/session-cookie.ts",
 )
+
+#: Files `src/auth.ts` imports that arrived after apps were built: written
+#: (not only refreshed) wherever the app has an `auth.ts`, or the refreshed
+#: one would import a file the app does not have. What stands between a right
+#: password and a session — the pause, the two-step code, trusted browsers,
+#: the sessions a person holds (2026-11-12).
+AUTH_FOUNDATION_FILES: tuple[str, ...] = ("src/lib/sign-in-guard.ts",)
 
 #: Ways in the platform adds after an app was built: template (under
 #: templates/runtime) -> where the app keeps it, written into every app people
@@ -176,6 +183,10 @@ ENGINE_FOUNDATION_FILES: tuple[str, ...] = (
 #: DITANS was built (QA DIT-005, 2026-11-05).
 AUTH_ROUTES: tuple[tuple[str, str], ...] = (
     ("api-auth-email-code/route.ts", "src/app/api/auth/email-code/route.ts"),
+    # Two-step sign-in, a password reset by code, the devices list (2026-11-12).
+    ("api-auth-two-step/route.ts", "src/app/api/auth/two-step/route.ts"),
+    ("api-auth-password-reset/route.ts", "src/app/api/auth/password-reset/route.ts"),
+    ("api-auth-devices/route.ts", "src/app/api/auth/devices/route.ts"),
 )
 
 
@@ -281,6 +292,14 @@ def refresh_engine(app_root: str | Path, doc: dict | None = None, *, complete: b
             continue
         shutil.copyfile(src, dst)
         changed.append(rel)
+    if (root / "src" / "auth.ts").is_file():
+        for rel in AUTH_FOUNDATION_FILES:
+            src, dst = foundation / rel, root / rel
+            if not src.is_file() or (dst.is_file() and dst.read_bytes() == src.read_bytes()):
+                continue
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(src, dst)
+            changed.append(rel)
     # AN APP PEOPLE SIGN IN TO, read from its definition when there is one: the
     # sign-in file is written later in the same sync, and waiting for it put
     # these files (and the token table's line in the schema barrel) a sync

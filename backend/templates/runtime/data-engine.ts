@@ -349,6 +349,27 @@ export async function sealSensitive(entityName: string, data: Record<string, any
  *  amount, and every page that showed one printed ₹NaN (pcn4owv7, 2026-10-14).
  *  `readers` is the decision; the mask is for the roles it leaves out.
  */
+/**
+ * THE SIGN-IN'S OWN COLUMNS ARE NOT DATA. The platform's users table carries
+ * the password hash, the digests of codes in flight, the sign-in pause and
+ * the list of a person's sessions (`lib/sign-in-guard.ts`); none of it
+ * leaves the engine, whatever the manifest says, and no write through it sets
+ * them. `GET /api/data/users` answered any signed-in person with every
+ * account's bcrypt hash and code digest (DITANS, 2026-11-12).
+ */
+const SIGN_IN_COLUMNS = ["password", "passwordHash", "emailCodeHash", "emailCodeExpiresAt", "emailCodeSentAt", "emailCodeAttempts",
+  "signInCodeHash", "signInCodeFor", "signInCodeExpiresAt", "signInCodeSentAt", "signInCodeAttempts",
+  "failedSignIns", "signInPausedUntil", "signedInDevices", "sessionVersion"];
+/** Written only by the sign-in routes: two-step goes on or off with a code. */
+const SIGN_IN_WRITTEN_ONLY = [...SIGN_IN_COLUMNS, "twoStep"];
+function isUsersTable(entityName: string): boolean {
+  const t = getEntity(entityName)?.table;
+  return (t ? getTableName(t as any) : entityName) === "users";
+}
+function withoutSignInColumns(entityName: string, data: Record<string, any>): void {
+  if (data && isUsersTable(entityName)) for (const c of SIGN_IN_WRITTEN_ONLY) delete data[c];
+}
+
 async function _maskOrUnmaskOnRead<T extends Record<string, any>>(
   entityName: string,
   record: T,
@@ -359,6 +380,7 @@ async function _maskOrUnmaskOnRead<T extends Record<string, any>>(
   if (record != null) {
     const t = getEntity(entityName)?.table;
     stripEmbeddings(t ? getTableName(t as any) : entityName, record);
+    if ((t ? getTableName(t as any) : entityName) === "users") for (const c of SIGN_IN_COLUMNS) delete (record as any)[c];
   }
   const specs = sensitiveColumnsFor(entityName);
   const keys = Object.keys(specs);
@@ -1147,6 +1169,7 @@ export async function create(
   for (const [k, v] of Object.entries(rest)) {
     if (k in entity.table && v !== "" && v !== undefined) cleanData[k] = v;
   }
+  withoutSignInColumns(entityName, cleanData);
   // Default an ACTOR foreign key (a FK to the users table naming who is acting) to
   // the current user when the form didn't collect it. The FK-role authority tells
   // us which columns those are — a `domain` FK (e.g. pets.ownerId → owners) is NEVER
@@ -1355,6 +1378,7 @@ export async function update(
 
   // Strip system fields
   const { id: _, createdAt, updatedAt, created_at, updated_at, ...cleanData } = data;
+  withoutSignInColumns(entityName, cleanData);
   await assertReachableThrough(entityName, cleanData, ctx);
   // A PERSON OF SEVERAL WORKSPACES MOVES A ROW ONLY BETWEEN THEIRS.
   for (const rule of ownershipRulesFor(entityName)) {

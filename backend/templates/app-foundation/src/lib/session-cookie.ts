@@ -27,8 +27,9 @@ function fingerprint(secret: string): string {
   return hash.toString(16).padStart(8, "0");
 }
 
-/** https, by the same reading next-auth's own `getToken` uses. */
-function isSecure(): boolean {
+/** https, by the same reading next-auth's own `getToken` uses. Exported:
+ *  the sign-in's other cookies (a trusted browser) are set the same way. */
+export function isSecure(): boolean {
   return (process.env.NEXTAUTH_URL ?? "").startsWith("https://") || Boolean(process.env.VERCEL);
 }
 

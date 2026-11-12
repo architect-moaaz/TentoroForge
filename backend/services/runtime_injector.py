@@ -1043,7 +1043,12 @@ def _inject_file_storage(output_path: Path) -> list[str]:
     for sub, dst in (("api-org/route.ts", "org/route.ts"), ("api-org/members/route.ts", "org/members/route.ts"),
                      ("api-org/address/route.ts", "org/address/route.ts"),
                      ("api-auth-methods/route.ts", "auth/methods/route.ts"), ("api-auth-magic/route.ts", "auth/magic/route.ts"),
-                     ("api-auth-email-code/route.ts", "auth/email-code/route.ts")):
+                     ("api-auth-email-code/route.ts", "auth/email-code/route.ts"),
+                     # Two-step sign-in, forgot password by code, the devices
+                     # a person is signed in on (`lib/sign-in-guard.ts`).
+                     ("api-auth-two-step/route.ts", "auth/two-step/route.ts"),
+                     ("api-auth-password-reset/route.ts", "auth/password-reset/route.ts"),
+                     ("api-auth-devices/route.ts", "auth/devices/route.ts")):
         src = _TEMPLATE_DIR / sub
         if src.exists():
             target = output_path / "src" / "app" / "api" / dst

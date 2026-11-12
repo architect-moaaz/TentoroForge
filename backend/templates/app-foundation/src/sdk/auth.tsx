@@ -26,21 +26,66 @@ function messageOf(body: unknown, fallback: string): string {
   return fallback;
 }
 
+/** Why a sign-in stopped short of a session (`lib/sign-in-guard.ts`): the
+ *  address is paused, or a two-step code is wanted (or was wrong). */
+export interface SignInStop {
+  code: "SIGN_IN_PAUSED" | "TWO_STEP_REQUIRED" | "TWO_STEP_WRONG" | "TWO_STEP_EXPIRED" | "TWO_STEP_TOO_MANY";
+  until?: number; sentTo?: string; wait?: number; notice?: string; left?: number;
+}
+function stopOf(error: unknown): SignInStop | null {
+  if (typeof error !== "string" || !error.startsWith("{")) return null;
+  try { const r = JSON.parse(error); return r && typeof r.code === "string" ? r as SignInStop : null; } catch { return null; }
+}
+/** A stop in words. */
+export function stopMessage(stop: SignInStop | null): string | null {
+  if (!stop) return null;
+  switch (stop.code) {
+    case "SIGN_IN_PAUSED": return `Sign-in is paused after 5 failed attempts. Try again after ${new Date(stop.until ?? Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}, or reset your password.`;
+    case "TWO_STEP_REQUIRED": return null;
+    case "TWO_STEP_WRONG": return `That code is not right. ${stop.left ?? 0} ${stop.left === 1 ? "try" : "tries"} left.`;
+    case "TWO_STEP_EXPIRED": return "That code has expired. Send a new one.";
+    case "TWO_STEP_TOO_MANY": return "Too many wrong codes. Send a new one.";
+  }
+}
+
 /** Sign in with email and password; lands on `?callbackUrl=`, else the
  *  signed-in role's own page, else the app's home. Everyone used to go home —
  *  F&B's administrator landed on the customers' menu, outside the frame with
- *  the notification bell (2026-10-01). */
+ *  the notification bell (2026-10-01).
+ *
+ *  TWO STEPS when the person turned two-step on: the first call stops with
+ *  `step === "code"` (a code went to `stop.sentTo`); call again with the same
+ *  email and password plus `{ code, remember }`. `resend()` asks for a new
+ *  code. `pausedUntil` is set while sign-in for the address is paused. */
 export function useSignIn() {
   const router = useRouter();
   const search = useSearchParams();
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const signInWith = React.useCallback(async (email: string, password: string) => {
+  const [stop, setStop] = React.useState<SignInStop | null>(null);
+  const [step, setStep] = React.useState<"password" | "code">("password");
+  const last = React.useRef<{ email: string; password: string } | null>(null);
+  const signInWith = React.useCallback(async (email: string, password: string, more?: { code?: string; remember?: boolean }) => {
     setPending(true);
     setError(null);
     try {
-      const r = await signIn("credentials", { email, password, redirect: false });
-      if (!r || r.error) { setError("That email and password do not match an account."); return false; }
+      last.current = { email, password };
+      const r = await signIn("credentials", { email, password, redirect: false,
+        ...(more?.code ? { code: more.code, remember: more.remember ? "true" : "false" } : {}) });
+      if (!r || r.error) {
+        const s = stopOf(r?.error);
+        if (s) {
+          setStop(s);
+          if (s.code === "SIGN_IN_PAUSED") setStep("password");
+          else setStep("code");
+          setError(stopMessage(s));
+        } else {
+          setStop(null);
+          setError("That email and password do not match an account.");
+        }
+        return false;
+      }
+      setStop(null);
       // The page they were sent away from, else their role's own page
       // (`lib/landing.ts`): "/" in the address is not a destination.
       const to = afterSignIn(search?.get("callbackUrl"), await roleAfterSignIn(getSession));
@@ -54,7 +99,136 @@ export function useSignIn() {
       setPending(false);
     }
   }, [router, search]);
-  return { signIn: signInWith, pending, error };
+  /** A new two-step code: the password again, no code. */
+  const resend = React.useCallback(async () => {
+    if (last.current) await signInWith(last.current.email, last.current.password);
+  }, [signInWith]);
+  /** Back to the email and password. */
+  const restart = React.useCallback(() => { setStep("password"); setStop(null); setError(null); }, []);
+  const pausedUntil = stop?.code === "SIGN_IN_PAUSED" ? stop.until ?? null : null;
+  return { signIn: signInWith, pending, error, step, stop, pausedUntil, resend, restart };
+}
+
+/** Forgot password: `request(email)` mails a six-digit code (the answer is
+ *  the same whether or not the address has an account); `reset(email, code,
+ *  password)` sets the new password, which signs the account out everywhere. */
+export function usePasswordReset() {
+  const [pending, setPending] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const [sentTo, setSentTo] = React.useState<string | null>(null);
+  const [sentAt, setSentAt] = React.useState<number | null>(null);
+  const [done, setDone] = React.useState(false);
+  const call = React.useCallback(async (method: "POST" | "PUT", body: Record<string, unknown>) => {
+    setPending(true); setError(null);
+    try {
+      const res = await fetch(apiPath("/api/auth/password-reset"), { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const out = await res.json().catch(() => null);
+      if (!res.ok) { setError(messageOf(out, "That did not work. Try again.")); return null; }
+      return out as Record<string, unknown>;
+    } catch {
+      setError("Check your connection and try again.");
+      return null;
+    } finally {
+      setPending(false);
+    }
+  }, []);
+  const request = React.useCallback(async (email: string) => {
+    const out = await call("POST", { email });
+    if (out) { setSentTo(String(out.sentTo ?? email)); setSentAt(Date.now()); }
+    return !!out;
+  }, [call]);
+  const reset = React.useCallback(async (email: string, code: string, password: string) => {
+    const out = await call("PUT", { email, code, password });
+    if (out) setDone(true);
+    return !!out;
+  }, [call]);
+  return { request, reset, pending, error, sentTo, sentAt, done };
+}
+
+/** Two-step sign-in for the signed-in person: `on` as it stands, `send()` a
+ *  code to their own address, `confirm(code, on)` turns it on or off. */
+export function useTwoStep() {
+  const { update } = useSession();
+  const [on, setOn] = React.useState<boolean | null>(null);
+  const [pending, setPending] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const [notice, setNotice] = React.useState<string | null>(null);
+  const [sentTo, setSentTo] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    let live = true;
+    fetch(apiPath("/api/auth/two-step")).then((r) => (r.ok ? r.json() : null)).then((b) => {
+      if (live && b && typeof b.on === "boolean") setOn(b.on);
+    }).catch(() => undefined);
+    return () => { live = false; };
+  }, []);
+  const send = React.useCallback(async () => {
+    setPending(true); setError(null);
+    try {
+      const res = await fetch(apiPath("/api/auth/two-step"), { method: "POST" });
+      const body = await res.json().catch(() => null) as { sentTo?: string; notice?: string } | null;
+      if (!res.ok) { setError(messageOf(body, "The code could not be sent.")); return false; }
+      setSentTo(body?.sentTo ?? null);
+      setNotice(body?.notice ? `The code could not be emailed: ${body.notice}` : null);
+      return true;
+    } catch {
+      setError("The code could not be sent — check your connection and try again.");
+      return false;
+    } finally {
+      setPending(false);
+    }
+  }, []);
+  const confirm = React.useCallback(async (code: string, turnOn: boolean, remember = false) => {
+    setPending(true); setError(null);
+    try {
+      const res = await fetch(apiPath("/api/auth/two-step"), { method: "PUT", headers: { "Content-Type": "application/json" },
+                                                              body: JSON.stringify({ code, on: turnOn, remember }) });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) { setError(messageOf(body, "That code could not be checked.")); return false; }
+      setOn(turnOn);
+      await update();
+      return true;
+    } catch {
+      setError("The code could not be checked — check your connection and try again.");
+      return false;
+    } finally {
+      setPending(false);
+    }
+  }, [update]);
+  return { on, send, confirm, pending, error, notice, sentTo };
+}
+
+export interface SignedInDevice { id: string; agent: string; at: string; via: string; current: boolean }
+
+/** Where the signed-in person is signed in; `signOutOthers()` ends every
+ *  other session (within thirty seconds), `signOut(id)` one of them. */
+export function useSignedInDevices() {
+  const [devices, setDevices] = React.useState<SignedInDevice[] | null>(null);
+  const [pending, setPending] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const load = React.useCallback(async () => {
+    try {
+      const res = await fetch(apiPath("/api/auth/devices"));
+      const body = await res.json().catch(() => null) as { devices?: SignedInDevice[] } | null;
+      if (res.ok) setDevices(body?.devices ?? []);
+    } catch { /* stays as it was */ }
+  }, []);
+  React.useEffect(() => { void load(); }, [load]);
+  const end = React.useCallback(async (id?: string) => {
+    setPending(true); setError(null);
+    try {
+      const res = await fetch(apiPath("/api/auth/devices" + (id ? `?id=${encodeURIComponent(id)}` : "")), { method: "DELETE" });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) { setError(messageOf(body, "The other devices could not be signed out.")); return false; }
+      await load();
+      return true;
+    } catch {
+      setError("Check your connection and try again.");
+      return false;
+    } finally {
+      setPending(false);
+    }
+  }, [load]);
+  return { devices, signOutOthers: () => end(), signOut: (id: string) => end(id), pending, error, reload: load };
 }
 
 /** Create the account — and, when the application has one, the person's own
@@ -141,6 +315,14 @@ export function useSignInMethods(): SignInMethods {
     return () => { live = false; };
   }, []);
   return methods;
+}
+
+/** Continue with an identity provider the application declared (`signIn.sso`,
+ *  offered only when `useSignInMethods()` says it is connected); the person
+ *  comes back to `callbackUrl`, else the app's root, which sends them on to
+ *  their role's own page. */
+export function continueWith(providerId: string, callbackUrl?: string): void {
+  void signIn(providerId, { callbackUrl: callbackUrl || apiPath("/") });
 }
 
 /** What a provider's refusal means, in words (`/login?error=…`). */
@@ -307,14 +489,38 @@ export function SignInMethods({ methods, email, className }: { methods?: SignInM
  *  password, a link by email, the organisation's identity provider. Place
  *  it; style the page around it. */
 export function SignInForm({ submitLabel = "Sign in", className }: { submitLabel?: string; className?: string }) {
-  const { signIn: go, pending, error } = useSignIn();
+  const { signIn: go, pending, error, step, stop, resend, restart } = useSignIn();
   const methods = useSignInMethods();
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
+  const [code, setCode] = React.useState("");
+  const [remember, setRemember] = React.useState(true);
   const [arrivalError, setArrivalError] = React.useState<string | null>(null);
   const finishing = useArrival(setArrivalError);
   const shown = error ?? arrivalError;
   if (finishing) return <p className={"text-sm text-muted-foreground " + (className ?? "")}>Signing you in…</p>;
+  if (step === "code") {
+    return (
+      <form className={"grid gap-5 " + (className ?? "")}
+        onSubmit={(e) => { e.preventDefault(); void go(email, password, { code, remember }); }}>
+        <p className="text-sm text-muted-foreground">We sent a 6-digit code to {stop?.sentTo ?? email}. It works for 10 minutes.</p>
+        {stop?.notice && <p className="text-sm text-muted-foreground">The code could not be emailed: {stop.notice}</p>}
+        <Field id="auth-code" label="Code" required>
+          <input id="auth-code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} required className={inputClass}
+            value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))} />
+        </Field>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} /> Trust this browser for 30 days
+        </label>
+        {shown && <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{shown}</p>}
+        <button type="submit" disabled={pending || code.length !== 6} className={buttonClass}>{pending && <Spinner />}{submitLabel}</button>
+        <div className="flex justify-between text-sm">
+          <button type="button" className="text-muted-foreground underline" onClick={() => { setCode(""); restart(); }}>Back</button>
+          <button type="button" className="text-primary underline" disabled={pending} onClick={() => { setCode(""); void resend(); }}>Send a new code</button>
+        </div>
+      </form>
+    );
+  }
   const others = methods.magicLink || methods.sso.length > 0;
   return (
     <form className={"grid gap-5 " + (className ?? "")}
@@ -333,6 +539,7 @@ export function SignInForm({ submitLabel = "Sign in", className }: { submitLabel
       )}
       {shown && <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{shown}</p>}
       {methods.password && <button type="submit" disabled={pending} className={buttonClass}>{pending && <Spinner />}{submitLabel}</button>}
+      {methods.password && <a href={apiPath("/reset-password")} className="text-center text-sm text-primary hover:underline">Forgot password?</a>}
       {others && (
         <>
           {methods.password && <p className="text-center text-xs text-muted-foreground">or</p>}
