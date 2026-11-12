@@ -97,6 +97,9 @@ def settle_platform(ctx: Ctx) -> str | None:
     chosen = app_target.read(ctx.out)
     if chosen:
         return chosen
+    plan = platform_plan_for(ctx)
+    if plan is not None:
+        return _settle_plan(ctx, plan)
     asked = platform_asked(ctx)
     if asked:
         said = app_target.parse_choice(ctx.message)
@@ -110,10 +113,73 @@ def settle_platform(ctx: Ctx) -> str | None:
     return None
 
 
+def _brief_before_plan(ctx: Ctx) -> str:
+    """The brief as it stood when Smith put the plan: the person's turns before it. Their reply to the plan ("web only")
+    is an answer, not part of the brief, and must not change what the plan is."""
+    from services.blueprint import platform_plan
+
+    said: list[str] = []
+    for role, text in map(_turn_text, ctx.history):
+        if role != "user":
+            if platform_plan.MARKER in text.lower():
+                break
+            continue
+        said.append(text)
+    return "\n".join(said)
+
+
+def platform_plan_for(ctx: Ctx):
+    """The per-role plan, when this app needs one; None when it does not (one kind of user, every role the same
+    platform, or a brief that asks for the web only) and the one question about where people will use it is enough."""
+    from services.blueprint import platform_plan
+    from services.smith4.context import defined
+
+    if defined(ctx.out):
+        return None
+    text = _brief_before_plan(ctx) if platform_plan.asked(ctx.history) else brief_of(ctx)
+    plan = platform_plan.analyse(text)
+    return plan if plan.needed else None
+
+
+def _settle_plan(ctx: Ctx, plan) -> str | None:
+    """The app-wide choice, when the plan is settled: the person accepted, edited or turned it down this turn.
+
+    NOT SILENT: with nobody to ask (an unattended build), or after two asks with no answer, the recommended plan is
+    used and written as decided by default, so it is on record and can be changed. A plan is never dropped for a
+    web-only guess, which would take the phone app away from a driver who needs it."""
+    from services.blueprint import app_target, platform_plan
+
+    asked = platform_plan.asked(ctx.history)
+    if asked:
+        got = platform_plan.read_reply(ctx.message, plan)
+        if got:
+            kind, chosen = got
+            if kind == "web":
+                platform_plan.write(ctx.out, plan, "web_only")
+                app_target.write(ctx.out, "web")
+                return "web"
+            platform_plan.write(ctx.out, chosen, "accepted" if kind == "accept" else "edited")
+            app_target.write(ctx.out, chosen.surface)
+            return chosen.surface
+    if asked >= 2 or getattr(ctx, "unattended", False) or (not asked and user_turns(ctx) >= MAX_CLARIFY_TURNS):
+        platform_plan.write(ctx.out, plan, "recommended", decided_by="default")
+        app_target.write(ctx.out, plan.surface)
+        return plan.surface
+    return None
+
+
 def platform_question(ctx: Ctx) -> str:
     """The instruction that makes Smith ask where people will use the app — first, in these words, with these chips."""
-    from services.blueprint import app_target
+    from services.blueprint import app_target, platform_plan
 
+    plan = platform_plan_for(ctx)
+    if plan is not None:
+        again = ("They were shown this plan already and did not accept or change it: say so in one short line, "
+                 "then ask again. " if platform_plan.asked(ctx.history) else "")
+        return ("THE PLATFORM PLAN IS NOT CHOSEN, AND IT IS ASKED FIRST. " + again +
+                "Ask it with `ask_user`: the `question` is the text below, word for word, and the `options` are exactly "
+                f"these, in this order: {'; '.join(platform_plan.OPTIONS)}. Ask nothing else this turn, and do not choose "
+                "for them or define the application.\n\nQUESTION:\n" + platform_plan.question(plan))
     again = ("They were asked this already and did not pick one of the five: say so in one short line, "
              "then ask it again. " if platform_asked(ctx) else "")
     chips = "; ".join(label for _surface, label in app_target.OPTIONS)
@@ -134,14 +200,20 @@ def canonical_platform_ask(ctx: Ctx, args: dict) -> dict:
         return args                      # an app exists, or this is some other question: it is the model's own
     if settle_platform(ctx) is not None:
         return args
+    plan = platform_plan_for(ctx)
+    if plan is not None:
+        from services.blueprint import platform_plan
+        return {**args, "question": platform_plan.question(plan), "options": list(platform_plan.OPTIONS)}
     return {**args, "question": app_target.QUESTION, "options": [label for _surface, label in app_target.OPTIONS]}
 
 
 def _is_platform_question(args: dict) -> bool:
     """Is the model's question the one about where people will use the app? By its words or by its chips."""
-    from services.blueprint import app_target
+    from services.blueprint import app_target, platform_plan
 
     said = str(args.get("question") or "").lower()
+    if platform_plan.MARKER in said:
+        return True
     chips = " | ".join(str(o).lower() for o in (args.get("options") or []))
     named = sum(1 for _surface, label in app_target.OPTIONS if label.lower() in said or label.lower() in chips)
     return "where will people use" in said or named >= 2 or ("pwa" in said and "native" in said)
