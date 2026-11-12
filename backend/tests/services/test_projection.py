@@ -351,11 +351,15 @@ def test_the_platform_declaration_is_parsed_not_transcribed():
     # user picked at signup, which auth folds into the session role so the menu
     # can gate on it. Parsing is what makes this a one-line acknowledgement
     # instead of a fourth hand-copy drifting off the original.
-    # The address a new account proves (`signIn.verifyEmail`, 2026-11-05) joined too.
+    # The address a new account proves (`signIn.verifyEmail`, 2026-11-05) joined too,
+    # and the sign-in's own state (two-step code, the pause, the signed-in devices, 2026-11-12).
     assert set(declared) == {"id", "email", "password", "name",
                              "accountType", "isActive", "activeOrgId", "createdAt",
                              "emailVerification", "emailCodeHash", "emailCodeExpiresAt",
-                             "emailCodeSentAt", "emailCodeAttempts"}
+                             "emailCodeSentAt", "emailCodeAttempts",
+                             "twoStep", "signInCodeFor", "signInCodeHash", "signInCodeExpiresAt",
+                             "signInCodeSentAt", "signInCodeAttempts", "failedSignIns",
+                             "signInPausedUntil", "signedInDevices", "sessionVersion"}
     assert declared["email"] == {"name": "email", "type": "text",
                                  "required": True, "unique": True}
     # The default `authorize()` depends on — a falsy isActive rejects the login.
