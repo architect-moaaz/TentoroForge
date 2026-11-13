@@ -223,6 +223,8 @@ export interface HandoffDeps {
   email?(to: string, subject: string, body: string): Promise<{ sent: boolean; reason?: string }>;
   /** The last messages of the conversation, as text. Optional. */
   snapshot?(conversationId: string): Promise<string>;
+  /** Whether the app has organisations, and which roles are the platform's (held in every one). Optional: none. */
+  tenancy?(): Promise<{ organisations: boolean; platformRole(role: string): boolean }>;
 }
 
 // ── conversation ──────────────────────────────────────────────────────────

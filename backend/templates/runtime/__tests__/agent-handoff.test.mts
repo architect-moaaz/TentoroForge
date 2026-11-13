@@ -145,6 +145,30 @@ console.log("the organisation the person acts in goes with the handoff, and only
   eqJson([one.records[0].orgId, one.notes.map((n: any) => [n.userId, n.role])], [null, [[null, "Manager"]]], "an app of one organisation is as before: no organisation, the role is rung");
 }
 
+console.log("a handoff of no organisation, in an app of several, rings only who can open it");
+{
+  // #30 review, 2026-11-13: a signed-out visitor to a public assistant acts in no organisation. Its handoff is in no
+  // organisation's inbox, but the bell rang the Manager role in every one, with the visitor's contact details.
+  const deps = fakeDeps();
+  deps.people = async () => [];
+  deps.tenancy = async () => ({ organisations: true, platformRole: (r: string) => r === "Platform Admin" });
+  const handlers = { roles: ["Manager", "Platform Admin"], people: [{ id: "named-1", name: "Nia" }] };
+  await requestHandoff(deps, ctxFor(spec({ handlers }), { user: { ...user, orgId: null } }), { reason: "x", contact: "555-0100" });
+  eqJson(deps.notes.map((n: any) => [n.userId, n.role]), [[null, "Platform Admin"], ["named-1", null]],
+    "the platform role and the person named, never every organisation's managers");
+
+  const unknown = fakeDeps();
+  unknown.people = async () => [];
+  unknown.tenancy = async () => { throw new Error("no tenancy module"); };
+  await requestHandoff(unknown, ctxFor(spec({ handlers }), { user: { ...user, orgId: null } }), { reason: "x" });
+  eqJson(unknown.notes.map((n: any) => [n.userId, n.role]), [["named-1", null]], "not knowing is nobody by role, not everyone");
+
+  const single = fakeDeps();
+  single.tenancy = async () => ({ organisations: false, platformRole: () => false });
+  await requestHandoff(single, ctxFor(spec()), { reason: "x" });
+  eqJson(single.notes.map((n: any) => [n.userId, n.role]), [[null, "Manager"]], "an app of one organisation rings the role, as before");
+}
+
 console.log("a handoff nobody is named to take is not set up, and says so");
 {
   const deps = fakeDeps();

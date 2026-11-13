@@ -155,8 +155,13 @@ async function snapshot(conversationId: string): Promise<string> {
     .join("\n");
 }
 
+async function tenancy(): Promise<{ organisations: boolean; platformRole(role: string): boolean }> {
+  const t = await import("@/lib/tenancy");
+  return { organisations: t.tenancyOn(), platformRole: (role: string) => t.isPlatformRole(role) };
+}
+
 export function handoffDeps(): HandoffDeps {
-  return { store: handoffStore, people, notify, email, snapshot };
+  return { store: handoffStore, people, notify, email, snapshot, tenancy };
 }
 
 // ── the inbox ─────────────────────────────────────────────────────────────

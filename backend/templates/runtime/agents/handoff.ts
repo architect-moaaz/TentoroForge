@@ -77,11 +77,23 @@ async function tell(deps: HandoffDeps, spec: HandoffSpec, h: HandoffRecord, assi
   if (spec.notify.inApp) {
     // A bell addressed to a role rings that role in EVERY organisation, with the person's contact details in it. In an
     // app of several organisations the handoff belongs to one, so it rings the people found in that organisation.
+    // A handoff of NO organisation in an app of several (a signed-out visitor to a public assistant) is in no
+    // organisation's inbox: only a platform role reaches it. Its bell still went to the handlers' role in every
+    // organisation, contact details and all (#30 review, 2026-11-13); it rings the platform roles and the people named.
+    let roles = spec.handlers.roles;
+    if (!assignee && !h.orgId && deps.tenancy) {
+      try {
+        const t = await deps.tenancy();
+        if (t.organisations) roles = roles.filter((r) => t.platformRole(r));
+      } catch {
+        roles = []; // not known: nobody by role, rather than everyone
+      }
+    }
     const targets: Array<{ userId?: string; role?: string }> = assignee
       ? [{ userId: assignee.id }]
       : h.orgId
         ? pool.map((p) => ({ userId: p.id }))
-        : [...spec.handlers.roles.map((role) => ({ role })), ...spec.handlers.people.map((p) => ({ userId: p.id }))];
+        : [...roles.map((role) => ({ role })), ...spec.handlers.people.map((p) => ({ userId: p.id }))];
     for (const t of targets) {
       try {
         await deps.notify({ title, message, userId: t.userId ?? null, role: t.role ?? null, entityId: h.id });
