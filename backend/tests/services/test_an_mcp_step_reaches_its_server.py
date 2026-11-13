@@ -179,5 +179,16 @@ def test_a_turn_reads_the_servers_in(tmp_path, monkeypatch):
     monkeypatch.setattr("services.env_writer.write_env_local_from_platform", write_env)
     (tmp_path / "app").mkdir()
     (tmp_path / "app" / "package.json").write_text("{}")
-    asyncio.run(router._adopt_mcp_servers(tmp_path, SimpleNamespace(org_id="org"), None))
+
+    class _Savepoint:
+        """Each best-effort read runs in a SAVEPOINT on the turn's session, so a session is
+        what it is handed (a bare None used to do, when nothing was asked of it)."""
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+    session = SimpleNamespace(begin_nested=lambda: _Savepoint())
+    asyncio.run(router._adopt_mcp_servers(tmp_path, SimpleNamespace(org_id="org"), session))
     assert seen == [("catalogue", tmp_path), ("settings", tmp_path)]

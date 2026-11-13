@@ -1,6 +1,6 @@
 "use client";
 
-import { Bot, Search, Shield, MessageSquare, GitFork } from "lucide-react";
+import { Bot, Search, Shield, MessageSquare, GitFork, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { AgentTemplate, AgentNodeSerialized, AgentEdgeSerialized } from "@/types/agent-builder";
 
@@ -353,11 +353,30 @@ const AGENT_TEMPLATES: AgentTemplate[] = [
 
 interface AgentTemplateSelectorProps {
   onSelect: (template: AgentTemplate) => void;
+  /** Draw an agent from this app's own tables, workflows and rules. */
+  onSuggest?: () => void;
+  suggesting?: boolean;
 }
 
-export function AgentTemplateSelector({ onSelect }: AgentTemplateSelectorProps) {
+export function AgentTemplateSelector({ onSelect, onSuggest, suggesting }: AgentTemplateSelectorProps) {
   return (
     <div className="space-y-2">
+      {onSuggest && (
+        <Button
+          variant="default"
+          className="h-auto w-full justify-start p-3 text-left"
+          onClick={onSuggest}
+          disabled={suggesting}
+        >
+          <Sparkles className="mr-2 h-4 w-4 shrink-0" />
+          <div className="min-w-0">
+            <div className="text-xs font-medium">Suggest from my app</div>
+            <div className="text-[10px] opacity-80">
+              Tools, rules and prompt drawn from this app's own data and workflows
+            </div>
+          </div>
+        </Button>
+      )}
       <p className="text-xs font-semibold text-muted-foreground">Start from a template</p>
       <div className="grid gap-2">
         {AGENT_TEMPLATES.map((template) => {

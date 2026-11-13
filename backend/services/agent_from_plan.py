@@ -9,10 +9,9 @@ This service reads that block and produces an :class:`AgentDefinition`
 JSON in the exact shape the Agent Builder frontend saves — the same
 shape ``routers.agent_builder`` accepts via ``POST
 /api/projects/.../agent-definitions``. The materialised JSON is written
-to ``<output>/agent-definitions/<id>.json`` and immediately handed to
-``run_code_editor`` so the generated app ends up with a working
-``src/agents/agent-service.ts`` + ``POST /api/agent/chat`` before the
-pipeline finishes.
+to ``<output>/agent-definitions/<id>.json`` and compiled into the fixed agent
+runtime (``templates/runtime/agents``) so the generated app ends up with a working
+``POST /api/agent/chat`` + chat widget before the pipeline finishes.
 
 The pipeline hook (``routers.generate``) calls
 :func:`install_agent_from_plan` after seed/validator/indexer, wrapped in
@@ -387,25 +386,21 @@ async def install_agent_from_plan(
     org_id: uuid.UUID,
     db: AsyncSession,
 ) -> Optional[dict]:
-    """Materialise the plan's agent_graph as source in the generated app.
+    """Materialise the plan's agent_graph as a working agent in the generated app.
 
     Steps:
       1. Build an AgentDefinition from ``plan['agent_graph']``.
       2. If the plan has no agent_graph (or every MCP tool was
          unresolved), return ``None`` — nothing to do.
-      3. Write ``<output>/agent-definitions/<agent_id>.json``.
-      4. Run ``routers.agent_builder._build_agent_instruction`` on the
-         same JSON to produce the natural-language instruction for the
-         code_editor (identical to what the Builder's Apply button
-         sends).
-      5. Drain ``run_code_editor(...)`` so it writes
-         ``src/agents/agent-service.ts`` + ``POST /api/agent/chat``.
-         (We do NOT run the validator/indexer here — the outer pipeline
-         already runs them after this hook.)
+      3. Write ``<output>/agent-definitions/<agent_id>.json`` (the Builder's copy —
+         the project's source of truth for the agent).
+      4. Install the fixed agent runtime and the definition compiled from it
+         (``services.agent_runtime_install``) — deterministic, no model call, so the
+         same plan always produces the same agent.
 
     Returns a small summary dict for logging::
 
-        {"agent_id", "name", "node_count", "tool_count"}
+        {"agent_id", "name", "node_count", "tool_count", "warnings"}
 
     or ``None`` when nothing was installed.
     """
@@ -413,29 +408,11 @@ async def install_agent_from_plan(
     if not agent_data:
         return None
 
-    defs_dir = Path(output_dir) / AGENT_DEFS_DIR
-    defs_dir.mkdir(parents=True, exist_ok=True)
-    agent_file = defs_dir / f"{agent_data['id']}.json"
-    agent_file.write_text(json.dumps(agent_data, indent=2), encoding="utf-8")
+    from services.agent_runtime_install import install_agent_runtime
 
-    # Build the same instruction the Builder's "Apply" button sends.
-    from routers.agent_builder import _build_agent_instruction
-
-    instruction = _build_agent_instruction(agent_data)
-
-    # Drain the code_editor stream. We intentionally don't propagate
-    # streaming events out of this service — the caller (pipeline) wraps
-    # us in a small status/log envelope and doesn't need per-tool-call
-    # traces.
-    from agents.code_editor import run_code_editor
-
-    async for _msg in run_code_editor(
-        output_dir=output_dir,
-        instruction=instruction,
-    ):
-        # Drain — we don't forward these events. The outer pipeline
-        # already emits a "status" event before/after this call.
-        pass
+    result = install_agent_runtime(output_dir, graphs=[agent_data])
+    if not result.get("installed"):
+        return None
 
     tool_count = sum(
         1 for n in agent_data.get("nodes", [])
@@ -446,4 +423,5 @@ async def install_agent_from_plan(
         "name": agent_data["name"],
         "node_count": len(agent_data.get("nodes", [])),
         "tool_count": tool_count,
+        "warnings": result.get("warnings", []),
     }

@@ -1,0 +1,45 @@
+# The tunnel's front door for the platform backend: the ONLY way another container can reach a builder's computer.
+#
+# sshd binds every reverse-forwarded port on 127.0.0.1 inside this container (GatewayPorts no, see sshd_config), so nothing on the
+# network can open a raw tunnel port. The backend asks this gateway instead, and the gateway forwards exactly two read-only
+# routes of a builder's app, nothing else:
+#   GET /t/<port>/api/agent/debug      the live-run stream   (needs the app's debug secret, sent by the backend)
+#   GET /t/<port>/api/agent/insights   the insights page     (same secret)
+#   GET /up/<port>                     200 while a computer is connected on that port, 404 when not (see listening.sh)
+# The port must be in 22000-22999 (the platform's tunnel range). The path is matched whole, with no dots or extra segments, so
+# it cannot be bent into "/api/agent/debug/../../something-that-needs-no-secret".
+{
+	admin off
+	auto_https off
+}
+
+:8080 {
+	@debug {
+		method GET HEAD
+		path_regexp tport ^/t/(22[0-9]{3})(/api/agent/(?:debug|insights))$
+	}
+	handle @debug {
+		rewrite * {re.tport.2}
+		reverse_proxy 127.0.0.1:{re.tport.1} {
+			flush_interval -1
+			transport http {
+				read_timeout 600s
+			}
+		}
+	}
+
+	@up {
+		method GET HEAD
+		path_regexp upport ^/up/(22[0-9]{3})$
+	}
+	handle @up {
+		header Cache-Control no-store
+		root * /run/ttf-up
+		rewrite * /{re.upport.1}
+		file_server
+	}
+
+	handle {
+		respond "not found" 404
+	}
+}

@@ -50,6 +50,7 @@ from models.mobile_build import MobileBuild
 from models.verify_run import VerifyRun
 from models.fault_record import FaultRecord
 from models.page import PageDefinition
+from models.agent_insights import AgentInsightKey  # also registers the agent insights rollup tables
 from models.runtime_exception import (
     RuntimeException,
     RuntimeExceptionKind,
@@ -108,4 +109,5 @@ __all__ = [
     "MobileBuild",
     "VerifyRun",
     "FaultRecord",
+    "AgentInsightKey",
 ]

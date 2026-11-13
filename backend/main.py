@@ -78,6 +78,8 @@ from routers.open_decisions import router as open_decisions_router
 from routers.pages import router as pages_router
 from routers.navigation import router as navigation_router
 from routers.agent_builder import router as agent_builder_router
+from routers.agent_insights_stream import router as agent_insights_stream_router, ingest_router as agent_insights_ingest_router
+from routers.agent_tunnel import router as agent_tunnel_router
 from routers.ai_features import router as ai_features_router
 from routers.portal import router as portal_router
 from routers.health import router as health_router
@@ -263,7 +265,12 @@ app.include_router(decisions_router)
 app.include_router(open_decisions_router)
 app.include_router(pages_router)
 app.include_router(navigation_router)
+# Agent insights (push and rollup): the app's event route, and the builder's key and summary routes. Registered BEFORE the
+# agent-definitions router so its `.../insights/...` paths can never be read as an agent id.
+app.include_router(agent_insights_ingest_router)
+app.include_router(agent_insights_stream_router)
 app.include_router(agent_builder_router)
+app.include_router(agent_tunnel_router)
 app.include_router(ai_features_router)
 app.include_router(portal_router)
 app.include_router(notifications_router)
@@ -450,6 +457,26 @@ async def _start_domain_watch():
     app.state.domain_watch = asyncio.create_task(domain_watch.watch_forever())
 
 
+async def _start_insights_worker():
+    """Applies the events apps push to /api/insights/ingest into the insights rollups — see `services.agent_insights_worker`.
+    Off by default (the feature is not out yet): `FORGE_INSIGHTS_WORKER=1` turns it on. On the LEADING worker
+    only: every worker started one, and each ran the hourly housekeeping and the people refresh again."""
+    from services import agent_insights_worker
+
+    if agent_insights_worker.enabled():
+        app.state.insights_worker = agent_insights_worker.InsightsWorker()
+        await app.state.insights_worker.start()
+
+
+@app.on_event("startup")
+async def _write_this_workers_insight_counts():
+    """EVERY WORKER writes its own insight counts. The ingest route runs in every worker and keeps what it turned
+    away, and which keys were used, in that worker's memory; only the leader's worker wrote them, so the others'
+    were never written (`agent_insights_worker.flush_counts_forever`)."""
+    from services import agent_insights_worker
+    app.state.insight_counts = asyncio.create_task(agent_insights_worker.flush_counts_forever())
+
+
 async def _start_job_recovery():
     """Builds and turns a dead worker left are picked up again or said to
     their person — at once, and every minute after; see `services.jobs`."""
@@ -472,7 +499,7 @@ async def _run_the_loops_once():
     from services import leader
     app.state.leading = asyncio.create_task(leader.run_when_leading([
         _start_timer_scheduler, _follow_open_mobile_builds, _start_lost_run_watch,
-        _start_dev_server_reaper, _start_domain_watch, _start_job_recovery,
+        _start_dev_server_reaper, _start_domain_watch, _start_job_recovery, _start_insights_worker,
     ]))
 
 
@@ -487,6 +514,12 @@ async def _shutdown():
     if left:
         _logging.getLogger("forge.shutdown").warning("[shutdown] stopping with %d job(s) still running: %s",
                                                       len(left), ", ".join(p.stem for p in left[:6]))
+    if hasattr(app.state, "insights_worker"):
+        await app.state.insights_worker.stop()
+    if hasattr(app.state, "insight_counts"):
+        app.state.insight_counts.cancel()
+        from services import agent_insights_worker
+        await agent_insights_worker.flush_counts()
     stop_all_previews()
     from services import phone_live
     phone_live.stop_all()

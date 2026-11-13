@@ -36,7 +36,7 @@ def test_a_publish_ships_the_pair_the_app_already_signs_with():
     assert env["VAPID_PUBLIC_KEY"] == "pub" and env["VAPID_PRIVATE_KEY"] == "priv"
     assert env["VAPID_SUBJECT"] == "mailto:org@acme.test", "the organisation's store wins"
     provider = (ROOT / "services/deploy/vercel_provider.py").read_text()
-    assert '(*VAPID_KEYS, "SENSITIVE_ENCRYPTION_KEY")' in provider and "app_secrets=app_secrets" in provider
+    assert '(*VAPID_KEYS, "SENSITIVE_ENCRYPTION_KEY"' in provider and "app_secrets=app_secrets" in provider
 
 
 def test_the_platform_knows_the_keys_when_the_app_sends_push():

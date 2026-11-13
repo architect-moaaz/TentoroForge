@@ -1,0 +1,37 @@
+# Key login only, for one user, for one purpose: reverse port forwards.
+Port 22
+HostKey /hostkeys/ssh_host_ed25519_key
+
+PermitRootLogin no
+AllowUsers tunnel
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
+
+# The key list is written by the platform. Each line carries its own limits (restrict, one permitlisten port, no command).
+AuthorizedKeysFile none
+AuthorizedKeysCommand /usr/local/bin/ttf-authkeys %u %k
+# An unprivileged user made for this one job (see the Dockerfile): it can read the public key list and write the per-connection notes, nothing else.
+AuthorizedKeysCommandUser ttf-keys
+
+# Remote forwards only. "GatewayPorts no" makes sshd bind every forwarded port on 127.0.0.1 INSIDE this container, whatever address the
+# connector asks for (its 0.0.0.0 still matches the key's permitlisten). Nothing else on the network can open those ports: the platform
+# backend, which also runs generated apps' code, reaches a builder's app only through the gateway (gateway.Caddyfile), which forwards
+# just the live-run and insights routes.
+AllowTcpForwarding remote
+GatewayPorts no
+PermitTunnel no
+PermitTTY no
+X11Forwarding no
+AllowAgentForwarding no
+PermitUserEnvironment no
+
+# A dead connection is noticed within about 45 seconds and its port is freed, so a returning builder is never locked out.
+ClientAliveInterval 15
+ClientAliveCountMax 3
+TCPKeepAlive yes
+
+MaxAuthTries 3
+LoginGraceTime 20
+MaxStartups 10:30:30
+LogLevel VERBOSE
