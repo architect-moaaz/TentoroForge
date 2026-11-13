@@ -178,6 +178,12 @@ def payment(ctx: Ctx, u: dict) -> Outcome:
                      fail=f"I could not {verb.replace('_', ' ')} and have changed nothing.")
 
 
+def set_up_payments(ctx: Ctx, u: dict) -> Outcome:
+    from services.smith.payments_setup import run
+    return from_seam(run(ctx.out, change=_s(u, "change") or ctx.ask, reasoning=ctx.reasoning),
+                     fail="I could not set up the app's payments and have changed nothing.")
+
+
 def audit(ctx: Ctx, u: dict) -> Outcome:
     from services.smith.audit_change import run
     verb = u["verb"]
@@ -1128,7 +1134,7 @@ PERFORM: dict[str, Perform] = {
     "add_webhook": webhook,
     "connect_domain": domain, "remove_domain": domain, "domain_status": domain, "rename_app_address": domain, "add_dns_records": domain, "give_organisations_addresses": domain,
     "show_audit": audit, "export_audit": audit, "verify_audit": audit, "edit_audit": audit,
-    "refund": payment, "set_currency": payment,
+    "refund": payment, "set_currency": payment, "set_up_payments": set_up_payments,
     "add_organisation": tenancy, "move_login": tenancy,
     "set_sign_in_method": sign_in, "map_sso_roles": sign_in, "restrict_sign_in_domains": sign_in,
     "edit_mobile": mobile, "test_notification": mobile,

@@ -361,8 +361,9 @@ def for_another_organisation(doc: dict) -> dict:
     """A definition as another organisation starts from it: what the app IS,
     without what belongs to the company that made it (PR #29 review) — the
     spreadsheets it loaded (their names and counts; the copy seeds its own
-    sample rows instead), its single sign-on providers, and the words its
-    people said that the requirements quote. In place; returned."""
+    sample rows instead), its single sign-on providers, the words its
+    people said that the requirements quote, and its payment accounts. In
+    place; returned."""
     data = doc.get("data")
     if isinstance(data, dict) and data.get("imports"):
         data["imports"] = []
@@ -380,6 +381,13 @@ def for_another_organisation(doc: dict) -> dict:
     for d in doc.get("decisions") or []:
         if isinstance(d, dict) and d.get("source") == "user" and d.get("reason"):
             d["reason"] = "Carried over from the template."
+    # ITS PAYMENT ACCOUNTS STAY BEHIND. What it sells and its plans come, as a
+    # suggestion; which gateways take the money — and that someone chose them
+    # — are the new owner's to decide. Kept, the copy took money "through" an
+    # account its organisation does not have, and nobody was asked.
+    pay = doc.get("payments")
+    if isinstance(pay, dict):
+        doc["payments"] = {k: v for k, v in pay.items() if k in ("needed", "models", "plans", "access", "reason")}
     return doc
 
 

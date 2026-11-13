@@ -2025,9 +2025,14 @@ export function registerDefaultActions(): void {
       const ref = cfg.reference && typeof cfg.reference === "object" ? _resolveValueMap(cfg.reference, ctx) as any : {};
       const origin = String((ctx.variables as any).__origin ?? process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000").replace(/\/$/, "");
       const base = (process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/$/, "");
-      const successPath = String(_resolveRef(cfg.successPage, ctx) ?? "/");
-      const cancelPath = String(_resolveRef(cfg.cancelPage, ctx) ?? successPath);
-      const { adapter, secrets, live, notice } = await pay.adapterFor();
+      // A PAGE OF THIS APP, never an address: "/x" is appended to the app's own origin.
+      const inApp = (p: unknown, fallback: string) => { const v = String(p ?? ""); return v.startsWith("/") && !v.startsWith("//") ? v : fallback; };
+      const successPath = inApp(_resolveRef(cfg.successPage, ctx), "/");
+      const cancelPath = inApp(_resolveRef(cfg.cancelPage, ctx), successPath);
+      // THE PAYER'S GATEWAY: by the currency they pay in and, when the request
+      // said, where they are (`payments/routing.ts`).
+      const country = (ctx.variables as any).__country ? String((ctx.variables as any).__country) : null;
+      const { adapter, secrets, live, notice } = await pay.gatewayFor({ currency, country });
       const user = (ctx as any)?.user;
       const paymentId = await pay.ledgerInsert({ provider: adapter.provider, provider_ref: null, amount_minor: amountMinor, currency,
         entity: ref?.entity ? String(ref.entity) : null, entity_id: ref?.id != null ? String(ref.id) : null,
@@ -2036,13 +2041,17 @@ export function registerDefaultActions(): void {
         metadata: { workflow: String((ctx as any)?.workflowId ?? ""), ...(ref?.entity ? { entity: String(ref.entity) } : {}), ...(ref?.id != null ? { entityId: String(ref.id) } : {}) } });
       const out = await adapter.createCheckout({ paymentId, amountMinor, currency, description: cfg.description ? String(_resolveRef(cfg.description, ctx) ?? "") : undefined,
         lineItems: lines.length ? lines : undefined, customerEmail: cfg.customerEmail ? String(_resolveRef(cfg.customerEmail, ctx) ?? "") : (user?.email ? String(user.email) : undefined),
-        successUrl: `${origin}${base}${successPath}?payment=${paymentId}`, cancelUrl: `${origin}${base}${cancelPath}?payment=${paymentId}&cancelled=1`,
+        // BACK THROUGH THE APP, WHICH ASKS THE GATEWAY: the return confirms the
+        // payment (and captures PayPal's) before the person reaches the page.
+        successUrl: `${origin}${base}/api/pay/return?payment=${paymentId}`, cancelUrl: `${origin}${base}/api/pay/return?payment=${paymentId}&cancelled=1`,
         metadata: { paymentId, ...(ref?.entity ? { entity: String(ref.entity) } : {}), ...(ref?.id != null ? { entityId: String(ref.id) } : {}) },
         transfer: cfg.transfer && typeof cfg.transfer === "object" ? _resolveValueMap(cfg.transfer, ctx) as any : undefined }, secrets, origin);
       await pay.ledgerSet(paymentId, { provider_ref: out.providerRef });
       return { url: out.url, sessionId: out.sessionId, paymentId, provider: adapter.provider, amount: amountMajor, currency, live,
         ...(notice ? { notice, standIn: true } : {}) };
     } catch (err) {
+      // The live app without its gateway's keys says so in the payer's words.
+      if ((err as Error)?.name === "PaymentsNotReady") return { error: (err as Error).message };
       console.error("[workflow] create_checkout failed:", err);
       return { error: String(err) };
     }
@@ -2055,13 +2064,34 @@ export function registerDefaultActions(): void {
       const row = id ? await pay.ledgerGet(id) : null;
       if (!row) return { error: `refund_payment: no payment '${id}' on the ledger` };
       if (row.status !== "succeeded" && row.status !== "partially_refunded") return { error: `refund_payment: the payment is ${row.status}, not paid` };
-      const amount = (config as any).amount != null ? Number(_resolveRef((config as any).amount, ctx)) : undefined;
+      // A PART THAT CANNOT BE READ IS NOT THE WHOLE. A step that names an
+      // amount and resolved none (a missing field, 0, text) refused nothing
+      // before: no amount sent is every gateway's "refund it all".
+      const named = (config as any).amount != null && String((config as any).amount).trim() !== "";
+      let partMinor: number | undefined;
+      if (named) {
+        const amount = Number(_resolveRef((config as any).amount, ctx));
+        if (!Number.isFinite(amount) || amount <= 0) return { error: `refund_payment: the amount to refund is not a number above zero (${String((config as any).amount)})` };
+        partMinor = pay.toMinor(amount, row.currency);
+      }
+      const already = Number((row.metadata as any)?.refundedMinor ?? 0);
+      const left = Number(row.amount_minor) - already;
+      if (!(left > 0)) return { error: "refund_payment: the payment is refunded in full already" };
+      if (partMinor != null && partMinor > left) return { error: `refund_payment: only ${pay.toMajor(left, row.currency)} ${row.currency} of the payment is left to refund` };
+      // REFUNDED WHERE IT WAS PAID: the gateway that took it, with its own keys.
       const adapter = pay.ADAPTERS[row.provider] ?? pay.ADAPTERS.stand_in;
-      const { secrets } = await pay.adapterFor();
-      const out = await adapter.refund({ providerRef: String(row.provider_ref), amountMinor: amount ? pay.toMinor(amount, row.currency) : undefined }, secrets);
+      const secrets = row.provider === "stand_in" ? { secret: "" } : await pay.secretsFor(row.provider);
+      if (!secrets) return { error: `refund_payment: ${row.provider}'s keys are not set here` };
+      const out = await adapter.refund({ providerRef: String(row.provider_ref), amountMinor: partMinor,
+        currency: row.currency, metadata: row.metadata ?? {}, idempotencyKey: `refund-${row.id}-${already}-${partMinor ?? "all"}` }, secrets);
+      if (row.provider === "stand_in" || out.status === "succeeded" || out.status === "pending") {
+        await pay.ledgerSet(row.id, { metadata: { refundedMinor: already + (partMinor ?? left) } });
+      }
       if (row.provider === "stand_in" || out.status === "succeeded") {
-        await pay.settle(String(row.metadata?.integration ?? row.provider), { type: "refund.succeeded", providerRef: String(row.provider_ref),
-          paymentId: row.id, amountMinor: amount ? pay.toMinor(amount, row.currency) : Number(row.amount_minor), currency: row.currency, metadata: {} });
+        const slug = pay.gateways().find((g: any) => g.provider === row.provider)?.integration ?? String(row.metadata?.integration ?? row.provider);
+        // This refund, by the gateway's id: the ledger adds the refunds up.
+        await pay.settle(slug, { type: "refund.succeeded", providerRef: String(row.provider_ref),
+          paymentId: row.id, amountMinor: partMinor ?? left, currency: row.currency, metadata: { refundId: String(out.refundId) } });
       }
       return { refundId: out.refundId, status: out.status, paymentId: row.id };
     } catch (err) {

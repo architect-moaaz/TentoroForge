@@ -1994,7 +1994,7 @@ async def smith_chat(
         if event == "message":
             _remember(loop, project_id, "assistant", str(data.get("text") or ""),
                       {k: v for k, v in data.items()
-                       if k in ("options", "diffSummary", "status", "intent", "secret")
+                       if k in ("options", "diffSummary", "status", "intent", "secret", "paymentChoice")
                        and v},
                       lock=memory_lock)
         # The telemetry is still not written to the transcript — it would make
@@ -2037,9 +2037,25 @@ async def smith_chat(
         checks = result.get("checks") if isinstance(result, dict) else None
         if not isinstance(checks, dict) or not checks.get("pending"):
             return
-        _start_checks(loop, str(project_id), checks["output_dir"], checks["app_root"],
-                      memory_lock=memory_lock, app_name=getattr(project, "name", "") or "",
-                      actor=_actor_of(user, project, ceiling))
+
+        async def settings_then_checks() -> None:
+            # THE ORGANISATION'S SETTINGS REACH THE NEW APP FIRST: its payment
+            # gateways' test keys, its integrations, its MCP servers. They were
+            # written only at the start of a later Smith turn, so a freshly
+            # built app's preview had no gateway keys and took payments through
+            # the stand-in (Zenith Yoga, 2026-11-11) — and its checks ran on it.
+            try:
+                from database import async_session
+                from services.env_writer import write_env_local_from_platform
+                async with async_session() as sess:
+                    await write_env_local_from_platform(Path(checks["output_dir"]), project.org_id, sess)
+            except Exception:  # noqa: BLE001 — the next turn writes them; the checks still run
+                logger.warning("[smith-chat] the new app's settings were not written for %s", project_id,
+                               exc_info=True)
+            _start_checks(loop, str(project_id), checks["output_dir"], checks["app_root"],
+                          memory_lock=memory_lock, app_name=getattr(project, "name", "") or "",
+                          actor=_actor_of(user, project, ceiling))
+        asyncio.ensure_future(settings_then_checks())
 
     async def turn() -> None:
 
@@ -2298,6 +2314,8 @@ async def smith_chat(
                         "status": "asked"})
                     return {"status": "asked"}
 
+                # (How it takes money is asked in `_run_dag`, for every door a build comes through.)
+
                 # VERIFICATION IS THE USER'S CALL, NOT AN AUTOMATIC COST. `_run_dag`
                 # offers it beside the completion line for every approved build
                 # (see there), so a build that outran its turn still delivers the
@@ -2357,6 +2375,11 @@ async def smith_chat(
                         "options": ["Build it again anyway", "Show me the screens",
                                     "Nothing, I'll change something first"],
                         "status": "asked"})
+                    return {"status": "asked"}
+                from services.payments.app_payments import build_question as _payment_question
+                _asked = _payment_question(svc)
+                if _asked is not None:
+                    emit("message", _asked)
                     return {"status": "asked"}
                 emit("message", {"text": "Building it now — this takes a few minutes."})
                 return _run_dag(str(output_dir), app_root, req.message,
@@ -3126,6 +3149,20 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
                     _documents.store(output_dir, documents)
                 emit("message", _stop)
                 return {"status": "asked"}
+            # HOW IT TAKES MONEY, BEFORE IT IS BUILT, WHICHEVER DOOR IT CAME
+            # THROUGH. An app that sells something waits for its owner to choose
+            # the gateways (the dialog opens on this message); one that takes no
+            # money builds. It used to be asked at the card alone, and the answer
+            # to the design question, a resumed build and Smith's "build" went past it.
+            from services.payments.app_payments import build_question as _payment_question
+            _asked = _payment_question(svc)
+            if _asked is not None:
+                _add_to_the_brief(svc, description)
+                if documents:
+                    from services.blueprint import documents as _documents
+                    _documents.store(output_dir, documents)
+                emit("message", _asked)
+                return {"status": "asked"}
         if approved and announce_completion:
             # "APPROVE AND BUILD" IS THE APPROVAL. Recorded now, against the
             # definition as it stands, so a plan approval that had gone stale
@@ -3496,7 +3533,19 @@ def _gate_turn(svc: Any, gate: str, output_dir: str, app_root: str, req: Any, *,
                                  "say it another way, or name the item you mean.",
                          "status": "needs_user"})
         return {"status": "needs_user"}
-    emit("message", {"text": text, "status": "resolved"})
+    # A CHANGE THAT MAKES THE APP TAKE MONEY ASKS HOW, here too: "take payments
+    # for the memberships" before the app is modelled came through this door,
+    # and nothing asked which of the organisation's gateways it uses.
+    _options: list[str] = []
+    try:
+        from services.payments.app_payments import sense_after_change
+        _sensed = sense_after_change(output_dir, req.message)
+        if _sensed:
+            text = f"{text}\n\n{_sensed['said']}"
+            _options = list(_sensed.get("options") or [])
+    except Exception:  # noqa: BLE001 — the change stands; the Payments tab can still be opened
+        logger.exception("[gates] sensing payments after a change failed")
+    emit("message", {"text": text, "status": "resolved", **({"options": _options} if _options else {})})
     emit("state", {"state": str(svc.doc.get("state") or "")})
     return {"status": "resolved", "gate": gate, "version": out.get("version")}
 

@@ -10,7 +10,7 @@
  * build time, and into an existing app with Sync on its page.
  */
 
-import { use, useMemo, useState } from "react";
+import { use, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -24,6 +24,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { GatewaysSection, gatewayMatches } from "@/components/payments/GatewaysSection";
+import { gatewayApi, gatewaysKey } from "@/lib/payment-gateways";
 import {
   APP_PROVIDER, GROUPS, MODEL_LABELS, STATUS_TEXT, type IntegrationEntry, type Status,
   groupByProvider, infoFor, lastUpdated, matches, platformOnly, statusOf,
@@ -57,24 +59,54 @@ function when(iso: string | null): string {
   return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
 }
 
+/**
+ * STRIPE'S OLDER KEYS ARE NOT A CARD OF THEIR OWN. Payments are the gateways
+ * (the Payments group); the six `STRIPE_*` values typed before gateways are
+ * shown there, beside them, while any is set (`GatewaysSection`).
+ */
+const OLDER_STRIPE = "stripe";
+
 function IntegrationsSettings({ orgId }: { orgId: string }) {
-  const { data: entries = [], isLoading } = useQuery({
+  const { data: entries = [], isLoading, isError, error } = useQuery({
     queryKey: ["orgIntegrations", orgId],
     queryFn: () => api.get<IntegrationEntry[]>(`/api/orgs/${orgId}/integrations`),
+    retry: (n, e) => (e as { status?: number })?.status !== 403 && n < 2,
   });
+  // The same request the Payments group makes: counted in the summary, searched with the rest.
+  const gatewayList = useQuery({ queryKey: gatewaysKey(orgId), queryFn: () => gatewayApi.list(orgId) });
+  const gateways = gatewayList.data?.gateways ?? [];
   const [open, setOpen] = useState<string | null>(null);
   const [query, setQuery] = useState("");
 
   const byProvider = useMemo(() => groupByProvider(entries), [entries]);
-  const providers = Object.keys(byProvider);
+  const providers = Object.keys(byProvider).filter((p) => p !== OLDER_STRIPE);
   // The search narrows the cards; the counts stay for the whole page.
   const shown = useMemo(() => providers.filter((p) => matches(p, byProvider[p], query)), [providers, byProvider, query]);
+  const gatewaysShown = gateways.filter((g) => gatewayMatches(g, query)).length;
   // A provider managed on another page is neither connected nor missing here.
+  // A gateway is connected when it can take a payment (test or live), and
+  // needs attention when its keys were refused or never checked.
   const counts = useMemo(() => {
     const c = { connected: 0, partial: 0, unset: 0 };
     for (const p of providers) if (!infoFor(p, byProvider[p]).managedAt) c[statusOf(byProvider[p])] += 1;
+    for (const g of gateways) c[g.status === "ready" || g.status === "test_only" ? "connected" : "partial"] += 1;
     return c;
-  }, [providers, byProvider]);
+  }, [providers, byProvider, gateways]);
+  // Keys are an admin's to see; a member still sees the gateways they can choose.
+  const keysHidden = isError && (error as { status?: number })?.status === 403;
+
+  // OPENED AT #payments (the old Payments tab, the build dialog, Smith's
+  // answers): once the cards are drawn, the Payments group is in view.
+  useEffect(() => {
+    if (isLoading || gatewayList.isLoading || typeof window === "undefined") return;
+    // The address is read when each timer fires: after a redirect the router
+    // sets `#payments` after this first runs, and then puts the page back at
+    // the top, which undid a single early scroll.
+    const go = () => { if (window.location.hash === "#payments") document.getElementById("payments")?.scrollIntoView({ block: "start" }); };
+    const timers = [window.setTimeout(go, 60), window.setTimeout(go, 450)];
+    window.addEventListener("hashchange", go);
+    return () => { timers.forEach((t) => window.clearTimeout(t)); window.removeEventListener("hashchange", go); };
+  }, [isLoading, gatewayList.isLoading]);
 
   if (isLoading) {
     return (
@@ -93,9 +125,10 @@ function IntegrationsSettings({ orgId }: { orgId: string }) {
             <KeyRound className="h-6 w-6" /> Integrations
           </h1>
           <p className="mt-2 text-[15px] leading-relaxed text-muted-foreground">
-            The services your apps are wired to. Every app your organisation builds gets these at build time; an app already built takes
-            a change when you press <b>Sync</b> on its page. Design, photo and DNS keys are used by Forge while it builds and never go
-            into an app. Values are encrypted at rest and never leave the platform.
+            The services your apps are wired to, payment gateways included. Every app your organisation builds gets these at build time;
+            an app already built takes a change when you press <b>Sync</b> on its page (a gateway's new keys reach the apps that use it at
+            once). Design, photo and DNS keys are used by Forge while it builds and never go into an app. Values are encrypted at rest
+            and never leave the platform.
           </p>
         </div>
         <div data-summary="" className="flex items-center gap-2 text-sm">
@@ -119,7 +152,18 @@ function IntegrationsSettings({ orgId }: { orgId: string }) {
         )}
       </div>
 
-      {query && shown.length === 0 && (
+      {keysHidden && (
+        <p data-keys-admin-only="" className="mb-8 rounded-lg bg-slate-50 p-3 text-sm text-muted-foreground dark:bg-slate-900">
+          Only your organisation's admins see and change the keys of its integrations.
+        </p>
+      )}
+      {isError && !keysHidden && (
+        <p role="alert" className="mb-8 rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">
+          The integrations could not be loaded: {error instanceof Error ? error.message : "unknown error"}
+        </p>
+      )}
+
+      {query && shown.length === 0 && gatewaysShown === 0 && (
         <p data-no-match="" className="rounded-xl border border-dashed border-slate-300 p-6 text-sm text-muted-foreground dark:border-slate-700">
           Nothing matches “{query}”. Try the service's name, what it does (email, uploads, mobile) or a key such as AWS_SECRET_ACCESS_KEY.
         </p>
@@ -127,6 +171,10 @@ function IntegrationsSettings({ orgId }: { orgId: string }) {
 
       <div className="space-y-10">
         {GROUPS.map((group) => {
+          if (group.id === "payments") {
+            return <GatewaysSection key={group.id} orgId={orgId} query={query}
+                                    onManageOlder={byProvider[OLDER_STRIPE] ? () => setOpen(OLDER_STRIPE) : undefined} />;
+          }
           const members = shown.filter((p) => infoFor(p, byProvider[p]).group === group.id);
           if (members.length === 0) return null;
           return (
@@ -196,7 +244,11 @@ function ProviderDialog({ orgId, provider, entries, onClose }: { orgId: string; 
   const [values, setValues] = useState<Record<string, string>>({});
   const [shown, setShown] = useState<Record<string, boolean>>({});
   const changes = Object.entries(values).filter(([, v]) => v !== "");
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["orgIntegrations", orgId] });
+  const invalidate = () => {
+    void queryClient.invalidateQueries({ queryKey: ["orgIntegrations", orgId] });
+    // The older Stripe keys are drawn from the gateways' answer (`olderStripe`).
+    if (provider === OLDER_STRIPE) void queryClient.invalidateQueries({ queryKey: gatewaysKey(orgId) });
+  };
 
   const save = useMutation({
     mutationFn: async () => {

@@ -12,6 +12,7 @@ installHarness({ stubs: {
   "@/db": "export const db = { async execute() { return []; } };",
   "@/lib/integrations/connected": "export function connectedService() { return undefined; }",
   "@/lib/integrations/resolver": "export async function getSecret() { return ''; }",
+  "@/lib/payments-config": "export const PAYMENTS = { needed: false, gateways: [], plans: [] };",
 } });
 
 const { stripeAdapter }: any = await import("../payments/stripe.ts");
@@ -48,6 +49,6 @@ const sign = (secret: string, t = Math.floor(Date.now() / 1000)) =>
   const out = await standInAdapter.createCheckout({ paymentId: "p-9" } as any, { secret: "" }, "https://shop.test");
   eqJson(out.url, "https://shop.test/pay/stand-in?session=standin_p-9", "the stand-in sends the person to the app's own page");
   const chosen = await pay.adapterFor();
-  ok(chosen.adapter.provider === "stand_in" && !chosen.live && /No payment service is connected/.test(chosen.notice), "with nothing connected the stand-in takes it and says so");
+  ok(chosen.adapter.provider === "stand_in" && !chosen.live && /No payment gateway is connected/.test(chosen.notice), "with nothing connected the stand-in takes it and says so");
 }
 done("a payment is believed only from a signed event");

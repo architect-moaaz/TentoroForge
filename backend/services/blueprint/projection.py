@@ -3192,7 +3192,20 @@ def project_integrations(doc: dict, app_root: str | Path) -> dict[str, Any]:
         "",
         "export const CONNECTED_SERVICES: Record<string, ConnectedService> = {",
     ]
+    # ONE SERVICE PER ACTION. An app paid into several gateways has an
+    # integration row for each, all serving `take_payment`; written as they
+    # came, the object literal held the key twice and the last silently won.
+    # The owner's first-chosen gateway answers for the action, as it is the
+    # default in the app's payments config (which routes payers between them);
+    # otherwise the first declared.
+    default = next((str(g.get("provider")) for g in ((doc.get("payments") or {}).get("gateways") or [])
+                    if isinstance(g, dict)), "")
+    by_action: dict[str, dict[str, Any]] = {}
     for entry in entries:
+        kept = by_action.get(entry["action"])
+        if kept is None or (entry["provider"] == default and kept["provider"] != default):
+            by_action[entry["action"]] = entry
+    for entry in by_action.values():
         lines.append(f"  {json.dumps(entry['action'])}: " + json.dumps({
             "name": entry["name"], "provider": entry["provider"],
             "keys": entry["keys"], "liveKey": entry["liveKey"],
@@ -4654,6 +4667,9 @@ def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
         lines.append(f'//   public: {r.route}{"/*" if r.subtree else ""}  (the platform\'s: {r.why})')
     gated_by_role = role_routes(doc)
     public_lines = [f'  new RegExp({json.dumps(rx)}),  // {why}' for rx, why in public]
+    # A SUBSCRIPTION OPENS THE APP when its payments say so (`payments.access`).
+    from services.payments.app_payments import middleware_gate
+    gate_head, gate_body = middleware_gate(doc)
     role_lines = [
         f'  {{ route: new RegExp({json.dumps(_route_regex(r["route"]))}), roles: {json.dumps(r["roles"])} }},'
         for r in gated_by_role
@@ -4694,6 +4710,7 @@ def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
         'const refuse = (status: 401 | 403, code: string, message: string) =>',
         '  NextResponse.json({ error: { code, message } }, { status });',
         '',
+        *gate_head,
         '// A NEW ACCOUNT PROVES ITS ADDRESS FIRST (`signIn.verifyEmail`). Until the',
         '// code is entered it reaches only the sign-in machinery and the code page,',
         '// public pages included: an employer\'s onboarding is public, and DITANS let',
@@ -4704,11 +4721,16 @@ def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
         '  Boolean(VERIFY_PATH) && (token as { profile?: { emailVerification?: unknown } } | null)?.profile?.emailVerification === "pending";',
         '',
         'export default withAuth(',
-        '  function middleware(req) {',
+        ('  async function middleware(req) {' if gate_body else '  function middleware(req) {'),
         '    const path = req.nextUrl.pathname;',
         '    if (pendingProof(req.nextauth.token) && !VERIFY_OPEN.some((r) => r.test(path)) && path !== VERIFY_PATH.split("?")[0]) {',
         '      if (isApi(path)) return refuse(403, "EMAIL_NOT_VERIFIED", "Confirm your email with the code we sent before using this.");',
-        '      const to = new URL(VERIFY_PATH, req.url);',
+        '      // The app\'s own prefix kept (`nextUrl`): `new URL(path, req.url)` dropped a',
+        '      // Preview\'s base path and sent the person to the platform\'s address.',
+        '      const to = req.nextUrl.clone();',
+        '      const [verifyPath, verifyQuery] = VERIFY_PATH.split("?");',
+        '      to.pathname = verifyPath;',
+        '      to.search = verifyQuery ? `?${verifyQuery}` : "";',
         '      to.searchParams.set("next", path + req.nextUrl.search);',
         '      return NextResponse.redirect(to);',
         '    }',
@@ -4719,9 +4741,13 @@ def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
         '    for (const r of ROLE_ROUTES) {',
         '      if (r.route.test(path) && !r.roles.includes(role)) {',
         '        if (isApi(path)) return refuse(403, "FORBIDDEN", "Your role may not use this.");',
-        '        return NextResponse.redirect(new URL("/403", req.url));',
+        '        const forbidden = req.nextUrl.clone();',
+        '        forbidden.pathname = "/403";',
+        '        forbidden.search = "";',
+        '        return NextResponse.redirect(forbidden);',
         '      }',
         '    }',
+        *gate_body,
         '    return NextResponse.next();',
         '  },',
         '  {',

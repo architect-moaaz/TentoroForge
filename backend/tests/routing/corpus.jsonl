@@ -99,6 +99,8 @@
 {"say": "give the customer their money back for booking 88", "verb": "refund"}
 {"say": "prices are in dirhams", "verb": "set_currency"}
 {"say": "use GBP", "verb": "set_currency"}
+{"say": "take payments through razorpay", "verb": "set_up_payments"}
+{"say": "let people subscribe for 9 dollars a month", "verb": "set_up_payments"}
 {"say": "add an organisation called Northside Clinic", "verb": "add_organisation"}
 {"say": "we have a new branch, Riverside", "verb": "add_organisation"}
 {"say": "move dave@clinic.com to Northside as a Nurse", "verb": "move_login"}

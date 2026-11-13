@@ -1,6 +1,8 @@
 import { notFound, redirect } from "next/navigation";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { auth } from "@/auth";
+import { landingFor } from "@/lib/landing";
 import { renderSchemaPage } from "@/lib/schema-page";
 import { entryRoute, schemas as routesRegistry } from "@/schemas/registry";
 import CodedRoot, { hasCodeRoot, rootIsPublic } from "../_root/page";
@@ -100,7 +102,14 @@ export default async function Page({
     // or the first thing in the navigation — and is empty when the
     // application genuinely has a page at "/", in which case this never runs
     // and the schema above renders.
-    redirect(entryRoute);
+    // A SIGNED-IN PERSON STARTS ON THEIR ROLE'S OWN PAGE (`lib/landing`), as
+    // signing in sends them: the navigation's first page can be one their
+    // role may not open, and a new visitor's first sight of Zenith Yoga was
+    // the "not allowed" page (2026-11-11). Anyone else: the entry page.
+    const session = await auth();
+    const role = String((session?.user as { role?: string } | undefined)?.role ?? "");
+    const own = role ? landingFor(role) : "";
+    redirect(own && own !== "/" ? own : entryRoute);
   }
   if (!matched) notFound();
 
