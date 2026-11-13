@@ -31,6 +31,7 @@ pictures (`/drawn/…`) are served here too, at the same origin.
 
 from __future__ import annotations
 
+import http.cookiejar
 import logging
 from typing import AsyncIterator
 
@@ -69,7 +70,17 @@ _HOP_BY_HOP = frozenset(
 # One shared client. Next dev streams SSE for HMR-adjacent endpoints;
 # a per-request client would leak connections. `follow_redirects=False`
 # so we forward 3xx unchanged.
-_client = httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=5.0), follow_redirects=False)
+#
+# IT KEEPS NO COOKIES. An httpx client stores every Set-Cookie it is
+# answered with and sends it with every later request it builds: the first
+# person to sign in to a preview had their session sent with everyone else's
+# requests, so a signed-out visitor read the app as them ("/api/billing/status"
+# answered `access: true` to a request with no cookie at all, 2026-11-11). The
+# jar refuses every cookie, and each request is built on its own, carrying
+# only the browser's own Cookie header.
+_NO_COOKIES = http.cookiejar.CookieJar(policy=http.cookiejar.DefaultCookiePolicy(allowed_domains=[]))
+_client = httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=5.0), follow_redirects=False,
+                            cookies=_NO_COOKIES)
 
 
 def _filter_headers(headers) -> list[tuple[str, str]]:
