@@ -177,8 +177,22 @@ def _look(doc: dict) -> str:
     return "\n".join(x for x in lines if x)
 
 
+#: Said once, only in an application that has a map-first screen.
+MAP_FIRST_RULES = """\
+# A map-first screen (the page brief says so)
+It REPLACES the translation above for that page: the screen is `MapScreen` from "@/ui" and nothing else wraps it (no `Screen`, no
+header, no `ListView`, no cards of facts). Its parts: the map (points, `route` from `useRoute`), `top` (one compact
+`FloatingPanel`), `controls` (round `FloatingButton`s), and one `BottomSheet` per state, whose `snapPoints` and `index` follow the
+state. The state is DERIVED from the records each render (their statuses, the offer's own expiry), never kept in `useState`
+flags that a status change could contradict. Each state offers only the next valid action, as ONE `accent` button.
+NEVER keep a ticking clock in this screen's state (no `setInterval`, no `now` in `useState`): it redraws the map on every tick.
+A countdown is `<Countdown until={offer.requestExpiresAt} />`, a time since is `<Elapsed since={…} />`, and `useExpired(iso)`
+removes an offer once its own time has passed."""
+
+
 def system_prompt(doc: dict) -> str:
     """Identical for every screen of one application — the cached prefix."""
+    from services.blueprint import map_first
     from services.blueprint.app_sdk import sdk_reference
     from services.blueprint.ui_engineer import _about, _language, _rhythm, bar
 
@@ -227,6 +241,7 @@ comes straight back to you with the errors, up to {_rounds()} times. Begin writi
 
 # Design
 {NATIVE_DESIGN}
+{MAP_FIRST_RULES if map_first.map_pages(doc) else ''}
 Reply with the rationale, the full contents of Screen.tsx, and `needs` (empty when every change has a workflow)."""
 
 
@@ -269,7 +284,10 @@ def user_prompt(doc: dict, page: dict, *, feedback: str = "", brief: str = "", c
         out.append("\nThis screen IS one of the app's bottom tabs: it has no `back` button, and its title is the tab's."
                    if is_tab(doc, str(page.get("id"))) else
                    "\nThis screen is NOT a tab: it is opened from another screen, so it has a `back` button.")
-    if not kind:
+    from services.blueprint import map_first
+    if map_first.is_map_page(page):
+        out.append("\n" + map_first.brief(doc, page))
+    if not kind and not map_first.is_map_page(page):
         words = _web_words(doc, page)
         if words:
             out.append("\nThe web page as it is written now - what it shows, how it words things, which status is which "
@@ -400,8 +418,42 @@ def _page_findings(doc: dict, page: dict, screen: str) -> list[str]:
     control, a flow move that leads nowhere, a change faked in state."""
     from services.blueprint.ui_engineer import _simulated_writes, _unfollowed_flows, _unwired_actions
 
-    found = _unwired_actions(doc, page, screen) + _unfollowed_flows(doc, page, screen) + _simulated_writes(screen)
+    from services.blueprint import map_first
+    from services.blueprint.app_sdk import page_keys
+
+    pages = [page]
+    folded_keys: set[str] = set()
+    if map_first.is_map_page(page):
+        # A MAP SCREEN IS THE PAGES IT COVERS. It runs their workflows (each needs a control, in some state), but a move from
+        # one of them to another ("after Accept, open the trip", "after Cancel, open the history") is the sheet changing with
+        # the data, not a link: those flows are not asked of it, and nothing is asked to link to a page it covers.
+        covered = map_first.covered_pages(doc, page)
+        pages += covered
+        keys = page_keys(doc)
+        folded_keys = {keys[str(p.get("id"))] for p in [page, *covered] if str(p.get("id")) in keys}
+    found: list[str] = []
+    for p in pages:
+        found += _unwired_actions(doc, p, screen)
+    # the page's own moves to somewhere else; a map screen's folded pages are states, so their moves are not asked
+    found += [e for e in _unfollowed_flows(doc, page, screen) if not any(f"(pages.{k}," in e for k in folded_keys)]
+    found += _simulated_writes(screen)
+    found += _ticking_screen(screen)
     return [e.replace("view.tsx", "Screen.tsx") for e in found]
+
+
+_TIMER_RX = re.compile(r"(?<![A-Za-z0-9_])setInterval\s*\(")
+
+
+def _ticking_screen(screen: str) -> list[str]:
+    """A screen that runs its own `setInterval` (a `now` it sets every second) redraws the whole screen on every tick; on a
+    map screen that is the map, the sheet and the panels ten times a second, and a slow phone never catches up (found on the
+    emulator: the JS thread pinned at 100% and the screen stuck on its loading sheet). The ticking belongs in the kit's small
+    parts, so only the number that changes is drawn."""
+    if not _TIMER_RX.search(screen):
+        return []
+    return ["Screen.tsx calls setInterval: a timer that sets state in a screen redraws the whole screen on every tick. Use "
+            "`<Countdown until={iso}/>` for a time left, `<Elapsed since={iso}/>` for a time since, and `useExpired(iso)` to "
+            "drop something once its time has passed (all from \"@/ui\"); polling is `useLive()`, never a timer of your own."]
 
 
 # ---------------------------------------------------------------------------

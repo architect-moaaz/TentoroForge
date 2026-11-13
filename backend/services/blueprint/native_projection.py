@@ -575,7 +575,9 @@ def navigation_module(doc: dict) -> str:
     icons = tab_icons([(p.get("_icon"), str(p.get("_label") or p.get("name") or ""), str(p.get("pattern") or "")) for p in shown])
     for p, icon in zip(pages_in_bar, icons):
         route = str(p.get("route") or "/")
-        name = (route.strip("/").split("/")[-1] or "index")
+        # the tab is named by the path of its route file inside the tab folder (`rides/history`), the name the router knows
+        # it by; the last word alone matched no screen, so the bar showed the raw path and a warning
+        name = (route.strip("/") or "index")
         tabs.append({"name": name, "title": str(p.get("_label") or p.get("name") or name), "icon": icon, "route": route})
     more = [{"title": str(p.get("_label") or p.get("name") or ""), "icon": icon, "route": str(p.get("route") or "/")}
             for p, icon in zip(listed, icons[len(pages_in_bar):])]
@@ -623,9 +625,12 @@ def screen_path(page_id: str) -> str:
 def drawn_pages(doc: dict) -> list[dict]:
     """The pages that get a native screen: the ones the web writes code for,
     without the sign-in and sign-up pages — signing in is the SDK's."""
+    from services.blueprint.map_first import covered_by
     from services.blueprint.orchestrator import native_page_subjects
     wanted = set(native_page_subjects(doc))
-    return [p for p in _live(doc.get("pages")) if str(p.get("id")) in wanted and for_phone_roles(doc, p)]
+    folded = covered_by(doc)      # a page folded into a map-first screen is a state of that screen: no screen, no tab
+    return [p for p in _live(doc.get("pages")) if str(p.get("id")) in wanted and str(p.get("id")) not in folded
+            and for_phone_roles(doc, p)]
 
 
 def for_phone_roles(doc: dict, page: dict) -> bool:
@@ -735,6 +740,19 @@ def project_screens(doc: dict, output_dir: str | Path) -> list[str]:
             expected.add(rel)
             if _write(root / rel, text if text.endswith("\n") else text + "\n"):
                 written.append(rel)
+    # A PAGE FOLDED INTO A MAP SCREEN OPENS THAT SCREEN: its address (a link, a deep link, a notification) lands on the map,
+    # which shows the state the job is in. Written only once the map screen exists.
+    from services.blueprint.map_first import covered_by
+    have_screens = {str(r.get("page")) for r in _live(doc.get("nativeCode")) if r.get("screen")}
+    live_pages = {str(p.get("id")): p for p in _live(doc.get("pages"))}
+    for covered, cover in covered_by(doc).items():
+        page = live_pages.get(covered)
+        target = route_file(str(page.get("route") or "/"), tab=False) if page else None
+        if not target or cover not in have_screens:
+            continue
+        expected.add(target)
+        if _write(root / target, f'export {{ default }} from "@/screens/{cover}";\n'):
+            written.append(target)
     # A PAGE WITH NO PHONE SCREEN STILL HAS A ROUTE. The tab, the menu entry or the link leads somewhere that says what
     # happened and where the page is, instead of "This screen does not exist". When a screen is written for it later
     # the same file is overwritten with the real one.

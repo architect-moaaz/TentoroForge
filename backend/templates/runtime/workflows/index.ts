@@ -2091,6 +2091,24 @@ export function registerDefaultActions(): void {
       ?? (config as any).recipientId ?? (config as any).recipientUserId ?? null;
     const userId = _resolveRef(who, ctx);
     const role = (config as any).toRole ?? (config as any).assigneeRole ?? (config as any).recipientRole ?? null;
+    // THE NEAREST PEOPLE: `nearest: { entity: "Driver", from: "{{ride.pickupLocation}}", limit: 5, maxKm: 15 }` alerts the
+    // on-duty people of that kind closest to a place, from the live fleet (the phones that are sharing a position right now).
+    // Whoever has gone quiet for `maxAgeSeconds` (two minutes by default) is not near, whatever their last position was.
+    const near = (config as any).nearest;
+    let nearIds: string[] | null = null;
+    let nearNotice: string | undefined;
+    if (near && typeof near === "object") {
+      try {
+        const { fleetOnDuty } = await import("@/lib/tracking/hub");
+        const { fleetKey } = await import("@/lib/tracking/rules");
+        const { whoIsNear } = await import("@/lib/tracking/nearest");
+        const kind = String(near.entity ?? "").trim();
+        const duty = kind ? fleetOnDuty(fleetKey(kind)).map((m) => ({ id: m.id, who: m.who, lat: m.lat, lng: m.lng, at: m.heardAt })) : [];
+        const out = whoIsNear(near, _resolveRef(near.from, ctx), duty);
+        nearIds = out.userIds;
+        nearNotice = out.notice;
+      } catch (e) { nearNotice = `could not look for who is near: ${e instanceof Error ? e.message : String(e)}`; }
+    }
     const type = String((config as any).notificationType ?? (config as any).type ?? "info");
     const entityId = _resolveRef((config as any).entityId ?? null, ctx);
     // WHERE IT OPENS: the address of the record it is about, filled when the
@@ -2101,32 +2119,38 @@ export function registerDefaultActions(): void {
     const link = typeof linkRaw === "string" && linkRaw.startsWith("/") && !linkRaw.includes("{{") ? linkRaw : null;
     const table = (schema as any).forgeNotifications;
     let notificationId: string | null = null;
+    // one in-app notification for each person it goes to (the bell shows it), or one for the role / nobody in particular
+    const people: Array<string | null> = nearIds ? nearIds : [userId ? String(userId) : null];
     if (table) {
-      try {
-        const inserted: any = await (db as any).insert(table).values({
-          title, message, userId: userId ? String(userId) : null,
-          role: role ? String(role) : null, type, entityId: entityId ? String(entityId) : null, read: false,
-          ...(link && "link" in table ? { link } : {}),
-        }).returning();
-        const row = Array.isArray(inserted) ? inserted[0] : inserted;
-        notificationId = row?.id ?? null;
-      } catch (e) { console.warn("[workflow] send_notification persist failed:", e); }
+      for (const person of people) {
+        try {
+          const inserted: any = await (db as any).insert(table).values({
+            title, message, userId: person,
+            role: nearIds ? null : (role ? String(role) : null), type, entityId: entityId ? String(entityId) : null, read: false,
+            ...(link && "link" in table ? { link } : {}),
+          }).returning();
+          const row = Array.isArray(inserted) ? inserted[0] : inserted;
+          notificationId = notificationId ?? row?.id ?? null;
+        } catch (e) { console.warn("[workflow] send_notification persist failed:", e); }
+      }
     }
     // TO THE PERSON'S DEVICES TOO, when the step says `push` and the
     // application sends it: signed with its own keys, reaching every device
     // they subscribed. Said when it could not (no device, no keys).
     const channels = Array.isArray((config as any).channels) ? (config as any).channels.map(String) : ["in_app"];
     let pushed: { sent: number; pruned: number; notice?: string } | null = null;
-    if (channels.includes("push")) {
+    if (channels.includes("push") && !(nearIds && nearIds.length === 0)) {
       try {
         const { sendPush } = await import("@/lib/push");
-        pushed = await sendPush({ userIds: userId ? [String(userId)] : [], role: role ? String(role) : undefined },
-                                { title, body: message, link });
+        const ttl = Number((config as any).ttlSeconds);
+        pushed = await sendPush(nearIds ? { userIds: nearIds } : { userIds: userId ? [String(userId)] : [], role: role ? String(role) : undefined },
+                                { title, body: message, link, ...(ttl > 0 ? { ttl } : {}) });
       } catch (e) { pushed = { sent: 0, pruned: 0, notice: `push failed: ${e instanceof Error ? e.message : String(e)}` }; }
     }
     // Contract-declared `notificationId` — was always null before.
-    return { sent: true, channel: pushed && pushed.sent > 0 ? "in_app+push" : "in_app", notificationId,
-             ...(pushed ? { pushed: pushed.sent, pushNotice: pushed.notice } : {}) };
+    return { sent: nearIds ? nearIds.length > 0 : true, channel: pushed && pushed.sent > 0 ? "in_app+push" : "in_app", notificationId,
+             ...(pushed ? { pushed: pushed.sent, pushNotice: pushed.notice } : {}),
+             ...(nearIds ? { nearby: nearIds.length } : {}), ...(nearNotice ? { notice: nearNotice } : {}) };
   });
 
   // Real email. THE APPLICATION KNOWS WHICH SERVICE IT IS MEANT TO SEND

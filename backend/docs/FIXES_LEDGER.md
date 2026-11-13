@@ -91,6 +91,21 @@ The phone's map and live location (found trying the driver app on an Android emu
 - The ride ownership rule with `readsUnclaimed`: the engine supports it and the blueprint agent is taught to use it for
   work that is offered before anyone holds it.
 
+- A person who works from the road gets a MAP-FIRST phone home (the map is the screen; the home, the offer and the trip are
+  states of one bottom sheet), chosen by the platform plan (`mobile.mapFirstRoles`) and written through the native
+  builder (`phone: {experience: "map_first", covers: [...]}`, `services/blueprint/map_first.py`, kit parts `MapScreen`,
+  `BottomSheet`, `FloatingPanel`). The pages it covers get no screen and no tab; the web app is untouched.
+- A phone screen may not tick: a `setInterval` that sets state in a screen is refused by the builder's checks, and the kit
+  has `Countdown`, `Elapsed` and `useExpired` for clocks. The phone's number formatter is made once, not on every draw.
+- A tab is named by the path of its route file, so a tab for `/rides/history` finds its screen.
+
+- Phone alerts, server side: a phone registers its Expo token (`/api/push/device`, table `forge_device_tokens`), the push
+  module sends to phones through Expo as well as browsers, and a `send_notification` step with `nearest` alerts the on-duty
+  people closest to a place (the live fleet). Smith is taught to write it and the contract refuses one that cannot work.
+  The phone side (asking permission, sending the token, opening the app on a tap) is NOT built yet.
+- The live fleet lost the first driver's position when nobody was watching the map (the empty fleet was dropped before the
+  driver was added). Fixed in `tracking/hub.ts`; it affected every app with live tracking.
+
 ## App only (a new Forge app will NOT have these)
 
 These were hand-written in `output/n2xcrvt5` for that app's own data and stay there:
@@ -100,6 +115,14 @@ These were hand-written in `output/n2xcrvt5` for that app's own data and stay th
 
 ## Found, not fixed yet
 
+- The phone app (Expo version 51) cannot be opened in the App Store's Expo Go on an iPhone, which only opens the newest
+  version. An iPhone needs a proper build (a paid Apple account) or an upgrade of the phone template to a newer Expo.
+- The test ride app's demo-ride workflow carries the "tell the nearest drivers" step by hand (app only); real apps get it
+  through Smith's teaching.
+- On the Android emulator used for testing, reading the clock costs about 65 microseconds a call (20,000 calls take over a
+  second; a phone takes about a millisecond), so React's development build crawls and the JS thread sits near 100%. That
+  is the emulator, not the app: a plain map screen is fine and the full driver screen is only slow. Test speed and
+  "stuck on loading" claims on a real phone or a release build, not on that emulator in development mode.
 - The test browser crashes ("Target crashed") on pages that draw the Google map several times in a row, in headless
   Chromium. Not yet known whether it is the test browser or the page.
 - Open (searching) ride requests show the rider's phone to every driver before anyone accepts. It should show only after

@@ -1300,9 +1300,11 @@ def native_page_subjects(doc: Mapping[str, Any]) -> list[str]:
     def route(p: Mapping[str, Any]) -> str:
         return "/" + str(p.get("route") or "").strip("/")
 
+    from services.blueprint.map_first import covered_by
+    folded = covered_by(doc)      # a page folded into a map-first screen is written as part of that screen
     return [p["id"] for p in (doc.get("pages") or [])
             if p.get("id") and p.get("status") != "DEPRECATED"
-            and p["id"] not in _deferred_pages(doc)
+            and p["id"] not in _deferred_pages(doc) and p["id"] not in folded
             and str(p.get("pattern") or "") != "audit_trail"
             and (str(p.get("pattern") or "") != "auth" or route(p) in AUTH_FILES)]
 

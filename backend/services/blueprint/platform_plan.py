@@ -71,6 +71,11 @@ _LEAN = {"provider": (1, 0), "office": (0, 1), "consumer": (0, 0), "vendor": (0,
 _WEB_ONLY_RX = re.compile(r"\b(?:web[- ]only|website[- ]only|only (?:a )?(?:web|website)|no (?:mobile|native|phone) app|without (?:a )?(?:mobile|native) app)\b", re.I)
 
 
+#: The signals that put a role ON THE MOVE: what it does out on the road, as opposed to a camera or an offline form. A
+#: phone role with one of these gets a map-first phone app (`experience: "map_first"`).
+_MOVING_RX = re.compile(r"gps|location|tracking|navigat|accept|go online|live", re.I)
+
+
 @dataclass
 class RolePlan:
     role: str
@@ -78,6 +83,8 @@ class RolePlan:
     why: str
     phone: list[str] = field(default_factory=list)
     desk: list[str] = field(default_factory=list)
+    #: "map_first" when the phone app of this role is built around a map; otherwise "screens" (one screen per page).
+    experience: str = "screens"
 
 
 @dataclass
@@ -190,7 +197,8 @@ def analyse(brief: str) -> Plan:
         else:
             platform = "web"
             why = ("works with " + ", ".join(d[:4])) if d else "is desk work: tables, forms and reports"
-        roles.append(RolePlan(label, platform, why, m, d))
+        moving = platform in ("mobile", "both") and kind == "provider" and any(_MOVING_RX.search(x) for x in m)
+        roles.append(RolePlan(label, platform, why, m, d, "map_first" if moving else "screens"))
 
     platforms = {r.platform for r in roles}
     if len(platforms) == 1:
@@ -209,7 +217,8 @@ def question(plan: Plan) -> str:
     """What Smith says: the plan in short lines a customer can read, then how to answer."""
     lines = ["Here is how I would split this app, because your people do different jobs:", ""]
     for r in plan.roles:
-        lines += [f"• {r.role}: {_PLATFORM_WORDS[r.platform]}. It {r.why}.", ""]
+        built = " The phone app is built around the map." if r.experience == "map_first" else ""
+        lines += [f"• {r.role}: {_PLATFORM_WORDS[r.platform]}.{built} It {r.why}.", ""]
     lines += [
         "All of them share one back end, so a ride booked, a job accepted or a trip finished shows up everywhere at once.",
         "",
@@ -276,12 +285,22 @@ def native_roles(output_dir: str | Path) -> list[str] | None:
     return roles or None
 
 
+def map_first_roles(output_dir: str | Path) -> list[str] | None:
+    """The roles whose phone app is built around a map, under the plan the person settled; None when there are none."""
+    kept = read(output_dir)
+    if not kept or kept.get("status") not in ("accepted", "edited", "recommended"):
+        return None
+    roles = [str(r["role"]) for r in kept.get("roles") or []
+             if r.get("platform") in ("mobile", "both") and r.get("experience") == "map_first"]
+    return roles or None
+
+
 def write(output_dir: str | Path, plan: Plan, status: str, decided_by: str = "person") -> None:
     path = Path(output_dir) / FILE
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({
         "status": status, "decidedBy": decided_by, "surface": plan.surface,
-        "roles": [{"role": r.role, "platform": r.platform, "why": r.why} for r in plan.roles],
+        "roles": [{"role": r.role, "platform": r.platform, "why": r.why, "experience": r.experience} for r in plan.roles],
     }, indent=2) + "\n", encoding="utf-8")
 
 

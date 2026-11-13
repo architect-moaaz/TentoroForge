@@ -196,3 +196,28 @@ export function dragShown(start: number, dy: number, heights: number[], give = 2
   if (raw > hi) return hi + Math.min(give, (raw - hi) / 4);
   return raw;
 }
+
+// ---- clocks ---------------------------------------------------------------------------------------------------------------
+
+/** `m:ss` for a time left (never negative). */
+export function countdownText(ms: number): string {
+  const total = Math.max(0, Math.ceil(ms / 1000));
+  const s = total % 60;
+  return `${Math.floor(total / 60)}:${s < 10 ? "0" : ""}${s}`;
+}
+
+/** The milliseconds from `now` to an ISO time (negative once it has passed); null when there is no time. */
+export function msUntil(iso: string | null | undefined, now: number): number | null {
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  return Number.isNaN(t) ? null : t - now;
+}
+
+/** How long ago something began, in words a glance can take: `just now`, `12 min`, `1 h 5 min`. */
+export function elapsedText(ms: number): string {
+  const min = Math.max(0, Math.floor(ms / 60000));
+  if (min < 1) return "just now";
+  if (min < 60) return `${min} min`;
+  const h = Math.floor(min / 60), m = min % 60;
+  return m ? `${h} h ${m} min` : `${h} h`;
+}

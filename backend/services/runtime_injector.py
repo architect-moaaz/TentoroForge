@@ -1042,13 +1042,30 @@ def _inject_file_storage(output_path: Path) -> list[str]:
             txt = barrel.read_text(encoding="utf-8")
             if "_forge_push_subscriptions" not in txt:
                 barrel.write_text(txt.rstrip() + '\nexport { forgePushSubscriptions } from "./_forge_push_subscriptions";\n', encoding="utf-8")
+    # The phones of the native app listen too: their Expo tokens live in `forge_device_tokens`, and the alert goes out
+    # through Expo's push service (`expo-push.ts`), which needs no key of the app's own.
+    device_schema = _TEMPLATE_DIR / "db" / "forge-device-tokens.schema.ts"
+    if device_schema.exists() and schema_dir.exists():
+        shutil.copy2(device_schema, schema_dir / "_forge_device_tokens.ts")
+        written.append("src/db/schema/_forge_device_tokens.ts")
+        barrel = schema_dir / "index.ts"
+        if barrel.exists():
+            txt = barrel.read_text(encoding="utf-8")
+            if "_forge_device_tokens" not in txt:
+                barrel.write_text(txt.rstrip() + '\nexport { forgeDeviceTokens } from "./_forge_device_tokens";\n', encoding="utf-8")
+    expo_src = _TEMPLATE_DIR / "expo-push.ts"
+    if expo_src.exists():
+        (output_path / "src" / "lib").mkdir(parents=True, exist_ok=True)
+        shutil.copy2(expo_src, output_path / "src" / "lib" / "expo-push.ts")
+        written.append("src/lib/expo-push.ts")
     push_src = _TEMPLATE_DIR / "push.ts"
     if push_src.exists():
         (output_path / "src" / "lib").mkdir(parents=True, exist_ok=True)
         shutil.copy2(push_src, output_path / "src" / "lib" / "push.ts")
         written.append("src/lib/push.ts")
         _ensure_package_deps(output_path, {"web-push": "^3.6.7"})
-    for sub, dst in (("api-push/route.ts", "push/route.ts"), ("api-push/test/route.ts", "push/test/route.ts")):
+    for sub, dst in (("api-push/route.ts", "push/route.ts"), ("api-push/test/route.ts", "push/test/route.ts"),
+                     ("api-push/device/route.ts", "push/device/route.ts")):
         src = _TEMPLATE_DIR / sub
         if src.exists():
             target = output_path / "src" / "app" / "api" / dst

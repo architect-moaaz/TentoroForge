@@ -221,7 +221,12 @@ import { MapScreen, BottomSheet, FloatingPanel, FloatingButton, Row, Text, Butto
 - A sheet's `snapPoints` are resting heights (shares of the room, e.g. `[0.24, 0.55, 0.9]`, or points). The person drags it;
   it never dims the map. A pick-one or a confirmation is still a `Sheet` / `Dialog`.
 - Put floating parts in `top` (a `FloatingPanel`: compact, one line of facts), round buttons in `controls`
-  (`FloatingButton`, 48 pt or more, with a `label`). Nothing else floats: the map stays visible.
+  (`FloatingButton`, 48 pt or more, with a `label`). Nothing else floats: the map stays visible. Never repeat the tab bar's
+  destinations (earnings, history, profile) as floating buttons: the buttons are for what helps the job now (call the rider).
+- NEVER TICK IN A SCREEN. A `setInterval` (or a `now` in `useState`) that sets state in the screen redraws the map, the sheet and the
+  panels on every tick, and a slow phone falls behind and draws without rest. Clocks live in small parts: `<Countdown until={iso} />`
+  (m:ss to a time, e.g. a request's own expiry), `<Elapsed since={iso} />` (12 min), and `useExpired(iso)` (false until that time,
+  then true, with one redraw) to drop an offer when it runs out. Polling is `useLive()`, never a timer of your own.
 - `MapView height="fill"` is the same map without the screen around it. `useDevicePosition()` reads where the device is
   if a screen needs the number. No made-up position, ever: with no fix show the last known spot and say so.
 

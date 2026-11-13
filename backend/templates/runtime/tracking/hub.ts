@@ -132,6 +132,9 @@ export function fleetPublish(
 ): Published {
   const f = fleetOf(key);
   sweep(key, f, now);
+  // `sweep` forgets a fleet that is empty and has no listener, which is exactly what a first report finds. Put it back before
+  // the person is added, or they are added to a fleet nothing can find (positions were lost unless someone was watching).
+  if (fleets.get(key) !== f) fleets.set(key, f);
   const cur = f.members.get(id);
   if (cur && cur.who !== who) return "not-your-trip";
   if (cur && p.at <= cur.m.at) return "old";
@@ -146,6 +149,18 @@ export function fleetSnapshot(key: string, now: number = Date.now()): Member[] {
   if (!f) return [];
   sweep(key, f, now);
   return [...f.members.values()].map((e) => e.m);
+}
+
+/**
+ * Everyone on duty with the sign-in id of the phone that said so (`who`): what an alert needs, to reach the nearest people.
+ * `heardAt` is when the SERVER last heard from them (not what their phone claims), so a phone with a wrong clock cannot
+ * look fresher than it is.
+ */
+export function fleetOnDuty(key: string, now: number = Date.now()): Array<Member & { who: string; heardAt: number }> {
+  const f = fleets.get(key);
+  if (!f) return [];
+  sweep(key, f, now);
+  return [...f.members.values()].map((e) => ({ ...e.m, who: e.who, heardAt: e.at }));
 }
 
 /** Returns the function that stops listening. */

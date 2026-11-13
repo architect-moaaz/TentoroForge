@@ -1181,6 +1181,28 @@
           },
           "syncNote": {
             "$ref": "#/properties/product/properties/capabilities/items/properties/syncNote"
+          },
+          "phone": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "How the PHONE app draws this page (the web is not affected). `experience: \"map_first\"`: the page is the whole map-first home of a person out and moving (a driver, a courier, a technician on the way): one screen whose map fills the glass and whose bottom sheet changes with where the job is. `covers` names the pages that are STATES of that job (an incoming offer, the current trip, the live position): they get no screen or tab of their own on the phone, and their data and controls become states of this screen's sheet.",
+            "properties": {
+              "experience": {
+                "type": "string",
+                "enum": [
+                  "screens",
+                  "map_first"
+                ],
+                "default": "screens"
+              },
+              "covers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              }
+            }
           }
         },
         "required": [
@@ -2233,6 +2255,40 @@
                           "push"
                         ]
                       }
+                    },
+                    "nearest": {
+                      "type": "object",
+                      "description": "A send_notification step alerts the people of one kind who are on duty and nearest to a place (a ride's pickup), instead of one named recipient.",
+                      "properties": {
+                        "entity": {
+                          "type": "string"
+                        },
+                        "from": {
+                          "type": "string"
+                        },
+                        "limit": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 50
+                        },
+                        "maxKm": {
+                          "type": "number",
+                          "exclusiveMinimum": 0
+                        },
+                        "maxAgeSeconds": {
+                          "type": "number",
+                          "exclusiveMinimum": 0
+                        }
+                      },
+                      "required": [
+                        "entity",
+                        "from"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "ttlSeconds": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0
                     }
                   },
                   "additionalProperties": {},
@@ -3299,6 +3355,13 @@
             "type": "string"
           },
           "description": "The roles that get the phone app, when the person chose a plan role by role (a driver gets phone screens, the administrator stays on the website). A page only those roles may open is drawn as a phone screen; a page only other roles may open is not. Absent or empty: every page is drawn, as before."
+        },
+        "mapFirstRoles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The roles whose phone app is map-first (they share a position as they move, navigate, or take jobs as they arrive): the home page of each has `phone.experience: \"map_first\"` and covers the pages that are states of the job. Absent or empty: every page is its own screen."
         }
       },
       "additionalProperties": false,

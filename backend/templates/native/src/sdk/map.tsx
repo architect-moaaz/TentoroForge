@@ -46,6 +46,7 @@ export const MapView = React.forwardRef<MapHandle, MapViewProps>(function MapVie
   const region = React.useRef<Region | null>(null);
   const framed = React.useRef(false);
   const following = React.useRef(true);
+  const followedOnce = React.useRef(false);
   const [ready, setReady] = React.useState(false);
   const dark = isDarkColour(theme.colors.background);
   const top = insets?.top ?? 0, bottom = insets?.bottom ?? 0;
@@ -73,7 +74,15 @@ export const MapView = React.forwardRef<MapHandle, MapViewProps>(function MapVie
   // The camera stays on a moving place until the person moves the map.
   React.useEffect(() => {
     if (!ready || !follow || !following.current || !ref.current) return;
-    ref.current.animateCamera({ center: { latitude: follow.lat, longitude: follow.lng }, ...(follow.heading != null ? { heading: follow.heading } : {}) }, { duration: 600 });
+    // the first time the map has the person it comes in to street level (it may have opened on the whole region); after that it
+    // only moves with them, so the zoom the person chose stays
+    const first = !followedOnce.current;
+    followedOnce.current = true;
+    ref.current.animateCamera({
+      center: { latitude: follow.lat, longitude: follow.lng },
+      ...(first ? { zoom: 16 } : {}),
+      ...(follow.heading != null ? { heading: follow.heading } : {}),
+    }, { duration: 600 });
   }, [ready, follow?.lat, follow?.lng, follow?.heading]);
 
   // The pins and the path, framed once and kept in view.

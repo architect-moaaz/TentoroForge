@@ -22,6 +22,8 @@ export { Sheet, Dialog, type SheetProps, type DialogProps } from "./Sheet";
 export { MapScreen, type MapScreenProps } from "./MapScreen";
 export { BottomSheet, type BottomSheetProps } from "./BottomSheet";
 export { FloatingPanel, FloatingButton, type FloatingPanelProps, type FloatingButtonProps } from "./Floating";
+// A ticking clock lives in its own small part, never in a screen's state (the screen would redraw its map every tick).
+export { Countdown, Elapsed, useExpired } from "./Clock";
 export {
   Field, TextField, NumberField, MoneyField, SelectField, MultiSelect, TagsField, SwitchField, DateField, ImageField, FileField, LocationField,
   type FieldShellProps, type TextFieldProps, type NumberFieldProps, type SelectFieldProps, type MultiSelectProps, type TagsFieldProps,
