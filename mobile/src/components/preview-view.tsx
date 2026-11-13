@@ -233,6 +233,23 @@ const REPORT_WIDTH_JS = `(function () {
   window.addEventListener('load', function () { setTimeout(tell, 300); });
 })(); true;`;
 
+/** `https://host:port` of an address, lower case; '' when it has none. */
+function originOf(address: string): string {
+  const m = /^(https?:\/\/[^/?#]+)/i.exec(address);
+  return m ? m[1].toLowerCase() : '';
+}
+
+/**
+ * Where the preview may go: the app's own address and the platform's. The WebView went wherever
+ * a page sent it (#36 review, 2026-11-13). A generated app (code a model wrote) could have taken the
+ * person to a look-alike sign-in page inside the Forge app, with no address bar to give it away.
+ * A link anywhere else opens in the phone's browser, which shows its address.
+ */
+function mayLoad(url: string, allowed: string[]): boolean {
+  if (/^(about:blank|about:srcdoc|data:)/i.test(url)) return true; // the desktop frame's own page
+  return allowed.includes(originOf(url));
+}
+
 /** The WebView, plus a quiet reload when the relay timed out on a page that was still compiling. */
 function PreviewFrame({
   uri,
@@ -271,6 +288,7 @@ function PreviewFrame({
   }, [retrying]);
 
   const busy = pageLoading || retrying;
+  const allowed = useMemo(() => [originOf(uri), originOf(API_BASE)].filter(Boolean), [uri]);
 
   return (
     <View style={styles.frame}>
@@ -281,6 +299,14 @@ function PreviewFrame({
         // The frame's width decides the layout, which a phone's viewport tag cannot be made to do.
         source={desktop ? { html: desktopShell(uri), baseUrl: API_BASE } : { uri }}
         style={{ flex: 1 }}
+        originWhitelist={[...allowed, 'about:*', 'data:*']}
+        onShouldStartLoadWithRequest={(req) => {
+          if (mayLoad(req.url, allowed)) return true;
+          // Only a page the person is looking at goes to the browser; a hidden frame is just refused.
+          if (req.isTopFrame !== false && /^https?:/i.test(req.url)) void WebBrowser.openBrowserAsync(req.url);
+          return false;
+        }}
+        setSupportMultipleWindows={false}
         userAgent={desktop ? DESKTOP_UA : undefined}
         injectedJavaScript={desktop ? undefined : REPORT_WIDTH_JS}
         onMessage={(e) => {

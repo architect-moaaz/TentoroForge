@@ -14,7 +14,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Markdown } from '@/components/markdown';
-import { Avatar } from '@/components/ui';
+import { Avatar, Button } from '@/components/ui';
 import { ApiError, apiJson, postJson } from '@/lib/api';
 import { readSse, type SseFrame } from '@/lib/sse';
 import { icon, radius, shadow, space, type, useColors, type Palette } from '@/theme';
@@ -24,7 +24,12 @@ interface Msg {
   role: 'user' | 'assistant' | 'system';
   content: string;
   at: string;
+  /** What Smith offered to do next, as buttons (the web panel's chips). */
+  options?: string[];
 }
+
+/** The review a build waits on: the requirements, then the product model (`/gates`). */
+type Gate = 'requirements' | 'product_model' | null;
 
 interface HistoryRow {
   id: string;
@@ -73,7 +78,6 @@ export function ChatView({ projectId, onApplied }: { projectId: string; onApplie
   const colors = useColors();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const [text, setText] = useState('');
-  const [busy, setBusy] = useState(false);
   // The job Smith is running now (from the job feed), when we first saw it, and when we last sent.
   const [work, setWork] = useState<{ text: string; since: number } | null>(null);
   const [, setTick] = useState(0);
@@ -118,15 +122,38 @@ export function ChatView({ projectId, onApplied }: { projectId: string; onApplie
     };
   }, [measureRoot, recalc]);
 
-  const addMsg = useCallback((role: Msg['role'], content: string, id?: string) => {
+  const addMsg = useCallback((role: Msg['role'], content: string, id?: string, options?: string[]) => {
     if (!content) return;
     const msgId = id ?? `${Date.now()}-${Math.random()}`;
+    const opts = options?.length ? { options } : {};
     setMessages((prev) =>
       prev.some((m) => m.id === msgId)
-        ? prev.map((m) => (m.id === msgId ? { ...m, content } : m))
-        : [...prev, { id: msgId, role, content, at: new Date().toISOString() }],
+        ? prev.map((m) => (m.id === msgId ? { ...m, content, ...opts } : m))
+        : [...prev, { id: msgId, role, content, at: new Date().toISOString(), ...opts }],
     );
   }, []);
+
+  // THE TWO REVIEWS, FROM THE PHONE. A new app waits for its requirements to be approved and
+  // then for its product model; the web panel has a button for each, and the phone had neither,
+  // so an app started on the phone could never be built from it (#36 review, 2026-11-13). The
+  // open review is read from the server, as the web panel reads it.
+  const [gate, setGate] = useState<Gate>(null);
+  const [busy, setBusy] = useState(false);
+  // Read when the chat opens and again whenever Smith has finished answering.
+  useEffect(() => {
+    if (busy) return;
+    let alive = true;
+    apiJson<{ gate?: Gate }>(`/api/projects/${projectId}/gates`)
+      .then((g) => {
+        if (alive) setGate(g.gate === 'requirements' || g.gate === 'product_model' ? g.gate : null);
+      })
+      .catch(() => {
+        if (alive) setGate(null); // no Blueprint yet, or not reachable: nothing to approve
+      });
+    return () => {
+      alive = false;
+    };
+  }, [projectId, busy]);
 
   const warmup = useCallback(async () => {
     try {
@@ -211,15 +238,34 @@ export function ChatView({ projectId, onApplied }: { projectId: string; onApplie
     const ctl = new AbortController();
     let alive = true;
 
+    // The agents at work now, by name. A turn ends with `agent_complete` and then one more
+    // `agent_status` ("Done"): read as work, that last status put the spinner back for good after
+    // every turn (#36 review, 2026-11-13). A status from an agent that has finished is not work
+    // until it starts again; one from an agent we never saw start is a job we joined part way.
+    // The line shows the most recent, and goes when none is left.
+    const running = new Map<string, { text: string; since: number }>();
+    const finished = new Set<string>();
+    const show = () => {
+      let latest: { text: string; since: number } | null = null;
+      for (const w of running.values()) if (!latest || w.since >= latest.since) latest = w;
+      setWork(latest ? { ...latest } : null);
+    };
     const onFrame = (frame: SseFrame) => {
       if (frame.event !== 'office') return;
-      const d = frame.data as { type?: string; status?: string };
+      const d = frame.data as { type?: string; status?: string; agent?: string };
+      const who = String(d.agent ?? '');
       if (d.type === 'agent_start') {
-        setWork({ text: 'Working on your message', since: Date.now() });
+        finished.delete(who);
+        running.set(who, { text: 'Working on your message', since: Date.now() });
+        show();
       } else if (d.type === 'agent_status' && d.status) {
-        setWork((w) => ({ text: String(d.status), since: w?.since ?? Date.now() }));
+        if (finished.has(who)) return;
+        running.set(who, { text: String(d.status), since: running.get(who)?.since ?? Date.now() });
+        show();
       } else if (d.type === 'agent_complete' || d.type === 'agent_error') {
-        setWork(null);
+        finished.add(who);
+        running.delete(who);
+        show();
       }
     };
 
@@ -255,19 +301,24 @@ export function ChatView({ projectId, onApplied }: { projectId: string; onApplie
   // a question or a first build, and the server saves both sides of the conversation. (The older
   // /smith/turn answers the same way but saves nothing, so a reload lost the person's message.)
   // We also send a short window of the chat so Smith can read its own earlier question.
-  const smithChat = async (message: string, signal: AbortSignal) => {
+  const smithChat = async (message: string, signal: AbortSignal, review?: { gate: Exclude<Gate, null> }) => {
     const history = messages
       .filter((m) => m.role !== 'system')
       .slice(-10)
       .map((m) => ({ role: m.role === 'assistant' ? 'smith' : 'user', text: m.content }));
     await readSse(
       `/api/projects/${projectId}/smith/chat`,
-      { method: 'POST', body: { message, history, source: 'user' } },
+      {
+        method: 'POST',
+        // A review's yes is said as the web panel says it: approved, and which review it answers.
+        body: { message, history, source: 'user', ...(review ? { approved: true, gate: review.gate, modules: null } : {}) },
+      },
       (frame) => {
         const d = frame.data;
         switch (frame.event) {
           case 'message':
-            addMsg('assistant', String(d.text ?? ''));
+            addMsg('assistant', String(d.text ?? ''), undefined,
+              Array.isArray(d.options) ? d.options.map((o) => String(o)).filter(Boolean) : undefined);
             break;
           case 'error':
             addMsg('system', String(d.message ?? d.detail ?? 'Something went wrong'));
@@ -314,7 +365,7 @@ export function ChatView({ projectId, onApplied }: { projectId: string; onApplie
     }
   };
 
-  const send = async (raw: string) => {
+  const send = async (raw: string, review?: { gate: Exclude<Gate, null> }) => {
     const message = raw.trim();
     if (!message || busy) return;
     const control = isControlSignal(message);
@@ -328,7 +379,7 @@ export function ChatView({ projectId, onApplied }: { projectId: string; onApplie
     turnAbort.current = ctl;
     const baseline = await knownIds();
     try {
-      await smithChat(message, ctl.signal);
+      await smithChat(message, ctl.signal, review);
     } catch (e) {
       if (ctl.signal.aborted) {
         /* we stopped waiting on purpose */
@@ -346,6 +397,10 @@ export function ChatView({ projectId, onApplied }: { projectId: string; onApplie
       setLiveStatus(null);
     }
   };
+
+  // The last thing Smith said, when it offered choices and nothing has been said since.
+  const last = messages[messages.length - 1];
+  const offered = !busy && last?.role === 'assistant' ? last.options ?? [] : [];
 
   // Stops waiting on the phone. It does not stop work the server already began.
   const cancel = () => {
@@ -402,6 +457,14 @@ export function ChatView({ projectId, onApplied }: { projectId: string; onApplie
                 </Text>
               </View>
             ) : null}
+            {offered.length ? <Offered options={offered} onPick={send} /> : null}
+            {!busy && gate ? (
+              <Button
+                label={gate === 'requirements' ? 'Approve requirements' : 'Build app'}
+                onPress={() => send(gate === 'requirements' ? 'Approve requirements' : 'Build app', { gate })}
+                icon={(c) => <Feather name={gate === 'requirements' ? 'check' : 'play'} size={16} color={c} />}
+              />
+            ) : null}
           </View>
         }
         renderItem={({ item }) => <MessageRow msg={item} />}
@@ -440,6 +503,26 @@ export function ChatView({ projectId, onApplied }: { projectId: string; onApplie
       </View>
       {/* Pushes the composer up by exactly how much the keyboard covers this view. */}
       <View style={{ height: kbOverlap }} />
+    </View>
+  );
+}
+
+/** What Smith offered to do next, as buttons; a tap says it, as typing it would. */
+function Offered({ options, onPick }: { options: string[]; onPick: (option: string) => void }) {
+  const colors = useColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+  return (
+    <View style={styles.chips}>
+      {options.map((o) => (
+        <Pressable
+          key={o}
+          onPress={() => onPick(o)}
+          accessibilityRole="button"
+          style={({ pressed }) => [styles.chip, pressed && { backgroundColor: colors.muted }]}>
+          <Feather name="corner-down-right" size={icon.sm - 2} color={colors.brand} />
+          <Text style={styles.chipText}>{o}</Text>
+        </Pressable>
+      ))}
     </View>
   );
 }
