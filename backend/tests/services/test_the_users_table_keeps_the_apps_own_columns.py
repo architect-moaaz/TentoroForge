@@ -91,3 +91,38 @@ def test_the_build_merges_a_role_over_every_foundation_column(tmp_path):
     assert "role" in props and "emailVerification" in props and "emailCodeAttempts" in props, props
     assert props.count("email") == 1
     assert generated == ["src/db/schema/user.ts"]
+
+
+MULTI_LINE = '''import { pgTable, uuid, text } from "drizzle-orm/pg-core";
+import { departments } from "./departments";
+
+export const users = pgTable("users", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  email: text("email").notNull().unique(),
+  role: text("role").notNull().default("member"), // who they are
+  departmentId: uuid("department_id")
+    .references(() => departments.id, { onDelete: "set null" }),
+  managerId: uuid("manager_id").references(
+    () => departments.id,
+    { onDelete: "cascade" },
+  ),
+  note: text("note"),
+});
+'''
+
+
+def test_a_column_written_over_several_lines_is_kept_whole():
+    """#37 review, 2026-11-13: a column was read as its first line, so the merged
+    table kept `departmentId: uuid("department_id")` without its reference, and
+    `managerId: uuid("manager_id").references(` did not parse at all."""
+    cols = {n: src for n, _, src in SB.user_columns(MULTI_LINE)}
+    assert list(cols) == ["id", "email", "role", "departmentId", "managerId", "note"]
+    assert cols["departmentId"].endswith('{ onDelete: "set null" }),')
+    assert cols["managerId"].count("\n") == 3 and cols["managerId"].endswith("),")
+    merged = SB.merge_user_schema(MULTI_LINE)
+    assert '.references(() => departments.id, { onDelete: "set null" }),' in merged
+    assert '    { onDelete: "cascade" },\n  ),\n  note: text("note"),\n});' in merged
+    assert 'import { departments } from "./departments";' in merged
+    assert merged.count('pgTable("users"') == 1
+    # Merged again, nothing moves.
+    assert SB.merge_user_schema(merged) == merged

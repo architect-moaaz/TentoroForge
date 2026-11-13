@@ -64,13 +64,52 @@ def _table_body(text: str) -> list[str] | None:
     return lines[start + 1:end]
 
 
+def _depth_change(line: str) -> int:
+    """Brackets opened minus closed on a line, outside quotes."""
+    depth, quote = 0, ""
+    for i, ch in enumerate(line):
+        if quote:
+            if ch == quote and line[i - 1] != "\\":
+                quote = ""
+            continue
+        if ch in "\"'`":
+            quote = ch
+        elif ch == "/" and line[i + 1:i + 2] == "/":
+            break
+        elif ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+    return depth
+
+
 def user_columns(text: str) -> list[tuple[str, str, str]]:
-    """`(property, builder, line)` for every column of a users table's source."""
+    """`(property, builder, source)` for every column of a users table's source.
+
+    A COLUMN IS EVERY LINE IT TAKES. A definition written over several lines —
+    a reference with its own options, a chain broken before `.notNull()` —
+    was read as its first line only, so the merged table kept
+    `managerId: uuid("manager_id")` and lost its reference, or did not parse
+    (#37 review, 2026-11-13). A column runs from its `name: builder(` line until
+    its brackets close on a line ending in a comma, or the table ends."""
     out: list[tuple[str, str, str]] = []
+    cur: tuple[str, str, list[str]] | None = None
+    depth = 0
     for line in _table_body(text) or []:
-        m = _COLUMN_LINE.match(line)
-        if m:
-            out.append((m.group(1), m.group(2), line.rstrip()))
+        if cur is None:
+            m = _COLUMN_LINE.match(line)
+            if not m:
+                continue
+            cur, depth = (m.group(1), m.group(2), [line.rstrip()]), _depth_change(line)
+        else:
+            cur[2].append(line.rstrip())
+            depth += _depth_change(line)
+        code = line.split("//", 1)[0].rstrip()
+        if depth <= 0 and code.endswith(","):
+            out.append((cur[0], cur[1], "\n".join(cur[2])))
+            cur = None
+    if cur is not None:
+        out.append((cur[0], cur[1], "\n".join(cur[2])))
     return out
 
 

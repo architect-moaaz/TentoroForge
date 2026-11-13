@@ -62,8 +62,9 @@ def load_doc(output_dir: str | Path) -> dict | None:
 
 def governs(doc: dict | None) -> bool:
     """Do this app's payments come from Settings → Integrations → Payments? (An app built
-    before that keeps the Stripe keys it had, untouched.)"""
-    return bool(doc) and AP.section(doc).get("decidedBy") is not None
+    before that keeps the Stripe keys it had, untouched — even once Forge has
+    recorded a decision of its own for it: see `relies_on_older_stripe`.)"""
+    return bool(doc) and AP.section(doc).get("decidedBy") is not None and not AP.relies_on_older_stripe(doc)
 
 
 async def _rows(db: AsyncSession, org_id: Any) -> list[PaymentGateway]:

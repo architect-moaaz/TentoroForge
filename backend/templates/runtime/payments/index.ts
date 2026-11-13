@@ -23,7 +23,7 @@ import { getSecret } from "@/lib/integrations/resolver";
 import { PAYMENTS } from "@/lib/payments-config";
 import { stripeAdapter } from "./stripe";
 import { razorpayAdapter } from "./razorpay";
-import { paypalAdapter } from "./paypal";
+import { paypalAdapter, money as paypalMoney } from "./paypal";
 import { standInAdapter } from "./stand-in";
 import { routeFor, type GatewayRef } from "./routing";
 import { toMajor, toMinor } from "./units";
@@ -229,8 +229,12 @@ export async function settle(integrationSlug: string, ev: { type: NormalizedEven
   if (!status) return { paymentId: row.id, event, moved: false };
   // PAID IS PAID ONLY AT THE PRICE: a gateway's word for a different amount or
   // currency than the ledger's is not this payment succeeding.
+  // At the price AS THE GATEWAY WAS SENT IT: PayPal takes HUF, JPY and TWD in
+  // whole units, so 1234.56 HUF went as "1235" and came back 123500 — a
+  // charged payment refused as a mismatch (#37 review, 2026-11-13).
+  const asSent = (minor: number) => row.provider === "paypal" ? paypalMoney(minor, String(row.currency)) : String(minor);
   if (status === "succeeded" && ev.amountMinor != null && ev.currency
-      && (Number(ev.amountMinor) !== Number(row.amount_minor) || ev.currency.toUpperCase() !== String(row.currency).toUpperCase())) {
+      && (asSent(Number(ev.amountMinor)) !== asSent(Number(row.amount_minor)) || ev.currency.toUpperCase() !== String(row.currency).toUpperCase())) {
     console.error(`[payments] ${row.id}: the gateway reported ${ev.amountMinor} ${ev.currency}, the ledger holds ${row.amount_minor} ${row.currency} — not settled as paid`);
     await ledgerSet(row.id, { metadata: { mismatch: `${ev.amountMinor} ${ev.currency}` } });
     status = "failed";

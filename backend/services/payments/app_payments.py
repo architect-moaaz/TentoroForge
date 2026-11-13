@@ -75,6 +75,24 @@ def takes_money(doc: dict) -> bool:
     return bool(section(doc).get("needed"))
 
 
+def relies_on_older_stripe(doc: dict) -> bool:
+    """An app from before gateways that takes money through its own Stripe
+    integration, and whose owner has not chosen a gateway for it since.
+
+    ITS STRIPE KEYS ARE ITS OWN. Forge deciding for it on the next rebuild or
+    turn wrote `decidedBy: "forge"` with no gateway chosen; from then on the
+    gateways governed it, every STRIPE_* variable came back None, and the next
+    publish removed them from production — checkout and webhooks stopped
+    (#37 review, 2026-11-13). Such an app keeps its keys until a person (or
+    Smith, asked) chooses its gateways."""
+    p = section(doc)
+    if p.get("decidedBy") in ("person", "smith") or p.get("gateways"):
+        return False
+    return any(isinstance(r, dict) and str(r.get("provider") or "").lower() == "stripe"
+               and str(r.get("status") or "").upper() not in _RETIRED
+               for r in doc.get("integrations") or [])
+
+
 def sells_plans(doc: dict) -> bool:
     p = section(doc)
     return bool(p.get("needed")) and "subscription" in (p.get("models") or []) and bool(p.get("plans"))
@@ -169,6 +187,8 @@ def decide_and_record(svc: Any, *, provider: Any = None, force: bool = False) ->
     p = section(doc)
     basis = need_mod.basis(doc)
     if p.get("decidedBy") in ("person", "smith") and not force:
+        return state(doc)
+    if relies_on_older_stripe(doc):
         return state(doc)
     if p.get("decidedBy") == "forge" and p.get("basis") == basis and not force:
         return state(doc)
@@ -360,6 +380,10 @@ def _sync_integrations(svc: Any) -> None:
 def config_text(doc: dict) -> str:
     p = section(doc)
     cfg = {
+        # The app's own id names its plans at a gateway: two apps of one
+        # organisation selling a `pro` plan at one price were handed one
+        # gateway plan, named for whichever was first (#37 review, 2026-11-13).
+        "app": str((doc.get("application") or {}).get("id") or ""),
         "needed": bool(p.get("needed")),
         "currency": need_mod.app_currency(doc),
         "models": list(p.get("models") or []) if p.get("needed") else [],
@@ -377,7 +401,7 @@ def config_text(doc: dict) -> str:
             "// (never a key: those arrive in the environment by name), the plans it sells\n"
             "// and whether a subscription opens it. Read by `src/lib/payments`.\n\n"
             "export interface PaymentsConfig {\n"
-            "  needed: boolean; currency: string; models: string[]; access: \"app\" | \"none\";\n"
+            "  app?: string; needed: boolean; currency: string; models: string[]; access: \"app\" | \"none\";\n"
             "  gateways: Array<{ id: string; provider: string; label: string; coverage: \"domestic\" | \"international\" | \"both\";\n"
             "    homeCountry?: string | null; currencies: string[]; integration: string; isDefault?: boolean }>;\n"
             "  plans: Array<{ id: string; name: string; description?: string; interval: \"day\" | \"week\" | \"month\" | \"year\";\n"
@@ -642,7 +666,7 @@ def env_for_side(doc: dict, rows: Iterable[Any], side: str, *, webhooks: dict[st
 
 
 __all__ = ["ALL_ENV", "ChoiceError", "FIELD_ENV", "GATE_FREE", "RUNTIME_FILES", "SERVES", "WEBHOOK_ENV", "WEBHOOK_EVENTS",
-           "agent_note", "choose", "config_text", "decide_and_record", "env_for_side", "readiness", "install_runtime", "integration_slug",
+           "agent_note", "choose", "config_text", "decide_and_record", "relies_on_older_stripe", "env_for_side", "readiness", "install_runtime", "integration_slug",
            "middleware_gate", "project_config", "project_into", "section", "sells_plans", "state", "summarise", "takes_money"]
 
 

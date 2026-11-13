@@ -68,7 +68,7 @@ export function specFor(plan: Plan, currency: string): PlanSpec {
   const c = currency.toUpperCase();
   const amount = Number(plan.prices[c]);
   const amountMinor = toMinor(amount, c);
-  const app = String(process.env.FORGE_APP_ID ?? "app").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 12) || "app";
+  const app = String(process.env.FORGE_APP_ID || (PAYMENTS as { app?: string })?.app || "app").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 12) || "app";
   return { key: `forge-${app}-${plan.id}-${plan.interval}${plan.intervalCount}-${c}-${amountMinor}-t${plan.trialDays ?? 0}`.slice(0, 200),
     planId: plan.id, name: plan.name, description: plan.description ?? "", interval: plan.interval, intervalCount: plan.intervalCount || 1,
     amountMinor, currency: c, trialDays: Number(plan.trialDays ?? 0) };
