@@ -7,6 +7,8 @@
  * uses to count attempts. Anything else throws, so a new kind of query cannot slip past a test unnoticed.
  */
 
+let madeRows = 0;
+
 export type Row = Record<string, any>;
 
 /** A table: any property you read is a column of that name. */
@@ -102,7 +104,10 @@ export function createFakeDb() {
             const made: Row[] = [];
             for (const one of Array.isArray(v) ? v : [v]) {
               const row: Row = { ...one };
-              if (!row.id) row.id = `00000000-0000-4000-8000-${String(tableRows(t).length + 1).padStart(12, "0")}`;
+              // Never the same id twice, as a real database: numbered by the table's length, a row made after a test
+              // emptied the table took an earlier row's id, and the outbox (which knows a hand-off event by its row id,
+              // status and millisecond) took it for one already sent — 1 run in 10 (#30 review, 2026-11-13).
+              if (!row.id) row.id = `00000000-0000-4000-8000-${String(++madeRows).padStart(12, "0")}`;
               row.createdAt ??= new Date();
               if (t.__table === "turns") {
                 row.shippedAt ??= null; row.shipAttempts ??= 0; row.shipError ??= null; row.rating ??= null; row.ratingAt ??= null;

@@ -9,6 +9,7 @@ app can be unreachable behind it is said as its own plain sentence.
 from __future__ import annotations
 
 import base64
+import json
 import os
 import socket
 import uuid
@@ -526,3 +527,23 @@ def test_without_a_gateway_nothing_changes(tunnel, monkeypatch):
     out = redeem(code_for())
     assert agent_tunnel.settings()["gateway"] == ""
     assert agent_tunnel.target_url(PID) == f"http://127.0.0.1:{out['port']}"
+
+
+def test_the_registry_holds_no_debug_secret_a_generated_app_could_use(tunnel, tmp_path, monkeypatch):
+    """#30 review, 2026-11-13: the backend runs generated apps' dev servers as its
+    own user, so their code can read the shared tunnel folder. With the platform's
+    master secret set, the registry holds the debug secret sealed; the platform
+    opens it when it calls the computer."""
+    monkeypatch.setenv("FORGE_INTEGRATIONS_SECRET", "test-secret-for-the-tunnel-registry-0123")
+    redeem(code_for())
+    text = (tmp_path / "registry.json").read_text("utf-8")
+    assert SECRET not in text and '"secretCt"' in text
+    assert agent_tunnel.get(PID)["secret"] == SECRET
+    assert SECRET not in json.dumps(agent_tunnel.describe(PID))
+
+
+def test_a_registry_written_before_sealing_still_works(tunnel, tmp_path, monkeypatch):
+    redeem(code_for())
+    assert agent_tunnel.get(PID)["secret"] == SECRET, "no master secret: kept as it was"
+    monkeypatch.setenv("FORGE_INTEGRATIONS_SECRET", "test-secret-for-the-tunnel-registry-0123")
+    assert agent_tunnel.get(PID)["secret"] == SECRET, "a plain entry from before is read as it is"

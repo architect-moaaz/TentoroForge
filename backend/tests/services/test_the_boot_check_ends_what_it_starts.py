@@ -93,7 +93,10 @@ def _run(mode: str, **kwargs):
         _fake_npm(bin_dir, child_py, pidfile, mode)
         env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}"}
         outcome: object
-        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(dev_servers, "DIR", tmp / "dev-servers"):
+        # `assembly._NPM` is the npm found when the module loaded (`tool("npm")`), not a PATH lookup per call: the
+        # fake one is handed in by name as well, or the real npm ran in an empty folder (#30 review, 2026-11-13).
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(dev_servers, "DIR", tmp / "dev-servers"), \
+                mock.patch.object(assembly, "_NPM", str(bin_dir / "npm")):
             try:
                 outcome = assembly.verify_boot(app, **kwargs)
             except Exception as exc:  # noqa: BLE001

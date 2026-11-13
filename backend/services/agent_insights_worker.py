@@ -47,6 +47,25 @@ def enabled() -> bool:
     return os.getenv("FORGE_INSIGHTS_WORKER", "0").strip().lower() in ("1", "on", "true", "yes")
 
 
+async def flush_counts(session_factory=None) -> None:
+    """Write THIS process's pending insight counts: events refused and requests turned away
+    (`ingest.DROPPED`), and when each key was last used (`keys.flush_touches`). Both live in
+    the memory of the worker whose ingest route saw them. Never raises."""
+    for step in (ingest.DROPPED.flush, keys.flush_touches):
+        try:
+            await step(session_factory)
+        except Exception:  # noqa: BLE001
+            logger.warning("[insights] a periodic write failed; trying again next time", exc_info=True)
+
+
+async def flush_counts_forever(every_s: float = CHORES_EVERY_S, session_factory=None) -> None:
+    """Every web worker runs this, leading or not: the counts are kept per process, and
+    only the leader runs an `InsightsWorker` (#30 review, 2026-11-13)."""
+    while True:
+        await asyncio.sleep(every_s)
+        await flush_counts(session_factory)
+
+
 class InsightsWorker:
     def __init__(self, session_factory=None, *, consumer: str | None = None, read_count: int = READ_COUNT, block_ms: int = BLOCK_MS,
                  stale_ms: int = STALE_MS) -> None:
@@ -133,11 +152,7 @@ class InsightsWorker:
         return total
 
     async def chores(self) -> None:
-        for step in (ingest.DROPPED.flush, keys.flush_touches):
-            try:
-                await step(self.session_factory)
-            except Exception:  # noqa: BLE001
-                logger.warning("[insights] a periodic write failed; trying again next time", exc_info=True)
+        await flush_counts(self.session_factory)
         try:
             await store.sweep_pending_ratings(self.session_factory)
         except Exception:  # noqa: BLE001

@@ -73,7 +73,11 @@ services:
       # Watch live: reaching the app on a builder's own computer through its reverse SSH tunnel (services/agent_tunnel.py)
       # A build checks every page with its own tsc; ten at once swamp a small server, so only a few run together (services/blueprint/tsc_gate.py)
       FORGE_TSC_PARALLEL: "2"
-      FORGE_TUNNEL_DIR: /tunnel
+      # OFF until generated code runs apart from the platform. The backend runs generated apps' dev servers as its own
+      # user, so their code can read the tunnel folder (and this process's environment): every project's debug secret
+      # and the SSH key list (#30 review, 2026-11-13). Set FORGE_TUNNEL_DIR=/tunnel in .env to turn Watch live's tunnel
+      # on for a server whose generated code is sandboxed, or that only its own team builds on.
+      FORGE_TUNNEL_DIR: ${FORGE_TUNNEL_DIR:-}
       FORGE_TUNNEL_HOST: tunnel
       # The backend reaches a builder's computer ONLY through the tunnel service's gateway (tunnel/gateway.Caddyfile), which forwards
       # just GET /api/agent/debug and /api/agent/insights. The raw tunnel ports (22000-22999) listen on 127.0.0.1 inside the tunnel

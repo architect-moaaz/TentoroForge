@@ -296,7 +296,7 @@ def pair(code: str, public_key: str, app_port: Any, secret: str, *, client_ip: s
             raise TunnelError("This computer's key is already connected to another project. Run the connector again (it makes a new key for each project).", 409)
         port = _allocate(reg, project_id)
         reg["projects"][project_id] = {
-            "port": port, "publicKey": key, "secret": secret, "appPort": port_of_app,
+            "port": port, "publicKey": key, **_sealed(project_id, secret), "appPort": port_of_app,
             "clientIp": public_address(ip), "label": re.sub(r"[^\w .@-]", "", str(label))[:64], "pairedAt": int(now),
             # kept when an admin replaces the computer, so the person who first registered it is still the one it belongs to
             "registeredBy": (current or {}).get("registeredBy") or entry.get("by"),
@@ -309,8 +309,39 @@ def pair(code: str, public_key: str, app_port: Any, secret: str, *, client_ip: s
 # using it
 # ---------------------------------------------------------------------------
 
+def _sealed(project_id: str, secret: str) -> dict[str, str]:
+    """The debug secret as the registry keeps it: sealed with the platform's own key.
+
+    THE REGISTRY IS READABLE BY GENERATED CODE. Its file is 0600, but the backend
+    runs generated apps' dev servers as the same user, so an app's code could read
+    every project's debug secret from the shared folder (#30 review, 2026-11-13).
+    Sealed, the file holds nothing usable without FORGE_INTEGRATIONS_SECRET, which
+    an app's environment never carries (`preview_manager._app_env`). With no master
+    secret (a builder's own computer, where the tunnel is off anyway) it is kept as
+    it was."""
+    from services.platform_integrations_crypto import CryptoError, encrypt
+    try:
+        ct, iv = encrypt(f"agent_tunnel:{project_id}", secret)
+    except CryptoError:
+        return {"secret": secret}
+    return {"secretCt": ct, "secretIv": iv}
+
+
+def _opened(project_id: str, entry: dict[str, Any]) -> dict[str, Any]:
+    if "secretCt" not in entry:
+        return entry
+    from services.platform_integrations_crypto import CryptoError, decrypt
+    out = {k: v for k, v in entry.items() if k not in ("secretCt", "secretIv")}
+    try:
+        out["secret"] = decrypt(f"agent_tunnel:{project_id}", str(entry["secretCt"]), str(entry.get("secretIv") or ""))
+    except CryptoError:
+        out["secret"] = ""  # the master secret changed: the computer pairs again
+    return out
+
+
 def get(project_id: str) -> dict[str, Any] | None:
-    return _read(_dir()).get("projects", {}).get(project_id) if enabled() else None
+    entry = _read(_dir()).get("projects", {}).get(project_id) if enabled() else None
+    return _opened(project_id, entry) if entry else entry
 
 
 def revoke(project_id: str, *, user_id: str | None = None, is_admin: bool = False) -> bool:

@@ -228,7 +228,10 @@ def test_the_worker_is_off_until_it_is_switched_on(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_a_stream_batch_updates_the_distinct_people_counters_after_it_is_saved(db):
+async def test_a_stream_batch_updates_the_distinct_people_counters_after_it_is_saved(db, monkeypatch):
+    # The events are dated NOW, a fixed day; on the real clock they aged out of the counted window (#30 review, 2026-11-13).
+    monkeypatch.setattr(store, "utcnow", lambda: NOW)
+    monkeypatch.setattr(people_mod, "utcnow", lambda: NOW)
     bus = MemoryBus()
     await bus.publish(payload([turn(i, NOW - timedelta(minutes=1), user=i % 4) for i in range(12)]))
     w = worker_mod.InsightsWorker(consumer="w1")

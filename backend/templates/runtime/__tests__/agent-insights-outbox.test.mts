@@ -364,7 +364,12 @@ console.log("a hand-off change that could not be sent is offered again by the ti
   // a new process, the platform back
   const next = fresh();
   fake.rows.handoffs.length = 0;
+  // `fresh()` brings the platform back, so this process's own send of conv-h3 reached it whenever it beat the tick, and
+  // the tick rightly had nothing left: 1 run in 10 failed (#30 review, 2026-11-13). The process that "crashed" never got
+  // it through: its send fails and is settled before the tick.
+  platform = () => ({ status: 503 });
   const kept = await handoffStore.create({ conversationId: "conv-h3", agentId: "support", requestedById: "p", requestedByName: "P", reason: "r", urgency: "normal", contact: null, summary: null, assignedToId: null, assignedToName: null, resolutionNote: null } as any);
+  await next.settle();
   void kept; void h;
   (globalThis as any).__forgeInsightsShipper = undefined;
   calls.length = 0;
