@@ -31,8 +31,10 @@ import {
   FileText,
   Plug,
   ClipboardCheck,
+  ShieldCheck,
 } from "lucide-react";
 import { visualFor } from "@/catalog/workflowNodes";
+import { useRuleChecks } from "../ruleChecks";
 import type { WorkflowNodeData, WorkflowNodeType } from "@/types/workflow";
 
 // ---------------------------------------------------------------------------
@@ -238,6 +240,8 @@ function getSubtitle(
       // actually an array — otherwise .length throws and blank-screens the editor.
       const dt = config.decisionTable as { hitPolicy?: unknown; rules?: unknown } | undefined;
       if (dt && Array.isArray(dt.rules)) return `${asText(dt.hitPolicy, "F")} · ${dt.rules.length} rules`;
+      // A step running one of the app's business rules, by id.
+      if (typeof config.rule === "string" && config.rule) return `Business rule ${config.rule}`;
       return "Decision table";
     }
     case "wait":
@@ -278,10 +282,12 @@ const SIM_STATUS_RING: Record<string, string> = {
 };
 
 function WorkflowNodeComponent({
+  id,
   data,
   selected,
 }: NodeProps & { data: WorkflowNodeData & { simStatus?: "pending" | "active" | "done" | "failed" } }) {
   const { label, nodeType, config, status, simStatus } = data;
+  const checks = useRuleChecks(id);
   const visual = getVisual(nodeType, config);
   const Icon = visual.icon;
 
@@ -347,6 +353,20 @@ function WorkflowNodeComponent({
               <span className="max-w-[100px] truncate">{pill.value}</span>
             </span>
           ))}
+        </div>
+      )}
+
+      {/* The business rules this step checks when it saves (read from the
+          server). One line: the canvas lays steps out one under another at
+          fixed heights, and a taller step ran into the next; the names are
+          all in the tooltip. */}
+      {checks.length > 0 && (
+        <div className="flex items-center gap-1 rounded-b-xl border-t border-emerald-100 bg-emerald-50 px-3 py-1 text-[11px] text-emerald-800"
+             data-testid="step-rule-checks"
+             title={`Every time this step saves, your app checks these business rules:\n${checks.map((c) => `• ${c.name}`).join("\n")}`}>
+          <ShieldCheck className="h-3 w-3 shrink-0" />
+          <span className="shrink-0 font-semibold">Checks {checks.length} rule{checks.length === 1 ? "" : "s"}:</span>
+          <span className="truncate">{checks.map((c) => c.name).join(", ")}</span>
         </div>
       )}
 

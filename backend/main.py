@@ -153,6 +153,22 @@ app = FastAPI(
     redoc_url="/redoc" if APP_ENV != "production" else None,
 )
 
+# A request that fails validation is answered with what failed — never a 500
+# because the input it echoes back (a NaN, an Infinity) is not valid JSON.
+from fastapi.exceptions import RequestValidationError as _RequestValidationError
+from fastapi.exception_handlers import request_validation_exception_handler as _default_validation_handler
+from fastapi.responses import JSONResponse as _JSONResponse
+
+
+@app.exception_handler(_RequestValidationError)
+async def _validation_errors(request, exc: _RequestValidationError):
+    try:
+        return await _default_validation_handler(request, exc)
+    except ValueError:
+        errors = [{k: v for k, v in e.items() if k not in ("input", "ctx")} for e in exc.errors()]
+        return _JSONResponse(status_code=422, content={"detail": errors})
+
+
 # Set up structured logging
 from config import LOG_LEVEL
 setup_structured_logging(LOG_LEVEL)

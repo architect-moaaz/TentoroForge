@@ -63,5 +63,8 @@ def test_a_task_is_completed_by_who_it_is_assigned_to():
 
 def test_form_rules_read_the_session_not_the_body():
     assert 'import { auth } from "@/auth";' in FORM_RULES
-    assert "evaluateFormRules(model, values, user)" in FORM_RULES
+    # The person is the session's; an edit form may send the record's id and
+    # how it was loaded (hints only — the save reads the stored record).
+    assert "const user = session?.user" in FORM_RULES
+    assert re.search(r"evaluateFormRules\(model, [^;]*, user, previous\)", FORM_RULES)
     assert "body?.user" not in FORM_RULES

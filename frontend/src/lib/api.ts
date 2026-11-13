@@ -51,8 +51,12 @@ async function request<T>(
   const token =
     typeof window !== "undefined" ? localStorage.getItem("token") : null;
 
+  // A FILE IS NOT JSON. Every request was labelled application/json, the
+  // uploads too, so a multipart body went out without its boundary and the
+  // server could not read the file. The browser labels FormData itself.
+  const isForm = typeof FormData !== "undefined" && options.body instanceof FormData;
   const headers: Record<string, string> = {
-    "Content-Type": "application/json",
+    ...(isForm ? {} : { "Content-Type": "application/json" }),
     ...((options.headers as Record<string, string>) || {}),
   };
 
@@ -132,6 +136,37 @@ async function request<T>(
  * Returns "" when there is nothing usable, so the caller's `||` chain moves on
  * to the next candidate rather than showing an empty toast.
  */
+/** "price_cents" → "Price cents"; "managerNote" → "Manager note". */
+function fieldWords(field: string): string {
+  const w = field.replace(/[_-]+/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase().trim();
+  return w ? w[0].toUpperCase() + w.slice(1) : "This";
+}
+
+/**
+ * A validation message in the person's words. The server's checker speaks
+ * its own language ("String should have at most 120 characters", "Value
+ * error, give the new app a name"); a person needs "Name can be at most 120
+ * characters." Anything not recognised is shown as it is, with its field.
+ */
+export function plainValidation(msg: string, field: string): string {
+  const f = fieldWords(field);
+  let m: RegExpMatchArray | null;
+  if ((m = msg.match(/^Value error,\s*(.*)$/i))) return m[1].charAt(0).toUpperCase() + m[1].slice(1).replace(/([^.!?])$/, "$1.");
+  if (/^Field required$/i.test(msg)) return `${f} is required.`;
+  if ((m = msg.match(/should have at most (\d+) (?:characters?|items?)/i))) return `${f} can be at most ${m[1]} characters long.`;
+  if ((m = msg.match(/should have at least (\d+) (?:characters?|items?)/i))) return m[1] === "1" ? `${f} can't be empty.` : `${f} needs at least ${m[1]} characters.`;
+  if ((m = msg.match(/greater than or equal to (-?[\d.]+)/i))) return `${f} must be ${m[1]} or more.`;
+  if ((m = msg.match(/less than or equal to (-?[\d.]+)/i))) return `${f} must be ${m[1]} or less.`;
+  if ((m = msg.match(/greater than (-?[\d.]+)/i))) return `${f} must be more than ${m[1]}.`;
+  if ((m = msg.match(/less than (-?[\d.]+)/i))) return `${f} must be less than ${m[1]}.`;
+  if (/valid integer/i.test(msg)) return `${f} must be a whole number.`;
+  if (/valid number/i.test(msg)) return `${f} must be a number.`;
+  if (/should match pattern/i.test(msg)) return `${f} isn't one of the allowed choices.`;
+  if (/valid UUID/i.test(msg)) return "That link isn't valid — it may be out of date. Reload the page.";
+  if (/valid email/i.test(msg)) return `${f} must be an email address.`;
+  return field ? `${f}: ${msg}` : msg;
+}
+
 export function describeDetail(detail: unknown): string {
   if (!detail) return "";
   if (typeof detail === "string") return detail;
@@ -143,8 +178,8 @@ export function describeDetail(detail: unknown): string {
           const { msg, loc } = d as { msg?: string; loc?: unknown[] };
           // `loc` names the offending field — worth keeping, it is usually the
           // difference between "invalid" and "which one?".
-          const where = Array.isArray(loc) ? loc.filter((p) => p !== "body").join(".") : "";
-          if (msg) return where ? `${where}: ${msg}` : msg;
+          const parts = Array.isArray(loc) ? loc.filter((p) => p !== "body" && typeof p === "string") as string[] : [];
+          if (msg) return plainValidation(msg, parts[parts.length - 1] ?? "");
         }
         return "";
       })

@@ -18,6 +18,10 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         try:
             return await call_next(request)
+        except RecursionError:
+            # Data nested deeper than any real request: the sender's to fix.
+            logger.warning("Too deeply nested request on %s %s", request.method, request.url.path)
+            return JSONResponse(status_code=400, content={"detail": "The request is nested too deeply."})
         except Exception as exc:
             request_id = getattr(request.state, "request_id", "-")
             logger.exception(

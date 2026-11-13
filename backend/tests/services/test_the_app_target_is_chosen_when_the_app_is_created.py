@@ -74,7 +74,8 @@ def test_the_project_keeps_the_choice_beside_its_blueprint(tmp_path, monkeypatch
 
     async def run():
         import services.git_service as git
-        git.git_init = lambda path: asyncio.sleep(0)
+        # monkeypatch, so later tests get the real git_init back.
+        monkeypatch.setattr(git, "git_init", lambda path: asyncio.sleep(0))
         return await project_service.create_project(uuid.uuid4(), uuid.uuid4(), "Paws", None, Db(), mobile_target="native")
 
     project = asyncio.run(run())

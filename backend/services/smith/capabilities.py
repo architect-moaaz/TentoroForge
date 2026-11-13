@@ -47,8 +47,9 @@ GROUPS: tuple[tuple[str, str, frozenset[str]], ...] = (
      frozenset({"add_workflow", "edit_workflow", "remove_workflow",
                 "set_schedule", "pause_schedule", "resume_schedule", "set_deadline", "run_now"})),
     ("What it will not let people do",
-     "Add, change or drop a rule that stops a record being saved.",
-     frozenset({"add_rule", "edit_rule", "remove_rule"})),
+     "Add, change or drop a rule that stops a record being saved — and tell you which "
+     "workflows use each rule, or make a workflow check one.",
+     frozenset({"add_rule", "edit_rule", "remove_rule", "link_rule", "unlink_rule"})),
     ("Who is allowed to do what",
      "Roles, permissions, and which screens each kind of person can open.",
      frozenset({"edit_access", "show_audit", "export_audit", "verify_audit", "edit_audit"})),
@@ -111,8 +112,9 @@ GROUPS: tuple[tuple[str, str, frozenset[str]], ...] = (
     ("Reusing it as a template",
      "Save the whole application — screens, records, processes, rules, roles "
      "and look — to Templates, so a new app can start from it: the exact same "
-     "app again, or one like it for another purpose.",
-     frozenset({"save_as_template"})),
+     "app again, or one like it for another purpose — send it to Tentoro for review "
+     "for the Templates Gallery, and tell you where each template stands.",
+     frozenset({"save_as_template", "template_status", "submit_template"})),
     ("Putting it back",
      "Undo the last change — the application returns to how it stood before "
      "it, and saying it again goes back another. Nothing is deleted: the undo "

@@ -103,6 +103,10 @@ function feelField(field: string): string {
 }
 
 function compileNode(node: ConditionNode, types?: FieldTypeMap): string {
+  // A row whose field is not chosen yet says nothing. It used to compile to
+  // `null = ""` — valid, and never true — so a rule saved with a blank row
+  // under AND silently never fired.
+  if (!(node.field || "").trim()) return "";
   const f = feelField(node.field);
   const cat = types?.[node.field];
   const op: ConditionOperator = node.operator;
@@ -170,5 +174,5 @@ export function conditionToFeel(
   types?: FieldTypeMap,
 ): string {
   if (!expr) return "true";
-  return isGroup(expr) ? compileGroup(expr, types) : compileNode(expr, types);
+  return (isGroup(expr) ? compileGroup(expr, types) : compileNode(expr, types)) || "true";
 }

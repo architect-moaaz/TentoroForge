@@ -5,6 +5,7 @@ The editor picks its node component and properties panel from
 the executor dispatches on ``type``. A projected node therefore carries both,
 laid out top-to-bottom, with the edges the Blueprint step declared.
 """
+from services.workflow_nodes import ROW_HEIGHT
 import json
 from pathlib import Path
 
@@ -44,7 +45,7 @@ def test_every_node_carries_the_editor_type_and_sits_in_a_column(tmp_path):
         assert n["data"]["config"]["nodeType"] == n["type"], n
         assert n["data"]["status"] == "idle"
     assert {n["position"]["x"] for n in nodes} == {250}
-    assert [n["position"]["y"] for n in nodes] == [0, 120, 240, 360]
+    assert [n["position"]["y"] for n in nodes] == [0, ROW_HEIGHT, 2 * ROW_HEIGHT, 3 * ROW_HEIGHT]
     # node ids are the Blueprint step keys, so `next` and codeMap line up
     assert [n["id"] for n in nodes] == ["trigger", "read", "any", "end"]
 

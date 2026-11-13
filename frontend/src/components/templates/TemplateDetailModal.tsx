@@ -111,7 +111,7 @@ export function TemplateDetailModal({
 
           {template.plan?.tables && (
             <div>
-              <p className="mb-2 text-sm font-medium">Database Tables</p>
+              <p className="mb-2 text-sm font-medium">What it keeps track of</p>
               <div className="flex flex-wrap gap-1">
                 {template.plan.tables.map((table) => (
                   <Badge key={table} variant="outline" className="text-xs font-mono">
@@ -123,7 +123,7 @@ export function TemplateDetailModal({
           )}
 
           <div>
-            <Label htmlFor="template-app-name">App Name</Label>
+            <Label htmlFor="template-app-name">Name of your new app</Label>
             <Input
               id="template-app-name"
               value={name}

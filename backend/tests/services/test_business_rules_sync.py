@@ -100,8 +100,8 @@ def test_a_rule_made_in_the_tab_is_versioned_and_in_force_at_once(app):
     ({**GOOD, "when": "nosuch > 3"}, "reads nosuch, which Role does not have"),
     ({**GOOD, "then": [{"type": "set_field", "value": "1"}]}, "needs a field"),
     ({**GOOD, "then": [{"type": "show_error"}]}, "needs the message"),
-    ({**GOOD, "then": []}, "at least one thing the rule does"),
-    ({**GOOD, "entity": "ENTITY-999"}, "Choose the record"),
+    ({**GOOD, "then": []}, "Add what the rule does"),
+    ({**GOOD, "entity": "ENTITY-999"}, "Choose what this rule is about"),
     ({**GOOD, "name": ""}, "Give the rule a name"),
     ({**GOOD, "when": "openingsCount == 0"}, "openingsCount"),
     ({**GOOD, "then": [{"type": "trigger_workflow", "workflow": "FLOW-999"}]}, "not a workflow"),
@@ -152,10 +152,11 @@ def test_switched_off_a_rule_is_kept_but_out_of_the_app(app):
     rid = made["rule"]["id"]
     off = br.set_enabled(app, rid, False, expected=made["revision"])["rule"]
     assert off["runs"] == "nowhere" and off["enabled"] is False
-    assert all(r["id"] != rid for r in _app_rules(app))
+    # In the app by name only, inactive: never applied, known to be off.
+    assert [(r["is_active"], r["config"]) for r in _app_rules(app) if r["id"] == rid] == [(False, {"source": "blueprint"})]
     assert any(v["rule"]["id"] == rid for v in br.read(app)["rules"]), "still listed"
     on = br.set_enabled(app, rid, True, expected=off["revision"])["rule"]
-    assert on["runs"] == "everywhere" and any(r["id"] == rid for r in _app_rules(app))
+    assert on["runs"] == "everywhere" and any(r["id"] == rid and r["is_active"] for r in _app_rules(app))
 
 
 def test_removed_a_rule_is_retired_in_history_and_gone_from_the_app(app):
@@ -187,11 +188,15 @@ def test_a_decision_table_is_bound_to_its_record_and_runs(app):
     table = {"hitPolicy": "F",
              "inputs": [{"id": "in_1", "name": "openingsCount", "type": "number", "variableBinding": "openingsCount"}],
              "outputs": [{"id": "out_1", "name": "status", "type": "string"}],
-             "rules": [{"id": "r1", "inputEntries": ["> 10"], "outputEntries": ['"hiring"']},
+             # Role.status is open or closed: a value outside those is refused
+             # as a typo now ("hiring" was saved, and could never be written).
+             "rules": [{"id": "r1", "inputEntries": ["> 10"], "outputEntries": ['"closed"']},
                        {"id": "r2", "inputEntries": ["-"], "outputEntries": ['"open"']}]}
     made = br.create(app, {"name": "Status by openings", "kind": "decision_table", "entity": ROLE,
                            "table": table})["rule"]
-    assert made["runs"] == "everywhere"
+    # On every save — the form does not evaluate tables, so "everywhere"
+    # (live on the form too) was never true of one.
+    assert made["runs"] == "save"
     row = next(r for r in _app_rules(app) if r["id"] == made["rule"]["id"])
     assert row["rule_type"] == "decision_table" and row["model_name"] == "Role"
     assert row["config"]["table"]["rules"][0]["inputEntries"] == ["> 10"]
@@ -504,7 +509,9 @@ def test_the_projection_leaves_out_what_is_off_or_retired_and_mirrors_for_server
     ]
     out = project_business_rules(doc, app / "app")
     assert out["rules"] == 1 and out["files"] == ["rules/blueprint-rules.json", "src/rules/blueprint-rules.json"]
-    assert [r["id"] for r in _app_rules(app)] == ["RULE-901"] == [r["id"] for r in _app_rules(app, "src/rules")]
+    rows = [(r["id"], r["is_active"]) for r in _app_rules(app)]
+    assert rows == [("RULE-901", True), ("RULE-902", False)] == [(r["id"], r["is_active"]) for r in _app_rules(app, "src/rules")]
+    assert "whenFeel" not in _app_rules(app)[1]["config"], "an off rule carries no condition"
 
 
 def test_the_contract_accepts_every_field_the_tab_writes(app):

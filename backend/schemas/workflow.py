@@ -30,6 +30,8 @@ class WorkflowListItem(BaseModel):
     description: str | None
     trigger_type: str | None
     step_count: int
+    #: The workflow in the app's definition (FLOW-…) it was written from, when it was.
+    blueprintId: str | None = None
 
 
 # ---------------------------------------------------------------------------
