@@ -293,14 +293,27 @@ function isWordCell(cell: string, ctx: Record<string, unknown>): boolean {
   let ast: any;
   try { ast = f.parse(f.tokenize(cell)); } catch { return false; }
   const names: string[] = [];
+  // Written tight, with no space, a name may carry a number or a slash:
+  // `Tier-1`, `Level-2`, `N/A`, `Yes/No`. Read as a formula `Tier-1` was
+  // null-1 = -1 and `N/A` null (#29 review, 2026-11-13). Spaced out
+  // (`discount - 5`) it is still arithmetic.
+  const tight = !/\s/.test(cell);
   const wordy = (n: any): boolean => {
     if (!n) return false;
     if (n.type === "Identifier") { names.push(String(n.name)); return true; }
-    if (n.type === "BinaryExpression" && (n.operator === "+" || n.operator === "-")) return wordy(n.left) && wordy(n.right);
+    if (tight && n.type === "NumberLiteral") return true;
+    if (n.type === "BinaryExpression" && (n.operator === "+" || n.operator === "-" || (tight && n.operator === "/")))
+      return wordy(n.left) && wordy(n.right);
     return false;
   };
-  return wordy(ast) && names.every((name) => !Object.prototype.hasOwnProperty.call(ctx, name));
+  return wordy(ast) && names.length > 0 && names.every((name) => !Object.prototype.hasOwnProperty.call(ctx, name));
 }
+
+/**
+ * Numbers joined by dashes or slashes are a date or a span, not sums:
+ * `2026-01-01` came out 2024 and `1-3` came out -2 (#29 review, 2026-11-13).
+ */
+const NUMBERED_TEXT = /^\d+(?:[-/]\d+)+$/;
 
 /** An output cell's value: text, number, yes/no, null — or a FEEL expression over the data. */
 export function outputValue(cell: unknown, ctx: Record<string, unknown> = {}): unknown {
@@ -312,6 +325,7 @@ export function outputValue(cell: unknown, ctx: Record<string, unknown> = {}): u
   if (c === "true") return true;
   if (c === "false") return false;
   if (c === "null") return null;
+  if (ISO_DATE.test(c) || NUMBERED_TEXT.test(c)) return c;
   if (isWordCell(c, ctx)) return c; // a bare word is text: approved, GeneralManager+AMIR
   try {
     const v = evaluateExpression(c, ctx as any);
@@ -323,6 +337,27 @@ export function outputValue(cell: unknown, ctx: Record<string, unknown> = {}): u
 
 function bindingOf(col: TableColumn): string {
   return String(col.variableBinding || col.name || "");
+}
+
+/**
+ * The value an input column reads: its binding, as a key or a dotted path
+ * (`expense.amount` in a workflow that carries the record as one variable),
+ * then its own name. The workflow step read the name when the binding was not
+ * there, and the shared evaluator had dropped that (#29 review, 2026-11-13):
+ * a table bound to a variable the run did not have matched nothing.
+ */
+function inputOf(col: TableColumn, ctx: Record<string, unknown>): unknown {
+  const b = bindingOf(col);
+  if (Object.prototype.hasOwnProperty.call(ctx, b)) return ctx[b];
+  if (b.includes(".")) {
+    let v: unknown = ctx;
+    for (const k of b.split(".")) {
+      if (v === null || typeof v !== "object") { v = undefined; break; }
+      v = (v as Record<string, unknown>)[k];
+    }
+    if (v !== undefined) return v;
+  }
+  return col.name && col.name !== b ? ctx[col.name] : undefined;
 }
 
 export interface TableResult {
@@ -349,7 +384,7 @@ export function evaluateTable(table: DecisionTableDef, ctx: Record<string, unkno
     const ok = inputs.every((col, ci) => {
       const p = parsedInputs[ri][ci];
       if (!p.ok) return false; // a cell the engine cannot read matches nothing
-      return matchConstraint(p.constraint!, ctx[bindingOf(col)], ctx);
+      return matchConstraint(p.constraint!, inputOf(col, ctx), ctx);
     });
     if (ok) matched.push(ri);
   });

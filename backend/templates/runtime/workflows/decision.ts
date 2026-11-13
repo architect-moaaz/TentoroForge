@@ -95,10 +95,18 @@ function scopeFor(ctx: DecisionContext, record: Record<string, unknown> | null):
   return record ? { ...ctx.variables, ...record } : ctx.variables;
 }
 
-/** A value a rule sets is the record's too, so the steps after it see `expense.managerNote`. */
+/**
+ * A value a rule sets is the record's too, so the steps after it see
+ * `expense.managerNote`. A field holds one value: a list (Rule order) goes
+ * onto the record only where the field is a list already, and otherwise its
+ * first value does — as on a save (rules/engine.ts).
+ */
 function writeRecord(record: Record<string, unknown> | null, outputs: Record<string, unknown>) {
   if (!record) return;
-  for (const [name, val] of Object.entries(outputs)) if (val !== undefined) record[name] = val;
+  for (const [name, val] of Object.entries(outputs)) {
+    if (val === undefined) continue;
+    record[name] = Array.isArray(val) && !Array.isArray(record[name]) ? val[0] : val;
+  }
 }
 
 function runTable(table: DecisionTableDef, ctx: DecisionContext, mapping: Record<string, string>,

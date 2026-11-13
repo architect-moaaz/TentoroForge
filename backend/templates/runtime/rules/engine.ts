@@ -1021,8 +1021,20 @@ async function evaluateDecisionTables(
     if (!firesOn(config, event)) continue;
     const result = evaluateTable(table, working);
     if (result.violation) console.warn(`[rules] ${rule.name}: ${result.violation}`);
-    for (const [field, val] of Object.entries(result.outputs)) {
+    for (const [field, listed] of Object.entries(result.outputs)) {
       if (claims && claims.has(field)) continue;
+      // A FIELD HOLDS ONE VALUE. Collect (without a total) and Rule order
+      // answer with every matched row's value, and that list was written over
+      // a text field: `tier` became ["high","mid"] (#29 review, 2026-11-13).
+      // A field that already holds a list takes the list; any other takes the
+      // first matched row's value, in the table's order.
+      let val = listed;
+      if (Array.isArray(listed) && !Array.isArray(working[field])) {
+        if (new Set(listed.map((v) => JSON.stringify(v))).size > 1) {
+          console.warn(`[rules] ${rule.name}: rows ${result.used.map((i) => i + 1).join(", ")} all set ${field}; a field holds one value, so the first was used.`);
+        }
+        val = listed[0];
+      }
       if (val !== undefined && working[field] !== val) {
         out.patches[field] = val;
         working[field] = val;
