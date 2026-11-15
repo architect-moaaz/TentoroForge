@@ -17,6 +17,7 @@ import {
   type ConditionOperator,
 } from "@/types/rules";
 import {
+  CATEGORY_SAID,
   operatorsForCategory,
   valueControl,
   type FieldMeta,
@@ -104,7 +105,7 @@ export function ConditionRow({
                     <span className="truncate">{f}</span>
                     {fm && (
                       <span className="shrink-0 rounded bg-muted px-1 text-[9px] text-muted-foreground">
-                        {fm.category}
+                        {CATEGORY_SAID[fm.category] ?? fm.category}
                       </span>
                     )}
                   </span>

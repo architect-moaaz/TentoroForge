@@ -1,3 +1,4 @@
+import { pathToFileURL } from "node:url";
 /**
  * HTTP surface for the Self-Verify Pass runner.
  *
@@ -189,7 +190,7 @@ async function main(): Promise<void> {
 }
 
 // Only run when invoked as the entrypoint, not on import (tests import types).
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((err) => {
     app.log.error(err);
     process.exit(1);

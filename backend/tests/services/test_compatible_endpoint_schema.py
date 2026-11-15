@@ -50,3 +50,29 @@ def test_an_entity_with_no_fields_is_refused_not_committed():
         ex.parse_envelope(raw, task_id="t", agent="data_architect", node="entity_fields")
     ok = json.dumps({"entities": [{"name": "Task", "fields": [{"name": "title", "type": "text"}]}]})
     assert ex.parse_envelope(ok, task_id="t", agent="data_architect", node="entity_fields").proposals
+
+
+def test_a_model_that_always_reasons_gets_room_to_answer(monkeypatch):
+    """Kimi reasons on every call and pays for it from `max_tokens`: a five-
+    token yes/no came back empty, so `asked_for` always read "no"."""
+    from services import llm_client
+    seen = {}
+
+    class Msgs:
+        def __init__(self, *_a): pass
+        def create(self, **kw):
+            seen.update(kw)
+            class M: content = "REQUEST"
+            return M()
+    monkeypatch.setattr(llm_client, "_SyncMessages", Msgs)
+    monkeypatch.setattr(llm_client, "_text_of", lambda c: c)
+
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://api.moonshot.ai/anthropic")
+    assert llm_client.reasons_unasked()
+    llm_client.complete(content="yes or no?", max_tokens=5)
+    assert seen["max_tokens"] == 5 + llm_client.THINKING_HEADROOM_TOKENS
+
+    monkeypatch.delenv("ANTHROPIC_BASE_URL")
+    assert not llm_client.reasons_unasked()
+    llm_client.complete(content="yes or no?", max_tokens=5)
+    assert seen["max_tokens"] == 5, "Anthropic's own endpoint is unchanged"

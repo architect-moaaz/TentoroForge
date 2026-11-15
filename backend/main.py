@@ -56,6 +56,7 @@ from routers.plan_adjust import router as plan_adjust_router
 from routers.mobile_builds import router as mobile_builds_router
 from routers.platform_integrations import router as platform_integrations_router
 from routers.figma_oauth import router as figma_oauth_router
+from routers.payment_gateways import router as payment_gateways_router
 from routers.platform_mcp_servers import router as platform_mcp_servers_router
 from routers.preview_proxy import router as preview_proxy_router
 from routers.phone_preview import router as phone_preview_router
@@ -77,6 +78,8 @@ from routers.open_decisions import router as open_decisions_router
 from routers.pages import router as pages_router
 from routers.navigation import router as navigation_router
 from routers.agent_builder import router as agent_builder_router
+from routers.agent_insights_stream import router as agent_insights_stream_router, ingest_router as agent_insights_ingest_router
+from routers.agent_tunnel import router as agent_tunnel_router
 from routers.ai_features import router as ai_features_router
 from routers.portal import router as portal_router
 from routers.health import router as health_router
@@ -153,6 +156,22 @@ app = FastAPI(
     redoc_url="/redoc" if APP_ENV != "production" else None,
 )
 
+# A request that fails validation is answered with what failed — never a 500
+# because the input it echoes back (a NaN, an Infinity) is not valid JSON.
+from fastapi.exceptions import RequestValidationError as _RequestValidationError
+from fastapi.exception_handlers import request_validation_exception_handler as _default_validation_handler
+from fastapi.responses import JSONResponse as _JSONResponse
+
+
+@app.exception_handler(_RequestValidationError)
+async def _validation_errors(request, exc: _RequestValidationError):
+    try:
+        return await _default_validation_handler(request, exc)
+    except ValueError:
+        errors = [{k: v for k, v in e.items() if k not in ("input", "ctx")} for e in exc.errors()]
+        return _JSONResponse(status_code=422, content={"detail": errors})
+
+
 # Set up structured logging
 from config import LOG_LEVEL
 setup_structured_logging(LOG_LEVEL)
@@ -211,6 +230,7 @@ app.include_router(plan_adjust_router)
 app.include_router(mobile_builds_router)
 app.include_router(platform_integrations_router)
 app.include_router(figma_oauth_router)
+app.include_router(payment_gateways_router)
 app.include_router(platform_mcp_servers_router)
 app.include_router(preview_proxy_router)
 app.include_router(phone_preview_router)
@@ -245,7 +265,12 @@ app.include_router(decisions_router)
 app.include_router(open_decisions_router)
 app.include_router(pages_router)
 app.include_router(navigation_router)
+# Agent insights (push and rollup): the app's event route, and the builder's key and summary routes. Registered BEFORE the
+# agent-definitions router so its `.../insights/...` paths can never be read as an agent id.
+app.include_router(agent_insights_ingest_router)
+app.include_router(agent_insights_stream_router)
 app.include_router(agent_builder_router)
+app.include_router(agent_tunnel_router)
 app.include_router(ai_features_router)
 app.include_router(portal_router)
 app.include_router(notifications_router)
@@ -432,6 +457,26 @@ async def _start_domain_watch():
     app.state.domain_watch = asyncio.create_task(domain_watch.watch_forever())
 
 
+async def _start_insights_worker():
+    """Applies the events apps push to /api/insights/ingest into the insights rollups — see `services.agent_insights_worker`.
+    Off by default (the feature is not out yet): `FORGE_INSIGHTS_WORKER=1` turns it on. On the LEADING worker
+    only: every worker started one, and each ran the hourly housekeeping and the people refresh again."""
+    from services import agent_insights_worker
+
+    if agent_insights_worker.enabled():
+        app.state.insights_worker = agent_insights_worker.InsightsWorker()
+        await app.state.insights_worker.start()
+
+
+@app.on_event("startup")
+async def _write_this_workers_insight_counts():
+    """EVERY WORKER writes its own insight counts. The ingest route runs in every worker and keeps what it turned
+    away, and which keys were used, in that worker's memory; only the leader's worker wrote them, so the others'
+    were never written (`agent_insights_worker.flush_counts_forever`)."""
+    from services import agent_insights_worker
+    app.state.insight_counts = asyncio.create_task(agent_insights_worker.flush_counts_forever())
+
+
 async def _start_job_recovery():
     """Builds and turns a dead worker left are picked up again or said to
     their person — at once, and every minute after; see `services.jobs`."""
@@ -454,7 +499,7 @@ async def _run_the_loops_once():
     from services import leader
     app.state.leading = asyncio.create_task(leader.run_when_leading([
         _start_timer_scheduler, _follow_open_mobile_builds, _start_lost_run_watch,
-        _start_dev_server_reaper, _start_domain_watch, _start_job_recovery,
+        _start_dev_server_reaper, _start_domain_watch, _start_job_recovery, _start_insights_worker,
     ]))
 
 
@@ -469,6 +514,12 @@ async def _shutdown():
     if left:
         _logging.getLogger("forge.shutdown").warning("[shutdown] stopping with %d job(s) still running: %s",
                                                       len(left), ", ".join(p.stem for p in left[:6]))
+    if hasattr(app.state, "insights_worker"):
+        await app.state.insights_worker.stop()
+    if hasattr(app.state, "insight_counts"):
+        app.state.insight_counts.cancel()
+        from services import agent_insights_worker
+        await agent_insights_worker.flush_counts()
     stop_all_previews()
     from services import phone_live
     phone_live.stop_all()

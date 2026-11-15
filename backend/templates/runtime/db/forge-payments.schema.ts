@@ -4,7 +4,7 @@
  * for, and where it stands. The provider's signed event moves `status`;
  * nothing else does. Forge runtime — do not remove.
  */
-import { index, integer, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { bigint, index, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
 export const forgePayments = pgTable("forge_payments", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -12,7 +12,8 @@ export const forgePayments = pgTable("forge_payments", {
   providerRef: text("provider_ref"),
   // pending | succeeded | failed | refunded | partially_refunded | cancelled
   status: text("status").notNull().default("pending"),
-  amountMinor: integer("amount_minor").notNull(),
+  // bigint: IDR 25,000,000 is 2.5e9 in minor units, past a 32-bit integer.
+  amountMinor: bigint("amount_minor", { mode: "number" }).notNull(),
   currency: text("currency").notNull(),
   entity: text("entity"),
   entityId: text("entity_id"),

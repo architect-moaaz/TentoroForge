@@ -183,6 +183,33 @@ async def write_env_local_from_platform(
     from services import app_settings
     switches = app_settings.env_for(output_dir)
     desired.update(switches)
+    # THE APP'S PAYMENT GATEWAYS, as its owner chose them (Settings → Integrations → Payments):
+    # their TEST keys only — a preview never carries a live key — and every
+    # payment variable the app should not carry removed (None).
+    payment_names: set[str] = set()
+    try:
+        from services.payments.webhooks import payment_env
+        pay = await payment_env(output_dir, org_id, db, side="local")
+    except Exception as exc:  # noqa: BLE001 — the rest of the environment is still written
+        log.warning("[env_writer] payment keys unavailable: %s", exc)
+        pay = None
+        # FAILING CLOSED for an app whose payments are Settings → Integrations → Payments':
+        # every payment variable is removed rather than left as it was (an old
+        # live key from Integrations would have stayed in the preview).
+        try:
+            from services.payments import app_payments as _AP
+            from services.payments.webhooks import governs, load_doc
+            if governs(load_doc(output_dir)):
+                pay = {name: None for name in _AP.ALL_ENV}
+        except Exception:  # noqa: BLE001
+            pass
+    if pay is not None:
+        payment_names = set(pay)
+        for k, v in pay.items():
+            if v is None:
+                desired.pop(k, None)
+            else:
+                desired[k] = v
 
     # Read existing .env.local, filter out managed keys, keep everything else.
     existing_lines: list[str] = []
@@ -191,11 +218,16 @@ async def write_env_local_from_platform(
 
     key_re = re.compile(r"^\s*([A-Z][A-Z0-9_]*)\s*=")
     kept: list[str] = []
+    below = False
     for line in existing_lines:
         if line.strip() == _MANAGED_MARKER:
             # Everything from the marker onwards is the previous managed
-            # block — drop it; we're about to rewrite.
-            break
+            # block — rewritten below. All but a line that is not ours: the
+            # app's `start.sh` appends DATABASE_URL to the end of the file,
+            # and dropping it with the block left `next dev` on whatever
+            # `.env` said (or on nothing).
+            below = True
+            continue
         m = key_re.match(line)
         if m and m.group(1) in APP_OWNED and m.group(1) not in desired:
             # THE APP'S OWN KEY, KEPT. Its sealing key and push pair are made
@@ -206,9 +238,12 @@ async def write_env_local_from_platform(
             # platform still replaces it, from the managed block.
             kept.append(line)
             continue
-        if m and (m.group(1) in known or m.group(1).startswith(_MCP_ENV_PREFIX) or m.group(1) in switches):
-            # Managed key found ABOVE the marker (or marker absent). Drop —
-            # the writer will re-append (or omit if cleared / server removed).
+        managed_key = bool(m) and (m.group(1) in known or m.group(1).startswith(_MCP_ENV_PREFIX) or m.group(1) in switches
+                                   or m.group(1) in payment_names or m.group(1) in desired)
+        if managed_key or (below and not m):
+            # A managed key (above or below the marker), or the old block's
+            # own comments and blanks. Dropped — the writer re-appends (or
+            # omits if cleared / server removed).
             continue
         kept.append(line)
 

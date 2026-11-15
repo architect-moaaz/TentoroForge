@@ -1,3 +1,4 @@
+from services.workflow_nodes import ROW_HEIGHT
 # backend/tests/services/test_crud_workflow_generator.py
 import json
 from pathlib import Path
@@ -193,4 +194,4 @@ def test_nodes_carry_the_editor_type_and_stack_top_to_bottom():
         assert n["data"]["nodeType"] == n["type"], n
     assert [n["id"] for n in nodes] == ["trigger", "cascade_0_comments", "db_delete", "end"]
     assert {n["position"]["x"] for n in nodes} == {250}
-    assert [n["position"]["y"] for n in nodes] == [0, 120, 240, 360]
+    assert [n["position"]["y"] for n in nodes] == [0, ROW_HEIGHT, 2 * ROW_HEIGHT, 3 * ROW_HEIGHT]

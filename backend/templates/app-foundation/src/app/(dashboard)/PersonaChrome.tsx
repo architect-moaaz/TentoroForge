@@ -5,6 +5,7 @@ import { BrandMark, BRAND_LOGO } from "@/components/BrandMark";
 import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
 import { LogOut, Settings, User } from "lucide-react";
+import { MemberCrown, planLine, usePlanStatus } from "./PlanPrompt";
 
 // The client-side chrome for the persona-pills shell frame:
 //   [brand] [Member · Instructor · Admin] [search] [🔔] [avatar ▾]
@@ -92,12 +93,17 @@ export function PersonaChrome({
   appName,
   chrome,
   userInitials,
+  plans = false,
 }: {
   personas: Persona[];
   appName: string;
   chrome: ChromeStyle;
   userInitials?: string;
+  /** The app sells plans: a holder's avatar carries the member's crown, as in the account menu. */
+  plans?: boolean;
 }) {
+  const plan = usePlanStatus(plans);
+  const member = Boolean(plan?.held);
   const pathname = usePathname() || "/";
   const activePersonaId = useMemo(
     () => findActivePersonaId(personas, pathname),
@@ -208,14 +214,19 @@ export function PersonaChrome({
 
           <details className="relative">
             <summary
-              className="grid h-9 w-9 cursor-pointer place-items-center rounded-full border border-border hover:bg-muted/50 transition-colors list-none [&::-webkit-details-marker]:hidden"
+              className={"grid h-9 w-9 cursor-pointer place-items-center rounded-full border hover:bg-muted/50 transition-colors list-none [&::-webkit-details-marker]:hidden "
+                + (member ? "border-amber-400/80 shadow-[0_0_0_3px_rgba(251,191,36,0.18)]" : "border-border")}
               aria-label="Account menu"
+              title={member && plan ? planLine(plan) : undefined}
+              data-member={member ? "" : undefined}
             >
               <span
-                className="grid h-7 w-7 place-items-center rounded-full text-[11px] font-semibold text-white"
-                style={{ background: chrome.accent }}
+                className={"relative grid h-7 w-7 place-items-center rounded-full text-[11px] font-semibold "
+                  + (member ? "bg-gradient-to-br from-amber-200 via-amber-300 to-amber-500 text-amber-950" : "text-white")}
+                style={member ? undefined : { background: chrome.accent }}
               >
                 {initials}
+                {member && <MemberCrown size={8} />}
               </span>
             </summary>
             <div
@@ -240,11 +251,14 @@ export function PersonaChrome({
                 type="button"
                 role="menuitem"
                 onClick={() => {
+                  // Under the app's own prefix, as in the account menu: a bare
+                  // "/login" left a Preview for the platform's address.
+                  const out = `${(process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/+$/, "")}/login`;
                   try {
-                    void signOut({ callbackUrl: "/login" });
+                    void signOut({ callbackUrl: out });
                   } catch {
                     // Fallback: hard nav to /login
-                    window.location.href = "/login";
+                    window.location.href = out;
                   }
                 }}
                 className="flex w-full items-center gap-2 px-3 py-2 hover:bg-muted/50 text-foreground text-left"

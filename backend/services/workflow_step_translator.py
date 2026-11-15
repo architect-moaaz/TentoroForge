@@ -10,6 +10,8 @@ exact keys each runtime handler reads. Pure, deterministic, no I/O.
 """
 from __future__ import annotations
 
+from services.workflow_nodes import ROW_HEIGHT
+
 import logging
 import re
 from typing import Any
@@ -403,7 +405,7 @@ def _translate_node(step: dict, idx: int) -> dict:
     return {
         "id": str(step.get("id") or f"step_{idx}"),
         "type": ntype,
-        "position": {"x": 250, "y": idx * 120},
+        "position": {"x": 250, "y": idx * ROW_HEIGHT},
         "data": {"label": label, "nodeType": ntype, "config": config, "status": "idle"},
     }
 
@@ -691,7 +693,7 @@ def translate_workflow(wf: dict, models: dict | None = None,
     nodes = [_translate_node(s, i) for i, s in enumerate(steps)]
     # Guarantee a terminal end node exists (planner usually includes one).
     if not any(n["type"] in ("end", "end_event") for n in nodes):
-        nodes.append({"id": "end", "type": "end", "position": {"x": 250, "y": len(nodes) * 120},
+        nodes.append({"id": "end", "type": "end", "position": {"x": 250, "y": len(nodes) * ROW_HEIGHT},
                       "data": {"label": "Complete", "nodeType": "end", "config": {"nodeType": "end"},
                                "status": "idle"}})
         steps = list(steps) + [{"id": "end", "type": "end"}]

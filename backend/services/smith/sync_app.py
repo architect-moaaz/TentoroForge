@@ -59,6 +59,9 @@ ENGINE_DIRS: dict[str, str] = {
     "workflows": "src/lib/workflows",
     "rules": "src/lib/rules",
     "events": "src/lib/events",
+    # The payment gateways, the ledger and subscriptions: a fix to how a
+    # payment is believed reaches every app on its next sync.
+    "payments": "src/lib/payments",
 }
 
 
@@ -69,6 +72,10 @@ RUNTIME_FILES: tuple[tuple[str, str], ...] = (
     ("db/forge-files.schema.ts", "src/db/schema/_forge_files.ts"),
     # The notification's `link` column (where the record it is about lives).
     ("db/forge-notifications.schema.ts", "src/db/schema/_forge_notifications.ts"),
+    # The bus a refresh brings writes `dedupe_key` (one delivery, one event):
+    # the table it writes to is declared with it, or a push takes the column
+    # away again and every event after it is lost.
+    ("db/forge-events.schema.ts", "src/db/schema/_forge_events.ts"),
     # The engine's reads (labels on a chart's groups) and the seed (a login
     # per role) are the platform's logic, copied verbatim into every app.
     ("data-engine.ts", "src/lib/data-engine.ts"),
@@ -176,6 +183,9 @@ ENGINE_FOUNDATION_FILES: tuple[str, ...] = (
 #: password and a session — the pause, the two-step code, trusted browsers,
 #: the sessions a person holds (2026-11-12).
 AUTH_FOUNDATION_FILES: tuple[str, ...] = ("src/lib/sign-in-guard.ts",)
+
+#: The users table: the foundation's columns and the app's own, merged (`schema_builder.merge_user_schema`).
+USER_SCHEMA = "src/db/schema/user.ts"
 
 #: Ways in the platform adds after an app was built: template (under
 #: templates/runtime) -> where the app keeps it, written into every app people
@@ -290,6 +300,17 @@ def refresh_engine(app_root: str | Path, doc: dict | None = None, *, complete: b
         src, dst = foundation / rel, root / rel
         if not src.is_file() or not dst.is_file() or dst.read_bytes() == src.read_bytes():
             continue
+        if rel == USER_SCHEMA:
+            # THE USERS TABLE IS MERGED, NEVER COPIED OVER. A build writes the
+            # app's own User columns (a role, profile fields) into it beside the
+            # foundation's; the template's file over it took them away, and the
+            # next publish's push would have dropped them from the database.
+            from services.schema_builder import merge_user_schema
+            text = merge_user_schema(dst.read_text("utf-8"))
+            if dst.read_text("utf-8") != text:
+                dst.write_text(text, "utf-8")
+                changed.append(rel)
+            continue
         shutil.copyfile(src, dst)
         changed.append(rel)
     if (root / "src" / "auth.ts").is_file():
@@ -373,6 +394,15 @@ def refresh_engine(app_root: str | Path, doc: dict | None = None, *, complete: b
         from services.runtime_injector import ensure_sensitive_key
         if ensure_sensitive_key(root / ".env.local"):
             changed.append(".env.local")
+    # THE PAYMENT FILES AND THE APP'S PAYMENTS CONFIG, the platform's: the
+    # routes and pages a gateway sends people back to, and what the owner
+    # chose (`services.payments.app_payments`).
+    if (root / "package.json").is_file():
+        try:
+            from services.payments.app_payments import install_runtime as _install_payments
+            changed += _install_payments(root, doc)
+        except Exception:  # noqa: BLE001 — the rest of the sync stands
+            logger.exception("[engine] the payment files could not be refreshed")
     # THE WORKFLOW ROUTES ARE WRITTEN BY CODE, not copied from a file, so the
     # lists above never carried them: an app kept the route it was built with.
     # TCommerce's kept one that gave a signed-out shopper no guest token, so the
@@ -418,7 +448,7 @@ FRAME_FILES: tuple[str, ...] = (
     "src/app/(dashboard)/layout.tsx", "src/app/(dashboard)/NotificationBell.tsx",
     "src/app/(dashboard)/AccountMenu.tsx", "src/app/(dashboard)/MobileNav.tsx",
     "src/app/(dashboard)/MobileTabBar.tsx", "src/app/(dashboard)/PersonaChrome.tsx",
-    "src/app/(dashboard)/RouteBreadcrumb.tsx",
+    "src/app/(dashboard)/RouteBreadcrumb.tsx", "src/app/(dashboard)/PlanPrompt.tsx",
     # The layout imports these two siblings; without them its refreshed copy
     # has a dangling import and every dashboard route 500s with "module not
     # found". OrgSwitcher (tenancy) and OutsideOrganisation (an app answering

@@ -17,6 +17,7 @@ import logging
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -177,6 +178,39 @@ async def _collect_integrations(
     return out
 
 
+async def _payments_for(project: Any, side: str, db: AsyncSession) -> tuple[dict[str, str], tuple[str, ...]]:
+    """The app's payment gateways for this side: their webhooks registered (or
+    reused), and their keys by name — or nothing, for an app whose payments
+    predate Settings → Integrations → Payments. Never fails a publish."""
+    try:
+        from services.deploy import environments as envs
+        from services.deploy.sign_in_address import main_domain, production_alias
+        from services.deploy.vercel_provider import _slugify
+        from services.payments.webhooks import ensure_webhooks, governs, load_doc, payment_env
+        if not governs(load_doc(project.output_dir)):
+            return {}, ()
+        slug = _slugify(project.short_id)
+        address = (f"https://{envs.test_alias(slug)}" if side == envs.TEST
+                   else (main_domain(project.output_dir) or production_alias(slug)))
+        hooks = await ensure_webhooks(db, project_id=project.id, output_dir=project.output_dir, org_id=project.org_id,
+                                      side=side, address=address)
+        env = await payment_env(project.output_dir, project.org_id, db, side=side, webhooks=hooks["secrets"]) or {}
+        return {k: v for k, v in env.items() if v}, tuple(k for k, v in env.items() if not v)
+    except Exception:  # noqa: BLE001 — the app publishes; its payments say what is missing
+        log.exception("[publish] payment gateways for %s could not be prepared", project.id)
+        # Failing closed for an app whose payments are Settings → Integrations → Payments': no
+        # payment variable carried over from before (the live app then refuses
+        # payments and says so, rather than taking them on stale keys).
+        try:
+            from services.payments import app_payments as _AP
+            from services.payments.webhooks import governs, load_doc
+            if governs(load_doc(project.output_dir)):
+                return {}, tuple(_AP.ALL_ENV)
+        except Exception:  # noqa: BLE001
+            pass
+        return {}, ()
+
+
 # --------------------------------------------------------------------------- #
 # POST /publish — SSE progress stream
 # --------------------------------------------------------------------------- #
@@ -226,11 +260,14 @@ async def publish(
     # live app here.
     from services import app_settings
     integrations.update(app_settings.env_for(project.output_dir))
+    payments_env, remove_env = await _payments_for(project, side, db)
     snapshot = DeploySnapshot(
         project_id=str(project.id),
         project_slug=project.short_id,
         output_dir=_deploy_app_dir(project.output_dir),
         integrations=integrations,
+        payments_env=payments_env,
+        remove_env=remove_env,
         triggered_by=str(user.id),
         environment=side,
         promote_from=promote_from,

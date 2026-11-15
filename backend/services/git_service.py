@@ -18,9 +18,14 @@ async def git_init(output_dir: str) -> None:
     await proc.wait()
 
     # Create .gitignore
+    # The preview, review and verify builds compile into `.next-*` folders
+    # (NEXT_DIST_DIR); none of them is the app's source.
     gitignore = Path(output_dir) / ".gitignore"
     if not gitignore.exists():
-        gitignore.write_text("node_modules/\n.next/\n.env\n")
+        gitignore.write_text("node_modules/\n.next/\n.next-*/\n.env\n")
+    elif ".next-*/" not in gitignore.read_text().splitlines():
+        text = gitignore.read_text()
+        gitignore.write_text(text + ("" if text.endswith("\n") or not text else "\n") + ".next-*/\n")
 
 
 #: Trailer key that records WHICH actor produced a commit. Without it

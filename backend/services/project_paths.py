@@ -17,11 +17,12 @@ def project_root(project_id: str) -> Path:
 
 
 def list_projects() -> list[dict]:
-    """Return [{id, name}] for each non-hidden directory in OUTPUT_ROOT."""
+    """Return [{id, name}] for each non-hidden directory in OUTPUT_ROOT —
+    not the saved templates' own folder (`_templates`), which is no project."""
     if not OUTPUT_ROOT.exists():
         return []
     out = []
     for entry in sorted(OUTPUT_ROOT.iterdir()):
-        if entry.is_dir() and not entry.name.startswith("."):
+        if entry.is_dir() and not entry.name.startswith(".") and entry.name != "_templates":
             out.append({"id": entry.name, "name": entry.name})
     return out

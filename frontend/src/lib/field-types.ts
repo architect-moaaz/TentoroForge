@@ -19,6 +19,11 @@ export type FieldCategory =
   | "json"
   | "other";
 
+/** A field's kind in a person's words — never "enum" or "string". */
+export const CATEGORY_SAID: Record<FieldCategory, string> = {
+  number: "number", string: "text", boolean: "yes/no", date: "date", enum: "a choice", json: "details", other: "other",
+};
+
 const NUMBER_TYPES = new Set([
   "serial", "integer", "int", "int4", "int8", "bigint", "smallint",
   "real", "doubleprecision", "double", "numeric", "decimal", "float", "number",

@@ -17,6 +17,8 @@ The UI reads node types to render appropriate forms/buttons:
 
 from __future__ import annotations
 
+from services.workflow_nodes import ROW_HEIGHT
+
 import json
 import logging
 import re
@@ -251,7 +253,7 @@ def _generate_from_step_names(
         nodes.append({
             "id": node_id,
             "type": node_type,
-            "position": {"x": 250, "y": (i + 1) * 120},
+            "position": {"x": 250, "y": (i + 1) * ROW_HEIGHT},
             "data": {
                 "label": _humanize(step_name),
                 "nodeType": node_type,
@@ -271,7 +273,7 @@ def _generate_from_step_names(
     nodes.append({
         "id": end_id,
         "type": "end",
-        "position": {"x": 250, "y": (len(step_names) + 1) * 120},
+        "position": {"x": 250, "y": (len(step_names) + 1) * ROW_HEIGHT},
         "data": {"label": "Complete", "nodeType": "end"},
     })
     edges.append({"id": f"e_{prev_id}_{end_id}", "source": prev_id, "target": end_id})

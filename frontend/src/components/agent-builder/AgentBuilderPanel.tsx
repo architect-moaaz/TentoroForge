@@ -1,30 +1,49 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Node as RFNode, Edge as RFEdge } from "@xyflow/react";
 import {
   Plus,
   Trash2,
-  Save,
+  Workflow,
+  X,
   Play,
   ArrowLeft,
   Loader2,
   FlaskConical,
+  Bomb,
+  Radio,
+  Sparkles,
+  BarChart3,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { api } from "@/lib/api";
+import { checkKeyOf, draftKeyOf } from "@/lib/agent-draft";
 import { useAgentBuilderStore } from "@/stores/agent-builder";
 import { AgentCanvas } from "./AgentCanvas";
+import { AgentChecksBar } from "./AgentChecksBar";
+import { AgentBlastPanel } from "./AgentBlastPanel";
+import { AgentInsightsPanel } from "./AgentInsightsPanel";
+import { InsightsComingSoon } from "./InsightsComingSoon";
+import { INSIGHTS_READY } from "./insights-ready";
 import { AgentNodePalette } from "./AgentNodePalette";
 import { AgentNodeProperties } from "./AgentNodeProperties";
 import { AgentTemplateSelector } from "./AgentTemplateSelector";
 import { AgentTestConsole } from "./AgentTestConsole";
+import { AgentWatchPanel } from "./AgentWatchPanel";
+import { WatchComingSoon } from "./WatchComingSoon";
+import { useAgentWatch } from "./useAgentWatch";
+import { useWatchRecording } from "./useWatchRecording";
+import { nodeStates } from "@/lib/agent-watch";
+import { chatsFor, sentence, type Incoming, type RecordedChat, type Sent } from "@/lib/agent-recording";
+import { applyFix, revertFix } from "@/lib/agent-blast";
 import { AgentIOSchemaEditor } from "./config/AgentIOSchemaEditor";
 import type {
   AgentDefinition,
+  AgentFinding,
   AgentIOField,
   AgentListItem,
   AgentNodeSerialized,
@@ -32,6 +51,12 @@ import type {
   AgentNodeData,
   AgentTemplate,
 } from "@/types/agent-builder";
+
+/** An agent saves itself this long after the last change, so typing is not a save per key. */
+const AUTOSAVE_MS = 1200;
+
+/** Watch live is open. Switch this off to put its "Coming soon" page (and a Soon badge on its button) back in its place. */
+const WATCH_LIVE_READY = true;
 
 interface AgentBuilderPanelProps {
   projectId: string;
@@ -53,7 +78,84 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
   const [edges, setEdges] = useState<AgentEdgeSerialized[]>([]);
   const [isApplying, setIsApplying] = useState(false);
   const [applyStatus, setApplyStatus] = useState<string | null>(null);
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestError, setSuggestError] = useState<string | null>(null);
+  // What is wrong with the agent as drawn, kept current while it is edited.
+  const [findings, setFindings] = useState<AgentFinding[]>([]);
+  const [appChecked, setAppChecked] = useState(true);
+  const [confirmingApply, setConfirmingApply] = useState(false);
+  // Find problems: bombs thrown at the agent as drawn, with fixes (it also holds the agent's saved tests).
+  const [showBlast, setShowBlast] = useState(false);
+  // The agent as last saved (see draftKeyOf), or null for one that was only just drawn and never saved.
+  const [savedKey, setSavedKey] = useState<string | null>(null);
+  // The agent as it was when opened or drawn (saved or not). "Touched" means the person has changed it since, and only
+  // a touched agent saves itself: opening "New Agent" and leaving again leaves nothing behind.
+  const [baseKey, setBaseKey] = useState<string | null>(null);
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "error" | "blocked">("idle");
+  // A save the server refused after verifying the drawing: what is wrong, and whether it could be saved on purpose.
+  const [blocked, setBlocked] = useState<{ kind: string; problems: AgentFinding[] } | null>(null);
   const [showTestConsole, setShowTestConsole] = useState(false);
+  // Watch the running app's real chats live: the canvas lights up as they happen.
+  const [showWatch, setShowWatch] = useState(false);
+  const watch = useAgentWatch({ projectId, agentId: currentAgent?.id ?? "", agentName: editName, nodes, edges });
+  // Cost and quality of the connected development app. It reads from the same app Watch live connects to ("tunnel" for the
+  // builder's own computer through the tunnel, or a localhost address), remembered per project so it survives a reload.
+  const [showInsights, setShowInsights] = useState(false);
+  const [insightsApp, setInsightsApp] = useState("");
+  useEffect(() => {
+    try {
+      setInsightsApp(window.localStorage.getItem(`forge.watch.insightsApp.${projectId}`) ?? "");
+    } catch {
+      /* a convenience only */
+    }
+  }, [projectId]);
+  const connectWatch = useCallback(
+    (where: string, who: Parameters<typeof watch.connect>[1]) => {
+      setInsightsApp(where);
+      try {
+        window.localStorage.setItem(`forge.watch.insightsApp.${projectId}`, where);
+      } catch {
+        /* a convenience only */
+      }
+      watch.connect(where, who);
+    },
+    [projectId, watch],
+  );
+  // Recording the next X chats lives here, beside the watch, so it carries on while Find problems or Test is shown.
+  const recording = useWatchRecording(projectId, watch.state);
+  // Chats just sent from Watch live to Find problems (it says what arrived and shows the fixer's proposals once, then lets go of them).
+  const [arrived, setArrived] = useState<{ agentId: string; data: Incoming } | null>(null);
+
+  // Send the recorded chats to Find problems as saved tests, and (when asked) have the fixer read them. Chats of another assistant
+  // are held back here, the platform leaves them out too. Resolves to a sentence for the Watch live strip; a refusal throws its sentence.
+  const sendRecording = useCallback(
+    async (chats: RecordedChat[], fix: boolean): Promise<string> => {
+      if (!currentAgent) throw new Error("Open an assistant first.");
+      const { mine, skipped } = chatsFor(chats, currentAgent.id);
+      if (mine.length === 0) throw new Error("None of these chats are from this assistant, so there is nothing to send.");
+      const res = await api.post<Partial<Sent>>(`/api/projects/${projectId}/agent-definitions/${currentAgent.id}/recordings/send`, {
+        chats: mine,
+        fix,
+        // the fixer needs the assistant as drawn now (the same drawing Find problems is given)
+        ...(fix ? { graph: { id: currentAgent.id, name: editName, description: editDescription || undefined, nodes, edges, config: currentAgent.config } } : {}),
+      });
+      const result: Sent = {
+        sent: res?.sent ?? mine.length,
+        added: res?.added ?? 0,
+        alreadyThere: res?.alreadyThere ?? 0,
+        leftOut: res?.leftOut ?? 0,
+        fixes: Array.isArray(res?.fixes) ? res.fixes : [],
+        problems: res?.problems ?? {},
+      };
+      setArrived({ agentId: currentAgent.id, data: { ...result, leftOut: result.leftOut + skipped, key: Date.now(), fixRequested: fix } });
+      setShowWatch(false);
+      setShowInsights(false);
+      setShowTestConsole(false);
+      setShowBlast(true);
+      return sentence(result, { fix, skipped });
+    },
+    [currentAgent, projectId, editName, editDescription, nodes, edges],
+  );
 
   // Fetch agent list
   const { data: agents = [], isLoading } = useQuery({
@@ -73,8 +175,13 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
       setEditDescription(agent.description || "");
       setNodes(agent.nodes || []);
       setEdges(agent.edges || []);
+      const opened = draftKeyOf(agent.name, agent.description || "", agent.nodes || [], agent.edges || [], agent.config);
+      setSavedKey(opened);
+      setBaseKey(opened);
+      setSaveState("idle");
       setSelectedNodeId(null);
       setShowTestConsole(false);
+      setApplyStatus(null);
     },
     [projectId, setCurrentAgent, setSelectedNodeId],
   );
@@ -107,8 +214,12 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
     setEditDescription("");
     setNodes(newAgent.nodes);
     setEdges(newAgent.edges);
+    setSavedKey(null);
+    setBaseKey(draftKeyOf(newAgent.name, "", newAgent.nodes, newAgent.edges, newAgent.config));
+    setSaveState("idle");
     setSelectedNodeId(null);
     setShowTestConsole(false);
+    setApplyStatus(null);
   }, [setCurrentAgent, setSelectedNodeId]);
 
   // Create from template
@@ -127,14 +238,101 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
       setEditDescription(newAgent.description || "");
       setNodes(newAgent.nodes);
       setEdges(newAgent.edges);
+      setSavedKey(null);
+      setBaseKey(draftKeyOf(newAgent.name, newAgent.description || "", newAgent.nodes, newAgent.edges, newAgent.config));
+      setSaveState("idle");
       setSelectedNodeId(null);
       setShowTestConsole(false);
+      setApplyStatus(null);
     },
     [setCurrentAgent, setSelectedNodeId],
   );
 
-  // Save current agent
-  const saveAgent = useCallback(async () => {
+  // An agent drawn from this app's own Blueprint (its tables, workflows, rules). Nothing is saved
+  // until the person saves it; the same id every time, so one agent per app.
+  const suggestFromApp = useCallback(async () => {
+    setSuggesting(true);
+    setSuggestError(null);
+    try {
+      const suggested = await api.post<AgentDefinition>(
+        `/api/projects/${projectId}/agent-definitions/suggest`,
+        {},
+      );
+      setCurrentAgent(suggested);
+      setEditName(suggested.name);
+      setEditDescription(suggested.description || "");
+      setNodes(suggested.nodes);
+      setEdges(suggested.edges);
+      setSavedKey(null);
+      setBaseKey(draftKeyOf(suggested.name, suggested.description || "", suggested.nodes, suggested.edges, suggested.config));
+      setSaveState("idle");
+      setSelectedNodeId(null);
+      setShowTestConsole(false);
+      setApplyStatus(null);
+    } catch (e) {
+      setSuggestError(e instanceof Error ? e.message : "Could not suggest an agent for this app.");
+    } finally {
+      setSuggesting(false);
+    }
+  }, [projectId, setCurrentAgent, setSelectedNodeId]);
+
+  // Ask the platform what is wrong with the agent as drawn. Nothing is saved or installed.
+  const runCheck = useCallback(async (): Promise<AgentFinding[]> => {
+    if (!currentAgent) return [];
+    const res = await api.post<{ findings?: AgentFinding[]; appChecked?: boolean }>(
+      `/api/projects/${projectId}/agent-definitions/check`,
+      {
+        id: currentAgent.id,
+        name: editName,
+        description: editDescription || undefined,
+        nodes,
+        edges,
+        config: currentAgent.config,
+      },
+    );
+    const list = Array.isArray(res?.findings) ? res.findings : [];
+    setFindings(list);
+    setAppChecked(res?.appChecked !== false);
+    return list;
+  }, [currentAgent, editName, editDescription, nodes, edges, projectId]);
+
+  // Re-check a moment after the drawing stops changing. Keyed on what the check READS (not on
+  // selection or box positions, which change on every click and drag).
+  const checkKey = useMemo(() => checkKeyOf(currentAgent?.id, nodes, edges), [currentAgent?.id, nodes, edges]);
+  useEffect(() => {
+    if (!currentAgent) {
+      setFindings([]);
+      setConfirmingApply(false);
+      return;
+    }
+    const timer = setTimeout(() => {
+      runCheck().catch(() => {
+        /* a failed check is not a problem with the agent: the bar keeps what it had */
+      });
+    }, 800);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [checkKey]);
+
+  // Which boxes the chat being watched is working on right now.
+  const liveStates = useMemo(() => {
+    const run = watch.state.selected ? watch.state.runs[watch.state.selected] : undefined;
+    return run ? nodeStates(run, watch.state.map) : {};
+  }, [watch.state]);
+
+  // Boxes with something wrong, for the canvas: the worst thing said about each.
+  const problems = useMemo(() => {
+    const out: Record<string, "error" | "warning"> = {};
+    for (const f of findings) {
+      if (!f.nodeId || f.severity === "info") continue;
+      if (f.severity === "error" || !out[f.nodeId]) out[f.nodeId] = f.severity;
+    }
+    return out;
+  }, [findings]);
+
+  // Save current agent. The server verifies the drawing first and refuses a corrupt one outright; `force` is the builder
+  // saying "save it anyway" about problems that are not corruption (Apply does, since it asks its own question).
+  const saveAgent = useCallback(async (force = false) => {
     if (!currentAgent) return;
     const payload = {
       id: currentAgent.id,
@@ -144,11 +342,65 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
       edges,
       config: currentAgent.config,
     };
-    await api.post(`/api/projects/${projectId}/agent-definitions`, payload);
+    await api.post(`/api/projects/${projectId}/agent-definitions${force ? "?force=true" : ""}`, payload);
+    setSavedKey(draftKeyOf(editName, editDescription, nodes, edges, currentAgent.config));
     queryClient.invalidateQueries({
       queryKey: ["project", projectId, "agent-definitions"],
     });
   }, [currentAgent, editName, editDescription, nodes, edges, projectId, queryClient]);
+
+  // What the agent is now, what was last saved, and what it was when opened. A change that is not saved yet is saved by
+  // itself a moment later (there is no Save button), but only once the person has changed something.
+  const draftKey = useMemo(
+    () => (currentAgent ? draftKeyOf(editName, editDescription, nodes, edges, currentAgent.config) : ""),
+    [currentAgent, editName, editDescription, nodes, edges],
+  );
+  const agentUnsaved = !!currentAgent && savedKey !== draftKey;
+  const touched = !!currentAgent && baseKey !== draftKey;
+  const needsSave = agentUnsaved && touched;
+
+  // A failed save is said in the status bar, in words. The message is kept so a later good save can take it away again.
+  const saveFailure = useRef<string | null>(null);
+  const autoSave = useCallback(async (force = false) => {
+    setSaveState("saving");
+    try {
+      await saveAgent(force);
+      setSaveState("idle");
+      setBlocked(null);
+      const earlier = saveFailure.current;
+      saveFailure.current = null;
+      if (earlier) setApplyStatus((now) => (now === earlier ? null : now));
+    } catch (e) {
+      // The server verified the drawing and said no (HTTP 422 with the problems): that is not a failure of saving, it is
+      // a drawing that is not right yet. It says what and where, and the last saved version stays as it was.
+      const refused = (e as { status?: number; body?: { detail?: { kind?: string; problems?: AgentFinding[] } } })?.body;
+      if ((e as { status?: number })?.status === 422 && Array.isArray(refused?.detail?.problems)) {
+        const problems = refused!.detail!.problems!;
+        setBlocked({ kind: refused!.detail!.kind ?? "problems", problems });
+        setSaveState("blocked");
+        setFindings((now) => (now.length ? now : problems));
+        return;
+      }
+      const message = `Error: ${e instanceof Error ? e.message : String(e)}`;
+      saveFailure.current = message;
+      setApplyStatus(message);
+      setSaveState("error");
+    }
+  }, [saveAgent]);
+
+  // No retry loop: after a failure it waits for the next change (or the person pressing the status) to try again.
+  useEffect(() => {
+    if (!needsSave || isApplying) return;
+    const timer = setTimeout(() => void autoSave(), AUTOSAVE_MS);
+    return () => clearTimeout(timer);
+  }, [needsSave, draftKey, isApplying, autoSave]);
+
+  // Leaving the builder (going back, or the page closing the panel) must not lose a change made a moment ago.
+  const leaving = useRef<() => void>(() => {});
+  leaving.current = () => {
+    if (needsSave && saveState !== "blocked") void saveAgent().catch(() => {});
+  };
+  useEffect(() => () => leaving.current(), []);
 
   // Delete agent
   const deleteAgent = useCallback(
@@ -165,9 +417,32 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
   );
 
   // Apply agent to generated app
-  const applyAgent = useCallback(async () => {
+  const applyAgent = useCallback(async (force = false) => {
     if (!currentAgent) return;
-    await saveAgent();
+    setConfirmingApply(false);
+    try {
+      await saveAgent(true);
+    } catch (e) {
+      // Reported where the person is looking; thrown from a click handler it
+      // surfaced as an uncaught "Runtime ApiError" overlay with no way forward.
+      setApplyStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+      return;
+    }
+
+    // BEFORE anything is installed: a problem that will stop a tool working is shown and asked about,
+    // not discovered afterwards in a log. A check that itself fails never blocks Apply.
+    if (!force) {
+      try {
+        const list = await runCheck();
+        if (list.some((f) => f.severity === "error")) {
+          setConfirmingApply(true);
+          setApplyStatus(null);
+          return;
+        }
+      } catch {
+        /* apply as before */
+      }
+    }
 
     setIsApplying(true);
     setApplyStatus("Starting...");
@@ -236,10 +511,30 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
 
   // Back to list
   const backToList = useCallback(() => {
+    if (needsSave && saveState === "blocked") {
+      // refused by the verification: leaving would lose them, so ask
+      if (typeof window !== "undefined" && !window.confirm("Your changes have problems, so they are not saved. Leave without saving them?")) return;
+    } else if (needsSave) {
+      void saveAgent().catch(() => {});
+    }
+    saveFailure.current = null;
+    setSaveState("idle");
+    setBlocked(null);
     setCurrentAgent(null);
     setSelectedNodeId(null);
     setShowTestConsole(false);
-  }, [setCurrentAgent, setSelectedNodeId]);
+    setApplyStatus(null);
+  }, [needsSave, saveState, saveAgent, setCurrentAgent, setSelectedNodeId]);
+
+  // The diagram page: the drawing, with the components to build it. The other pages (Test, Find problems, Watch live)
+  // are closed to get back to it.
+  const showDiagram = useCallback(() => {
+    setShowTestConsole(false);
+    setShowBlast(false);
+    setShowWatch(false);
+    setShowInsights(false);
+  }, []);
+  const onDiagramPage = !showTestConsole && !showBlast && !showWatch && !showInsights;
 
   // Update node data
   const updateNodeData = useCallback(
@@ -265,11 +560,26 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
       <div className="flex h-full flex-col">
         <div className="flex items-center justify-between border-b px-4 py-3">
           <h2 className="text-sm font-semibold">AI Agents</h2>
-          <Button size="sm" onClick={createAgent}>
-            <Plus className="mr-1 h-3.5 w-3.5" />
-            New Agent
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" onClick={suggestFromApp} disabled={suggesting}>
+              {suggesting ? (
+                <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Sparkles className="mr-1 h-3.5 w-3.5" />
+              )}
+              Suggest from my app
+            </Button>
+            <Button size="sm" onClick={createAgent}>
+              <Plus className="mr-1 h-3.5 w-3.5" />
+              New Agent
+            </Button>
+          </div>
         </div>
+        {suggestError && (
+          <div role="alert" className="border-b bg-destructive/10 px-4 py-2 text-xs text-destructive">
+            {suggestError}
+          </div>
+        )}
 
         <div className="flex-1 overflow-y-auto">
           {isLoading ? (
@@ -284,7 +594,11 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
                   Create a custom AI agent or start from a template
                 </p>
               </div>
-              <AgentTemplateSelector onSelect={createFromTemplate} />
+              <AgentTemplateSelector
+                onSelect={createFromTemplate}
+                onSuggest={suggestFromApp}
+                suggesting={suggesting}
+              />
             </div>
           ) : (
             <div className="divide-y">
@@ -360,21 +674,104 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
         </div>
 
         <div className="flex items-center gap-1">
-          <Button size="sm" variant="outline" onClick={saveAgent}>
-            <Save className="mr-1 h-3.5 w-3.5" />
-            Save
+          {saveState === "error" ? (
+            <button type="button" className="mr-1 text-xs text-red-700 underline" onClick={() => void autoSave()} data-testid="save-state">
+              Not saved. Try again
+            </button>
+          ) : saveState === "blocked" && blocked ? (
+            <span className="mr-1 flex items-center gap-1.5 text-xs text-red-700" data-testid="save-state" title={blocked.problems[0]?.message}>
+              Not saved: {blocked.problems.length === 1 ? "1 problem" : `${blocked.problems.length} problems`} to fix
+              {blocked.kind !== "corrupt" && (
+                <button type="button" className="underline" onClick={() => void autoSave(true)} data-testid="save-anyway">
+                  Save anyway
+                </button>
+              )}
+            </span>
+          ) : saveState === "saving" ? (
+            <span className="mr-1 text-xs text-muted-foreground" data-testid="save-state">
+              Saving…
+            </span>
+          ) : needsSave ? (
+            <span className="mr-1 text-xs text-amber-700" data-testid="save-state">
+              Unsaved changes
+            </span>
+          ) : (
+            <span className="mr-1 text-xs text-muted-foreground" data-testid="save-state">
+              {savedKey !== null ? "Saved" : "Saves as you edit"}
+            </span>
+          )}
+          <Button
+            size="sm"
+            variant={onDiagramPage ? "default" : "outline"}
+            aria-pressed={onDiagramPage}
+            onClick={showDiagram}
+          >
+            <Workflow className="mr-1 h-3.5 w-3.5" />
+            Diagram
           </Button>
           <Button
             size="sm"
             variant="outline"
-            onClick={() => setShowTestConsole(!showTestConsole)}
+            onClick={() => {
+              setShowBlast(false);
+              setShowInsights(false);
+              setShowTestConsole(!showTestConsole);
+            }}
           >
             <FlaskConical className="mr-1 h-3.5 w-3.5" />
             Test
           </Button>
           <Button
             size="sm"
-            onClick={applyAgent}
+            variant={showBlast ? "default" : "outline"}
+            aria-pressed={showBlast}
+            onClick={() => {
+              setShowTestConsole(false);
+              setShowInsights(false);
+              setShowBlast(!showBlast);
+            }}
+          >
+            <Bomb className="mr-1 h-3.5 w-3.5" />
+            Find problems
+          </Button>
+          <Button
+            size="sm"
+            variant={showWatch ? "default" : "outline"}
+            aria-pressed={showWatch}
+            onClick={() => {
+              setShowTestConsole(false);
+              setShowBlast(false);
+              setShowInsights(false);
+              setShowWatch(!showWatch);
+            }}
+          >
+            <Radio className="mr-1 h-3.5 w-3.5" />
+            Watch live
+            {!WATCH_LIVE_READY && (
+              <span className="ml-1.5 rounded bg-amber-100 px-1 py-px text-[9px] font-semibold uppercase leading-none text-amber-800">Soon</span>
+            )}
+            {watch.link === "connected" && <span className="ml-1.5 inline-block h-2 w-2 rounded-full bg-green-500" aria-label="connected" />}
+          </Button>
+          <Button
+            size="sm"
+            variant={showInsights ? "default" : "outline"}
+            aria-pressed={showInsights}
+            onClick={() => {
+              setShowTestConsole(false);
+              setShowBlast(false);
+              setShowWatch(false);
+              setShowInsights(!showInsights);
+            }}
+          >
+            <BarChart3 className="mr-1 h-3.5 w-3.5" />
+            Insights
+            {!INSIGHTS_READY && (
+              <span className="ml-1.5 rounded bg-amber-100 px-1 py-px text-[9px] font-semibold uppercase leading-none text-amber-800">Soon</span>
+            )}
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => applyAgent(false)}
             disabled={isApplying}
           >
             {isApplying ? (
@@ -388,11 +785,45 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
       </div>
 
       {/* Progress bar */}
-      {isApplying && applyStatus && (
-        <div className="border-b bg-blue-50 px-4 py-1.5">
-          <p className="text-xs text-blue-700">{applyStatus}</p>
+      {applyStatus && (
+        <div
+          role="status"
+          className={
+            /^(error|failed)/i.test(applyStatus)
+              ? "flex items-start gap-2 border-b bg-red-50 px-4 py-1.5"
+              : "flex items-start gap-2 border-b bg-blue-50 px-4 py-1.5"
+          }
+        >
+          <p
+            className={
+              /^(error|failed)/i.test(applyStatus)
+                ? "flex-1 text-xs text-red-700"
+                : "flex-1 text-xs text-blue-700"
+            }
+          >
+            {applyStatus}
+          </p>
+          {/* a message that has been read can be put away */}
+          <button
+            type="button"
+            aria-label="Dismiss this message"
+            title="Dismiss"
+            className="mt-0.5 shrink-0 rounded p-0.5 text-slate-500 hover:bg-black/5 hover:text-slate-800"
+            onClick={() => setApplyStatus(null)}
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
         </div>
       )}
+
+      <AgentChecksBar
+        findings={findings}
+        appChecked={appChecked}
+        confirming={confirmingApply}
+        onSelectNode={(id) => setSelectedNodeId(id)}
+        onApplyAnyway={() => applyAgent(true)}
+        onCancel={() => setConfirmingApply(false)}
+      />
 
       {/* Agent-level I/O contract — what a caller must supply + what the agent
           returns. Collapsible so it stays out of the way when authoring nodes. */}
@@ -413,19 +844,57 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
 
       {/* Canvas area */}
       <div className="flex flex-1 overflow-hidden">
-        <AgentNodePalette />
+        {onDiagramPage && <AgentNodePalette />}
         <div className="flex-1">
-          {showTestConsole ? (
+          {showBlast ? (
+            <AgentBlastPanel
+              projectId={projectId}
+              agentId={currentAgent.id}
+              graph={{
+                id: currentAgent.id,
+                name: editName,
+                description: editDescription || undefined,
+                nodes,
+                edges,
+                config: currentAgent.config,
+              }}
+              onApplyFix={(fix) => setNodes((current) => applyFix(current, fix))}
+              onRevertFix={(fix) => setNodes((current) => revertFix(current, fix))}
+              agentUnsaved={saveState === "error"}
+              onSaveAgent={() => autoSave()}
+              incoming={arrived && arrived.agentId === currentAgent.id ? arrived.data : undefined}
+              onIncomingTaken={() => setArrived(null)}
+            />
+          ) : showInsights && !INSIGHTS_READY ? (
+            <InsightsComingSoon />
+          ) : showInsights ? (
+            <AgentInsightsPanel
+              projectId={projectId}
+              agentId={currentAgent.id}
+              agentName={editName}
+              appUrl={insightsApp}
+              onOpenWatch={() => {
+                setShowInsights(false);
+                setShowTestConsole(false);
+                setShowBlast(false);
+                setShowWatch(true);
+              }}
+            />
+          ) : showTestConsole ? (
             <AgentTestConsole
               projectId={projectId}
               agentId={currentAgent.id}
               agentName={editName}
               nodes={nodes}
             />
+          ) : showWatch && !WATCH_LIVE_READY ? (
+            <WatchComingSoon />
           ) : (
             <AgentCanvas
               initialNodes={nodes}
               initialEdges={edges}
+              problems={problems}
+              liveStates={liveStates}
               onNodesChange={(rf: RFNode[]) =>
                 setNodes(
                   rf.map((n) => ({
@@ -450,7 +919,23 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
             />
           )}
         </div>
-        {selectedNode && !showTestConsole && (
+        {WATCH_LIVE_READY && showWatch && !showTestConsole && !showBlast && (
+          <AgentWatchPanel
+            state={watch.state}
+            link={watch.link}
+            reason={watch.reason}
+            suggestedUrl={watch.suggestedUrl}
+            projectId={projectId}
+            onConnect={connectWatch}
+            onDisconnect={watch.disconnect}
+            onSelect={watch.select}
+            onFollow={watch.follow}
+            recording={recording}
+            onSendToBlast={(chats) => sendRecording(chats, false)}
+            onSendToFix={(chats) => sendRecording(chats, true)}
+          />
+        )}
+        {selectedNode && !showTestConsole && !showWatch && !showInsights && (
           <AgentNodeProperties
             nodeData={selectedNode.data}
             nodeId={selectedNode.id}

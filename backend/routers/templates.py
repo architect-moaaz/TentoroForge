@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import get_current_user
+from platform_admin import require_super_admin
 from database import get_db
 from models.auth import PlatformUser
 from models.template import AppTemplate
@@ -156,8 +157,10 @@ async def suggested_apps(
 # ---------------------------------------------------------------------------
 
 @router.post("/api/templates/seed", status_code=201)
-async def seed_templates(db: AsyncSession = Depends(get_db)):
-    """Seed the database with default templates."""
+async def seed_templates(db: AsyncSession = Depends(get_db),
+                         _admin: PlatformUser = Depends(require_super_admin)):
+    """Seed the database with default templates. Tentoro's own admins only:
+    it writes the platform's catalogue (it was open to anyone, signed in or not)."""
     from seeds.templates import TEMPLATE_SEEDS
 
     count = 0

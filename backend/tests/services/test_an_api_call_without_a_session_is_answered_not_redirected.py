@@ -42,7 +42,9 @@ def test_an_api_call_is_let_past_the_redirect_to_be_answered(tmp_path):
 def test_a_role_restricted_api_answers_403_where_a_page_redirects(tmp_path):
     src = _source(tmp_path)
     assert 'refuse(403, "FORBIDDEN"' in src
-    assert 'NextResponse.redirect(new URL("/403", req.url))' in src, "a page still redirects"
+    assert 'forbidden.pathname = "/403"' in src and "NextResponse.redirect(forbidden)" in src, "a page still redirects"
+    # Under the app's own prefix (`nextUrl`): `new URL("/403", req.url)` sent a Preview's visitor to the platform.
+    assert 'new URL("/403", req.url)' not in src
 
 
 def test_pages_still_go_to_the_sign_in_page(tmp_path):
