@@ -82,16 +82,23 @@ class Observation:
     status: str = ""                       # resolved | no_op | asked | needs_user | error
     said: str = ""
     touched: list[str] = field(default_factory=list)
+    #: What this step changed in the application's definition, as lines of the
+    #: page taken out (-) and put in (+). The page at the top of the prompt is
+    #: the one the turn began with; this is how a later step knows what it says
+    #: now (`smith4.context.page_changes`).
+    now: str = ""
 
     def line(self) -> str:
         args = ", ".join(f"{k}={v!r}" for k, v in sorted(self.args.items()) if v)
         head = f"{self.tool}({args})" if args else f"{self.tool}()"
         files = f" [touched: {', '.join(self.touched[:3])}]" if self.touched else ""
+        now = (f"\n  THE APPLICATION NOW — this step changed what the application above says "
+               f"(- taken out, + put in):\n{self.now}") if self.now else ""
         # WHAT WAS READ IS SHOWN AS READ. A file's lines collapsed to one would
         # be a file the model cannot reason from; the read's own layout stays.
         if self.status == "read":
-            return f"- {head} ->\n{self.said}"
-        return f"- {head} -> {self.status or '?'}: {' '.join((self.said or '').split())}{files}"
+            return f"- {head} ->\n{self.said}{now}"
+        return f"- {head} -> {self.status or '?'}: {' '.join((self.said or '').split())}{files}{now}"
 
 
 #: A step is identified by the fields its verb DECLARES it needs — the same set
@@ -421,6 +428,15 @@ _APP = """WHAT THE APPLICATION IS, as much of it as is relevant:
 
 """
 
+#: Between the application and the state the turn began from, in the page a
+#: turn hands its chooser (`smith4.turn`). The state (an agreed plan's waiting
+#: steps, the notebook, the live line) changes every turn; above it in the
+#: application's cached block, it wrote the whole application to the cache
+#: again at every turn's start (forge-v3, Oct–Nov 2026: three quarters of
+#: Smith's cache writes were that block). Split off here, it goes into the
+#: turn's own part, and the application can be read back from the cache.
+TURN_STATE = "\n\n<<the state this turn began from>>\n"
+
 _TURN = """THE CONVERSATION SO FAR:
 {history}
 
@@ -533,8 +549,10 @@ def next_step(ask: str, ctx: str, observations: list[Observation],
 
     shown = (f"\n\n[{len(images)} screenshot{'s' if len(images) != 1 else ''} attached by the person, shown above "
              "the text: what they see on screen. Read it as their evidence.]" if images else "")
-    parts = [_RULES.format(catalogue=tools.render()), _APP.format(ctx=ctx or "(nothing yet)"),
-             _TURN.format(ask=(ask or "").strip() + shown, history=_render_history(history),
+    app, _, state = (ctx or "").partition(TURN_STATE)
+    state = f"WHERE THINGS STOOD WHEN THIS TURN BEGAN:\n{state.strip()}\n\n" if state.strip() else ""
+    parts = [_RULES.format(catalogue=tools.render()), _APP.format(ctx=app or "(nothing yet)"),
+             state + _TURN.format(ask=(ask or "").strip() + shown, history=_render_history(history),
                           observations=_render(observations))]
     prompt = "".join(parts)
     # THE TURN'S OWN STEPS, EACH A BLOCK, THE LAST ONE CACHED. Step N writes

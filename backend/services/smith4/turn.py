@@ -620,7 +620,13 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
     # again, 32k tokens a call (pah7lhfz, 2026-10-21). A read or a try changes
     # nothing the page says, so the next call reads it back for a tenth.
     head = turn_head(ctx.out)
+    from services.smith.loop import TURN_STATE
+    from services.smith4.context import page_changes
+    state = (TURN_STATE + head) if head else ""
     page: str | None = None
+    # What the application's definition says now, which the page stops being
+    # once a step changes it (`page_changes`).
+    current = ""
     page_at = 0
     while True:
         if _step >= budget:
@@ -649,11 +655,30 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
             from services.smith import notebook as _nb
             _nb.checkpoint(ctx.out, ctx.ask or ctx.message or "", observations)
         t0 = _time.monotonic()
-        if page is None or any(_is_change(o) for o in observations[page_at:]):
-            page = opening(ctx.project_id, ctx.out, ctx.ask, brief=brief_of(ctx), head=head)
+        # A CHANGE IS SAID ON THE STEP THAT MADE IT, NOT BY A NEW PAGE. The page
+        # is the second cached block, and every step after it is cached behind
+        # it: rebuilt after a change, the page AND the whole turn so far went
+        # to the cache again, at 1.25x, 40-60k tokens a time (forge-v3,
+        # Oct–Nov 2026: a third of Smith's steps followed a change). The page
+        # stays the one the turn began with; what the change moved in it rides
+        # on the change's own step, the next one to be sent. A change that
+        # moved most of the page sends the page again.
+        if page is None:
+            page = current = opening(ctx.project_id, ctx.out, ctx.ask, brief=brief_of(ctx), head="")
+            page_at = len(observations)
+        elif any(_is_change(o) for o in observations[page_at:]):
+            fresh = opening(ctx.project_id, ctx.out, ctx.ask, brief=brief_of(ctx), head="")
+            if fresh != current:
+                moved = page_changes(current, fresh)
+                if moved is None:
+                    page = fresh
+                else:
+                    last_change = next(o for o in reversed(observations[page_at:]) if _is_change(o))
+                    last_change.now = "\n".join(x for x in (last_change.now, moved) if x)
+                current = fresh
             page_at = len(observations)
         t1 = _time.monotonic()
-        chosen = choose(ctx.ask, page, observations, history) or {}
+        chosen = choose(ctx.ask, page + state, observations, history) or {}
         t2 = _time.monotonic()
         tool = str(chosen.get("tool") or "").strip()
         # WHERE A TURN'S TIME GOES, ONE LINE A STEP. Turns ran seven to ten
@@ -931,7 +956,7 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
         try:
             observations.append(Observation(tool="done", status="error", said=OUT_OF_STEPS))
             for _ask in range(2):
-                final = choose(ctx.ask, page or opening(ctx.project_id, ctx.out, ctx.ask, head=head),
+                final = choose(ctx.ask, (page or opening(ctx.project_id, ctx.out, ctx.ask, head="")) + state,
                                observations, history) or {}
                 if str(final.get("tool") or "") == "answer":
                     said = str((final.get("args") or {}).get("text") or "").strip()
