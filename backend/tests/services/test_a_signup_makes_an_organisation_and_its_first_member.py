@@ -19,7 +19,7 @@ DOC = {
 
 
 def test_the_runtime_ships_signup_invites_switching_and_two_seeded_organisations():
-    signup = (ROOT / "templates/app-foundation/src/app/api/auth/signup/route.ts").read_text()
+    signup = (ROOT / "templates/app-foundation/src/app/api/auth/signup/route.ts").read_text() + (ROOT / "templates/app-foundation/src/lib/account-row.ts").read_text()
     assert "tenancy.createOrganisation(orgName)" in signup and "tenancy.setActive(" in signup
     setpw = (ROOT / "templates/runtime/api-auth-set-password/route.ts").read_text()
     assert "tenancy.join(" in setpw

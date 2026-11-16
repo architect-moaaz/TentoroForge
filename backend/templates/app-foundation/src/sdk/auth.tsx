@@ -301,7 +301,7 @@ function Field({ id, label, required, children, help }: { id: string; label: str
 export interface SignInMethods {
   password: boolean;
   magicLink: boolean;
-  sso: { id: string; name: string; kind: "oidc" | "saml"; connected: boolean }[];
+  sso: { id: string; name: string; kind: "oidc" | "saml"; connected: boolean; signUp?: boolean }[];
 }
 const DEFAULT_METHODS: SignInMethods = { password: true, magicLink: false, sso: [] };
 
@@ -323,6 +323,35 @@ export function useSignInMethods(): SignInMethods {
  *  their role's own page. */
 export function continueWith(providerId: string, callbackUrl?: string): void {
   void signIn(providerId, { callbackUrl: callbackUrl || apiPath("/") });
+}
+
+/** SIGN UP through an identity provider: the kind of account the person chose
+ *  (`as`, one of the roles signup offers) and the account fields the form
+ *  starts them with travel with them, so the provider's return makes the
+ *  account the password form would have made, then lands on `callbackUrl`.
+ *  Resolves with a message when the choice was refused; otherwise the page
+ *  leaves for the provider. A person who already has an account is simply
+ *  signed in. */
+export async function signUpWith(
+  providerId: string,
+  opts: { as?: string | null; account?: Record<string, unknown>; callbackUrl?: string } = {},
+): Promise<string | null> {
+  try {
+    const res = await fetch(apiPath("/api/auth/methods"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ as: opts.as ?? null, account: opts.account ?? {} }),
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
+      return body?.error?.message ?? "Signing up through the provider could not be started.";
+    }
+  } catch {
+    return "Signing up through the provider could not be started.";
+  }
+  continueWith(providerId, opts.callbackUrl);
+  return null;
 }
 
 /** What a provider's refusal means, in words (`/login?error=…`). */
@@ -586,6 +615,9 @@ export function SignUpForm({ submitLabel = "Create account", className, columns 
   const [password, setPassword] = React.useState("");
   const [name, setName] = React.useState("");
   const [account, setAccount] = React.useState<Record<string, unknown>>({});
+  const [providerError, setProviderError] = React.useState<string | null>(null);
+  // The providers a new person can make their account through, when connected here.
+  const joinable = useSignInMethods().sso.filter((p) => p.connected && p.signUp);
   const askName = !ACCOUNT;
   return (
     <form className={"grid gap-5 " + (className ?? "")}
@@ -609,8 +641,19 @@ export function SignUpForm({ submitLabel = "Create account", className, columns 
             value={password} onChange={(e) => setPassword(e.target.value)} />
         </Field>
       </div>
-      {error && <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>}
+      {(error || providerError) && <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error || providerError}</p>}
       <button type="submit" disabled={pending} className={buttonClass}>{pending && <Spinner />}{submitLabel}</button>
+      {joinable.length > 0 && (
+        <>
+          <p className="text-center text-xs text-muted-foreground">or</p>
+          {joinable.map((p) => (
+            <button key={p.id} type="button" className={secondaryButtonClass}
+              onClick={async () => { setProviderError(await signUpWith(p.id, { account })); }}>
+              Sign up with {p.name}
+            </button>
+          ))}
+        </>
+      )}
     </form>
   );
 }

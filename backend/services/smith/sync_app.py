@@ -182,7 +182,14 @@ ENGINE_FOUNDATION_FILES: tuple[str, ...] = (
 #: one would import a file the app does not have. What stands between a right
 #: password and a session — the pause, the two-step code, trusted browsers,
 #: the sessions a person holds (2026-11-12).
-AUTH_FOUNDATION_FILES: tuple[str, ...] = ("src/lib/sign-in-guard.ts",)
+AUTH_FOUNDATION_FILES: tuple[str, ...] = (
+    "src/lib/sign-in-guard.ts",
+    # Signing up through an identity provider makes the account the signup
+    # form would have — the chosen role and the person's own record — so the
+    # helpers both ways share, and the provider rules, travel with auth.ts
+    # (2026-11-16).
+    "src/lib/account-row.ts", "src/lib/sign-in.ts",
+)
 
 #: The users table: the foundation's columns and the app's own, merged (`schema_builder.merge_user_schema`).
 USER_SCHEMA = "src/db/schema/user.ts"
@@ -197,6 +204,8 @@ AUTH_ROUTES: tuple[tuple[str, str], ...] = (
     ("api-auth-two-step/route.ts", "src/app/api/auth/two-step/route.ts"),
     ("api-auth-password-reset/route.ts", "src/app/api/auth/password-reset/route.ts"),
     ("api-auth-devices/route.ts", "src/app/api/auth/devices/route.ts"),
+    # The kind of account a person chose, carried through a provider's sign-up (2026-11-16).
+    ("api-auth-methods/route.ts", "src/app/api/auth/methods/route.ts"),
 )
 
 

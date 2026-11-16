@@ -29,7 +29,7 @@ def test_a_new_account_starts_pending_and_only_a_digest_is_kept():
     user = (ROOT / "templates/app-foundation/src/db/schema/user.ts").read_text()
     for col in ('"email_verification"', '"email_code_hash"', '"email_code_expires_at"', '"email_code_attempts"'):
         assert col in user
-    signup = (ROOT / "templates/app-foundation/src/app/api/auth/signup/route.ts").read_text()
+    signup = (ROOT / "templates/app-foundation/src/app/api/auth/signup/route.ts").read_text() + (ROOT / "templates/app-foundation/src/lib/account-row.ts").read_text()
     assert 'signInPolicy().verifyEmail ? { emailVerification: "pending" }' in signup
     auth = (ROOT / "templates/app-foundation/src/auth.ts").read_text()
     guard = (ROOT / "templates/app-foundation/src/lib/sign-in-guard.ts").read_text()

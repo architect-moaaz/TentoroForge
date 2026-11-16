@@ -8,7 +8,7 @@ import { sessionCookies } from "@/lib/session-cookie";
 import { db } from "@/db";
 import { users } from "@/db/schema/user";
 import { eq } from "drizzle-orm";
-import { connected, digest, domainAllowed, issuerOf, roleFromClaims, ssoEntries, policy as signInPolicy, type SsoEntry } from "@/lib/sign-in";
+import { connected, digest, domainAllowed, issuerOf, readSignupIntent, roleFromClaims, signupIntentCookie, ssoEntries, policy as signInPolicy, type SsoEntry } from "@/lib/sign-in";
 import { SIGN_IN_COLUMNS } from "@/lib/sign-in-guard";
 
 /** Every scalar column of a users row except the credential and what the
@@ -267,21 +267,42 @@ async function admitSso(e: SsoEntry, user: Record<string, any>, claims: Record<s
   let row = await userByEmail(email);
   const claimed = roleFromClaims(claims, e);
   if (!row) {
+    // A NEW PERSON WHO CHOSE A KIND OF ACCOUNT ON THE SIGNUP FORM before going
+    // out to the provider: that choice (and the fields the form starts them
+    // with) came back in this app's own cookie. Without it, everyone a
+    // provider brought in held the one signup role (DITANS, 2026-11-16).
+    let intent: { as: string | null; account: Record<string, unknown> } = { as: null, account: {} };
+    try {
+      const { cookies } = await import("next/headers");
+      const jar = await cookies();
+      intent = readSignupIntent(jar.get(signupIntentCookie())?.value);
+      if (intent.as) jar.delete(signupIntentCookie());
+    } catch { /* outside a request: no choice was carried */ }
+    // A provider that admits only the invited admits nobody new, whatever the
+    // form said: an enterprise's own sign-in stays its own.
     if (e.provisioning !== "just_in_time") { await _signIn(null, email, false, `sso:${e.id}`); return "/login?error=NotInvited"; }
     const { SIGNUP_ROLE } = await import("@/lib/account");
-    const role = claimed || SIGNUP_ROLE || undefined;
+    const role = claimed || intent.as || SIGNUP_ROLE || undefined;
     const name = String(user.name ?? email.split("@")[0]);
-    const [created] = await db.insert(users).values({
-      email,
-      // A credential nobody holds: this person signs in through the provider.
-      password: await bcrypt.hash(`sso:${e.id}:${Date.now()}:${Math.random()}`, 10),
-      ...("name" in (users as any) ? { name } : {}),
-      ...("firstName" in (users as any) ? { firstName: name.split(" ")[0], lastName: name.split(" ").slice(1).join(" ") || "" } : {}),
-      ...("role" in (users as any) && role ? { role } : {}),
-      ...("accountType" in (users as any) && role ? { accountType: role } : {}),
-      ...("isActive" in (users as any) ? { isActive: true } : {}),
-    } as any).returning();
-    row = created as any;
+    const { accountValues, writeAccountRow } = await import("@/lib/account-row");
+    const account = accountValues(intent.account, email, name);
+    if (account.error) console.warn(`[auth] ${email} signed up through ${e.id} without an account record: ${account.error}`);
+    row = await (db as any).transaction(async (tx: any) => {
+      const [created] = await tx.insert(users).values({
+        email,
+        // A credential nobody holds: this person signs in through the provider.
+        password: await bcrypt.hash(`sso:${e.id}:${Date.now()}:${Math.random()}`, 10),
+        ...("name" in (users as any) ? { name } : {}),
+        ...("firstName" in (users as any) ? { firstName: name.split(" ")[0], lastName: name.split(" ").slice(1).join(" ") || "" } : {}),
+        ...("role" in (users as any) && role ? { role } : {}),
+        ...("accountType" in (users as any) && role ? { accountType: role } : {}),
+        ...("isActive" in (users as any) ? { isActive: true } : {}),
+        // The provider proved the address: there is no code to wait for.
+        ...("emailVerification" in (users as any) ? { emailVerification: "verified" } : {}),
+      } as any).returning();
+      if (!account.error) await writeAccountRow(tx, created.id, account.values);
+      return created;
+    }) as any;
   } else if (claimed && "role" in row && row.role !== claimed) {
     // THE PROVIDER'S GROUPS DECIDE THE ROLE on every sign-in: a person moved
     // between groups holds the new role next time, with nobody re-roling them here.

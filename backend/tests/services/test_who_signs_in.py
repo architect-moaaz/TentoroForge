@@ -355,7 +355,7 @@ def test_the_app_starts_a_new_account_where_no_process_has_taken_it():
     assert initial["kycStatus"] == "unverified"
     assert initial["passwordHash"] == am.UNUSABLE_CREDENTIAL, "the column is NOT NULL and nobody may sign in with it"
     assert "kycVerifiedAt" not in initial, "not required, so it starts empty"
-    route = (_ROOT / "backend/templates/app-foundation/src/app/api/auth/signup/route.ts").read_text()
+    route = (_ROOT / "backend/templates/app-foundation/src/app/api/auth/signup/route.ts").read_text() + (_ROOT / "backend/templates/app-foundation/src/lib/account-row.ts").read_text()
     assert "const values: Record<string, unknown> = { ...ACCOUNT_INITIAL };" in route
 
 
