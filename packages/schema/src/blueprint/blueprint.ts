@@ -839,6 +839,16 @@ export const PageContract = z.object({
    *  `designSources[].frames[].nodeId`, whichever provider holds it. */
   figmaFrame: z.string().optional(),
   /**
+   * THE PAGE IS ITS OWN WHOLE SCREEN: it draws its own header, so a public
+   * page gets no public frame (the application's menu of public pages and its
+   * page width) around it. An employer's careers site is the employer's, not
+   * the platform's; framed, it showed a bar listing "Splash", "Candidate App
+   * Home"… above the employer's own header, in a boxed column (DITANS CP-1,
+   * 2026-11-17). A page with a `figmaFrame` already is one; this says so for a
+   * page drawn where the design could not be connected.
+   */
+  wholeScreen: z.boolean().optional(),
+  /**
    * THE OTHER DRAWN FRAMES THIS PAGE IS MADE OF. A design draws a screen
    * several times — with its dialog open, on its second tab, at step three of
    * its wizard, empty — and each drawing is a frame. One page per frame made

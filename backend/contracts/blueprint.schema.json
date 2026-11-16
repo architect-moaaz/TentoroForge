@@ -1121,6 +1121,9 @@
           "figmaFrame": {
             "type": "string"
           },
+          "wholeScreen": {
+            "type": "boolean"
+          },
           "frames": {
             "type": "array",
             "items": {

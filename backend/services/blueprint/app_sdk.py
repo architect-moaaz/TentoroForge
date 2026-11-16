@@ -678,7 +678,9 @@ def page_module(doc: dict, page: dict, row: dict) -> str:
     # A DRAWN PUBLIC PAGE IS ITS OWN WHOLE SCREEN. Its frame carries the
     # header the designer drew; the generic public frame put a second bar
     # above it listing every public page by name (DITANS sign-up, 2026-10-31).
-    framed = public and not page.get("figmaFrame")
+    # A page that says it is its own whole screen (`wholeScreen`, e.g. an
+    # employer's careers site with its own header) is not framed either.
+    framed = public and not page.get("figmaFrame") and not page.get("wholeScreen")
     frame_open = "<PublicPageFrame><PageFrame" if framed else "<PageFrame"
     frame_close = "</PageFrame></PublicPageFrame>" if framed else "</PageFrame>"
     frame_import = ('import { PublicPageFrame } from "@/components/PublicPageFrame";\n'
