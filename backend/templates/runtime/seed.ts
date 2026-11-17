@@ -1192,6 +1192,37 @@ async function seedEverything(): Promise<void> {
   try { await seedEverythingElse(); } finally { await giveLoginsReach(); }
 }
 
+/**
+ * The zones and rules the brief named (contracts/geofence-plan.json), when it named any. A zone with coordinates is made, one
+ * without is left for the owner to draw; a rule is made only beside its zone. Safe on every start (see geofence/plan.ts), and
+ * it never takes the seed down: an app with no plan, or no geofence tables, simply has nothing to do here.
+ */
+async function seedGeofencePlan(): Promise<void> {
+  const file = path.join(process.cwd(), "contracts", "geofence-plan.json");
+  if (!fs.existsSync(file)) return;
+  try {
+    const { applyPlan } = await import("../lib/geofence/plan");
+    const rowsOf = (r: unknown): any[] => (Array.isArray(r) ? r : ((r as { rows?: any[] })?.rows ?? []));
+    const plan = JSON.parse(fs.readFileSync(file, "utf8"));
+    const done = await applyPlan(plan, {
+      zoneId: async (name) => rowsOf(await db.execute(sql`SELECT id FROM forge_geofences WHERE lower(name) = lower(${name}) LIMIT 1`))[0]?.id ?? null,
+      addZone: async (z) => String(rowsOf(await db.execute(sql`
+        INSERT INTO forge_geofences (name, shape, rules, created_by)
+        VALUES (${z.name}, ${JSON.stringify({ type: "circle", center: { lat: z.lat, lng: z.lng }, radiusM: z.radiusM })}::jsonb, ${JSON.stringify(z.rules ?? {})}::jsonb, 'forge-plan')
+        RETURNING id`))[0].id),
+      hasRule: async (zone, onEvent, action) => rowsOf(await db.execute(sql`
+        SELECT 1 FROM forge_geofence_rules
+        WHERE geofence_id IS NOT DISTINCT FROM ${zone}::uuid AND on_event = ${onEvent} AND action = ${JSON.stringify(action)}::jsonb LIMIT 1`)).length > 0,
+      addRule: async (r) => { await db.execute(sql`
+        INSERT INTO forge_geofence_rules (geofence_id, on_event, action, sensitive)
+        VALUES (${r.geofenceId}::uuid, ${r.onEvent}, ${JSON.stringify(r.action)}::jsonb, ${r.sensitive})`); },
+    });
+    console.log(`[seed] geofencing — zones: ${done.zonesAdded.length} added, ${done.zonesKept.length} kept, ${done.zonesToDraw.length} to draw; rules: ${done.rulesAdded} added, ${done.rulesKept} kept, ${done.rulesWaiting.length} waiting for a zone, ${done.rulesRefused.length} refused`);
+  } catch (err) {
+    console.warn(`[seed] geofencing plan skipped: ${String(err).slice(0, 200)}`);
+  }
+}
+
 async function seedEverythingElse(): Promise<void> {
   const forceSeed = /^(1|true|yes)$/i.test(String(process.env.FORCE_SEED || ""));
 
@@ -1209,6 +1240,7 @@ async function seedEverythingElse(): Promise<void> {
   // AND SO MUST THE PEOPLE THE OWNER ADDED — for the same reason and above the
   // same gates. An app whose staff cannot log in is not in use.
   await seedAccounts();
+  await seedGeofencePlan();
 
   // THE OWNER'S OWN RECORDS COME BEFORE THE DEMO ONES, and before both skip
   // gates below: a database reused from an earlier deploy must still take the

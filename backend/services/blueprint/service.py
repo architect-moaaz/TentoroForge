@@ -375,6 +375,8 @@ class BlueprintService:
         from services.blueprint import app_target, platform_plan
         app_target.apply(svc.doc, app_target.read(output_dir), platform_plan.native_roles(output_dir),
                          platform_plan.map_first_roles(output_dir))
+        from services.blueprint import geofence_plan
+        geofence_plan.apply(svc.doc, geofence_plan.read(output_dir))
         svc.validate()
         svc.save()
         return svc

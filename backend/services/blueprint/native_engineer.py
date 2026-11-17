@@ -187,7 +187,10 @@ state. The state is DERIVED from the records each render (their statuses, the of
 flags that a status change could contradict. Each state offers only the next valid action, as ONE `accent` button.
 NEVER keep a ticking clock in this screen's state (no `setInterval`, no `now` in `useState`): it redraws the map on every tick.
 A countdown is `<Countdown until={offer.requestExpiresAt} />`, a time since is `<Elapsed since={…} />`, and `useExpired(iso)`
-removes an offer once its own time has passed."""
+removes an offer once its own time has passed.
+A DELIVERY OR RIDE UNDER WAY SHARES ITS POSITION BY ITSELF: on the mover's screen for the job put `<TripBeacon entity="Order"
+trip={order.id} stage={…} />` from "@/sdk" (stage "to_pickup" or "to_dropoff"). NEVER a "Start sharing" button (`ShareLocation`) for
+a job under way: the person on it does not press one, and the customer would wait for a driver who is not shown."""
 
 
 def system_prompt(doc: dict) -> str:

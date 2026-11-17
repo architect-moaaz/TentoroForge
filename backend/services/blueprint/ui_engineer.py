@@ -588,7 +588,7 @@ What a finished page looks like:
   rider, a courier, a technician on the way — the job is ONE record (the order,
   the ride, the visit) and its id is the trip:
     the follower's screen: `<LiveTrackingMap entity="Order" trip={order.id} pickup={…} dropoff={…} />`
-    the mover's screen for that job: `<ShareLocation entity="Order" trip={order.id} />`
+    the mover's screen for that job: `<ShareLocation entity="Order" trip={order.id} />` (a Start / End button)
   both from "@/sdk/tracking"; `entity` is the record's kind exactly as the data
   model names it. `pickup` and `dropoff` are the record's `location` values
   ({ lat, lng }); pass them as they are. The server decides who may follow (whoever
@@ -618,6 +618,20 @@ What a finished page looks like:
   pass `kinds` from the filter the admin picks ("Bike", "Auto", "Sedan", "SUV").
   Clicking a pin opens that driver's page. Never poll for positions, never draw
   your own pins, and never save the position as fields on the driver.
+- ZONES (GEOFENCES) — when the request wants to know that a person or a vehicle ARRIVED at, LEFT or STAYED in a place
+  (a delivery partner at the restaurant or the customer's door, a rider near the pick-up, a technician on site, a
+  vehicle leaving a yard, staff at work), the zones and their screens already exist; never draw your own circle, test a
+  distance, or read a position yourself. All from "@/sdk/geofence":
+    the map of zones: `<GeofenceMap />`
+    where an admin draws or reshapes one: `<GeofenceEditor onSaved={…} />` / `<GeofenceEditor zone={zone} />`
+    what is happening now: `<GeofenceMonitor entity="Order" />`
+    one record's history: `<GeofenceEventTimeline entity="Order" id={order.id} />`
+    how a zone behaves and what it does: `<GeofenceSettings zone={zone} />` (zone from `useZones()`)
+  Put the editor, the settings and the map on an admin screen; the monitor on the dispatcher's; the timeline on the
+  record's own page. The server says who may change zones, so a screen never checks a role for it. A crossing is only
+  where a phone SAYS it is: NEVER make an arrival complete an order, take a payment or mark someone present by itself —
+  those need a confirmation that is not GPS (the customer's code, a manager's tap, a scan), and the settings screen asks
+  for it. Say so in the copy ("Arrived — enter the code to finish"), not "Delivered".
 - NAMES, NEVER IDS. A reader never sees an id or a shortened one ("Order #a1b2…"). A
   foreign key is shown as the record it points at — its name, its owner, its
   picture: load them with recordsById(Entity, rows.map(r => r.customerId)) in load.ts
@@ -1409,6 +1423,7 @@ SDK_PACKAGES: dict[str, tuple[str, ...]] = {
     # `ensure_sdk`) but not the package, until a page imports it — then here.
     "@/sdk/map": ("maplibre-gl",),
     "@/sdk/tracking": ("maplibre-gl",),
+    "@/sdk/geofence": ("maplibre-gl",),
     "@/components/ui/calendar": ("react-day-picker",),
     "@/components/ui/command": ("cmdk",),
     "@dnd-kit/core": ("@dnd-kit/core",),

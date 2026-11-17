@@ -219,6 +219,19 @@ def _is_platform_question(args: dict) -> bool:
     return "where will people use" in said or named >= 2 or ("pwa" in said and "native" in said)
 
 
+def note_geofencing(ctx: Ctx, brief: str) -> None:
+    """Keep what the brief says about zones, when it says anything: which scenario, which zones, which rules. It asks nothing
+    (zones are drawn on the zones screen), and it never fails a definition: a brief with no zones keeps no plan."""
+    try:
+        from services.blueprint import geofence_plan
+
+        plan = geofence_plan.analyse(brief)
+        if plan.needed:
+            geofence_plan.write(ctx.out, plan)
+    except Exception:
+        pass
+
+
 def open_decisions(ctx: Ctx, args: dict) -> str:
     """The decisions the brief so far leaves open, as questions with chips.
 
@@ -235,6 +248,7 @@ def open_decisions(ctx: Ctx, args: dict) -> str:
         return "Nothing has been asked for yet. There is no brief to clarify."
     if settle_platform(ctx) is None:
         return platform_question(ctx)
+    note_geofencing(ctx, brief)
     if user_turns(ctx) >= MAX_CLARIFY_TURNS:
         return (f"The person has answered {user_turns(ctx)} times already; asking more would be "
                 "interrogating. Define with what is known.")

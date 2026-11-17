@@ -279,6 +279,54 @@ def sample_findings(doc: dict) -> list[Any]:
     return out
 
 
+def _roles_that_read(doc: dict, entity: dict) -> list[str]:
+    """The roles, other than the administrator, that hold a read permission on this entity."""
+    from services.blueprint.account_model import admin_role
+
+    admin = admin_role(doc)
+    # A role lists its permissions by ID once the document has identities ("PERM-039"), by name before.
+    perm_names = {str(v) for p in doc.get("permissions") or []
+                  if isinstance(p, dict) and str(p.get("action")) == "read"
+                  and str(p.get("subject")) in (str(entity.get("id")), str(entity.get("name")))
+                  for v in (p.get("name"), p.get("id")) if v}
+    out = []
+    for r in doc.get("roles") or []:
+        if not isinstance(r, dict) or r.get("status") == "DEPRECATED" or str(r.get("name")) == admin:
+            continue
+        if perm_names & {str(x) for x in r.get("permissions") or []}:
+            out.append(str(r.get("name")))
+    return out
+
+
+def secret_findings(doc: dict) -> list[Any]:
+    """A secret meant for one party that every reader of its record can read.
+
+    A sensitive field with `mask: "full"` and no `readers` is shown unmasked to every role that may
+    read the record. For a value only one of them should hold — the delivery code a customer reads
+    out to the driver at the door — that makes the driver able to finish a delivery from the couch
+    (Zomato, 2026-11-13: found by reading it back as the driver, not by any check). Asked of the
+    data-model agent, with the roles that can see it now.
+    """
+    from services.blueprint.verification import Finding
+
+    out = []
+    for e in _entities(doc):
+        readers = _roles_that_read(doc, e)
+        if len(readers) < 2:
+            continue
+        for f in e.get("fields") or []:
+            if not isinstance(f, dict) or not f.get("sensitive") or str(f.get("mask") or "") != "full":
+                continue
+            if f.get("readers"):
+                continue
+            out.append(Finding(EDGE, section="data.entities", artifact_id=str(e.get("id") or ""),
+                               detail=f"{e.get('name')}.{f.get('name')} is a secret (`mask: \"full\"`) and names no "
+                                      f"`readers`, so every role that can read a {e.get('name')} can read it: "
+                                      f"{', '.join(readers)}. Name in `readers` only the role(s) that must see the "
+                                      f"value — the person it is meant for — and the others will see the mask."))
+    return out
+
+
 def early_findings(doc: dict, app_root: str | Path) -> list[Any]:
     """After the data model is written: project its tables and push them.
     No seed yet — the rest of the app is not on disk."""
@@ -297,4 +345,5 @@ def early_findings(doc: dict, app_root: str | Path) -> list[Any]:
     return samples + findings(doc, result, app_root)
 
 
-__all__ = ["EDGE", "early_findings", "findings", "gate_server", "run", "sample_findings", "throwaway_database"]
+__all__ = ["EDGE", "early_findings", "findings", "gate_server", "run", "sample_findings", "secret_findings",
+           "throwaway_database"]

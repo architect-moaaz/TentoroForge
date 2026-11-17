@@ -11,8 +11,9 @@
 // moving place until the person drags the map (then it stops: `onUserPan`), and `ref.recenter()` takes it back.
 
 import * as React from "react";
-import { StyleSheet, View } from "react-native";
-import RNMap, { Marker, Polyline, type Region } from "react-native-maps";
+import { Platform, StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
+import RNMap, { Marker, Polyline, UrlTile, type Region } from "react-native-maps";
+import { ANDROID_MAPS_KEY_SET } from "../config.generated";
 import { useTheme } from "../theme";
 import type { GeoPoint } from "./geo";
 import { isDarkColour, type MapHandle, type MapPoint, type MapViewProps } from "./map-types";
@@ -20,6 +21,16 @@ import { isDarkColour, type MapHandle, type MapPoint, type MapViewProps } from "
 export type { MapPoint, MapViewProps, MapHandle } from "./map-types";
 
 const PADDING = { top: 64, right: 64, bottom: 64, left: 64 };
+
+/** WHICH MAP IS DRAWN. Google's by default; with `EXPO_PUBLIC_MAP_PROVIDER=openfreemap` free map tiles are laid over the map
+ *  instead (no Google tiles, and no per-load Google billing), and the pins, the route and the follow camera work the same.
+ *  NOT tile.openstreetmap.org (its volunteer-run servers refuse an app that does not identify itself in a header the tile layer
+ *  cannot send: "Access blocked", 403) and NOT CARTO's raster tiles (they now stamp "API KEY REQUIRED" over every tile): found
+ *  trying both, Zomato 2026-11-16. Esri's public street map needs neither; it is a demo choice. For a shipped app set
+ *  `EXPO_PUBLIC_MAP_TILES` to a tile service you hold a key for. Read when the app is bundled, so changing it means restarting Metro (or rebuilding). The web map has the same switch
+ *  (`NEXT_PUBLIC_MAP_PROVIDER`). */
+const FREE_MAP = process.env.EXPO_PUBLIC_MAP_PROVIDER === "openfreemap";
+const FREE_TILES = process.env.EXPO_PUBLIC_MAP_TILES || "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}";
 
 /** Google's dark style, short: land and water dark, roads a little lighter, labels quiet. */
 const DARK_STYLE = [
@@ -38,7 +49,38 @@ function inside(region: Region | null, p: GeoPoint): boolean {
   return Math.abs(p.lat - region.latitude) <= region.latitudeDelta / 2 && Math.abs(p.lng - region.longitude) <= region.longitudeDelta / 2;
 }
 
-export const MapView = React.forwardRef<MapHandle, MapViewProps>(function MapView(
+/** Does this Android build carry a Maps SDK key? Google's map code CRASHES THE WHOLE APP when it has none
+ *  ("API key not found"), so a build without one must not mount the map at all (Zomato, 2026-11-16: the driver's
+ *  map screen closed the app). Apple Maps (iPhone) needs no key. */
+function androidMapsKeyMissing(): boolean {
+  // `ANDROID_MAPS_KEY_SET` is written into `config.generated.ts` when the app is projected, from the key in `app.json`
+  // (a flag: the key itself cannot be read at run time).
+  return Platform.OS === "android" && !ANDROID_MAPS_KEY_SET;
+}
+
+/** What stands in for the map when it cannot be drawn: said plainly, and the rest of the screen still works. */
+const MapUnavailable = React.forwardRef<MapHandle, Pick<MapViewProps, "height" | "style">>(function MapUnavailable({ height = 320, style }, handle) {
+  const theme = useTheme();
+  React.useImperativeHandle(handle, () => ({ recenter: () => undefined, fit: () => undefined }), []);
+  return (
+    <View
+      accessibilityLabel="The map is not available in this build"
+      style={[styles.box, { borderColor: theme.colors.border, backgroundColor: theme.colors.muted, alignItems: "center", justifyContent: "center", padding: 24 }, height === "fill" ? { flex: 1, borderRadius: 0 } : { height }, style as StyleProp<ViewStyle>]}
+    >
+      <Text style={{ color: theme.colors.foreground, fontWeight: "700", fontSize: 16, textAlign: "center" }}>The map is not available in this build</Text>
+      <Text style={{ color: theme.colors.mutedForeground, marginTop: 8, textAlign: "center" }}>
+        It needs a Google Maps key for Android (android.config.googleMaps.apiKey in app.json). Everything else works.
+      </Text>
+    </View>
+  );
+});
+
+export const MapView = React.forwardRef<MapHandle, MapViewProps>(function MapView(props, handle) {
+  if (androidMapsKeyMissing()) return <MapUnavailable ref={handle} height={props.height} style={props.style} />;
+  return <LiveMap {...props} ref={handle} />;
+});
+
+const LiveMap = React.forwardRef<MapHandle, MapViewProps>(function LiveMap(
   { points = [], route = [], center, keepInView, onPointClick, height = 320, showsUser, follow, insets, onUserPan, style }, handle,
 ) {
   const theme = useTheme();
@@ -118,9 +160,11 @@ export const MapView = React.forwardRef<MapHandle, MapViewProps>(function MapVie
         toolbarEnabled={false}
         rotateEnabled={!!follow}
         pitchEnabled={false}
-        customMapStyle={dark ? DARK_STYLE : undefined}
+        customMapStyle={dark && !FREE_MAP ? DARK_STYLE : undefined}
         userInterfaceStyle={dark ? "dark" : "light"}
+        mapType={FREE_MAP ? "none" : "standard"}
       >
+        {FREE_MAP ? <UrlTile urlTemplate={FREE_TILES} maximumZ={19} tileSize={256} zIndex={-1} /> : null}
         {route.length > 1 && (
           <Polyline coordinates={route.map((p) => ({ latitude: p.lat, longitude: p.lng }))} strokeColor={tone("accent")} strokeWidth={6} />
         )}
@@ -135,6 +179,11 @@ export const MapView = React.forwardRef<MapHandle, MapViewProps>(function MapVie
           />
         ))}
       </RNMap>
+      {FREE_MAP ? (
+        <View pointerEvents="none" style={{ position: "absolute", left: 8, bottom: 6 }}>
+          <Text style={{ fontSize: 10, color: theme.colors.mutedForeground }}>Tiles © Esri</Text>
+        </View>
+      ) : null}
     </View>
   );
 });

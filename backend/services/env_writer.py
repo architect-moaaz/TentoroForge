@@ -32,7 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.platform_integration import PlatformIntegration
 from models.platform_mcp_server import PlatformMcpServer
-from services.node_config_specs import all_providers, keys_for_provider, platform_only_keys
+from services.node_config_specs import alias_names, all_providers, keys_for_provider, platform_only_keys, with_aliases
 from services.platform_integrations_crypto import CryptoError, decrypt
 
 
@@ -135,7 +135,7 @@ async def write_env_local_from_platform(
     # THE REGISTRY'S NAMES AND THE APPLICATION'S OWN: a secret an integration
     # declares (`secretRefs`) is written for the app that declares it.
     from services.declared_secrets import declared_keys_for_output_dir
-    known = _known_keys() | {e.key for e in declared_keys_for_output_dir(output_dir)}
+    known = _known_keys() | alias_names() | {e.key for e in declared_keys_for_output_dir(output_dir)}
     platform_only = platform_only_keys()
 
     res = await db.execute(
@@ -162,6 +162,8 @@ async def write_env_local_from_platform(
         except CryptoError as e:
             skipped.append({"key": row.key, "reason": f"decrypt_failed: {e}"})
             log.warning("[env_writer] decrypt failed for %s: %s", row.key, e)
+
+    desired = with_aliases(desired)  # one stored key an app reads under several names
 
     # --- MCP servers ------------------------------------------------- #
     # Dynamic per-server env vars: one row → up to five env vars

@@ -73,7 +73,7 @@ _advance_state_to_review = _brief_mod.advance_to_review
 from services import build_slots, run_registry
 from services.smith import design_language
 from services.smith import figma_gate as ui_figma_gate
-from services.smith import ui_designer
+from services.smith import maps_key, ui_designer
 from services.smith.clarify_brief import (
     company_palette_option as clarify_company_option)
 from services.blueprint.run_progress import Progress
@@ -2176,6 +2176,16 @@ async def smith_chat(
             if svc is not None:
                 _history = [(t.role, t.text) for t in req.history if t.text]
 
+                # GOOGLE MAPS KEY: "saved" (the box stored it; this turn's start already copied it into the app) or "use the
+                # free map". Both are the panel's own words, recognised only after Smith's ask (`maps_key`).
+                if maps_key.key_saved_in(req.message, _history):
+                    emit("message", {"text": maps_key.SAVED_TEXT, "status": "reported"})
+                    return {"status": "reported"}
+                if maps_key.skipped_in(req.message, _history):
+                    emit("message", {"text": "The free map it is. You can add a Google key any time under Settings → Integrations → Google Maps.",
+                                     "status": "reported"})
+                    return {"status": "reported"}
+
                 # FIGMA: the link to the design, or the way forward after its coverage check. Both
                 # are recognised only by the turn before them (`figma_gate.link_in` / `choice_in`),
                 # and the token never travels here: the panel stored it before sending the link.
@@ -3102,6 +3112,13 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
                     _documents.store(output_dir, documents)
                 emit("message", _stop)
                 return {"status": "asked"}
+            # A MAP IN THE PLAN WITH NO GOOGLE KEY: say so once, show the box, and carry on with the free map. Never a stop.
+            try:
+                _maps_ask = maps_key.ask(svc.doc, output_dir)
+                if _maps_ask is not None:
+                    emit("message", _maps_ask)
+            except Exception as exc:  # noqa: BLE001 — a suggestion never stops a build
+                logger.warning("[smith-chat] maps key not asked for %s: %s", output_dir.name, exc)
         if approved and announce_completion:
             # "APPROVE AND BUILD" IS THE APPROVAL. Recorded now, against the
             # definition as it stands, so a plan approval that had gone stale

@@ -40,7 +40,7 @@ def test_a_page_importing_tracking_gets_the_map_library(tmp_path):
 
 def test_every_built_app_carries_the_tracking_routes_and_their_mailbox():
     injector = (BACKEND / "services" / "runtime_injector.py").read_text(encoding="utf-8")
-    assert '"tracking"]' in injector, "the mailbox directory is copied with the other runtime libraries"
+    assert '"tracking", "geofence"]' in injector, "the mailbox directory is copied with the other runtime libraries"
     for tmpl in ("api-tracking-update", "api-tracking-stream"):
         assert tmpl in injector, tmpl
         assert (RUNTIME / tmpl / "route.ts").is_file(), tmpl

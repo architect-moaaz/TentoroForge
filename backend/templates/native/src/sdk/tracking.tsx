@@ -157,6 +157,25 @@ export function FleetBeacon({ entity, trip, on = true }: { entity: string; trip:
   );
 }
 
+/** A DELIVERY IN PROGRESS SHARES ITS POSITION BY ITSELF. `ShareLocation` is a button the person must press; a driver on a
+ *  delivery has other things to do, and nobody told this one to press it, so the customer and the admin saw "Waiting for the
+ *  driver to share their location…" for the whole trip (Zomato, 2026-11-16). While this is on screen the position is sent
+ *  for that trip. `stage`: "to_pickup" or "to_dropoff". */
+export function TripBeacon({ entity, trip, stage }: { entity: string; trip: string; stage?: string }) {
+  const { error, sent } = useShareLocation(entity, trip, true, stage);
+  return (
+    <View accessibilityRole="summary" accessibilityLiveRegion="polite">
+      {error ? (
+        <Text tone="danger" variant="caption">{error}</Text>
+      ) : (
+        <Text variant="caption" tone="muted">
+          {sent > 0 ? `Sharing your position with the customer · ${sent} sent` : "Finding your position… allow location if the phone asks."}
+        </Text>
+      )}
+    </View>
+  );
+}
+
 export type LiveTrackingMapProps = {
   entity: string;
   trip: string;

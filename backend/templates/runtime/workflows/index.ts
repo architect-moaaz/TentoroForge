@@ -801,6 +801,47 @@ export function _resolveRef(ref: unknown, ctx: WorkflowExecutionContext): unknow
   return ref; // literal
 }
 
+/**
+ * A WORKFLOW'S OWN WRITE IS A RECORD CHANGE TOO. The event bus carried only the writes that went through the data API, so a
+ * workflow that starts when a record changes ("an order has just become ready: offer it to the drivers") NEVER started when
+ * another workflow made the change ("Mark ready for pickup"): no event, no offers, and a driver could not see the order
+ * (Zomato, 2026-11-16). The same `<table>.created|updated` event, the same payload shape the data engine gives
+ * (`entity`, `previousEntity`). Fire-and-forget and non-fatal: a bus failure must never fail the write.
+ */
+function announceRecordChange(op: "created" | "updated", table: unknown, row: Record<string, unknown>, previous: Record<string, unknown> | null, ctx: unknown): void {
+  try {
+    const key = String(getTableName(table as any));
+    if (!key || key.startsWith("forge_") || key.startsWith("_")) return;      // the platform's own tables are not the app's records
+    void import("../events/bus")
+      .then((bus) => bus.emitEventAndProcess(`${key}.${op}`, {
+        entity: key,
+        entityId: row?.id != null ? String(row.id) : null,
+        payload: { entity: row, ...(previous ? { previousEntity: previous } : {}), user: (ctx as { user?: unknown })?.user },
+      }))
+      .catch((e) => console.warn(`[workflow] event bus emit failed for ${key}.${op} (non-fatal):`, e));
+  } catch (e) {
+    console.warn("[workflow] event bus emit failed (non-fatal):", e);
+  }
+}
+
+/**
+ * A numeric (money) column read by a step as a NUMBER. node-postgres returns numeric as text
+ * ("100.00"), so a step that added a fee to a total joined them — `469 + "100.00"` read
+ * "469100" and an order cost crores (Zomato, 2026-11-13). The column knows it is a number.
+ */
+function numericColumnsAsNumbers<T extends Record<string, unknown>>(table: unknown, row: T): T {
+  const out: Record<string, unknown> = { ...row };
+  for (const [key, value] of Object.entries(row)) {
+    if (typeof value !== "string") continue;
+    const col = (table as Record<string, unknown> | null)?.[key];
+    const kind = col && typeof col === "object" ? String((col as { columnType?: unknown }).columnType ?? "") : "";
+    if (!/PgNumeric|PgDecimal|PgMoney/.test(kind)) continue;
+    const n = Number(value);
+    if (Number.isFinite(n)) out[key] = n;
+  }
+  return out as T;
+}
+
 // Drizzle timestamp columns expect a Date, not a string. Coerce ISO
 // date/datetime strings so db_insert/db_update don't blow up on
 // `value.toISOString is not a function`.
@@ -1168,6 +1209,8 @@ export function _finalizeInsert(
 async function _scoped(table: any, where: any, ctx: WorkflowExecutionContext, op: "read" | "write"): Promise<any> {
   const user = (ctx as any)?.user;
   if (!user?.id) return where;
+  // an event's run is the application's own (`__byEvent`, set by the bus): it sees what the application sees, whoever caused it
+  if ((ctx as any)?.variables?.__byEvent) return where;
   const { scopeForTable } = await import("../data-engine");
   const scope = await scopeForTable(table, user, op, "workflow");
   if (!scope) return where;
@@ -1541,6 +1584,7 @@ export function registerDefaultActions(): void {
       const rows = await (db as any).insert(table).values(values).returning();
       const sealedRow = Array.isArray(rows) ? rows[0] : rows;
       await _trail(ctx, "create", table, null, sealedRow);
+      if (sealedRow && typeof sealedRow === "object") announceRecordChange("created", table, sealedRow as Record<string, unknown>, null, ctx);
       const row = sealedRow && typeof sealedRow === "object" ? { ...sealedRow, ...plain } : sealedRow;
       if (row && typeof row === "object") await embedWrittenRow(table, row);
       if (row && typeof row === "object") {
@@ -1684,13 +1728,14 @@ export function registerDefaultActions(): void {
       } catch (e: any) { _rethrowIfRulesFailed(e, (config as any).table, "write"); }
       await _seal(table, raw);
       const q = (db as any).update(table).set(raw);
-      const before: any[] = auditOn() ? await (db as any).select().from(table).where(kept) : [];
+      const before: any[] = await (db as any).select().from(table).where(kept);
       const rows = await q.where(kept).returning();
       if (Array.isArray(rows)) {
         const was = new Map(before.map((b: any) => [String(b?.id), b]));
         for (const r of rows) {
           await embedWrittenRow(table, r, null, Object.keys(raw));
           await _trail(ctx, "update", table, was.get(String(r?.id)) ?? null, r);
+          announceRecordChange("updated", table, r, was.get(String(r?.id)) ?? null, ctx);
         }
       }
       const count = Array.isArray(rows) ? rows.length : 1;
@@ -1781,7 +1826,7 @@ export function registerDefaultActions(): void {
       // `rows`, which keep their own names when a column shares one — the
       // first row whenever there is one, the row a template reads too
       // (`_firstRowFallback`; AquaTrack's three active goals, m1dck85j).
-      return queryResult(await Promise.all((rows ?? []).map((r: Record<string, unknown>) => openSealed(r))));
+      return queryResult(await Promise.all((rows ?? []).map(async (r: Record<string, unknown>) => numericColumnsAsNumbers(table, await openSealed(r)))));
     } catch (err) { console.error("[workflow] db_query failed:", err); return { error: String(err), rows: [], count: 0 }; }
   });
 

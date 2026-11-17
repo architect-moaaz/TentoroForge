@@ -1301,11 +1301,15 @@ def native_page_subjects(doc: Mapping[str, Any]) -> list[str]:
         return "/" + str(p.get("route") or "").strip("/")
 
     from services.blueprint.map_first import covered_by
+    from services.blueprint.native_projection import for_phone_roles
     folded = covered_by(doc)      # a page folded into a map-first screen is written as part of that screen
+    # A PAGE ONLY A ROLE WITHOUT THE PHONE APP USES gets no phone screen: asking for one wrote twenty
+    # screens for the restaurant's and the administrator's web pages that nothing ever showed (Zomato, 2026-11-16).
     return [p["id"] for p in (doc.get("pages") or [])
             if p.get("id") and p.get("status") != "DEPRECATED"
             and p["id"] not in _deferred_pages(doc) and p["id"] not in folded
             and str(p.get("pattern") or "") != "audit_trail"
+            and for_phone_roles(dict(doc), p)
             and (str(p.get("pattern") or "") != "auth" or route(p) in AUTH_FILES)]
 
 

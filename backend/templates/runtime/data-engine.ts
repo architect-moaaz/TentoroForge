@@ -53,6 +53,7 @@ import { embedQuery, embedWrittenRow, stripEmbeddings } from "./embeddings";
 // rule for it — empty for apps that authorise by role alone, so
 // scopeConditions() fast-paths to [].
 import { ownershipRulesFor, type OwnershipRule } from "./ownership-rules";
+import { appliesTo, reachesNothing } from "./ownership-roles";
 
 /**
  * FK-label expansion. A list row only carries the FK id (a UUID), so a table that
@@ -603,7 +604,12 @@ function scopeConditions(
   const role = ctx.user?.role;
   const cols = entity.table as any;
   const conds: SQL[] = [];
+  // RULES ADDRESSED TO ROLES. An order is a customer's by `customerId`, a restaurant's by `restaurantId` and the driver's by
+  // `driverId`: three rules on one entity, each applying to its own role. A person in none of those roles reaches nothing.
+  // A rule that lets everyone READ (a menu, a catalogue) shuts nobody out of reading; it still binds who may write.
+  if (reachesNothing(rules.filter((r) => !(op === "read" && r.reads === "everyone")), role)) return [sql`false`];
   for (const rule of rules) {
+    if (!appliesTo(rule, role)) continue;
     // EVERYONE READS, THE OWNER WRITES. A catalogue is browsed by visitors
     // who hold no role at all; scoped to its vendor, a marketplace showed a
     // guest no products and every category "0 products" (Ecom L1,
@@ -677,7 +683,16 @@ function scopeConditions(
     // rows that are mine AND the rows nobody holds yet; once held, only the holder reads it. A WORKFLOW may also
     // claim a row nobody holds (its own steps check who may take it: "accept ride"); a direct write over the data API
     // stays mine only, so nobody can reach into a request that is not theirs.
-    if (rule.readsUnclaimed === true && (op === "read" || String(ctx.via ?? "").startsWith("workflow"))) mine = or(mine, isNull(col)) as SQL;
+    // ONLY THE UNCLAIMED ROWS IN THESE STATES (`unclaimedWhere`): a driver reads an order nobody holds once it is READY for
+    // pickup, not while it is only placed or being cooked — those carry a customer's name, number and address that no driver
+    // has any business with yet (Zomato, 2026-11-16: every driver read every unclaimed order in every state).
+    const unclaimedStates = rule.unclaimedWhere
+      ? Object.entries(rule.unclaimedWhere).map(([field, want]) => {
+          const c = cols[field];
+          return c === undefined ? sql`false` : inArray(c, (Array.isArray(want) ? want : [want]) as any[]); // a missing column fails closed
+        })
+      : undefined;
+    if (rule.readsUnclaimed === true && (op === "read" || String(ctx.via ?? "").startsWith("workflow"))) mine = or(mine, unclaimedStates ? and(isNull(col), ...unclaimedStates) : isNull(col)) as SQL;
     conds.push(guest ? (or(mine, guest) as SQL) : mine);
   }
   return conds;
@@ -720,6 +735,7 @@ async function assertReachableThrough(
 ): Promise<void> {
   for (const rule of ownershipRulesFor(entityName)) {
     if (!rule.through || rule.kind === "attribution") continue;
+    if (!appliesTo(rule, ctx.user?.role)) continue;
     if (ctx.user?.role && (rule.unscopedRoles || []).includes(ctx.user.role)) continue;
     const value = data[rule.column];
     if (value === undefined || value === null || value === "") continue;
@@ -1219,6 +1235,7 @@ export async function create(
   // `createdByUserId` has written a signature, not a record. A role the rule
   // exempts may still file on another's behalf.
   for (const rule of ownershipRulesFor(entityName)) {
+    if (!appliesTo(rule, ctx.user?.role)) continue;
     if (ctx.user?.role && (rule.unscopedRoles || []).includes(ctx.user.role)) continue;
     if (!(rule.column in entity.table)) continue;
     // A `through` column holds another record's id, never the actor's.
@@ -1365,6 +1382,7 @@ export async function update(
   // A PERSON OF SEVERAL WORKSPACES MOVES A ROW ONLY BETWEEN THEIRS.
   for (const rule of ownershipRulesFor(entityName)) {
     if (rule.kind === "attribution" || rule.through || !(rule.column in cleanData)) continue;
+    if (!appliesTo(rule, ctx.user?.role)) continue;
     if (ctx.user?.role && (rule.unscopedRoles || []).includes(ctx.user.role)) continue;
     if (rule.scope === "member") {
       // MOVED ONLY BETWEEN THE ORGANISATIONS THEY ARE IN; left where it was, fine.
@@ -1504,6 +1522,24 @@ export async function findById(
   } catch {
     return record;
   }
+}
+
+/**
+ * The ids of the records this person may read, and nothing else. For a screen that only needs to know WHICH records a
+ * person may see (a live map, a history of crossings) — `query` would also read, decrypt and unmask every sensitive column
+ * of every row (and log each unmasking) to hand back ids. The same ownership and row rules apply; no field is read.
+ */
+export async function visibleIds(
+  entityName: string,
+  ctx: DataEngineContext = {},
+  limit = 500,
+): Promise<string[]> {
+  const entity = getEntity(entityName);
+  if (!entity) throw new Error(`Unknown entity: ${entityName}`);
+  const where = allOf(await accessConditions(entityName, entity, ctx, "read"));
+  const q = db.select({ id: entity.table.id }).from(entity.table);
+  const rows = await (where ? q.where(where) : q).limit(Math.max(1, Math.min(limit, 5000)));
+  return rows.map((r: { id: unknown }) => String(r.id));
 }
 
 export async function query(

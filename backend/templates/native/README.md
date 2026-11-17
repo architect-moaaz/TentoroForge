@@ -164,13 +164,16 @@ Use these when a page is about someone on the move: a driver, courier or technic
 following a ride or an order. Do NOT draw a map for a page that only shows an address as text.
 
 ```tsx
-import { FleetBeacon, ShareLocation, LiveTrackingMap, MapView, useRoute, useLiveTrip, minutesText } from "@/sdk";
+import { FleetBeacon, TripBeacon, ShareLocation, LiveTrackingMap, MapView, useRoute, useLiveTrip, minutesText } from "@/sdk";
 
 <FleetBeacon entity="Driver" trip={driver.id} on={driver.availabilityStatus === "online"} />
     // the driver is ONLINE: this shares their position by itself while it is on screen. Put it on the page that shows
     // the online state, once. Never add a second "Go online" button next to the workflow's own.
-<ShareLocation entity="Ride" trip={ride.id} stage={ride.status === "in_progress" ? "to_dropoff" : "to_pickup"} />
-    // one trip: a Start / End button that shares for that trip only
+<TripBeacon entity="Ride" trip={ride.id} stage={ride.status === "in_progress" ? "to_dropoff" : "to_pickup"} />
+    // a delivery or ride IN PROGRESS: shares that trip's position by itself while it is on screen. USE THIS for the mover's
+    // screen of a job under way: a person on a job does not press a button to be followed.
+<ShareLocation entity="Ride" trip={ride.id} />
+    // only where sharing is the person's own choice: a Start / End button that shares for that trip only
 <LiveTrackingMap entity="Ride" trip={ride.id} pickup={{ lat, lng }} dropoff={{ lat, lng }} height={320} />   // optional `heading="pickup"|"dropoff"`: which end they are going to (else read from the trip's stage)
     // the driver, both ends, the road, "To pickup: 2.1 mi · 9 min · arrives 14:05" and where the route came from
 <MapView points={[{ id, lat, lng, label, tone }]} route={path} keepInView />   // any other map: pins and a line

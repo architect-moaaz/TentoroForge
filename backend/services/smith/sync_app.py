@@ -80,6 +80,7 @@ RUNTIME_FILES: tuple[tuple[str, str], ...] = (
     # The engine's reads (labels on a chart's groups) and the seed (a login
     # per role) are the platform's logic, copied verbatim into every app.
     ("data-engine.ts", "src/lib/data-engine.ts"),
+    ("ownership-roles.ts", "src/lib/ownership-roles.ts"),
     ("seed.ts", "src/db/seed.ts"),
     # THE TRAIL, SEALED VALUES, PUSH AND ORGANISATIONS are the platform's too.
     # They were left off this list, so a fix to the audit chain never reached
@@ -482,7 +483,7 @@ def refresh_frame(app_root: str | Path, doc: dict, *, complete: bool = True) -> 
 #: `templates/app-foundation/src` has them: `@/<module>` -> its template under
 #: `templates/runtime` (`runtime_injector` copies the same ones on a build).
 def _runtime_modules() -> dict[str, str]:
-    mods = {"lib/push": "push.ts", "lib/expo-push": "expo-push.ts",
+    mods = {"lib/push": "push.ts", "lib/expo-push": "expo-push.ts", "lib/ownership-roles": "ownership-roles.ts",
             "db/schema/_forge_push_subscriptions": "db/forge-push-subscriptions.schema.ts",
             "db/schema/_forge_device_tokens": "db/forge-device-tokens.schema.ts"}
     for tmpl, dst in RUNTIME_FILES + (MEWS_LIB, MEWS_FILES[0]):

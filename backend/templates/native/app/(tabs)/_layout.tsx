@@ -13,10 +13,19 @@
 import * as React from "react";
 import { Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { TABS } from "@/navigation.generated";
+import { ROLE_TABS, TABS } from "@/navigation.generated";
+import { useSession } from "@/sdk";
 import { theme } from "@/theme";
 
 export default function TabsLayout() {
+  // EACH ROLE HAS ITS OWN BAR where the roles differ (`ROLE_TABS`): the bar declares every role's tabs and shows
+  // the signed-in person's own, in their order. Everyone else's tabs stay out of the bar (`href: null`) but their
+  // screens are still reachable by route. With one shared bar `ROLE_TABS` is empty and nothing changes.
+  const { user } = useSession();
+  const role = String((user as { role?: unknown } | null)?.role ?? "");
+  const mine = ROLE_TABS[role];
+  const shown = mine ? mine.map((name) => TABS.find((t) => t.name === name)).filter((t): t is (typeof TABS)[number] => !!t) : TABS;
+  const hidden = TABS.filter((t) => !shown.some((s) => s.name === t.name));
   return (
     <Tabs
       sceneContainerStyle={{ backgroundColor: theme.colors.background }}
@@ -28,7 +37,7 @@ export default function TabsLayout() {
         tabBarLabelStyle: { fontSize: 12, fontWeight: "600" },
       }}
     >
-      {TABS.map((tab) => (
+      {shown.map((tab) => (
         <Tabs.Screen
           key={tab.name}
           name={tab.name}
@@ -38,6 +47,9 @@ export default function TabsLayout() {
             tabBarIcon: ({ color, size }) => <Ionicons name={tab.icon as keyof typeof Ionicons.glyphMap} size={size} color={color} />,
           }}
         />
+      ))}
+      {hidden.map((tab) => (
+        <Tabs.Screen key={tab.name} name={tab.name} options={{ href: null }} />
       ))}
     </Tabs>
   );

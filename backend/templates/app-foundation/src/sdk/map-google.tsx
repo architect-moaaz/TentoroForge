@@ -10,7 +10,7 @@
  * Loaded in the browser only, by a script tag on first use.
  */
 import * as React from "react";
-import { colour, middle, toHex, type MapViewProps } from "./map-shared";
+import { colour, middle, ringOf, toHex, type MapViewProps } from "./map-shared";
 
 type Gm = any; // the Google Maps namespace has no types in this app; its shape is stable and small here
 
@@ -35,7 +35,7 @@ function loadGoogle(key: string): Promise<Gm> {
 const PIN = "M12 2C8.1 2 5 5.1 5 9c0 5.2 7 13 7 13s7-7.8 7-13c0-3.9-3.1-7-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z";
 
 export function GoogleMapView({
-  points = [], route = [], center, zoom = 12, fit, keepInView, onPointClick, height = 320, className, apiKey, onFail,
+  points = [], route = [], zones = [], center, zoom = 12, fit, keepInView, onPointClick, onMapClick, onZoneClick, height = 320, className, apiKey, onFail,
 }: MapViewProps & { apiKey: string; onFail: () => void }) {
   const box = React.useRef<HTMLDivElement | null>(null);
   const gm = React.useRef<Gm>(null);
@@ -47,6 +47,11 @@ export function GoogleMapView({
   const [ready, setReady] = React.useState(false);
   const clicked = React.useRef(onPointClick);
   clicked.current = onPointClick;
+  const mapClicked = React.useRef(onMapClick);
+  mapClicked.current = onMapClick;
+  const zoneClicked = React.useRef(onZoneClick);
+  zoneClicked.current = onZoneClick;
+  const shapes = React.useRef<Gm[]>([]);
   const failed = React.useRef(onFail);
   failed.current = onFail;
 
@@ -68,6 +73,9 @@ export function GoogleMapView({
           disableDefaultUI: true, zoomControl: true, gestureHandling: "cooperative", clickableIcons: false,
         });
         info.current = new InfoWindow();
+        map.current.addListener("click", (ev: Gm) => {
+          if (ev?.latLng) mapClicked.current?.({ lat: ev.latLng.lat(), lng: ev.latLng.lng() });
+        });
         setReady(true);
       } catch {
         refused();
@@ -77,12 +85,35 @@ export function GoogleMapView({
       gone = true;
       window.removeEventListener("forge-google-refused", refused);
       for (const p of pins.current) p.setMap(null);
+      for (const s of shapes.current) s.setMap(null);
+      shapes.current = [];
       line.current?.setMap(null);
       pins.current = [];
       map.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // The zones, whenever they change: a faint fill and an outline.
+  React.useEffect(() => {
+    const maps = gm.current;
+    const m = map.current;
+    if (!maps || !m || !ready) return;
+    for (const s of shapes.current) s.setMap(null);
+    shapes.current = zones.map((z) => {
+      const hex = toHex(colour(z.tone ?? "primary"));
+      const poly = new maps.Polygon({
+        map: m, paths: ringOf(z).map((p) => ({ lat: p.lat, lng: p.lng })),
+        strokeColor: hex, strokeOpacity: z.inactive ? 0.4 : 0.9, strokeWeight: 2,
+        fillColor: hex, fillOpacity: z.inactive ? 0.05 : 0.18, clickable: !!zoneClicked.current,
+      });
+      poly.addListener("click", (ev: Gm) => {
+        zoneClicked.current?.(z.id);
+        if (ev?.latLng) mapClicked.current?.({ lat: ev.latLng.lat(), lng: ev.latLng.lng() });
+      });
+      return poly;
+    });
+  }, [zones, ready]);
 
   // The pins and the path, whenever they change.
   React.useEffect(() => {
@@ -111,7 +142,7 @@ export function GoogleMapView({
       }
     } else line.current?.setMap(null);
 
-    const all = [...points, ...route];
+    const all = [...points, ...route, ...(points.length || route.length ? [] : zones.flatMap((z) => ringOf(z, 8)))];
     const bounds = () => {
       const b = new maps.LatLngBounds();
       for (const p of all) b.extend({ lat: p.lat, lng: p.lng });
@@ -129,9 +160,9 @@ export function GoogleMapView({
       m.setCenter({ lat: all[0].lat, lng: all[0].lng });
       if ((m.getZoom() ?? 12) < 5) m.setZoom(12); // from the zoomed-out empty view to the first pin: come in close
     }
-  }, [points, route, fit, keepInView, ready]);
+  }, [points, route, zones, fit, keepInView, ready]);
 
   return (
-    <div ref={box} className={"relative overflow-hidden rounded-xl border bg-muted " + (className ?? "")} style={{ height }} aria-label="Map" data-map="google" data-pins={points.length} />
+    <div ref={box} className={"relative overflow-hidden rounded-xl border bg-muted " + (className ?? "")} style={{ height }} aria-label="Map" data-map="google" data-pins={points.length} data-zones={zones.length} />
   );
 }

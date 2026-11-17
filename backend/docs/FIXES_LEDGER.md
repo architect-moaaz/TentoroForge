@@ -25,6 +25,32 @@ Live tracking and maps
   then a free routing service, then a straight line, always saying which. Key never reaches a browser response or a
   log. Test: `test_maps_can_be_google_and_routes_have_a_time.py`, `the-road-between-two-places.test.mts`.
 
+Geofencing (zones on a map; see GEOFENCING.md)
+- Every new app has a geofence engine (circle and polygon zones, enter / exit / dwell / approaching, GPS accuracy,
+  hysteresis, duplicates, late and out-of-order fixes), a service that records each crossing once, rules that act on a
+  crossing, a live feed, five screens, and four routes. Test: `test_the_geofence_engine_passes_its_own_tests.py`
+  (runs the node suites, including whole delivery / ride / fleet / attendance scenarios and a 600-phone load run),
+  `test_every_built_app_checks_positions_against_its_zones.py`,
+  `test_the_geofence_screens_and_their_routes_ship_and_are_taught.py`.
+- A crossing is where a phone SAYS it is. A rule that finishes a job, takes payment or marks someone present is held until
+  an event that is not GPS (a code, a tap, a scan) has been recorded for the same record, then runs once. A sensitive rule
+  with no confirmation never runs. Test: `rules.test.ts`, `scenarios.test.ts`.
+- The brief decides whether an app needs zones ("geofence", or "when the driver is within 300 m"; "live tracking" alone does
+  not). The plan becomes a blueprint section `geofencing`, and the app's seed makes the zones that came with coordinates and
+  the rules beside them. Nothing guesses where a place is. Test: `test_the_brief_decides_whether_an_app_needs_zones.py`,
+  `plan.test.ts`.
+- Zones made from a plan carry the settings their rules need (approach distance, stay time); without them "driver is near"
+  and "stayed a long time" never fired. Test: `test_a_zone_carries_the_settings_its_rules_need`, `scenarios.test.ts`.
+- Zone screens asked "which orders may this person see" by reading every row with sensitive columns unmasked (17 s a call and
+  hundreds of unmask logs). `visibleIds` reads ids only under the same access rules (about 150 ms).
+- A role named "Admin" was refused as a zone manager because the check expected "admin". Role names are compared without case.
+- Crossings are kept 90 days (`FORGE_GEOFENCE_RETENTION_DAYS`, 0 = for ever), positions can be stored coarser
+  (`FORGE_GEOFENCE_COORD_DECIMALS`), and a zone manager can erase one record's crossings
+  (`DELETE /api/geofence/events?entity=&id=`). Test: `privacy.test.ts`.
+- Regenerating `contracts/blueprint.schema.json` from `packages/schema` drops fields that were added to the JSON by hand
+  (`pages[].phone`, `nativeRoles`, `mapFirstRoles`, `readsUnclaimed`, `nearest`, ...). Do not regenerate it until the TypeScript
+  source has them.
+
 Security
 - Any signed-in user could run admin workflows (empty `LAUNCH_ROLES`). Fixed in projection (`PROJECTED_PATHS`).
 - Uploaded files were served inline with any type. Allowlist, nosniff, attachment, sandbox. Test:

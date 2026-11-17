@@ -46,7 +46,8 @@ _ROLES: tuple[tuple[str, str, str], ...] = (
     ("Field employee", "provider", r"field (?:employees?|staff|workers?|agents?|executives?)|inspectors?|surveyors?"),
     ("Service provider", "provider", r"service providers?|professionals?|caregivers?"),
     ("Customer", "consumer", r"customers?|riders?|passengers?|buyers?|shoppers?|guests?|patients?|students?|clients?|members?"),
-    ("Merchant", "vendor", r"merchants?|vendors?|sellers?|restaurants?|shop owners?|store owners?"),
+    ("Restaurant", "vendor", r"restaurants?|kitchens?|cafes?|cafés?"),
+    ("Merchant", "vendor", r"merchants?|vendors?|sellers?|shop owners?|store owners?"),
     ("Admin", "office", r"admins?|administrators?|back[- ]office|moderators?"),
     ("Manager", "office", r"managers?|owners?|operators?|dispatchers?|supervisors?"),
     ("Support", "office", r"support (?:team|agents?|staff)|customer support|help ?desk"),
@@ -116,6 +117,47 @@ def _roles_in(text: str) -> list[tuple[str, str]]:
     return found
 
 
+#: A paragraph that opens with its own title in capitals ("ORDER RULES. ...", "DISPATCH: ...", "LIVE UPDATES. ..."). It is about the
+#: whole product, not about the role whose heading came last, so it ends that role's section.
+_SECTION_RX = re.compile(r"^[A-Z][A-Z0-9 &/'\-]{2,40}[.:](?:\s|$)")
+#: A role's heading may carry a description in brackets and run long ("DELIVERY PARTNER (mobile app, built around the map):").
+_CAPS_OPENING_RX = re.compile(r"^[A-Z][A-Z &/'\-]{2,40}(?=\s*[(:])")
+
+
+def _heading_of(line: str) -> str | None:
+    """The role a line is the heading of, or None. A short line naming one role, with no full stop, is a heading; so is a longer
+    one that opens with the role in capitals and ends in a colon (`RESTAURANT (web app for the kitchen):`)."""
+    roles = _roles_in(line)
+    if len(roles) != 1 or line.rstrip(":").endswith("."):
+        return None
+    if len(line) <= 60 or (line.rstrip().endswith(":") and _CAPS_OPENING_RX.match(line)):
+        return roles[0][0]
+    return None
+
+
+_DECLARED_MOBILE_RX = re.compile(r"\b(?:mobile|phone|android|ios|iphone|native)\b", re.I)
+_DECLARED_WEB_RX = re.compile(r"\b(?:web|website|desktop|browser|dashboard|tablet)\b", re.I)
+_MAP_BUILT_RX = re.compile(r"around the map|map[- ]first|full[- ]screen map|the map is the (?:screen|app)", re.I)
+
+
+def _declared(brief: str) -> dict[str, tuple[str | None, bool]]:
+    """What a role's own heading says about its platform: ("mobile" | "web" | "both" | None, built around a map). A brief that
+    says `ADMIN (web dashboard):` has decided; the plan keeps the person's word and infers only where they said nothing."""
+    out: dict[str, tuple[str | None, bool]] = {}
+    for raw in re.split(r"[\r\n]+", brief):
+        line = raw.strip(" \t-*•#>")
+        label = _heading_of(line) if line else None
+        if not label:
+            continue
+        brackets = " ".join(re.findall(r"\(([^)]*)\)", line))
+        if not brackets:
+            continue
+        mob, web = bool(_DECLARED_MOBILE_RX.search(brackets)), bool(_DECLARED_WEB_RX.search(brackets))
+        platform = "both" if mob and web else "mobile" if mob else "web" if web else None
+        out[label] = (platform, bool(_MAP_BUILT_RX.search(brackets)))
+    return out
+
+
 def _sentences(brief: str) -> list[tuple[str, str | None]]:
     """(sentence, the role whose heading it sits under or None). A short line naming one role, with no full stop, is a heading."""
     out: list[tuple[str, str | None]] = []
@@ -125,10 +167,12 @@ def _sentences(brief: str) -> list[tuple[str, str | None]]:
         if not line:
             continue
         roles = _roles_in(line)
-        if len(line) <= 60 and len(roles) == 1 and not line.rstrip(":").endswith("."):
+        if _heading_of(line):
             heading = roles[0][0]
             out.append((line, heading))
             continue
+        if _SECTION_RX.match(line):
+            heading = None
         for sentence in re.split(r"(?<=[.!?;])\s+", line):
             if sentence.strip():
                 out.append((sentence.strip(), heading))
@@ -175,6 +219,16 @@ def analyse(brief: str) -> Plan:
             phone.setdefault(owner, []).extend(m)
             desk.setdefault(owner, []).extend(d)
 
+    # A driver and a delivery partner are one person in every brief that names both ("delivery partners (drivers)"): one role,
+    # under the name the brief gave a heading to (the delivery partner's, when neither or both did).
+    if "Driver" in kinds and "Delivery partner" in kinds:
+        headed = {h for _t, h in _sentences(text) if h}
+        keep, drop = ("Driver", "Delivery partner") if ("Driver" in headed and "Delivery partner" not in headed) else ("Delivery partner", "Driver")
+        phone.setdefault(keep, []).extend(phone.pop(drop, []))
+        desk.setdefault(keep, []).extend(desk.pop(drop, []))
+        kinds.pop(drop, None)
+    declared = _declared(text)
+
     if len(kinds) < 2:
         return Plan(False, why_not="one kind of user")
 
@@ -184,7 +238,10 @@ def analyse(brief: str) -> Plan:
         d = sorted(set(desk.get(label, [])))
         lean_m, lean_d = _LEAN[kind]
         score_m, score_d = len(m) + lean_m, len(d) + lean_d
-        if kind == "consumer" and not m:
+        said, map_built = declared.get(label, (None, False))
+        if said:
+            platform, why = said, "was set by the brief"
+        elif kind == "consumer" and not m:
             platform, why = "web", "needs no phone features: it works in a browser, on a computer or a phone"
         elif kind == "consumer":
             # books or browses on the web, and wants the alerts and the live map on a phone
@@ -197,7 +254,7 @@ def analyse(brief: str) -> Plan:
         else:
             platform = "web"
             why = ("works with " + ", ".join(d[:4])) if d else "is desk work: tables, forms and reports"
-        moving = platform in ("mobile", "both") and kind == "provider" and any(_MOVING_RX.search(x) for x in m)
+        moving = platform in ("mobile", "both") and kind == "provider" and (map_built or any(_MOVING_RX.search(x) for x in m))
         roles.append(RolePlan(label, platform, why, m, d, "map_first" if moving else "screens"))
 
     platforms = {r.platform for r in roles}

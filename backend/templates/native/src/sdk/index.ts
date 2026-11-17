@@ -41,7 +41,7 @@ export { MapView, type MapPoint, type MapViewProps, type MapHandle } from "./map
 export { useDevicePosition, type DevicePosition, type PositionState } from "./position";
 export { useRoute, minutesText, routeSource, type Navigation, type RouteInfo } from "./route";
 export {
-  useLiveTrip, useShareLocation, ShareLocation, FleetBeacon, LiveTrackingMap,
+  useLiveTrip, useShareLocation, ShareLocation, FleetBeacon, TripBeacon, LiveTrackingMap,
   type LiveTrip, type LivePosition, type LiveTrackingMapProps,
 } from "./tracking";
 export { CURRENCY, formatMoney } from "./money";

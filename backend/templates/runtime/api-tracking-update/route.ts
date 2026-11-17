@@ -18,6 +18,7 @@ import { NextRequest } from "next/server";
 import { jobFor, whoIs } from "@/lib/tracking/access";
 import { finished, fleetKey, fleetKind, fleetLabel, isSelf, mayShare, tripKey, whyNotOnDuty } from "@/lib/tracking/rules";
 import { finish, fleetLeave, fleetPublish, publish, validPosition } from "@/lib/tracking/hub";
+import { checkPosition } from "@/lib/geofence";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -63,6 +64,8 @@ export async function POST(req: NextRequest): Promise<Response> {
       heading: num(body.heading), speed: num(body.speed), accuracy: num(body.accuracy),
     }, { label: fleetLabel(found.job), kind: fleetKind(found.job) });
     if (out === "not-your-trip") return no(403, "That is not your record.");
+    // Zones: a position that was believed is a position the zones may see. Never waits on, or fails because of, them.
+    if (out !== "old") await checkPosition({ entityType: entity, entityId: trip }, { lat: body.lat as number, lng: body.lng as number, at: when, accuracy: num(body.accuracy) });
     return Response.json({ ok: true, ignored: out === "old" ? "old" : undefined });
   }
   if (!mayShare(found.job, found.userId)) return no(403, "Only the person on the move may share their position.");
@@ -92,5 +95,6 @@ export async function POST(req: NextRequest): Promise<Response> {
     stage: typeof body.stage === "string" ? body.stage : undefined,
   });
   if (result === "not-your-trip") return no(403, "Only the person on the move may share their position.");
+  if (result !== "old") await checkPosition({ entityType: entity, entityId: trip }, { lat: body.lat as number, lng: body.lng as number, at, accuracy: num(body.accuracy) });
   return Response.json({ ok: true, ignored: result === "old" ? "old" : undefined });
 }

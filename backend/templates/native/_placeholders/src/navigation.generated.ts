@@ -16,3 +16,12 @@ export const NAV_STYLE: "tabs" | "drawer" = "tabs";
 
 /** The main pages (then Account, when the app has a sign-in), for the drawer's menu. Empty for a tab app. */
 export const MENU: readonly { title: string; icon: string; route: string }[] = [];
+
+/** Each role's own bar, by role name: the tab names it shows. Empty when everyone shares one bar. */
+export const ROLE_TABS: Readonly<Record<string, readonly string[]>> = {};
+
+/** Each role's More list. */
+export const ROLE_MORE: Readonly<Record<string, readonly { title: string; icon: string; route: string }[]>> = {};
+
+/** Where each role lands once signed in (its first tab). */
+export const ROLE_HOME: Readonly<Record<string, string>> = {};

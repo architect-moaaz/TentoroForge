@@ -39,6 +39,19 @@ export async function jobFor(entity: string, id: string): Promise<Job> {
   }
 }
 
+/** The ids of the records of this kind the signed-in person may read — no field of any record is read. */
+export type VisibleIds = { ok: true; userId: string; ids: Set<string> } | { ok: false; status: 401 | 404; error: string };
+export async function visibleIds(entity: string, limit = 500): Promise<VisibleIds> {
+  const me = await whoIs();
+  if (!me) return { ok: false, status: 401, error: "Sign in to see the zones." };
+  await ensureDataEngineInitialized();
+  try {
+    return { ok: true, userId: me.userId, ids: new Set(await engine.visibleIds(entity, actorCtx(me.user) as never, limit)) };
+  } catch {
+    return { ok: false, status: 404, error: "No such records." };
+  }
+}
+
 export type Visible =
   | { ok: true; userId: string; rows: Map<string, Record<string, unknown>> }
   | { ok: false; status: 401 | 404; error: string };

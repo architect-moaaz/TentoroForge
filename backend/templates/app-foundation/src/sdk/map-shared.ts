@@ -9,8 +9,25 @@ export type MapPoint = GeoPoint & {
   tone?: "primary" | "accent" | "muted" | "danger";
 };
 
+/** An area drawn on the map: a circle (centre and radius in metres) or a polygon (its corners). */
+export type MapZone = {
+  id: string;
+  label?: string;
+  tone?: "primary" | "accent" | "muted" | "danger";
+  /** Drawn faint and dashed: a zone that is switched off. */
+  inactive?: boolean;
+} & (
+  | { shape: "circle"; center: GeoPoint; radiusM: number }
+  | { shape: "polygon"; ring: GeoPoint[] }
+);
+
 export type MapViewProps = {
   points?: MapPoint[];
+  /** Areas drawn under the pins. */
+  zones?: MapZone[];
+  /** The map was clicked at this place (not a pin, not a zone's edge). */
+  onMapClick?: (at: GeoPoint) => void;
+  onZoneClick?: (id: string) => void;
   /** A path through these places, in order — a trip, a route. */
   route?: GeoPoint[];
   /** Where it opens; the points' middle when omitted. */
@@ -47,6 +64,19 @@ export function toHex(css: string): string {
   if (out.startsWith("#")) return out;
   const m = out.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
   return m ? "#" + [m[1], m[2], m[3]].map((n) => Number(n).toString(16).padStart(2, "0")).join("") : "#2563eb";
+}
+
+/** A zone's outline as a closed ring of places: a circle becomes 64 corners, which no eye can tell from round. */
+export function ringOf(z: MapZone, steps = 64): GeoPoint[] {
+  if (z.shape === "polygon") return z.ring.length && (z.ring[0].lat !== z.ring[z.ring.length - 1].lat || z.ring[0].lng !== z.ring[z.ring.length - 1].lng) ? [...z.ring, z.ring[0]] : z.ring;
+  const out: GeoPoint[] = [];
+  const dLat = z.radiusM / 111_320;
+  const dLng = z.radiusM / (111_320 * Math.max(0.01, Math.cos((z.center.lat * Math.PI) / 180)));
+  for (let i = 0; i <= steps; i++) {
+    const a = (i / steps) * 2 * Math.PI;
+    out.push({ lat: z.center.lat + dLat * Math.sin(a), lng: z.center.lng + dLng * Math.cos(a) });
+  }
+  return out;
 }
 
 export function middle(points: GeoPoint[]): GeoPoint {

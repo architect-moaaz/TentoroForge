@@ -3121,6 +3121,13 @@
                     "description": "Role names that read and write this entity unscoped. Name a role only where the product genuinely grants it every row.",
                     "default": []
                   },
+                  "roles": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Apply this rule only to people holding one of these roles. One entity is often reached differently by different roles (an order is a customer's by customerId, a restaurant's by restaurantId, the driver's by driverId): write one rule per role, each naming its `roles`. A person in none of the named roles, and not named in `unscopedRoles`, reaches no row. Omit it for a rule that applies to everyone."
+                  },
                   "actorColumn": {
                     "type": "string",
                     "description": "For scope \"workspace\": the column on the users table whose value is the actor's workspace — homePropertyId, organisationId, tenantId. The session carries that column and the engine compares `column` to it. Omit for scope \"user\", where the actor's id is the value."
@@ -3159,6 +3166,23 @@
                     "type": "boolean",
                     "description": "For work that is OFFERED before anyone holds it (a ride request offered to drivers, a job offered to technicians): signed-in people read the rows that are theirs AND the rows nobody holds yet (the column is empty). Once a row is held, only its holder reads it. Writes stay limited to the holder's own rows. Use it instead of leaving the entity unscoped, which lets every holder read every other holder's rows.",
                     "default": false
+                  },
+                  "unclaimedWhere": {
+                    "type": "object",
+                    "description": "With `readsUnclaimed`: only the rows nobody holds yet whose column has one of these values are readable, e.g. {\"status\": \"ready_for_pickup\"}: a driver sees an order only once it is ready, not while it is being placed or cooked.",
+                    "additionalProperties": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      ]
+                    }
                   },
                   "guestColumn": {
                     "type": "string",
@@ -4864,6 +4888,137 @@
         "additionalProperties": false
       },
       "default": []
+    },
+    "geofencing": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "scenario": {
+          "type": "string",
+          "default": ""
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "zones": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "radiusM": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "purpose": {
+                "type": "string",
+                "default": ""
+              },
+              "lat": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": -90,
+                    "maximum": 90
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "lng": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": -180,
+                    "maximum": 180
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "needsDrawing": {
+                "type": "boolean",
+                "default": true
+              },
+              "rules": {
+                "type": "object",
+                "description": "How the zone behaves: approachM (metres out at which 'approaching' is raised), dwellSec (stay time), hysteresisM, minFixes, maxAccuracyM, staleMs, maxGapMs.",
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "default": {}
+              }
+            },
+            "required": [
+              "name",
+              "radiusM"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "zone": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "default": null
+              },
+              "onEvent": {
+                "type": "string",
+                "enum": [
+                  "geofence.entered",
+                  "geofence.exited",
+                  "geofence.dwell",
+                  "geofence.approaching"
+                ]
+              },
+              "action": {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              "note": {
+                "type": "string",
+                "default": ""
+              }
+            },
+            "required": [
+              "onEvent",
+              "action"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        }
+      },
+      "additionalProperties": false,
+      "description": "Zones on a map and what happens at them, written from what the brief says; present only when the app reacts to something entering, leaving or coming near a place. A zone has coordinates only when the brief gave them (the rest are drawn by the owner). A rule never finishes a job, takes payment or marks someone present from a crossing alone."
     },
     "completeness": {
       "type": "object",

@@ -4285,6 +4285,14 @@ def ownership_rules(doc: dict) -> dict[str, list[dict]]:
         # WORK OFFERED BEFORE IT IS HELD: reads also reach the rows nobody holds yet; writes stay the holder's.
         if item.get("readsUnclaimed") is True:
             rule["readsUnclaimed"] = True
+            # ...and only the unclaimed rows in these states ({"status": "ready_for_pickup"}): a field, then a value or a list
+            where = item.get("unclaimedWhere")
+            if isinstance(where, dict) and where:
+                rule["unclaimedWhere"] = {str(k): (list(v) if isinstance(v, list) else v) for k, v in where.items()}
+        # A RULE FOR CERTAIN ROLES: an order is a customer's by one column, a restaurant's by another and a driver's by a
+        # third; each rule applies only to the roles it names (and a person in none of them reaches no row).
+        if isinstance(item.get("roles"), list) and item["roles"]:
+            rule["roles"] = [str(r) for r in item["roles"]]
         # OWNED THROUGH ANOTHER RECORD: `column` references a record of
         # `through`, and the row is reachable when that one is. Written as
         # the target's TABLE, which the engine's registry always resolves —
@@ -4383,6 +4391,9 @@ def render_ownership_rules_module(manifest: dict[str, list[dict]]) -> str:
         '  reads?: "scoped" | "everyone" | "visitors";\n'
         "  /** Reads also reach rows whose column is empty (work offered, not yet held); writes stay scoped. */\n"
         "  readsUnclaimed?: boolean;\n"
+        "  /** With `readsUnclaimed`: only the unclaimed rows whose column is one of these values are read. */\n"
+        "  unclaimedWhere?: Record<string, string | string[]>;\n"
+        "  roles?: string[];\n"
         "  /** For scope \"member\": the membership table, its organisation column, and\n"
         "   *  the column matching the actor (their email, or their user id). */\n"
         "  members?: string;\n"
