@@ -24,7 +24,7 @@ import { windowStart, priorWindow } from "./data-engine/aggregate-window";
 // with no sensitive columns, so every helper below is a no-op fast-path on
 // non-sensitive entities — zero overhead for plain CRUD.
 import { sensitiveColumnsFor, type SensitiveColumnSpec } from "./sensitive-columns";
-import { actorOf, auditOn, ready as auditReady, reasonRequired, recordAudit, regulated, withAudit } from "./audit";
+import { actorOf, auditOn, ready as auditReady, reasonRequired, recordAudit, recordAuditMany, regulated, withAudit, type AuditEntry } from "./audit";
 
 /** Whether `entity` is a ledger — rows written once. The manifest is
  *  projected beside this module; an app built before it existed has none. */
@@ -129,8 +129,9 @@ async function attachFkLabels(entityName: string, entity: any, rows: any[], ctx:
       const where = allOf([inArray(cols.id, ids as any), ...await accessConditions(targetName, target, ctx, "read")])!;
       const found: any[] = await db.select(shape).from(target.table).where(where);
       const byId = new Map<string, Record<string, any>>();
+      const labelReads: ReadAudit = [];
       for (const f of found) {
-        const seen = await _maskOrUnmaskOnRead(targetName, { ...f }, ctx);
+        const seen = await _maskOrUnmaskOnRead(targetName, { ...f }, ctx, labelReads);
         let visible: Record<string, any> = seen;
         try {
           const { filterFields } = await import("@/lib/rules");
@@ -140,6 +141,7 @@ async function attachFkLabels(entityName: string, entity: any, rows: any[], ctx:
         }
         byId.set(String(f.id), visible);
       }
+      await _flushReadAudit(labelReads);
       for (const [fkProp, field] of props) {
         for (const r of rows) {
           if (r[fkProp] != null) r[`${fkProp}Label`] = byId.get(String(r[fkProp]))?.[field] ?? "";
@@ -403,10 +405,23 @@ function withoutSignInColumns(entityName: string, data: Record<string, any>): vo
   if (data && isUsersTable(entityName)) for (const c of SIGN_IN_WRITTEN_ONLY) delete data[c];
 }
 
+// ── WHAT A READ SAW, WRITTEN ONCE (17 Nov 2026) ─────────────────────────────
+// A regulated app records every sensitive value a reader may see. It used to write
+// one audit entry per field per row, each taking the chain's lock in turn: a screen
+// of fifty guests wrote three hundred entries one by one and took a minute. Now a
+// row's fields make ONE entry, and the rows of one read are written together.
+type ReadAudit = AuditEntry[];
+async function _flushReadAudit(sink: ReadAudit): Promise<void> {
+  if (!sink.length) return;
+  await recordAuditMany(db, sink.splice(0, sink.length)).catch((e: unknown) =>
+    console.warn("[audit] sensitive reads could not be recorded:", e));
+}
+
 async function _maskOrUnmaskOnRead<T extends Record<string, any>>(
   entityName: string,
   record: T,
   ctx: DataEngineContext,
+  sink?: ReadAudit,
 ): Promise<T> {
   // Every read passes through here, so this is also where the vectors leave
   // the row: they are the engine's to rank by, not anyone's to read.
@@ -418,6 +433,7 @@ async function _maskOrUnmaskOnRead<T extends Record<string, any>>(
   const specs = sensitiveColumnsFor(entityName);
   const keys = Object.keys(specs);
   if (keys.length === 0 || record == null) return record;
+  const seen: string[] = [];
   for (const col of keys) {
     const spec = specs[col];
     const encKey = `${col}_encrypted`;
@@ -444,10 +460,7 @@ async function _maskOrUnmaskOnRead<T extends Record<string, any>>(
         // LOOKING IS ON THE RECORD here too: a value held in the clear (a
         // seeded row) was shown unmasked and nothing was written, so the
         // trail of a regulated app missed every such read (60v142ju).
-        await recordAudit(db, { action: "read_sensitive", entity: entityName,
-          entityId: (record as any)?.id != null ? String((record as any).id) : null, changed: [col],
-          actor: actorOf(ctx.user, ctx.guest), via: ctx.via ?? "api" }).catch((e: unknown) =>
-            console.warn("[audit] a sensitive read could not be recorded:", e));
+        seen.push(col);
       }
       continue;
     }
@@ -459,13 +472,8 @@ async function _maskOrUnmaskOnRead<T extends Record<string, any>>(
       // the incident is visible in logs.
       const blob = record[encKey];
       _auditUnmask(entityName, col, ctx);
-      if (regulated()) {
-        // LOOKING IS ON THE RECORD: who saw which column of which row.
-        await recordAudit(db, { action: "read_sensitive", entity: entityName,
-          entityId: (record as any)?.id != null ? String((record as any).id) : null, changed: [col],
-          actor: actorOf(ctx.user, ctx.guest), via: ctx.via ?? "api" }).catch((e: unknown) =>
-            console.warn("[audit] a sensitive read could not be recorded:", e));
-      }
+      // LOOKING IS ON THE RECORD: who saw which column of which row.
+      if (regulated()) seen.push(col);
       try {
         display = blob ? await decryptSensitive(String(blob)) : null;
       } catch (e) {
@@ -480,6 +488,13 @@ async function _maskOrUnmaskOnRead<T extends Record<string, any>>(
     // callers (a Table cell that shows the mask + an eye toggle to
     // request unmask on-demand) rely on the field being labelled as such.
     delete (record as any)[encKey];
+  }
+  if (seen.length) {
+    const entry: AuditEntry = { action: "read_sensitive", entity: entityName,
+      entityId: (record as any)?.id != null ? String((record as any).id) : null, changed: seen,
+      actor: actorOf(ctx.user, ctx.guest), via: ctx.via ?? "api" };
+    if (sink) sink.push(entry);
+    else await _flushReadAudit([entry]);
   }
   return record;
 }
@@ -1563,6 +1578,39 @@ export async function findById(
   return visible;
 }
 
+/**
+ * MANY RECORDS BY ID, ONE QUERY (17 Nov 2026). `recordsById` read each id with
+ * its own `findById` — its own query, access check and audit write — and a
+ * screen that names the guests, hotels and stays of fifty cases ran hundreds of
+ * them. The same ownership predicate rides in the WHERE, so an id the reader may
+ * not see is simply absent, exactly as `findById` answers NotFound for it.
+ */
+export async function findByIds(
+  entityName: string,
+  ids: string[],
+  ctx: DataEngineContext = {}
+): Promise<Record<string, any>[]> {
+  const entity = getEntity(entityName);
+  if (!entity) throw new Error(`Unknown entity: ${entityName}`);
+  const wanted = Array.from(new Set(ids.filter((v) => typeof v === "string" && v.length > 0)));
+  if (!wanted.length) return [];
+  const where = allOf([inArray(entity.table.id, wanted as any),
+                       ...await accessConditions(entityName, entity, ctx, "read")])!;
+  const data: any[] = await db.select().from(entity.table).where(where);
+  const reads: ReadAudit = [];
+  await Promise.all(data.map((r: any) => _maskOrUnmaskOnRead(entityName, r, ctx, reads)));
+  await _flushReadAudit(reads);
+  let visible = data;
+  try {
+    const { filterFields } = await import("@/lib/rules");
+    visible = await Promise.all(data.map((r: any) => filterFields(entityName, r, { role: ctx.user?.role })));
+  } catch {
+    /* rules not available: the rows as read */
+  }
+  await attachFkLabels(entityName, entity, visible, ctx);
+  return visible;
+}
+
 export async function query(
   entityName: string,
   opts: QueryOptions = {},
@@ -1625,7 +1673,9 @@ export async function query(
 
   // Slice-4: mask/unmask sensitive columns per row before rules-based
   // field filtering. Rows never expose ciphertext to the client.
-  await Promise.all(data.map((r: any) => _maskOrUnmaskOnRead(entityName, r, ctx)));
+  const reads: ReadAudit = [];
+  await Promise.all(data.map((r: any) => _maskOrUnmaskOnRead(entityName, r, ctx, reads)));
+  await _flushReadAudit(reads);
 
   // Apply field-level read access
   let filtered = data;
@@ -2601,7 +2651,9 @@ export async function resolveSimilar(
     // Cosine distance is 0 for the same direction and 2 for the opposite one.
     similarity: Math.max(0, Math.min(100, Math.round((1 - Number(__distance)) * 100))),
   }));
-  await Promise.all(out.map((r) => _maskOrUnmaskOnRead(source.entity, r, ctx)));
+  const reads: ReadAudit = [];
+  await Promise.all(out.map((r) => _maskOrUnmaskOnRead(source.entity, r, ctx, reads)));
+  await _flushReadAudit(reads);
   await attachFkLabels(source.entity, entity, out, ctx);
   return out;
 }
