@@ -1447,8 +1447,15 @@ export function registerDefaultActions(): void {
         }
         return null;
       };
+      // A list bound to a JSON column IS that column's value (a job's description sections, its requirement rows,
+      // its questions) — never rows to fan out. Fanning it out wrote one junk `jobs` row per section and no job.
+      const jsonColumn = (k: string) => {
+        const c = (table as any)[k] as { dataType?: unknown; columnType?: unknown } | undefined;
+        return !!c && (c.dataType === "json" || /^Pg(Json|Jsonb)$/.test(String(c.columnType ?? "")));
+      };
       let arrayEntry: [string, Array<Record<string, unknown>>] | null = null;
       for (const [k, v] of Object.entries(raw)) {
+        if (jsonColumn(k)) continue;
         const arr = findRowArray(v);
         if (arr) { arrayEntry = [k, arr]; break; }
       }

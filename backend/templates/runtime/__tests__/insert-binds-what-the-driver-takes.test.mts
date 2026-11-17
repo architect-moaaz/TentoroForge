@@ -11,7 +11,7 @@ installHarness({
   stubs: {
     "@/db": "export const db = { insert: () => ({ values: (v) => ({ returning: async () => [{ id: 'row-1', ...v }] }) }) };",
     "./embedding-columns": "export const EMBEDDING_DIMENSIONS = 512;\nexport const embeddingColumnsFor = () => [];\n",
-    "@/db/schema": "export const cases = { __name: 'cases', id: { columnType: 'PgUUID', dataType: 'string' }, title: { columnType: 'PgText', dataType: 'string' }, caseNumber: { columnType: 'PgText', dataType: 'string' } };\nexport const carts = { __name: 'carts', id: { columnType: 'PgUUID', dataType: 'string' }, status: { columnType: 'PgText', dataType: 'string' }, guestToken: { columnType: 'PgText', dataType: 'string' } };",
+    "@/db/schema": "export const cases = { __name: 'cases', id: { columnType: 'PgUUID', dataType: 'string' }, title: { columnType: 'PgText', dataType: 'string' }, caseNumber: { columnType: 'PgText', dataType: 'string' } };\nexport const jobs = { __name: 'jobs', id: { columnType: 'PgUUID', dataType: 'string' }, title: { columnType: 'PgText', dataType: 'string' }, status: { columnType: 'PgText', dataType: 'string' }, descriptionSections: { columnType: 'PgJsonb', dataType: 'json' }, requirementItems: { columnType: 'PgJsonb', dataType: 'json' } };\nexport const prices = { __name: 'prices', id: { columnType: 'PgUUID', dataType: 'string' }, price: { columnType: 'PgText', dataType: 'string' }, url: { columnType: 'PgText', dataType: 'string' } };\nexport const carts = { __name: 'carts', id: { columnType: 'PgUUID', dataType: 'string' }, status: { columnType: 'PgText', dataType: 'string' }, guestToken: { columnType: 'PgText', dataType: 'string' } };",
     "../ownership-rules": "export const ownershipRulesFor = (e) => /^carts?$/.test(e) ? [{ entity: 'Cart', column: 'customerId', scope: 'user', guestColumn: 'guestToken' }] : [];",
     "drizzle-orm": "export const getTableName = (t) => t.__name || 'cases'; export const is = (v) => !!(v && v.__name); export class Table {}; export const eq = () => ({}); export const and = () => ({}); export const sql = () => ({}); export const ne = (c, v) => ({ op: 'ne', col: c && c.__col, v }); export const gt = (c, v) => ({ op: 'gt', col: c && c.__col, v }); export const gte = (c, v) => ({ op: 'gte', col: c && c.__col, v }); export const lt = (c, v) => ({ op: 'lt', col: c && c.__col, v }); export const lte = (c, v) => ({ op: 'lte', col: c && c.__col, v }); export const inArray = (c, v) => ({ op: 'inArray', col: c && c.__col, v }); export const notInArray = (c, v) => ({ op: 'notInArray', col: c && c.__col, v });",
     "@/lib/error_reporter": "export const reportFromError = () => {};",
@@ -125,6 +125,24 @@ const other = await handlers.db_insert(
   { table: "cases", values: { title: "x" } }, { variables: { __guest: GUEST } } as any,
 );
 ok(!("guestToken" in other.inserted), "a table with no guestColumn is left alone");
+
+// A LIST BOUND TO A JSON COLUMN IS ITS VALUE (DITANS, 2026-11-17): a job draft's description sections are a list of
+// objects in a jsonb column. The array fan-out took them for rows and wrote one `jobs` row per section — status
+// "Required" / "Recommended" from the section — and no job; the draft came back with no id.
+const sections = [{ key: "about", heading: "About the role", status: "Required" }, { key: "pay", heading: "Pay & benefits", status: "Recommended" }];
+const job = await handlers.db_insert(
+  { table: "jobs", values: { title: "Staff Nurse", status: "draft", descriptionSections: "{{descriptionSections}}", requirementItems: "{{reqs}}" }, __nodeId: "insert_job" },
+  { variables: { descriptionSections: sections, reqs: [{ id: "r1", requirement: "BLS", mustHave: true }] } } as any,
+);
+eqJson([job.inserted?.title, job.inserted?.status, job.inserted?.descriptionSections?.length], ["Staff Nurse", "draft", 2],
+       "one job, its sections kept whole in the jsonb column");
+ok(typeof job.id === "string", "and the step answers the job's id");
+// A list going to no JSON column is still rows (a scrape's results into a rows table).
+const scraped = await handlers.db_insert(
+  { table: "prices", values: { results: "{{rows}}" }, __nodeId: "persist" },
+  { variables: { rows: [{ price: "10", url: "a" }, { price: "12", url: "b" }] } } as any,
+);
+eqJson(scraped.inserted, 2, "a list bound to no JSON column still writes one row per item");
 eqJson(resolve("$guest", { variables: { __guest: GUEST } } as any), GUEST, "$guest names the visitor's token");
 eqJson(resolve("$guest", { variables: {} } as any), null, "and nothing when there is none");
 
