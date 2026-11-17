@@ -57,14 +57,6 @@ export async function POST(request: Request) {
       );
     }
 
-    const account = accountValues(data.account ?? {}, data.email, data.name);
-    if (account.error) {
-      return NextResponse.json(
-        { error: { code: "VALIDATION_ERROR", message: account.error } },
-        { status: 400 }
-      );
-    }
-
     const hashedPassword = await bcrypt.hash(data.password, 12);
     // The role: the one chosen, else the one self-registered people get —
     // auth folds `accountType` into the session role, and without one a new
@@ -75,6 +67,14 @@ export async function POST(request: Request) {
     const offered = [...ACCOUNT_TYPE_VALUES, ...SIGNUP_ROLES];
     const chosen = data.accountType && offered.includes(data.accountType) ? data.accountType : undefined;
     const role = chosen || SIGNUP_ROLE || undefined;
+    // The account record is the signup role's; another role offered gets none (lib/account-row.ts).
+    const account = accountValues(data.account ?? {}, data.email, data.name, role);
+    if (account.error) {
+      return NextResponse.json(
+        { error: { code: "VALIDATION_ERROR", message: account.error } },
+        { status: 400 }
+      );
+    }
 
     // AN ORGANISATION AT SIGNUP, when the application has several and lets a
     // new person start one: the tenant row, the first membership (in the

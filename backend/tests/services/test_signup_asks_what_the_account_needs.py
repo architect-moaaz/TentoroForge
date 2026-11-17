@@ -26,11 +26,30 @@ def test_the_scaffold_signup_form_asks_the_accounts_fields_and_sends_them():
 
 def test_the_route_takes_the_typed_name_as_the_display_name_and_honours_initial_values():
     route = (FOUNDATION / "app" / "api" / "auth" / "signup" / "route.ts").read_text()
-    assert "accountValues(data.account ?? {}, data.email, data.name)" in route
+    assert "accountValues(data.account ?? {}, data.email, data.name, role)" in route
     # The account fields are worked out in one place for every way an account is made.
     route += (FOUNDATION / "lib" / "account-row.ts").read_text()
     assert "ACCOUNT.labelField === f.name || NAME_LIKE.test(f.name)" in route
     assert 'Object.prototype.hasOwnProperty.call(ACCOUNT_INITIAL, f.name)) continue;' in route
+
+
+def test_another_role_offered_at_signup_is_not_refused_for_the_account_records_fields():
+    """DITANS offers Candidate (the account record's role), Organisation Admin
+    and Agency User at signup; every recruiter was refused "Plan is required"
+    by the Candidate record (2026-11-17). The record's own role, or no role,
+    still must make it; another offered role gets it only when what it sent
+    makes one."""
+    route = (FOUNDATION / "app" / "api" / "auth" / "signup" / "route.ts").read_text()
+    row = (FOUNDATION / "lib" / "account-row.ts").read_text()
+    auth = (FOUNDATION / "auth.ts").read_text()
+    # The role is known before the record is worked out, and passed to it.
+    assert route.index("const role = chosen || SIGNUP_ROLE || undefined;") < route.index("accountValues(")
+    assert "accountValues(intent.account, email, name, role)" in auth
+    assert "if (!role || role === m.SIGNUP_ROLE) return true;" in row
+    assert "return !(m.SIGNUP_ROLES ?? []).includes(role);" in row
+    assert "return made.error && !ownsAccountRecord(role) ? {} : made;" in row
+    # No values means no record row, never a half-filled one.
+    assert "if (!ACCOUNT || !accountTable || !values) return;" in row
 
 
 def _doc(fields: list[dict], writes: list[dict] | None = None) -> dict:
@@ -80,5 +99,5 @@ def test_the_catch_up_carries_the_current_signup_route_to_a_built_app(tmp_path):
     old.write_text("const ACCOUNT_TYPES: { value: string }[] = [];\n// the route as built yesterday\n")
     changed = refresh_engine(app)
     assert SIGNUP_ROUTE in changed
-    assert "accountValues(data.account ?? {}, data.email, data.name)" in old.read_text()
+    assert "accountValues(data.account ?? {}, data.email, data.name, role)" in old.read_text()
     assert refresh_engine(app) == []            # current: nothing written again
