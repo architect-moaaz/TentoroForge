@@ -206,7 +206,7 @@ export function GeofenceMonitor({ entity, zone, max = 30, label }: {
       <ul className="divide-y rounded-xl border">
         {items.map((c) => (
           <li key={c.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm" data-crossing={c.type}>
-            <span>{(label ?? describe)({ ...c, zoneName: c.zoneName ?? names.get(c.geofenceId) ?? null })}</span>
+            <span>{(typeof label === "function" ? label : describe)({ ...c, zoneName: c.zoneName ?? names.get(c.geofenceId) ?? null })}</span>
             <time className="shrink-0 text-xs text-muted-foreground">{clock(c.occurredAt)}</time>
           </li>
         ))}

@@ -83,10 +83,59 @@ def test_saved_and_free_map_are_recognised_only_after_the_ask():
     assert not mk.key_saved_in("hello", later) and not mk.key_saved_in(mk.SAVED, [])
 
 
-def test_the_chat_asks_without_stopping_the_build_and_answers_the_panel():
+def test_the_ask_comes_with_the_first_plan_from_what_is_saved(tmp_path):
+    """Before any definition exists the only signs of a map are the saved plans: the zones plan and a map-first role."""
+    from services.blueprint import geofence_plan
+
+    assert mk.ask_after_turn(tmp_path) is None, "nothing saved, nothing to ask"
+    geofence_plan.write(tmp_path, geofence_plan.analyse("Delivery app. Drivers deliver orders. Alert the customer when the driver is within 300 m."))
+    msg = mk.ask_after_turn(tmp_path)
+    assert msg and msg["secret"]["key"] == "GOOGLE_MAPS_API_KEY" and "zones" in msg["text"]
+    assert mk.ask_after_turn(tmp_path) is None, "once"
+
+
+def test_a_map_first_role_asks_too(tmp_path, monkeypatch):
+    monkeypatch.setattr("services.blueprint.platform_plan.map_first_roles", lambda _d: ["Driver"])
+    msg = mk.ask_after_turn(tmp_path)
+    assert msg and "phone app" in msg["text"]
+
+
+def test_the_saved_definition_counts_as_well(tmp_path):
+    import json
+    cur = tmp_path / ".forge" / "blueprint" / "current.json"
+    cur.parent.mkdir(parents=True)
+    cur.write_text(json.dumps(SCREEN), encoding="utf-8")
+    assert mk.ask_after_turn(tmp_path)
+
+
+def test_a_failing_read_never_breaks_a_turn(tmp_path, monkeypatch):
+    monkeypatch.setattr(mk, "ask", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom")))
+    assert mk.ask_after_turn(tmp_path) is None
+
+
+def test_the_chat_asks_after_each_answer_the_build_gate_never_stops_and_the_panel_is_answered_first():
     src = (BACKEND / "routers" / "blueprint_generate.py").read_text(encoding="utf-8")
+    assert src.count("maps_key.ask_after_turn(output_dir, ") == 2, "after the answer before a definition and after it"
     gate = src.index("maps_key.ask(svc.doc, output_dir)")
-    assert src.index("ui_designer.gate(svc.doc, output_dir)", src.index("_add_to_the_brief(svc, description)") - 600) < gate
     around = src[gate - 300: gate + 400]
     assert "return" not in around.split("emit(")[0], "the ask is a suggestion, never a stop"
-    assert "maps_key.key_saved_in(req.message, _history)" in src and "maps_key.skipped_in(req.message, _history)" in src
+    saved = src.index("maps_key.key_saved_in(req.message, _chat_so_far)")
+    assert saved < src.index("# DEFECT-STATUS-VERB"), "the panel's words are met at the start of the turn, with no definition needed"
+    assert saved < src.index("maps_key.ask_after_turn(output_dir, ")
+
+
+def test_the_very_first_answer_asks_from_the_brief_alone(tmp_path):
+    """Smith's first answer is the plan question, before anything is saved: only the typed brief shows a map is coming."""
+    brief = "Food delivery app. Drivers share live GPS. Admin sees all drivers on a live map."
+    msg = mk.ask_after_turn(tmp_path, brief)
+    assert msg and msg["secret"]["key"] == "GOOGLE_MAPS_API_KEY"
+
+
+@pytest.mark.parametrize("brief", ["A recipe app with a roadmap page", "A todo app for a family", "", "A site map generator"])
+def test_a_brief_without_a_map_does_not_ask(brief, tmp_path):
+    assert mk.ask_after_turn(tmp_path, brief) is None
+
+
+def test_the_chat_reads_the_brief_when_it_asks():
+    src = (BACKEND / "routers" / "blueprint_generate.py").read_text(encoding="utf-8")
+    assert src.count("maps_key.ask_after_turn(output_dir, _brief_from(req.history, req.message))") == 2

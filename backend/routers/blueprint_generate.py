@@ -2046,6 +2046,18 @@ async def smith_chat(
                 defined = bool(svc.doc.get("requirements")
                                or svc.doc.get("pages"))
 
+            # GOOGLE MAPS KEY: "saved" (the box stored it; this turn's start already copied it into the app) or "use the free
+            # map". Both are the panel's own words, recognised only after Smith's ask (`maps_key`), and they need no definition:
+            # the ask can come with the very first plan.
+            _chat_so_far = [(t.role, t.text) for t in req.history if t.text]
+            if maps_key.key_saved_in(req.message, _chat_so_far):
+                emit("message", {"text": maps_key.SAVED_TEXT, "status": "reported"})
+                return {"status": "reported"}
+            if maps_key.skipped_in(req.message, _chat_so_far):
+                emit("message", {"text": "The free map it is. You can add a Google key any time under Settings → Integrations → Google Maps.",
+                                 "status": "reported"})
+                return {"status": "reported"}
+
             # DEFECT-STATUS-VERB: a typed `status` is a COMMAND, not a brief to
             # reason about. Answer it deterministically from the Blueprint and
             # return — it must NEVER fall through and trigger a define (which it
@@ -2175,16 +2187,6 @@ async def smith_chat(
             # organisation's integrations and says only that it did.
             if svc is not None:
                 _history = [(t.role, t.text) for t in req.history if t.text]
-
-                # GOOGLE MAPS KEY: "saved" (the box stored it; this turn's start already copied it into the app) or "use the
-                # free map". Both are the panel's own words, recognised only after Smith's ask (`maps_key`).
-                if maps_key.key_saved_in(req.message, _history):
-                    emit("message", {"text": maps_key.SAVED_TEXT, "status": "reported"})
-                    return {"status": "reported"}
-                if maps_key.skipped_in(req.message, _history):
-                    emit("message", {"text": "The free map it is. You can add a Google key any time under Settings → Integrations → Google Maps.",
-                                     "status": "reported"})
-                    return {"status": "reported"}
 
                 # FIGMA: the link to the design, or the way forward after its coverage check. Both
                 # are recognised only by the turn before them (`figma_gate.link_in` / `choice_in`),
@@ -2430,6 +2432,9 @@ async def smith_chat(
                     "able to do in it, and I will define it.")
                 emit("message", {"text": answer_text, "options": turn_result.options,
                                  "status": turn_result.status})
+                _maps_ask = maps_key.ask_after_turn(output_dir, _brief_from(req.history, req.message))   # a map in the plan and no Google key: say so, once
+                if _maps_ask is not None:
+                    emit("message", _maps_ask)
                 if not _defined_now(str(output_dir)):
                     return {"status": turn_result.status}
                 # A DEFINITION LANDED THIS TURN: the design it named, the answers
@@ -2522,6 +2527,9 @@ async def smith_chat(
                 "status": turn_result.status,
                 "intent": turn_result.intent,
             })
+            _maps_ask = maps_key.ask_after_turn(output_dir, _brief_from(req.history, req.message))   # a map in the plan and no Google key: say so, once
+            if _maps_ask is not None:
+                emit("message", _maps_ask)
             # THE CHECK, AFTER THE ANSWER. The pages the change reaches are
             # opened as the people they are for and what this change broke is
             # repaired once; what was already not working is said as known.

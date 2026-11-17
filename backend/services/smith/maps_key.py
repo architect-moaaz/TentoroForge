@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -80,6 +81,57 @@ def why_maps(doc: dict) -> str:
     return ""
 
 
+_MAP_WORDS = re.compile(r"\b(?:maps?|gps|live (?:location|tracking)|directions|geofenc\w*)\b", re.I)
+_NOT_A_MAP = re.compile(r"\b(?:road ?map|site ?map|mind ?map|heat ?map|tree ?map|story ?map|journey map)\b", re.I)
+
+
+def why_in_brief(brief: str) -> str:
+    """The reason, read from what the person typed: Smith's first answer comes before anything is saved, so the brief itself is
+    the only sign of a map that early."""
+    text = _NOT_A_MAP.sub(" ", brief or "")
+    if not text.strip():
+        return ""
+    try:
+        from services.blueprint import geofence_plan
+
+        if geofence_plan.analyse(text).needed:
+            return "the zones it watches are drawn on a map"
+    except Exception:  # noqa: BLE001
+        pass
+    if _MAP_WORDS.search(text):
+        return "the brief talks about a map or live tracking"
+    return ""
+
+
+def why_in_files(output_dir: str | Path) -> str:
+    """The same reason, read from what is saved beside the project, for the turns before a definition exists: the zones
+    plan (written the first turn the brief names a geofence or a distance) and the platform plan (a map-first role)."""
+    try:
+        from services.blueprint import geofence_plan
+
+        if geofence_plan.read(output_dir):
+            return "the zones it watches are drawn on a map"
+    except Exception:  # noqa: BLE001 — a reading that fails is no reason to ask
+        pass
+    try:
+        from services.blueprint import platform_plan
+
+        if platform_plan.map_first_roles(output_dir):
+            return "a role of the phone app is built around a map"
+    except Exception:  # noqa: BLE001
+        pass
+    return ""
+
+
+def _saved_doc(output_dir: str | Path) -> dict:
+    import json
+
+    try:
+        return json.loads((Path(output_dir) / ".forge" / "blueprint" / "current.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
 def key_set(output_dir: str | Path) -> bool:
     """Whether a Google Maps key is already available to this project: the organisation's, or the server's own."""
     if any((os.environ.get(n) or "").strip() for n in (KEY, "NEXT_PUBLIC_GOOGLE_MAPS_API_KEY", "GOOGLE_MAPS_SERVER_KEY")):
@@ -106,11 +158,11 @@ def _mark_asked(output_dir: str | Path) -> None:
         pass
 
 
-def ask(doc: dict, output_dir: str | Path) -> dict[str, Any] | None:
+def ask(doc: dict, output_dir: str | Path, brief: str = "") -> dict[str, Any] | None:
     """The message that asks for the key, or None: no map in the plan, a key already set, or already asked once.
 
     Asking is remembered, so an owner who carries on with the free map is not asked again at every build."""
-    why = why_maps(doc)
+    why = why_maps(doc) or why_in_files(output_dir) or why_in_brief(brief)
     if not why or asked(output_dir) or key_set(output_dir):
         return None
     _mark_asked(output_dir)
@@ -140,3 +192,13 @@ def key_saved_in(message: str, history: Iterable[tuple[str, str]]) -> bool:
 def skipped_in(message: str, history: Iterable[tuple[str, str]]) -> bool:
     """Whether `message` is the owner choosing the free map, after the ask."""
     return _norm(message) == _norm(SKIP) and _asked_lately(history)
+
+
+def ask_after_turn(output_dir: str | Path, brief: str = "") -> dict[str, Any] | None:
+    """The ask, for a chat turn that has just answered: from the saved definition when there is one, else from the saved plans.
+    Never raises: a suggestion must not break a turn."""
+    try:
+        return ask(_saved_doc(output_dir), output_dir, brief)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[maps-key] not asked for %s: %s", Path(str(output_dir)).name, exc)
+        return None

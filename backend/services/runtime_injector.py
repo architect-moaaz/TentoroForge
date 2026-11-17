@@ -1041,7 +1041,10 @@ def _inject_file_storage(output_path: Path) -> list[str]:
 
     # 5a-g2. What the brief said about zones (`.forge/geofence-plan.json`, written from the brief): the app's seed makes the zones
     #        that came with coordinates and the rules beside them (src/lib/geofence/plan.ts). No plan, no file, nothing to seed.
-    geo_plan = output_path / ".forge" / "geofence-plan.json"
+    #        The plan is kept beside the project (`output/<id>/.forge`), and this runs on the app folder (`output/<id>/app`), so
+    #        it is read from the folder above first; a plan inside the app folder is still honoured.
+    geo_plan = next((p for p in (output_path.parent / ".forge" / "geofence-plan.json", output_path / ".forge" / "geofence-plan.json") if p.exists()),
+                    output_path / ".forge" / "geofence-plan.json")
     if geo_plan.exists():
         try:
             dst = output_path / "contracts" / "geofence-plan.json"

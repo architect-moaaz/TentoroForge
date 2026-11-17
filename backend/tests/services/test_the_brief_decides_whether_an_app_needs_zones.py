@@ -182,3 +182,25 @@ def test_what_is_kept_about_a_person_is_limited_and_can_be_erased():
     index = (RUNTIME / "geofence" / "index.ts").read_text(encoding="utf-8")
     assert "purgeOld" in index and "purgeDue" in index
     assert (RUNTIME / "geofence" / "privacy.ts").exists()
+
+
+def test_the_plan_kept_beside_the_project_reaches_the_built_app(tmp_path):
+    """The build runs the injector on the APP folder while the plan is kept one level up; reading it from the wrong place meant no
+    real build ever carried its zones (found building an app end to end, 2026-11-17)."""
+    from services.runtime_injector import inject_runtime
+
+    app = tmp_path / "app"
+    app.mkdir()
+    gp.write(tmp_path, gp.analyse(DELIVERY))
+    inject_runtime(str(app), app_name="T", domain="food", project_id="p1")
+    got = app / "contracts" / "geofence-plan.json"
+    assert got.is_file() and '"delivery"' in got.read_text(encoding="utf-8")
+
+
+def test_an_app_with_no_plan_gets_no_plan_file(tmp_path):
+    from services.runtime_injector import inject_runtime
+
+    app = tmp_path / "app"
+    app.mkdir()
+    inject_runtime(str(app), app_name="T", domain="food", project_id="p2")
+    assert not (app / "contracts" / "geofence-plan.json").exists()
