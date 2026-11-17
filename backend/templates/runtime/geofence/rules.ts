@@ -53,6 +53,11 @@ export interface RuleDeps {
 /** Words that mark an action as moving money, finishing a job or marking someone present. */
 export const SENSITIVE = /(paid|payment|charge|refund|payout|settle|deliver|complet|finish|fulfil|close|attend|present|clock|check(?:ed)?[-_. ]?(?:in|out)|sign[-_. ]?off|approve)/i;
 
+/** A rule whose event name is built from the crossing (`order.{{metadata.next}}`) is judged by what it BECOMES, not by its template. */
+export function resolvesToSensitive(rule: Rule, e: GeofenceEvent): boolean {
+  return rule.action.kind === "emit_event" && SENSITIVE.test(fill(rule.action.event, e));
+}
+
 export function isSensitive(rule: Rule): boolean {
   if (rule.sensitive) return true;
   return rule.action.kind === "emit_event" && SENSITIVE.test(rule.action.event);
@@ -96,7 +101,7 @@ export async function runRules(e: GeofenceEvent, deps: RuleDeps): Promise<RuleRe
   const out: RuleResult[] = [];
   for (const rule of matching(e, deps.rules)) {
     try {
-      if (isSensitive(rule)) {
+      if (isSensitive(rule) || resolvesToSensitive(rule, e)) {
         if (!rule.confirm?.event) {
           out.push({ ruleId: rule.id, outcome: "held", reason: "This moves money, finishes a job or marks someone present, so it needs a confirmation that is not GPS, and the rule names none." });
           continue;

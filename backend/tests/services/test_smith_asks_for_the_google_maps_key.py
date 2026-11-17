@@ -139,3 +139,15 @@ def test_a_brief_without_a_map_does_not_ask(brief, tmp_path):
 def test_the_chat_reads_the_brief_when_it_asks():
     src = (BACKEND / "routers" / "blueprint_generate.py").read_text(encoding="utf-8")
     assert src.count("maps_key.ask_after_turn(output_dir, _brief_from(req.history, req.message))") == 2
+
+
+@pytest.mark.parametrize("doc", [{"geofencing": [1]}, {"geofencing": "yes"}, {"mobile": []}, {"mobile": "x"}, None, {"pages": "oops"}])
+def test_a_malformed_saved_definition_never_breaks_the_ask(doc, tmp_path):
+    assert not mk.why_maps(doc)
+    assert mk.ask(doc, tmp_path) is None
+
+
+def test_the_build_gate_names_the_folder_without_assuming_it_is_a_path_object():
+    """`_run_dag` is handed a str; `.name` on it would turn a harmless suggestion into a crash."""
+    src = (BACKEND / "routers" / "blueprint_generate.py").read_text(encoding="utf-8")
+    assert "Path(str(output_dir)).name, exc)" in src and 'logger.warning("[smith-chat] maps key not asked for %s: %s", output_dir.name' not in src

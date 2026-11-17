@@ -204,3 +204,18 @@ def test_an_app_with_no_plan_gets_no_plan_file(tmp_path):
     app.mkdir()
     inject_runtime(str(app), app_name="T", domain="food", project_id="p2")
     assert not (app / "contracts" / "geofence-plan.json").exists()
+
+
+def test_erasing_and_purging_also_clear_the_copy_on_the_event_bus():
+    """Every crossing is announced on the bus with its exact position; a purge or an erase that left that copy kept the trail."""
+    store = (RUNTIME / "geofence" / "store.ts").read_text(encoding="utf-8")
+    assert "dropBusCopies" in store and "DELETE FROM forge_events WHERE type LIKE 'geofence.%'" in store
+    erase = store[store.index("export async function eraseEntity"):]
+    assert "dropBusCopies(sql`entity_id = ${entityId}`)" in erase
+    purge = store[store.index("export async function purgeOld"):store.index("async function dropBusCopies")]
+    assert "dropBusCopies(" in purge
+
+
+def test_a_zone_never_widens_to_everyone_because_one_entry_was_misspelt():
+    route = (RUNTIME / "api-geofence-zones" / "route.ts").read_text(encoding="utf-8")
+    assert route.count("assign.length !== b.assign.length") == 2, "both adding and changing a zone refuse a dropped entry"

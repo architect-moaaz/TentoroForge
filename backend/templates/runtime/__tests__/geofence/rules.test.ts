@@ -241,3 +241,14 @@ test("zone settings are kept within sane ranges, and unknown ones are dropped", 
   assert.match(cleanFenceRules({ maxAccuracyM: "wide" }).problem!, /maxAccuracyM/);
   assert.match(cleanFenceRules({ staleMs: 5 }).problem!, /staleMs/);
 });
+
+test("an event name built from the crossing is judged by what it becomes, not by its template", async () => {
+  // `order.{{metadata.next}}` looks harmless, but this crossing makes it `order.delivered`, which finishes a job.
+  const r = rule({ action: { kind: "emit_event", event: "order.{{metadata.next}}" } });
+  const { d, emitted } = deps([r]);
+  const out = await runRules(event({ metadata: { next: "delivered" } }), d);
+  assert.equal(out[0].outcome, "held", "it must wait for a confirmation that is not GPS");
+  assert.equal(emitted.length, 0);
+  const calm = deps([r]);
+  assert.equal((await runRules(event({ metadata: { next: "arriving" } }), calm.d))[0].outcome, "done", "a name that stays harmless still runs");
+});

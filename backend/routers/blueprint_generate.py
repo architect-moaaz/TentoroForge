@@ -3183,7 +3183,7 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
                 if _maps_ask is not None:
                     emit("message", _maps_ask)
             except Exception as exc:  # noqa: BLE001 — a suggestion never stops a build
-                logger.warning("[smith-chat] maps key not asked for %s: %s", output_dir.name, exc)
+                logger.warning("[smith-chat] maps key not asked for %s: %s", Path(str(output_dir)).name, exc)
             # HOW IT TAKES MONEY, BEFORE IT IS BUILT, WHICHEVER DOOR IT CAME
             # THROUGH. An app that sells something waits for its owner to choose
             # the gateways (the dialog opens on this message); one that takes no

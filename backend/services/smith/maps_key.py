@@ -70,10 +70,12 @@ def _walk(node: Any) -> Iterable[dict]:
 
 def why_maps(doc: dict) -> str:
     """The reason this plan has a map, in a few words; "" when it has none."""
-    doc = doc or {}
-    if (doc.get("geofencing") or {}).get("enabled"):
+    doc = doc if isinstance(doc, dict) else {}
+    geo = doc.get("geofencing")
+    if isinstance(geo, dict) and geo.get("enabled"):
         return "the zones it watches are drawn on a map"
-    if (doc.get("mobile") or {}).get("mapFirstRoles"):
+    mobile = doc.get("mobile")
+    if isinstance(mobile, dict) and mobile.get("mapFirstRoles"):
         return "a role of the phone app is built around a map"
     for n in _walk(doc.get("pages") or []):
         if str(n.get("shows") or "").strip().lower() == "map":

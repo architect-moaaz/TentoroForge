@@ -59,3 +59,7 @@ blueprint section, the injector, and the shipped screens and routes.
 - Nothing has run on a real phone, and no app has been built from one prompt end to end.
 - Consent is the sharing choice the tracking screen already asks; geofencing adds no consent screen of its own.
 - Regenerating the blueprint schema from `packages/schema` loses hand-added fields (see FIXES_LEDGER.md).
+
+- A zone or rule that came from the plan and was then DELETED or renamed is put back the next time the app's seed runs; nothing records that it was removed on purpose. (Changing one is safe: a zone that is there is left as it is.)
+- The history screen and the live feed read the records a person may open, capped at 500 of them (the tracking access rule). A person who can open more than 500 records can miss crossings of the rest.
+- A rule's claim is taken before its action runs. If the action then fails (a push that throws), the claim is spent and a later retry of the same crossing reads as a duplicate: the failure is recorded (`geofence.action_failed`) but not retried.

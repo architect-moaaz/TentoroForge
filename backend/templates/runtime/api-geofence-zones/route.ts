@@ -67,6 +67,7 @@ export async function POST(req: Request): Promise<Response> {
   const { rules, problem } = cleanFenceRules(b.rules);
   if (problem) return refuse(400, problem);
   const assign = cleanAssign(b.assign);
+  if (Array.isArray(b.assign) && assign && assign.length !== b.assign.length) return refuse(400, "Each entry of who the zone watches must look like Entity:id (letters, digits, . _ - and * for all), at most 200 of them. A zone that dropped a bad entry would watch everyone.");
   try {
     const id = String(rowsOf(await db.execute(sql`
       INSERT INTO forge_geofences (name, shape, rules, active, owner, created_by)
@@ -106,6 +107,7 @@ export async function PATCH(req: Request): Promise<Response> {
     }
     if (typeof b.active === "boolean") await db.execute(sql`UPDATE forge_geofences SET active = ${b.active}, updated_at = NOW() WHERE id = ${id}::uuid`);
     const assign = cleanAssign(b.assign);
+    if (Array.isArray(b.assign) && assign && assign.length !== b.assign.length) return refuse(400, "Each entry of who the zone watches must look like Entity:id (letters, digits, . _ - and * for all), at most 200 of them. A zone that dropped a bad entry would watch everyone.");
     if (assign) await setAssign(id, assign);
     zonesChanged();
     return Response.json({ ok: true });

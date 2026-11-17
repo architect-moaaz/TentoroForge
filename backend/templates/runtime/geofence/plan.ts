@@ -5,7 +5,7 @@
  *
  * Written by Forge from the brief (`services/blueprint/geofence_plan.py`) and read from `contracts/geofence-plan.json`.
  * Safe to run on every start: a zone is found by its name and a rule by its zone, event and action, so nothing is added twice,
- * and a zone or rule a person changed or removed later is not put back (a zone that is there is left as it is).
+ * and a zone or rule a person CHANGED later is left as it is. One that was DELETED or renamed comes back the next time the seed runs: nothing records that it was removed on purpose.
  *
  *   * A zone with no coordinates is NOT created: nothing guesses where a restaurant is. The owner draws it.
  *   * A rule is bound to its zone by name and is created only when that zone exists. It is never left loose, because a rule for

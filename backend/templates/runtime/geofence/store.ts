@@ -138,12 +138,22 @@ export async function purgeOld(now = Date.now(), days = retentionDays()): Promis
   if (cut == null) return { events: 0, states: 0 };
   const ev = rows(await db.execute(sql`DELETE FROM forge_geofence_events WHERE occurred_at < ${cut} RETURNING id`));
   const st = rows(await db.execute(sql`DELETE FROM forge_geofence_state WHERE phase = 'outside' AND updated_at < to_timestamp(${cut} / 1000.0) RETURNING entity_id`));
+  await dropBusCopies(sql`created_at < to_timestamp(${cut} / 1000.0)`);
   return { events: ev.length, states: st.length };
+}
+
+/** Every crossing is also announced on the event bus with its exact position (`announce`); that copy is history too, so what
+ *  is purged or erased here goes from there as well. Best effort: an app whose bus table is missing has no copy to drop. */
+async function dropBusCopies(where: ReturnType<typeof sql>): Promise<void> {
+  try {
+    await db.execute(sql`DELETE FROM forge_events WHERE type LIKE 'geofence.%' AND ${where}`);
+  } catch { /* no bus table, nothing kept there */ }
 }
 
 /** Forget one record entirely: its crossings and where it stood against every zone (a person leaves, a customer asks to be erased). */
 export async function eraseEntity(entityType: string, entityId: string): Promise<{ events: number; states: number }> {
   const ev = rows(await db.execute(sql`DELETE FROM forge_geofence_events WHERE lower(entity_type) = lower(${entityType}) AND entity_id = ${entityId} RETURNING id`));
   const st = rows(await db.execute(sql`DELETE FROM forge_geofence_state WHERE lower(entity_type) = lower(${entityType}) AND entity_id = ${entityId} RETURNING entity_id`));
+  await dropBusCopies(sql`entity_id = ${entityId}`);
   return { events: ev.length, states: st.length };
 }
