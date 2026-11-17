@@ -39,6 +39,11 @@ import os
 # be forced into every serverless function's trace or Vercel hits ENOENT on
 # `/var/task/src/schemas/home.json` (SSR 500s) or silently disables every
 # business rule.
+# The workflow engine loads nodemailer lazily with `webpackIgnore` (an app that
+# sends no SMTP mail need not install it), which also hides it from the tracer:
+# deployed, every code email failed "Cannot find package 'nodemailer'" (DITANS
+# recruiter sign-up, 2026-11-17). Its files are forced in the same way; the glob
+# matches nothing where it is not installed.
 _AUTHORITATIVE = (
     "/** @type {import('next').NextConfig} */\n"
     "// Preview-behind-prefix mode — see services/next_config_guard.py.\n"
@@ -55,7 +60,7 @@ _AUTHORITATIVE = (
     "  outputFileTracingIncludes: {\n"
     '    "/**": ['
     '"./src/schemas/**/*.json", "./src/contracts/**/*.json", "./registry.json", '
-    '"./rules/**/*", "./src/rules/**/*"'
+    '"./rules/**/*", "./src/rules/**/*", "./node_modules/nodemailer/**/*"'
     "],\n"
     "  },\n"
     "  typescript: { ignoreBuildErrors: true },\n"
