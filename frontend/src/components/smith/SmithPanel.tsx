@@ -65,6 +65,7 @@ import {
   type AttachedPicture,
 } from "./attachedDocuments";
 import ReactMarkdown from "react-markdown";
+import { ASK_SMITH_EVENT, type AskSmithDetail } from "@/lib/ask-smith";
 import { MarkdownLink } from "@/components/chat/MarkdownLink";
 import { SelfHealCard, type SelfHealMetadata } from "@/components/chat/SelfHealCard";
 import remarkGfm from "remark-gfm";
@@ -98,6 +99,7 @@ import {
 import { authFetch } from "@/lib/api";
 import { useSmithDraftStore } from "@/stores/smithDraft";
 import { SecretCard } from "./SecretCard";
+import { PaymentChoiceDialog, paymentsApi, PAYMENT_CHIP } from "@/components/payments/PaymentChoiceDialog";
 
 /** §107 step 1 — what Smith says before the user says anything. */
 type Greeting = {
@@ -205,6 +207,8 @@ interface Message {
   selfHeal?: SelfHealMetadata;
   /** A field to fill in the chat (an API key): shown as a masked box, never sent as a message. */
   secret?: SecretField;
+  /** The build waits for the owner to choose how the app takes payments. */
+  paymentChoice?: boolean;
 }
 
 /** A transcript row as the panel shows it. */
@@ -225,6 +229,7 @@ function messageOf(r: Record<string, unknown>): Message {
     selfHeal: heal,
     // A field to fill in the chat (an API key): never part of the text, only its description.
     secret: (meta.secret as SecretField) ?? undefined,
+    paymentChoice: meta.paymentChoice === true || undefined,
   };
 }
 
@@ -531,6 +536,10 @@ export function SmithPanel({
   }, [messages.length, run.nodesDone, run.thoughts.length]);
 
   const busy = run.status === "running";
+  // WHAT IS RUNNING, SAID AS IT IS. A build streams its plan of steps; a
+  // reply does not. The input read "Building…" under every turn — a "Not now"
+  // included — so a slow answer looked like a build nobody had asked for.
+  const building = busy && (run.nodesTotal > 0 || run.nodes.some((n) => n.state === "running"));
 
   // Discovery already asked "what would you like to build?", so the workspace
   // does not ask again — it carries that answer in as the first turn. Guarded
@@ -804,9 +813,13 @@ export function SmithPanel({
         secret: x.secret,
         diffSummary: x.diffSummary,
         status: x.status,
+        paymentChoice: x.paymentChoice,
         at: Date.now(),
       })),
     ]);
+    // THE BUILD WAITS FOR THE PAYMENT CHOICE: the dialog opens on Smith's word.
+    // The modules the person asked to build come back with the server's question (they were lost: the whole app was built).
+    if (fresh.some((x) => x.paymentChoice)) setPaymentDialog((d) => d ?? { modules: lastModules.current, mode: "build" });
   }, [run.messages]);
 
   // Split out so a turn can be sent by something other than the composer —
@@ -866,6 +879,18 @@ export function SmithPanel({
     setDraft("");
     sendText(text);
   };
+
+  // Another tab hands Smith a request (lib/ask-smith): it lands in the
+  // composer for the person to read and send.
+  useEffect(() => {
+    const onAsk = (e: Event) => {
+      const d = (e as CustomEvent<AskSmithDetail>).detail;
+      if (!d || d.projectId !== projectId || !d.text) return;
+      setDraft(d.text);
+    };
+    window.addEventListener(ASK_SMITH_EVENT, onAsk);
+    return () => window.removeEventListener(ASK_SMITH_EVENT, onAsk);
+  }, [projectId]);
 
   // THE FIGMA IMPORT LANDS HERE.
   //
@@ -939,6 +964,31 @@ export function SmithPanel({
     setMessages((m) => [...m, { role: "user", text: "Approve requirements", at: Date.now() }]);
     void start({ description: "Approve requirements", evidence, history: prior,
                  approved: true, gate: "requirements" });
+  };
+
+  // HOW IT TAKES MONEY, ASKED AS THE BUILD STARTS. Forge decides once per
+  // definition whether the app takes payments; when it does and nobody has
+  // chosen the gateways, the dialog opens and the build waits for it.
+  // "edit": opened from Smith's chip after a change — saving does not start a build.
+  const [paymentDialog, setPaymentDialog] = useState<{ modules: string[] | null; mode: "build" | "edit" } | null>(null);
+  const [checkingPayments, setCheckingPayments] = useState(false);
+  const lastModules = useRef<string[] | null>(null);
+  const buildApp = async (modules: string[] | null) => {
+    if (!projectId) return;
+    lastModules.current = modules;
+    setCheckingPayments(true);
+    try {
+      const v = await paymentsApi.decide(projectId);
+      if (v.payments.needed && !v.payments.decided) {
+        setPaymentDialog({ modules, mode: "build" });
+        return;
+      }
+    } catch {
+      // The server asks again when the build starts; a check that failed never blocks the click.
+    } finally {
+      setCheckingPayments(false);
+    }
+    buildModules(modules);
   };
 
   // THE PRODUCT MODEL'S YES: build all of it, or the modules ticked.
@@ -1203,6 +1253,14 @@ export function SmithPanel({
               <SmithProse text={m.text} />
             )}
 
+            {m.paymentChoice && i === messages.length - 1 && (
+              <button type="button" disabled={busy} data-open-payment-choice=""
+                      onClick={() => setPaymentDialog({ modules: lastModules.current, mode: "build" })}
+                      className="mt-2 rounded border border-current/25 px-2.5 py-1 text-xs font-medium hover:bg-current/10">
+                Choose payment gateways
+              </button>
+            )}
+
             {m.secret && i === messages.length - 1 && (
               // A key typed here goes to the organisation's integrations, not into the transcript;
               // only the last message offers it, so a reloaded history never shows a stale box.
@@ -1239,7 +1297,9 @@ export function SmithPanel({
                       <button
                         key={opt}
                         disabled={busy}
-                        onClick={() => answerQuestion(i, opt)}
+                        // Smith's "Choose payment gateways" OPENS the dialog: sent as
+                        // words it was a turn that asked the same question again.
+                        onClick={() => (opt === PAYMENT_CHIP ? setPaymentDialog({ modules: null, mode: "edit" }) : answerQuestion(i, opt))}
                         className="rounded border border-current/25 px-2 py-0.5 text-xs hover:bg-current/10"
                       >
                         {opt}
@@ -1255,6 +1315,27 @@ export function SmithPanel({
         ))}
 
         <ThinkingTrail thoughts={run.thoughts} nodes={run.nodes} busy={busy} />
+
+        {paymentDialog && projectId && (
+          <PaymentChoiceDialog
+            projectId={projectId}
+            appName={String(((blueprint as { application?: { name?: unknown } } | null | undefined)?.application?.name) ?? "") || undefined}
+            mode={paymentDialog.mode}
+            onClose={() => setPaymentDialog(null)}
+            onDone={(v) => {
+              const pending = paymentDialog;
+              setPaymentDialog(null);
+              if (pending.mode === "edit") {
+                toast.success(v.payments.needed ? "Payments saved. The app's preview uses them now." : "Payments turned off.");
+                return;
+              }
+              toast.success(v.payments.needed
+                ? `Payments set: ${v.payments.gateways.map((g) => g.label).join(" and ") || "a test checkout until a gateway is chosen"}. Building now.`
+                : "No payments for now. Building now.");
+              buildModules(pending?.modules ?? null);
+            }}
+          />
+        )}
 
         {run.status === "error" && (
           <div className="flex items-start gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -1375,7 +1456,11 @@ export function SmithPanel({
             rows={1}
             disabled={busy}
             placeholder={
-              busy ? "Building…" : "Describe the application, or a change to it…"
+              building
+                ? "Building…"
+                : busy
+                  ? "Smith is working on your last message…"
+                  : "Describe the application, or a change to it…"
             }
             className="min-h-11 flex-1 resize-none rounded-xl border bg-background px-4 py-[11px] text-sm leading-5 outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
           />
@@ -1448,10 +1533,10 @@ export function SmithPanel({
         <ProductModelReview
           doc={bp}
           gates={gates.data}
-          busy={busy}
+          busy={busy || checkingPayments}
           wide={wideModel}
           onToggleWide={() => setWideModel((w) => !w)}
-          onBuild={buildModules}
+          onBuild={(m) => void buildApp(m)}
           onEdit={() => composerRef.current?.focus()}
           className="min-h-0 flex-1"
         />
@@ -1472,7 +1557,7 @@ export function SmithPanel({
             </button>
           )}
           {gates.data && (
-            <WaitingModules gates={gates.data} busy={busy} onBuild={buildModules} />
+            <WaitingModules gates={gates.data} busy={busy || checkingPayments} onBuild={(m) => void buildApp(m)} />
           )}
           <BlueprintSummary
             doc={bp}

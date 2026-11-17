@@ -4,7 +4,9 @@
 # builder. Each is plain `node` with type stripping.
 set -e
 DIR="$(cd "$(dirname "$0")" && pwd)"
-for t in bridge-unresolved-route-id build-where condition-log decision dry-run-stand-in join-barrier \
+# decision.test.mts imports the shared decision-table module (and FEEL), so it is
+# bundled by run-decision-step-tests.sh.
+for t in bridge-unresolved-route-id build-where condition-log dry-run-stand-in join-barrier \
          notification-reaches-the-person-it-names record-inputs required-inputs resolve-aggregate; do
   node --experimental-strip-types --no-warnings "$DIR/$t.test.mts"
 done

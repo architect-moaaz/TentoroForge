@@ -8,7 +8,7 @@
  *
  * Forge runtime — do not remove.
  */
-import { bigserial, index, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { bigserial, index, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
 export const forgeAudit = pgTable("forge_audit", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -40,4 +40,10 @@ export const forgeAudit = pgTable("forge_audit", {
   byRecord: index("forge_audit_record_idx").on(t.entity, t.entityId),
   byActor: index("forge_audit_actor_idx").on(t.actorId, t.at),
   byTime: index("forge_audit_at_idx").on(t.at),
+  // THE CHAIN'S TAIL IS FOUND BY seq. Every write reads the newest row's hash
+  // (`ORDER BY seq DESC LIMIT 1`, under the trail's lock) to link the next one.
+  // Without this index that was a scan of the whole trail per write: 281 ms at
+  // 666k rows on DITANS Test, every sensitive read writes one, so pages took
+  // 11-50 s to render and grew slower with every view (2026-11-14).
+  bySeq: uniqueIndex("forge_audit_seq_idx").on(t.seq),
 }));

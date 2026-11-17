@@ -136,4 +136,12 @@ eqJson([formula.output, formula.result, formula.value], ["Morning", "Morning", "
 eqJson(mod._resolveRef("{{compute_time_of_day.output}}", { user: {}, variables: { compute_time_of_day: formula } }), "Morning",
        "and {{step.output}} reads it");
 
+// A VARIABLE SET INSIDE THE LOOP is set, item by item — `set_variable` is not a
+// registered handler, and inside a loop it failed "no action set_variable"
+// (DITANS's stage builder never shifted its later stages, 2026-11-12).
+const looped = await h.for_each({ actionType: "for_each", items: ["09:00", "18:00"], as: "t",
+  steps: [{ key: "part", config: { actionType: "set_variable", variableName: "part", expression: 'if t < "12:00" then "Morning" else "Night"' } }] },
+  { user: {}, variables: {} });
+eqJson([looped.failed, looped.results.map((r: any) => r.part)], [0, ["Morning", "Night"]], "a set_variable inside a loop is evaluated for each item");
+
 done("for_each carries each id forward");

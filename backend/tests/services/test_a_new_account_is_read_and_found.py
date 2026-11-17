@@ -62,7 +62,7 @@ def test_a_sealed_field_is_typed_as_possibly_empty():
 def test_an_unsealed_value_is_read_and_sign_up_seals_as_it_writes():
     engine = (ROOT / "templates/runtime/data-engine.ts").read_text()
     assert "const unsealed = record[encKey] == null && record[col] != null" in engine
-    signup = (ROOT / "templates/app-foundation/src/app/api/auth/signup/route.ts").read_text()
-    assert "await sealSensitive(ACCOUNT.entity, values)" in signup
+    signup = (ROOT / "templates/app-foundation/src/app/api/auth/signup/route.ts").read_text() + (ROOT / "templates/app-foundation/src/lib/account-row.ts").read_text()
+    assert "await sealSensitive(ACCOUNT.entity, row)" in signup
     sdk = (ROOT / "templates/app-foundation/src/sdk/server.ts").read_text()
     assert 'else if (numeric.has(k) && typeof v === "string") out[k] = null;' in sdk

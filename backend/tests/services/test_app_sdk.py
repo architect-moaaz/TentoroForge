@@ -478,6 +478,24 @@ def test_a_coded_root_is_rendered_inside_the_shell_unless_it_is_public(tmp_path)
     assert "export const rootIsPublic = true;" in drawn and "PublicPageFrame" not in drawn and "<PageFrame" in drawn
 
 
+def test_a_public_page_that_draws_its_own_header_gets_no_public_frame():
+    """An employer's careers site (DITANS CP-1) carries the employer's own
+    header. Its design could not be connected, so it had no `figmaFrame`, and
+    the public frame put the application's menu of public pages above it and
+    boxed it into the app's column. `wholeScreen` says the page is its own
+    whole screen; a page without it is framed as before."""
+    from services.blueprint.app_sdk import page_module
+
+    page = {"id": "PAGE-486", "name": "Public Careers Page", "route": "/careers/[slug]",
+            "pattern": "record_workspace", "access": "public"}
+    doc = {"pages": [page], "data": {"entities": []}}
+    row = {"page": "PAGE-486", "load": "", "view": ""}
+    assert "PublicPageFrame" in page_module(doc, page, row)
+    page["wholeScreen"] = True
+    own = page_module(doc, page, row)
+    assert "PublicPageFrame" not in own and "<PageFrame" in own
+
+
 def test_a_sign_in_page_is_given_a_full_height_frame_to_centre_in():
     """Its view was dropped straight into <body>, as tall as its content, so a
     view written to centre itself sat at the top of an empty screen."""

@@ -147,4 +147,25 @@ def template_page(staged: dict, brief: str = "") -> str:
     return "\n".join(lines)
 
 
-__all__ = ["defined", "opening", "template_page", "turn_head"]
+def page_changes(before: str, after: str, *, most: float = 0.4) -> str | None:
+    """What a change moved in a turn's page: its lines taken out (-) and put in
+    (+), each run with the line above it for where it is. None when the moved
+    lines come to more than `most` of the new page: sent as changes they would
+    cost about what the page does, and read worse than the page itself."""
+    import difflib
+    a, b = before.splitlines(), after.splitlines()
+    out: list[str] = []
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
+        if tag == "equal":
+            continue
+        if i1 > 0:
+            out.append("  " + a[i1 - 1])
+        out += ["- " + x for x in a[i1:i2]]
+        out += ["+ " + x for x in b[j1:j2]]
+    text = "\n".join(out)
+    if not text:
+        return ""
+    return None if len(text) > most * max(1, len(after)) else text
+
+
+__all__ = ["defined", "opening", "page_changes", "template_page", "turn_head"]

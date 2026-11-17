@@ -46,6 +46,8 @@ from models.auth import PlatformUser
 from auth import get_current_user
 from pathlib import Path
 
+from concurrent.futures import ThreadPoolExecutor
+
 from services.project_paths import project_root
 from services.project_service import get_project_with_auth
 
@@ -84,6 +86,19 @@ _DETACHED: set[asyncio.Task] = set()
 def _detach(task: "asyncio.Task") -> None:
     _DETACHED.add(task)
     task.add_done_callback(_DETACHED.discard)
+
+#: SMITH'S OWN THREADS. Every turn — a whole build included, for up to an hour
+#: — ran on asyncio's DEFAULT pool, which holds a handful of threads on a small
+#: host and is shared with everything that calls `asyncio.to_thread`. A few
+#: builds in flight filled it, and a "Not now" that needs a millisecond waited
+#: in its queue under "Thinking… 2m" while its ledger already said "working"
+#: (forge-v3, 2026-10-09). Builds and page reviews take the long pool; every
+#: other turn the short one, so an answer never queues behind a build.
+_LONG_TURNS = ThreadPoolExecutor(
+    max_workers=int(os.environ.get("FORGE_BUILD_THREADS", "16")), thread_name_prefix="smith-build")
+_SHORT_TURNS = ThreadPoolExecutor(
+    max_workers=int(os.environ.get("FORGE_TURN_THREADS", "32")), thread_name_prefix="smith-turn")
+
 router = APIRouter(tags=["generation", "blueprint"])
 
 
@@ -814,7 +829,7 @@ def _build_complete_message(doc: dict | None) -> str | None:
              f"{'it' if len(waiting) == 1 else 'them'} from the product model whenever you're ready."
              if waiting else "")
     served_pages = [p for p in (doc.get("pages") or [])
-                    if str(p.get("status") or "").upper() != "REMOVED"]
+                    if str(p.get("status") or "").upper() not in ("REMOVED", "DEPRECATED")]
     unbuilt = _unbuilt_pages(doc)
     funnel = (doc.get("runtime") or {}).get("pages") or {}
     planned = funnel.get("planned")
@@ -1195,7 +1210,7 @@ async def generate_via_blueprint(
         try:
             emit("started", {"projectId": str(project_id),
                              "engine": "blueprint"})
-            outcome = await loop.run_in_executor(None, _acting_as(work, user, project, ceiling, job))
+            outcome = await loop.run_in_executor(_LONG_TURNS, _acting_as(work, user, project, ceiling, job))
             # COMMIT THE BUILT APP. The mainline generate path commits after a
             # build; this DAG path did not, so the app tree stayed untracked and
             # Smith's first change landed in an untracked working tree — its
@@ -1206,7 +1221,14 @@ async def generate_via_blueprint(
                     and isinstance(outcome, dict)
                     and not outcome.get("awaitingApproval")):
                 try:
-                    from services.git_service import git_commit
+                    from services.git_service import git_commit, git_init
+                    # The project's git_init runs at CREATION, before this build
+                    # made output_dir exist, so it no-ops and the app has no repo
+                    # — then Smith's ground-truth (git status vs a baseline) reads
+                    # every change as "nothing changed on disk". git init is
+                    # idempotent, and output_dir exists now, so ensure the repo
+                    # here before the baseline commit.
+                    await git_init(str(output_dir))
                     await git_commit(
                         str(output_dir),
                         f"Initial generation: {(req.description or '')[:80]}",
@@ -1737,15 +1759,19 @@ async def _adopt_mcp_servers(output_dir: Path, project: Any, db: AsyncSession) -
     org_id = getattr(project, "org_id", None)
     if org_id is None:
         return
+    # Each read in its own SAVEPOINT (see `_adopt_brand_language`): one that fails
+    # must not leave the shared transaction aborted for the next.
     try:
         from services.blueprint import mcp_catalog
-        await mcp_catalog.refresh(output_dir, org_id, db)
+        async with db.begin_nested():
+            await mcp_catalog.refresh(output_dir, org_id, db)
     except Exception as exc:  # noqa: BLE001
         logger.warning("[smith-chat] MCP servers not read for %s: %s", output_dir.name, exc)
     if (output_dir / "app" / "package.json").is_file():
         try:
             from services.env_writer import write_env_local_from_platform
-            await write_env_local_from_platform(output_dir, org_id, db)
+            async with db.begin_nested():
+                await write_env_local_from_platform(output_dir, org_id, db)
         except Exception as exc:  # noqa: BLE001
             logger.warning("[smith-chat] app settings not written for %s: %s", output_dir.name, exc)
 
@@ -1972,7 +1998,7 @@ async def smith_chat(
         if event == "message":
             _remember(loop, project_id, "assistant", str(data.get("text") or ""),
                       {k: v for k, v in data.items()
-                       if k in ("options", "diffSummary", "status", "intent", "secret")
+                       if k in ("options", "diffSummary", "status", "intent", "secret", "paymentChoice")
                        and v},
                       lock=memory_lock)
         # The telemetry is still not written to the transcript — it would make
@@ -2015,9 +2041,25 @@ async def smith_chat(
         checks = result.get("checks") if isinstance(result, dict) else None
         if not isinstance(checks, dict) or not checks.get("pending"):
             return
-        _start_checks(loop, str(project_id), checks["output_dir"], checks["app_root"],
-                      memory_lock=memory_lock, app_name=getattr(project, "name", "") or "",
-                      actor=_actor_of(user, project, ceiling))
+
+        async def settings_then_checks() -> None:
+            # THE ORGANISATION'S SETTINGS REACH THE NEW APP FIRST: its payment
+            # gateways' test keys, its integrations, its MCP servers. They were
+            # written only at the start of a later Smith turn, so a freshly
+            # built app's preview had no gateway keys and took payments through
+            # the stand-in (Zenith Yoga, 2026-11-11) — and its checks ran on it.
+            try:
+                from database import async_session
+                from services.env_writer import write_env_local_from_platform
+                async with async_session() as sess:
+                    await write_env_local_from_platform(Path(checks["output_dir"]), project.org_id, sess)
+            except Exception:  # noqa: BLE001 — the next turn writes them; the checks still run
+                logger.warning("[smith-chat] the new app's settings were not written for %s", project_id,
+                               exc_info=True)
+            _start_checks(loop, str(project_id), checks["output_dir"], checks["app_root"],
+                          memory_lock=memory_lock, app_name=getattr(project, "name", "") or "",
+                          actor=_actor_of(user, project, ceiling))
+        asyncio.ensure_future(settings_then_checks())
 
     async def turn() -> None:
 
@@ -2288,6 +2330,8 @@ async def smith_chat(
                         "status": "asked"})
                     return {"status": "asked"}
 
+                # (How it takes money is asked in `_run_dag`, for every door a build comes through.)
+
                 # VERIFICATION IS THE USER'S CALL, NOT AN AUTOMATIC COST. `_run_dag`
                 # offers it beside the completion line for every approved build
                 # (see there), so a build that outran its turn still delivers the
@@ -2347,6 +2391,11 @@ async def smith_chat(
                         "options": ["Build it again anyway", "Show me the screens",
                                     "Nothing, I'll change something first"],
                         "status": "asked"})
+                    return {"status": "asked"}
+                from services.payments.app_payments import build_question as _payment_question
+                _asked = _payment_question(svc)
+                if _asked is not None:
+                    emit("message", _asked)
                     return {"status": "asked"}
                 emit("message", {"text": "Building it now — this takes a few minutes."})
                 return _run_dag(str(output_dir), app_root, req.message,
@@ -2418,7 +2467,7 @@ async def smith_chat(
                 _the_brief = _brief_with_documents(_brief_from(req.history, req.message), req.evidence)
                 named_design = _figma_in(_the_brief) or _uxpilot_in(_the_brief)
                 turn_result = handle_chat_v2(ChatV2Request(
-                    project_id=str(project_id), output_dir=str(output_dir),
+                    project_id=str(project_id), output_dir=str(output_dir), user_id=str(user.id),
                     message=req.message + shown_note,
                     attachments=shown_files,
                     history=[(t.role, t.text) for t in req.history if t.text][-10:],
@@ -2504,7 +2553,7 @@ async def smith_chat(
             # model reasoning; the stage list above still does exactly that.
             # This is the conversation, and it is where the user asked for it.
             turn_result = handle_chat_v2(ChatV2Request(
-                project_id=str(project_id), output_dir=str(output_dir),
+                project_id=str(project_id), output_dir=str(output_dir), user_id=str(user.id),
                 message=req.message + _document_note(
                     str(output_dir), attached_docs,
                     late=bool(svc is not None and (svc.doc.get("requirements") or svc.doc.get("pages")))) + shown_note,
@@ -2589,7 +2638,9 @@ async def smith_chat(
             # Keep the INNER future too: `wait_for` cancels the shield on timeout,
             # but the inner build keeps running, and it is the inner one we wait
             # on to emit the real completion afterwards.
-            _inner = loop.run_in_executor(None, _acting_as(work, user, project, ceiling, job))
+            _inner = loop.run_in_executor(
+                _LONG_TURNS if (req.approved or _reviewing) else _SHORT_TURNS,
+                _acting_as(work, user, project, ceiling, job))
             # ON DISK, FOR EVERY WORKER. The registry above is this worker's
             # memory; a panel whose stream dropped polls whichever worker
             # answers, and only a ledger tells it the turn is still working —
@@ -2725,9 +2776,15 @@ async def _adopt_brand_language(output_dir: Path, project: Any,
         from models.brand_profile import OrgBrandProfile
         from sqlalchemy import select
 
-        found = await db.execute(
-            select(OrgBrandProfile).where(OrgBrandProfile.org_id == org_id))
-        profile = found.scalar_one_or_none()
+        # In a SAVEPOINT. This session is shared with everything the turn does next,
+        # and Postgres refuses every statement after a failed one until the
+        # transaction is rolled back — so an unreadable profile (a missing table)
+        # silently took the MCP-server read down with it ("InFailedSQLTransaction").
+        # The savepoint rolls back only this read; the transaction stays usable.
+        async with db.begin_nested():
+            found = await db.execute(
+                select(OrgBrandProfile).where(OrgBrandProfile.org_id == org_id))
+            profile = found.scalar_one_or_none()
     except Exception as exc:  # noqa: BLE001 — no profile readable is no profile
         logger.info("[brand] %s: profile not readable (%s)", org_id, exc)
         return False
@@ -3127,6 +3184,20 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
                     emit("message", _maps_ask)
             except Exception as exc:  # noqa: BLE001 — a suggestion never stops a build
                 logger.warning("[smith-chat] maps key not asked for %s: %s", output_dir.name, exc)
+            # HOW IT TAKES MONEY, BEFORE IT IS BUILT, WHICHEVER DOOR IT CAME
+            # THROUGH. An app that sells something waits for its owner to choose
+            # the gateways (the dialog opens on this message); one that takes no
+            # money builds. It used to be asked at the card alone, and the answer
+            # to the design question, a resumed build and Smith's "build" went past it.
+            from services.payments.app_payments import build_question as _payment_question
+            _asked = _payment_question(svc)
+            if _asked is not None:
+                _add_to_the_brief(svc, description)
+                if documents:
+                    from services.blueprint import documents as _documents
+                    _documents.store(output_dir, documents)
+                emit("message", _asked)
+                return {"status": "asked"}
         if approved and announce_completion:
             # "APPROVE AND BUILD" IS THE APPROVAL. Recorded now, against the
             # definition as it stands, so a plan approval that had gone stale
@@ -3497,7 +3568,19 @@ def _gate_turn(svc: Any, gate: str, output_dir: str, app_root: str, req: Any, *,
                                  "say it another way, or name the item you mean.",
                          "status": "needs_user"})
         return {"status": "needs_user"}
-    emit("message", {"text": text, "status": "resolved"})
+    # A CHANGE THAT MAKES THE APP TAKE MONEY ASKS HOW, here too: "take payments
+    # for the memberships" before the app is modelled came through this door,
+    # and nothing asked which of the organisation's gateways it uses.
+    _options: list[str] = []
+    try:
+        from services.payments.app_payments import sense_after_change
+        _sensed = sense_after_change(output_dir, req.message)
+        if _sensed:
+            text = f"{text}\n\n{_sensed['said']}"
+            _options = list(_sensed.get("options") or [])
+    except Exception:  # noqa: BLE001 — the change stands; the Payments tab can still be opened
+        logger.exception("[gates] sensing payments after a change failed")
+    emit("message", {"text": text, "status": "resolved", **({"options": _options} if _options else {})})
     emit("state", {"state": str(svc.doc.get("state") or "")})
     return {"status": "resolved", "gate": gate, "version": out.get("version")}
 

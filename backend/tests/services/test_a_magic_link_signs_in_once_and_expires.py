@@ -26,7 +26,7 @@ def test_auth_ts_consumes_a_link_once_and_builds_every_provider_from_names():
     assert "BoxyHQSAMLProvider({ id: e.id" in auth and 'checks: ["pkce", "state"]' in auth and "wellKnown: `${issuer}/.well-known/openid-configuration`" in auth
     assert "process.env[e.clientIdKey]" in auth and "if (!connected(e)) return null;" in auth
     assert '"/login?error=DomainNotAllowed"' in auth and '"/login?error=NotInvited"' in auth
-    assert "roleFromClaims(claims, e)" in auth and "Object.assign(user, await sessionUserOf(row))" in auth
+    assert "roleFromClaims(claims, e)" in auth and "Object.assign(user, await startSession(row, `sso:${e.id}`))" in auth
     assert "sk_" not in auth and "client_secret=" not in auth
     cookies = (ROOT / "templates/app-foundation/src/lib/session-cookie.ts").read_text()
     assert "pkceCodeVerifier" in cookies and "nonce" in cookies and "state:" in cookies

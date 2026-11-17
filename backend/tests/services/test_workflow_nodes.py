@@ -8,7 +8,7 @@ def test_node_shape_matches_what_the_editor_reads():
     assert n["data"]["config"] == {"table": "tickets", "nodeType": "user_task"}
     assert n["data"]["label"] == "Review"
     assert n["data"]["status"] == "idle"
-    assert n["position"] == {"x": 250, "y": 240}
+    assert n["position"] == {"x": 250, "y": 300}
 
 
 def test_builder_does_not_mutate_the_caller_config():

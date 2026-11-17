@@ -1,6 +1,7 @@
 "use client";
 
-import { use, useState } from "react";
+import { Suspense, use, useEffect, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { Search, Loader2, LayoutTemplate } from "lucide-react";
 import { api } from "@/lib/api";
@@ -9,6 +10,10 @@ import { Button } from "@/components/ui/button";
 import { TemplateCard } from "@/components/templates/TemplateCard";
 import { TemplateDetailModal } from "@/components/templates/TemplateDetailModal";
 import { OrgTemplates } from "@/components/templates/OrgTemplates";
+import { GallerySection } from "@/components/templates/GallerySection";
+import { TemplateDetailDialog } from "@/components/templates/TemplateDetailDialog";
+import { SubmitTemplateDialog } from "@/components/templates/SubmitTemplateDialog";
+import { CreatorProfileDialog } from "@/components/templates/CreatorProfileDialog";
 
 interface Template {
   slug: string;
@@ -37,6 +42,24 @@ function TemplatesGallery({ orgId }: { orgId: string }) {
     null,
   );
   const [showDetail, setShowDetail] = useState(false);
+  // One template, a builder's profile, or the submit wizard: opened from a
+  // card, or from a link (a notification says `?template=<id>`).
+  const router = useRouter();
+  const pathname = usePathname();
+  const params = useSearchParams();
+  const [openTemplate, setOpenTemplate] = useState<string | null>(null);
+  const [openCreator, setOpenCreator] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState<string | null>(null);
+  useEffect(() => {
+    const linked = params.get("template");
+    if (linked && /^[0-9a-f]{32}$/.test(linked)) setOpenTemplate(linked);
+    const submit = params.get("submit");
+    if (submit && /^[0-9a-f]{32}$/.test(submit)) setSubmitting(submit);
+  }, [params]);
+  const closeTemplate = () => {
+    setOpenTemplate(null);
+    if (params.get("template")) router.replace(pathname);
+  };
 
   const { data, isLoading } = useQuery({
     queryKey: ["templates", selectedCategory, search],
@@ -73,7 +96,7 @@ function TemplatesGallery({ orgId }: { orgId: string }) {
       <div className="mb-6">
         <h1 className="mb-1 text-2xl font-semibold text-foreground">Templates</h1>
         <p className="text-sm text-muted-foreground">
-          Start from an app your organisation saved, or a pre-built template
+          Start from an app your organisation saved, or one shared in the Gallery
         </p>
       </div>
 
@@ -89,9 +112,19 @@ function TemplatesGallery({ orgId }: { orgId: string }) {
         </div>
       </div>
 
-      <OrgTemplates orgId={orgId} search={search} />
+      <OrgTemplates
+        orgId={orgId}
+        search={search}
+        onOpen={setOpenTemplate}
+        onSubmit={setSubmitting}
+      />
 
-      <h2 className="mb-3 text-base font-semibold text-foreground">Gallery</h2>
+      <GallerySection search={search} onOpen={setOpenTemplate} onOpenCreator={setOpenCreator} />
+
+      <h2 className="mb-1 text-base font-semibold text-foreground">Starter ideas</h2>
+      <p className="mb-3 text-xs text-muted-foreground">
+        Outlines of common apps to describe to Smith from scratch.
+      </p>
       {/* Category filter (gallery) */}
       <div className="mb-6 flex flex-wrap items-center gap-3">
         <div className="flex flex-wrap gap-1">
@@ -144,6 +177,38 @@ function TemplatesGallery({ orgId }: { orgId: string }) {
         open={showDetail}
         onOpenChange={setShowDetail}
       />
+
+      <TemplateDetailDialog
+        templateId={openTemplate}
+        orgId={orgId}
+        open={!!openTemplate}
+        onOpenChange={(o) => !o && closeTemplate()}
+        onOpenCreator={(id) => setOpenCreator(id)}
+        onSubmit={(id) => {
+          closeTemplate();
+          setSubmitting(id);
+        }}
+      />
+      <CreatorProfileDialog
+        userId={openCreator}
+        open={!!openCreator}
+        onOpenChange={(o) => !o && setOpenCreator(null)}
+        onOpenTemplate={(id) => {
+          setOpenCreator(null);
+          setOpenTemplate(id);
+        }}
+      />
+      <SubmitTemplateDialog
+        templateId={submitting}
+        orgId={orgId}
+        open={!!submitting}
+        onOpenChange={(o) => {
+          if (!o) {
+            setSubmitting(null);
+            if (params.get("submit")) router.replace(pathname);
+          }
+        }}
+      />
     </div>
   );
 }
@@ -154,5 +219,10 @@ export default function TemplatesPage({
   params: Promise<{ orgId: string }>;
 }) {
   const { orgId } = use(params);
-  return <TemplatesGallery orgId={orgId} />;
+  // useSearchParams needs a Suspense boundary on a statically optimised page.
+  return (
+    <Suspense fallback={null}>
+      <TemplatesGallery orgId={orgId} />
+    </Suspense>
+  );
 }

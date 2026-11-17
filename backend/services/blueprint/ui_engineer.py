@@ -41,6 +41,7 @@ from services.blueprint.app_sdk import (
     code_page_files, project_app_sdk, sdk_reference,
 )
 from services.blueprint.repeated_sections import drop_repeated_sections
+from services.blueprint.tsc_gate import tsc_slot
 from services.build_usage import carrying
 
 logger = logging.getLogger(__name__)
@@ -408,6 +409,16 @@ useWorkflow(workflows.x, { successMessage?, redirectTo?, silent? })
    On success the page's data refreshes (or it navigates to redirectTo) and a toast is shown.
    When the workflow's own rules refuse the input, `ok` is false and `error` is the workflow's
    sentence, shown as an error toast — `successMessage` is only ever shown for a real success.
+
+useRuleHints(model, values, { id?, previous? }?) → { required(field), hidden(field), readonly(field), message(field), errors, pending }
+   What the app's BUSINESS RULES say about the values being typed, asked of the rules themselves. A
+   form that shows, hides or requires a field because of a rule asks here —
+   `const rules = useRuleHints("<Model>", { <field>: <value as typed> })`, then
+   `rules.required("<field>")` and `rules.message("<field>")` — and NEVER writes the rule's
+   number or values into the page: the person changes rules in the Business Rules tab and the
+   screen must follow at once. A form that EDITS an existing record passes its `id` (and the record
+   as loaded as `previous`), so rules about a change are asked as a change, not as a new record.
+   The save checks every rule anyway; this is only what the form shows.
 
 <SignInForm submitLabel? className? />          // an `auth` login page: email, password, signs in, goes home
 <SignUpForm submitLabel? className? columns?={1 | 2} />   // an `auth` signup page: the person's details + login,
@@ -791,7 +802,7 @@ view.tsx — "use client" on the first line.
     "@/sdk/tracking" (LiveTrackingMap, ShareLocation: a driver's dot moving on a map while a job
     runs — see LIVE TRACKING below),
     "@/sdk" (entity types, workflows, pages, widgets, href, fileUrl), "@/sdk/client" (useWorkflow,
-    WorkflowForm, WorkflowButton, WidgetView, ImageSearch, NearMe, formatDistance, distanceKm,
+    WorkflowForm, WorkflowButton, WidgetView, ImageSearch, NearMe, formatDistance, distanceKm, useRuleHints,
     useLive — `useLive(10)` in a view whose records change while someone watches: it re-reads
     the page every 10 seconds while the tab is open; a section marked `live` calls it),
     "@/sdk/camera" (CameraCapture, BarcodeScanner), "@/sdk/i18n" (useT, useLanguage, LanguageSwitch), and
@@ -1528,8 +1539,9 @@ def typecheck(doc: dict, app_root: Path, page_id: str, load: str, view: str,
             "include": ["page.tsx", "load.ts", "view.tsx", "parts/*.tsx", "../../next-env.d.ts",
                         "../../src/types/**/*.d.ts"],
         }))
-        proc = subprocess.run([str(tsc), "-p", str(check / "tsconfig.json"), "--pretty", "false"],
-                              cwd=str(app_root), capture_output=True, text=True, encoding="utf-8", timeout=timeout)
+        with tsc_slot():
+            proc = subprocess.run([str(tsc), "-p", str(check / "tsconfig.json"), "--pretty", "false"],
+                                  cwd=str(app_root), capture_output=True, text=True, encoding="utf-8", timeout=timeout)
         # tsc prints paths relative to its own idea of the cwd — under a
         # symlinked root (`/tmp` on macOS) that is `../../../../tmp/…/<check>/`,
         # so the check directory is looked for anywhere in the path, not at

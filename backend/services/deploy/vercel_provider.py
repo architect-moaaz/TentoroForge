@@ -524,7 +524,9 @@ class VercelDeployProvider:
             # gets the same ones, never new ones (a new encryption key makes
             # every sealed value unreadable; see services/push_keys).
             from services.push_keys import VAPID_KEYS
-            app_secrets = {k: local_secrets[k] for k in (*VAPID_KEYS, "SENSITIVE_ENCRYPTION_KEY")
+            # The analytics settings go too, so a published app reports to the same place with the same anonymous codes. NOT the "include message
+            # text" choice: a development app may share the words of a failed chat, a live app must be asked on purpose.
+            app_secrets = {k: local_secrets[k] for k in (*VAPID_KEYS, "SENSITIVE_ENCRYPTION_KEY", "FORGE_INSIGHTS_USER_SALT", "FORGE_INSIGHTS_URL", "FORGE_INSIGHTS_KEY")
                            if local_secrets.get(k) and k not in existing_by_key}
 
             # WHERE THE APP REPORTS ITS FAILURES (services/app_reporting): the
@@ -544,10 +546,17 @@ class VercelDeployProvider:
                     nextauth_url = published_address(snapshot.output_dir, _slugify(snapshot.project_slug))
                 except Exception:  # noqa: BLE001 — no Blueprint to read: no provider to tell
                     nextauth_url = ""
+            # THE APP'S PAYMENT GATEWAYS LAST: their keys for this side (test keys
+            # on Test, live on Production) over the organisation's older ones,
+            # and nothing this side must not carry.
+            side_env = {**publish_env(snapshot.project_id),
+                        **envs.integrations_for(side, dict(snapshot.integrations)),
+                        **envs.side_settings(side, test_recipients=snapshot.test_recipients),
+                        **dict(snapshot.payments_env)}
+            for gone in snapshot.remove_env:
+                side_env.pop(gone, None)
             env = build_deploy_env(
-                integrations={**publish_env(snapshot.project_id),
-                              **envs.integrations_for(side, dict(snapshot.integrations)),
-                              **envs.side_settings(side, test_recipients=snapshot.test_recipients)},
+                integrations=side_env,
                 neon_url=neon_url,
                 vercel_url="",  # unused — NEXTAUTH_URL is left to VERCEL_URL unless a provider needs it
                 nextauth_secret=nextauth_secret,
@@ -574,6 +583,11 @@ class VercelDeployProvider:
                     await self.vercel.set_env(
                         vercel_project_id, key, val, targets
                     )
+
+            for gone in snapshot.remove_env:
+                prior = existing_by_key.get(gone)
+                if prior and prior.get("id") and gone not in env:
+                    await self.vercel.delete_env(vercel_project_id, prior["id"])
 
             # NEXTAUTH_URL is intentionally unset so NextAuth falls back to
             # Vercel's own VERCEL_URL — the real host — on both preview and

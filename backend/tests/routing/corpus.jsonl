@@ -99,6 +99,8 @@
 {"say": "give the customer their money back for booking 88", "verb": "refund"}
 {"say": "prices are in dirhams", "verb": "set_currency"}
 {"say": "use GBP", "verb": "set_currency"}
+{"say": "take payments through razorpay", "verb": "set_up_payments"}
+{"say": "let people subscribe for 9 dollars a month", "verb": "set_up_payments"}
 {"say": "add an organisation called Northside Clinic", "verb": "add_organisation"}
 {"say": "we have a new branch, Riverside", "verb": "add_organisation"}
 {"say": "move dave@clinic.com to Northside as a Nurse", "verb": "move_login"}
@@ -341,3 +343,10 @@
 {"say": "I want to reuse this app later for another client", "verb": "save_as_template"}
 {"say": "make a template out of this", "verb": "save_as_template"}
 {"say": "can I keep this as a starting point for other apps?", "verb": "save_as_template"}
+{"say": "link the deposit rule to the Book a room workflow", "verb": "link_rule"}
+{"say": "make Approve leave check the days left rule", "verb": "link_rule"}
+{"say": "stop checking the late fee rule in Return a book", "verb": "unlink_rule"}
+{"say": "is my template approved yet?", "verb": "template_status"}
+{"say": "what templates do we have?", "verb": "template_status"}
+{"say": "submit my template for review", "verb": "submit_template"}
+{"say": "publish the template to the gallery", "verb": "submit_template"}

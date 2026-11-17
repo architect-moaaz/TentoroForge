@@ -27,6 +27,8 @@ def test_the_scaffold_signup_form_asks_the_accounts_fields_and_sends_them():
 def test_the_route_takes_the_typed_name_as_the_display_name_and_honours_initial_values():
     route = (FOUNDATION / "app" / "api" / "auth" / "signup" / "route.ts").read_text()
     assert "accountValues(data.account ?? {}, data.email, data.name)" in route
+    # The account fields are worked out in one place for every way an account is made.
+    route += (FOUNDATION / "lib" / "account-row.ts").read_text()
     assert "ACCOUNT.labelField === f.name || NAME_LIKE.test(f.name)" in route
     assert 'Object.prototype.hasOwnProperty.call(ACCOUNT_INITIAL, f.name)) continue;' in route
 

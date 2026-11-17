@@ -4,8 +4,9 @@ import json
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
@@ -18,7 +19,11 @@ from models.project import (
     AgentType,
     Version,
 )
-from schemas.agent_builder import AgentDefinitionSave, AgentListItem, AgentTestRequest
+from schemas.agent_builder import (
+    AgentBlastFixes, AgentBlastInvent, AgentBlastRun, AgentBlastTool, AgentBlastWrite, AgentDefinitionSave, AgentListItem, AgentRecordingSend, AgentScenarioSave,
+    AgentTestRequest,
+    AgentWatch,
+)
 from services.project_service import get_project_with_auth
 from services.git_service import git_commit
 from sse_helpers import sse_event, stream_agent_messages
@@ -29,9 +34,18 @@ router = APIRouter(tags=["agent-builder"], dependencies=[Depends(feature_gate("a
 AGENT_DEFS_DIR = "agent-definitions"  # relative to project output_dir
 
 
-def _agent_defs_path(output_dir: str) -> Path:
+def _agent_defs_path(output_dir: str, *, create: bool = False) -> Path:
+    """The project's agent-definitions directory.
+
+    Only a WRITE creates it, and with its parents: a project row can outlive its
+    folder (a draft whose output directory was removed, a restore from a database
+    alone), and creating one level of a missing path raised FileNotFoundError out
+    of Save. Reads must not create anything — listing the agents of a project that
+    has none is not a reason to put a directory on disk.
+    """
     p = Path(output_dir) / AGENT_DEFS_DIR
-    p.mkdir(exist_ok=True)
+    if create:
+        p.mkdir(parents=True, exist_ok=True)
     return p
 
 
@@ -66,6 +80,46 @@ async def list_agent_definitions(
     return items
 
 
+@router.get("/api/projects/{project_id}/agent-definitions/handoff-options")
+async def get_handoff_options(
+    project_id: uuid.UUID,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """The roles and people the human-handoff box can name, from this app. Declared BEFORE the `{agent_id}` route,
+    which would otherwise read "handoff-options" as an agent's id."""
+    import asyncio
+
+    from services.agent_handoff_options import handoff_options
+
+    project = await get_project_with_auth(project_id, user, db)
+    if not project.output_dir:
+        return {"roles": [], "people": [], "peopleNote": "No output directory."}
+    return await asyncio.to_thread(handoff_options, project.output_dir)
+
+
+@router.get("/api/projects/{project_id}/agent-definitions/insights")
+async def agent_insights(
+    project_id: uuid.UUID,
+    app_url: str,
+    days: int = Query(7, ge=1, le=90),
+    agent_id: str = "",
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """How the agent is doing in the connected development app: what it costs (an estimate) and how good it is. The platform asks
+    the app with its secret; the browser never sees it. `app_url` is "tunnel" or a localhost address, exactly as for Watch live.
+    Answers `{ok: true, insights}` or `{ok: false, reason}` and never raises for an app that cannot be reached. Declared BEFORE
+    the `{agent_id}` route, which would otherwise read "insights" as an agent's id."""
+    from services.agent_debug import read_debug_secret
+    from services.agent_insights import fetch
+
+    project = await get_project_with_auth(project_id, user, db)
+    if app_url.strip().lower() == "tunnel":
+        return await fetch(str(project.id), "tunnel", None, days, agent_id)
+    return await fetch(str(project.id), app_url, read_debug_secret(_debug_roots(project)), days, agent_id)
+
+
 @router.get("/api/projects/{project_id}/agent-definitions/{agent_id}")
 async def get_agent_definition(
     project_id: uuid.UUID,
@@ -85,20 +139,371 @@ async def get_agent_definition(
     return json.loads(agent_file.read_text())
 
 
-@router.post("/api/projects/{project_id}/agent-definitions", status_code=201)
-async def save_agent_definition(
+@router.post("/api/projects/{project_id}/agent-definitions/suggest")
+async def suggest_agent_definition(
+    project_id: uuid.UUID,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """An agent drawn from this app's own Blueprint (its tables, workflows, rules and who may do
+    what). Nothing is saved: the builder loads it onto the canvas to edit, save and Apply."""
+    from services.agent_suggest import suggest_agent
+
+    project = await get_project_with_auth(project_id, user, db)
+    if not project.output_dir:
+        raise HTTPException(status_code=400, detail="No output directory")
+    path = Path(project.output_dir) / ".forge" / "blueprint" / "current.json"
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raise HTTPException(
+            status_code=409,
+            detail="This project has no Blueprint yet — build the app first, then suggest an agent for it.",
+        )
+    return suggest_agent(doc)
+
+
+@router.post("/api/projects/{project_id}/agent-definitions/check")
+async def check_agent_definition(
     project_id: uuid.UUID,
     req: AgentDefinitionSave,
     user: PlatformUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create or update an agent definition."""
+    """What is wrong with this agent, before Apply: the compiler's notes and the app's own rules, each pinned
+    to the box it is about. Nothing is saved or installed."""
+    from services.agent_check import check_agent
+    from services.agent_runtime_install import resolve_roots
+
+    project = await get_project_with_auth(project_id, user, db)
+    if not project.output_dir:
+        raise HTTPException(status_code=400, detail="No output directory")
+    _, app_root = resolve_roots(project.output_dir)
+    return check_agent(req.model_dump(), app_root)
+
+
+@router.post("/api/projects/{project_id}/agent-definitions/suggest-scenarios")
+async def suggest_agent_scenarios(
+    project_id: uuid.UUID,
+    req: AgentDefinitionSave,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """A starting set of test conversations drawn from what this agent can do. Nothing is saved."""
+    from services.agent_scenarios import suggest_scenarios
+
+    await get_project_with_auth(project_id, user, db)
+    return {"scenarios": suggest_scenarios(req.model_dump())}
+
+
+@router.get("/api/projects/{project_id}/agent-definitions/{agent_id}/tests")
+async def get_agent_scenarios(
+    project_id: uuid.UUID,
+    agent_id: str,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """The agent's saved test conversations."""
+    from services.agent_scenarios import load_scenarios
+
+    project = await get_project_with_auth(project_id, user, db)
+    if not project.output_dir:
+        return {"scenarios": []}
+    return {"scenarios": load_scenarios(project.output_dir, agent_id)}
+
+
+@router.put("/api/projects/{project_id}/agent-definitions/{agent_id}/tests")
+async def save_agent_scenarios(
+    project_id: uuid.UUID,
+    agent_id: str,
+    req: AgentScenarioSave,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Save the agent's test conversations (cleaned: only fields that mean something are kept)."""
+    from services.agent_scenarios import save_scenarios
+
+    project = await get_project_with_auth(project_id, user, db)
+    if not project.output_dir:
+        raise HTTPException(status_code=400, detail="No output directory")
+    return {"scenarios": save_scenarios(project.output_dir, agent_id, req.scenarios)}
+
+
+def _debug_roots(project) -> Path:
+    """The app folder of a project, for the live run. A project that was never built has none."""
+    from services.agent_runtime_install import resolve_roots
+
+    if not project.output_dir:
+        raise HTTPException(status_code=400, detail="This project has not been built yet, so there is no app to run.")
+    return resolve_roots(project.output_dir)[1]
+
+
+@router.get("/api/projects/{project_id}/agent-definitions/debug/status")
+async def debug_status(
+    project_id: uuid.UUID,
+    app_url: str,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Whether the running app can be watched live: it is running, it accepts this project's key, and it is in
+    development. If the address is another project's, says where this project's app is."""
+    from services.agent_debug import DebugError, read_debug_secret, status, tunnel_status
+
+    project = await get_project_with_auth(project_id, user, db)
+    if app_url.strip().lower() == "tunnel":
+        # the app is on the builder's own computer, behind its reverse SSH tunnel: the platform chose that address itself
+        return await tunnel_status(str(project.id))
+    app_root = _debug_roots(project)
+    try:
+        return await status(app_url, read_debug_secret(app_root))
+    except DebugError as e:
+        return {"ok": False, "reason": str(e)}
+
+
+@router.post("/api/projects/{project_id}/agent-definitions/debug/watch")
+async def debug_watch(
+    project_id: uuid.UUID,
+    req: AgentWatch,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Every chat the running app has, live, as the app's own people have them: who wrote what, each step the
+    runtime takes, each model call, each tool and the real request behind it. The first event says which box on
+    the canvas each tool belongs to. Stays open until the builder closes it."""
+    import json as _json
+
+    from fastapi.responses import StreamingResponse
+
+    from services import agent_tunnel
+    from services.agent_debug import NOT_PAIRED, flow_map, read_debug_secret, watch_stream
+
+    project = await get_project_with_auth(project_id, user, db)
+    via_tunnel = req.app_url.strip().lower() == "tunnel"
+    if via_tunnel:
+        reg = agent_tunnel.get(str(project.id))
+        target, secret = (agent_tunnel.target_url(str(project.id)), (reg or {}).get("secret")) if reg else (None, None)
+    else:
+        target, secret = req.app_url, read_debug_secret(_debug_roots(project))
+
+    async def events():
+        if req.graph is not None:
+            yield f"data: {_json.dumps({'type': 'platform_map', **flow_map(req.graph.model_dump())})}\n\n".encode()
+        if not target:
+            yield f"data: {_json.dumps({'type': 'error', 'message': NOT_PAIRED})}\n\n".encode()
+            return
+        async for chunk in watch_stream(target, secret, role=req.role, user_id=req.user_id, trusted=via_tunnel):
+            yield chunk
+
+    return StreamingResponse(events(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"})
+
+
+@router.get("/api/projects/{project_id}/agent-definitions/blast/bombs")
+async def blast_bombs(
+    project_id: uuid.UUID,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """The kinds of bomb that can be thrown at an agent, and the limits on one blast."""
+    from services.agent_blast import BOMBS, MAX_REPEATS, MAX_TESTS, PER_BOMB_DEFAULT, TOOL_ANGLES, TOOL_PER_ANGLE_DEFAULT
+
+    await get_project_with_auth(project_id, user, db)
+    return {"bombs": BOMBS, "maxTests": MAX_TESTS, "maxRepeats": MAX_REPEATS, "perBomb": PER_BOMB_DEFAULT,
+            "toolAngles": [{"key": a["key"], "title": a["title"]} for a in TOOL_ANGLES], "perAngle": TOOL_PER_ANGLE_DEFAULT}
+
+
+@router.post("/api/projects/{project_id}/agent-definitions/{agent_id}/blast/invent")
+async def blast_invent(
+    project_id: uuid.UUID,
+    agent_id: str,
+    req: AgentBlastInvent,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Have an AI invent tricky tests for this agent as drawn. Nothing is run or saved."""
+    from services.agent_blast import client_for, invent_bombs
+    from services.agent_spend import MAX_HELPER_CALLS, gate, meter_for
+
+    project = await get_project_with_auth(project_id, user, db)
+    await gate(db, project, user, calls=2)  # this spends the platform's model key: 402 when the organisation cannot pay
+    meter = meter_for(project, user, "agent_blast", MAX_HELPER_CALLS)
+    try:
+        return {"tests": await invent_bombs(req.graph.model_dump(), req.bombs, req.per_bomb, client=client_for(meter))}
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/api/projects/{project_id}/agent-definitions/{agent_id}/blast/tool-tests")
+async def blast_tool_tests(
+    project_id: uuid.UUID,
+    agent_id: str,
+    req: AgentBlastTool,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Have an AI study ONE tool and write the tests that would break it, with a short analysis of what the tool does and how
+    it could go wrong. One model call. Nothing is run or saved here: the builder runs them with the blast."""
+    from services.agent_blast import client_for, invent_tool_tests
+    from services.agent_spend import MAX_HELPER_CALLS, gate, meter_for
+
+    project = await get_project_with_auth(project_id, user, db)
+    await gate(db, project, user, calls=4)
+    meter = meter_for(project, user, "agent_blast", MAX_HELPER_CALLS)
+    try:
+        return await invent_tool_tests(req.graph.model_dump(), req.tool, req.angles, req.per_angle, client=client_for(meter))
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/api/projects/{project_id}/agent-definitions/{agent_id}/write-tests")
+async def write_agent_tests(
+    project_id: uuid.UUID,
+    agent_id: str,
+    req: AgentBlastWrite,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Have an AI write everyday test cases for this agent as drawn, each with a note on what a good reply does. One
+    model call. Nothing is run or saved here: the builder keeps them in My tests."""
+    from services.agent_blast import client_for, write_tests
+    from services.agent_spend import MAX_HELPER_CALLS, gate, meter_for
+
+    project = await get_project_with_auth(project_id, user, db)
+    await gate(db, project, user, calls=2)
+    meter = meter_for(project, user, "agent_blast", MAX_HELPER_CALLS)
+    try:
+        return {"tests": await write_tests(req.graph.model_dump(), req.count, client=client_for(meter))}
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/api/projects/{project_id}/agent-definitions/{agent_id}/blast/run")
+async def blast_run(
+    project_id: uuid.UUID,
+    agent_id: str,
+    req: AgentBlastRun,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Run tests against the agent as drawn (a real model call each; the tools it asks for are reported, never
+    executed) and report each as it finishes: ``start``, a ``result`` per test (defused or exploded, with why),
+    then ``done`` with the totals. Saved tests and invented bombs alike."""
+    import json as _json
+
+    from fastapi.responses import StreamingResponse
+
+    from services.agent_blast import blast, estimate_blast_calls
+    from services.agent_spend import MAX_BLAST_CALLS, gate, meter_for
+
+    project = await get_project_with_auth(project_id, user, db)
+    # Priced and checked BEFORE the stream starts (once it has, a refusal can no longer be an HTTP 402); the run itself is
+    # capped at MAX_BLAST_CALLS model calls and its real usage is recorded under this application and person.
+    await gate(db, project, user, calls=estimate_blast_calls(req.tests, req.repeats))
+    meter = meter_for(project, user, "agent_blast", MAX_BLAST_CALLS)
+
+    async def events():
+        async for e in blast(req.graph.model_dump(), req.tests, repeats=req.repeats, meter=meter):
+            yield f"data: {_json.dumps(e)}\n\n".encode()
+
+    return StreamingResponse(events(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"})
+
+
+@router.post("/api/projects/{project_id}/agent-definitions/{agent_id}/blast/fixes")
+async def blast_fixes(
+    project_id: uuid.UUID,
+    agent_id: str,
+    req: AgentBlastFixes,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Proposed fixes for the tests that exploded: a sentence for the instructions, a clearer tool description,
+    or "ask first". Nothing is applied: the builder decides."""
+    from services.agent_blast import client_for, propose_fixes
+    from services.agent_spend import MAX_HELPER_CALLS, gate, meter_for
+
+    project = await get_project_with_auth(project_id, user, db)
+    await gate(db, project, user, calls=2)
+    meter = meter_for(project, user, "agent_blast", MAX_HELPER_CALLS)
+    try:
+        return {"fixes": await propose_fixes(req.graph.model_dump(), req.results, client=client_for(meter))}
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/api/projects/{project_id}/agent-definitions/{agent_id}/recordings/send")
+async def send_recorded_chats(
+    project_id: uuid.UUID,
+    agent_id: str,
+    req: AgentRecordingSend,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Chats recorded in Watch live: keep them with all their details, add each as a saved test in Find problems, and (when
+    ``fix`` is set) have the fixer propose fixes from what really happened. Nothing is applied: the builder decides."""
+    from services.agent_blast import client_for
+    from services.agent_recording import send
+    from services.agent_spend import MAX_HELPER_CALLS, gate, meter_for
+
+    project = await get_project_with_auth(project_id, user, db)
+    if not project.output_dir:
+        raise HTTPException(status_code=400, detail="This project has not been built yet, so there is nowhere to keep the chats.")
+    meter = None
+    if req.fix:  # only the fixer calls the model; keeping the chats costs nothing
+        await gate(db, project, user, calls=2)
+        meter = meter_for(project, user, "agent_blast", MAX_HELPER_CALLS)
+    try:
+        return await send(project.output_dir, agent_id, req.chats, graph=req.graph.model_dump() if req.graph else None, fix=req.fix,
+                          client=client_for(meter) if meter else None)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:  # the model could not be reached: said in plain words
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+def _verified_for_save(project, graph: dict[str, Any], force: bool) -> None:
+    """The drawing is verified BEFORE anything is written, and a save that fails says why (HTTP 422 with the problems).
+
+    * A drawing that is corrupt (an unsafe id, two boxes with one id, an arrow to nowhere...) is never saved, even when
+      the builder says to: it could not be loaded back, and the id becomes a file name.
+    * A drawing with errors (no System Prompt box, a tool for a table the app does not have...) is held back unless
+      ``force`` is set, which is the builder saying "save it anyway, on purpose". Apply does that, because it asks its
+      own question about the same problems first.
+    Warnings and notes never hold a save back."""
+    from services.agent_check import check_agent, verify_graph
+    from services.agent_runtime_install import resolve_roots
+
+    sound = verify_graph(graph)
+    if sound["corrupt"]:
+        raise HTTPException(status_code=422, detail={
+            "msg": "This drawing cannot be saved: " + sound["corrupt"][0]["message"], "kind": "corrupt", "problems": sound["corrupt"]})
+    if force:
+        return
+    _, app_root = resolve_roots(project.output_dir)
+    errors = [f for f in check_agent(graph, app_root)["findings"] if f["severity"] == "error"]
+    if errors:
+        n = len(errors)
+        raise HTTPException(status_code=422, detail={
+            "msg": f"Not saved: {n} problem{'s' if n != 1 else ''} to fix first. {errors[0]['message']}", "kind": "problems", "problems": errors})
+
+
+@router.post("/api/projects/{project_id}/agent-definitions", status_code=201)
+async def save_agent_definition(
+    project_id: uuid.UUID,
+    req: AgentDefinitionSave,
+    force: bool = False,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create or update an agent definition, after verifying the drawing (see ``_verified_for_save``)."""
     project = await get_project_with_auth(project_id, user, db)
     if not project.output_dir:
         raise HTTPException(status_code=400, detail="No output directory")
 
-    agent_file = _agent_defs_path(project.output_dir) / f"{req.id}.json"
-    agent_file.write_text(json.dumps(req.model_dump(), indent=2))
+    data = req.model_dump()
+    _verified_for_save(project, data, force)
+    agent_file = _agent_defs_path(project.output_dir, create=True) / f"{req.id}.json"
+    agent_file.write_text(json.dumps(data, indent=2))
     return {"id": req.id, "saved": True}
 
 
@@ -107,20 +512,22 @@ async def update_agent_definition(
     project_id: uuid.UUID,
     agent_id: str,
     req: AgentDefinitionSave,
+    force: bool = False,
     user: PlatformUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update an existing agent definition."""
+    """Update an existing agent definition, after verifying the drawing (see ``_verified_for_save``)."""
     project = await get_project_with_auth(project_id, user, db)
     if not project.output_dir:
         raise HTTPException(status_code=400, detail="No output directory")
 
+    data = req.model_dump()
+    data["id"] = agent_id
+    _verified_for_save(project, data, force)
     agent_file = _agent_defs_path(project.output_dir) / f"{agent_id}.json"
     if not agent_file.exists():
         raise HTTPException(status_code=404, detail="Agent definition not found")
 
-    data = req.model_dump()
-    data["id"] = agent_id
     agent_file.write_text(json.dumps(data, indent=2))
     return {"id": agent_id, "saved": True}
 
@@ -153,7 +560,7 @@ async def apply_agent_definition(
     user: PlatformUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Apply an agent definition to the generated app via code_editor agent (SSE streaming)."""
+    """Install an agent into the generated app: compile its definition, lay down the runtime, validate, index (SSE streaming)."""
     project = await get_project_with_auth(project_id, user, db)
     if not project.output_dir:
         raise HTTPException(status_code=400, detail="No output directory")
@@ -163,6 +570,7 @@ async def apply_agent_definition(
         raise HTTPException(status_code=404, detail="Agent definition not found")
 
     agent_data = json.loads(agent_file.read_text())
+    # What is recorded against the version: the definition, in the builder's words.
     instruction = _build_agent_instruction(agent_data)
 
     async def event_stream():
@@ -173,20 +581,33 @@ async def apply_agent_definition(
             total_turns = 0
             total_duration = 0
 
-            from agents.code_editor import run_code_editor
-            yield sse_event("status", {"message": "Generating agent runtime..."})
+            # The runtime is fixed code and the definition is data, so installing an
+            # agent is a compile + copy — no model writes it, and applying twice gives
+            # the same files.
+            import asyncio
 
-            async for evt in stream_agent_messages(
-                run_code_editor(output_dir=project.output_dir, instruction=instruction),
-                output_dir=project.output_dir,
-            ):
-                if evt.get("event") == "agent_result":
-                    data = json.loads(evt["data"])
-                    total_cost += data.get("cost_usd", 0)
-                    total_turns += data.get("num_turns", 0)
-                    total_duration += data.get("duration_ms", 0)
+            from services.agent_runtime_install import install_agent_runtime
+
+            yield sse_event("status", {"message": "Installing agent runtime..."})
+            install = await asyncio.to_thread(install_agent_runtime, project.output_dir)
+            if not install.get("installed"):
+                # Saved is saved: the definition is on disk and is installed by the
+                # build. Say that, rather than a bare failure — there is nothing
+                # wrong with the agent, there is just no app to put it in yet.
+                if install.get("no_app"):
+                    yield sse_event("error", {"message": (
+                        "This project has no generated app yet. Your agent is saved and will be "
+                        "installed when the app is built.")})
                 else:
-                    yield evt
+                    yield sse_event("error", {"message": "Nothing to install — the project has no agent definition."})
+                return
+            for w in install.get("warnings", []):
+                yield sse_event("log", {"text": f"[Agent] ⚠ {w}"})
+            yield sse_event("log", {"text": (
+                f"[Agent] installed {len(install['agents'])} agent(s), "
+                f"{len(install['written'])} file(s) written"
+                + ("" if install.get("widget_mounted") else "; the floating widget was not mounted (see /assistant)")
+            )})
 
             from agents.validator import run_validator
             yield sse_event("status", {"message": "Validating build..."})
@@ -264,6 +685,8 @@ async def apply_agent_definition(
                 "cost_usd": total_cost,
                 "duration_ms": total_duration,
                 "commit_hash": commit_hash,
+                "warnings": install.get("warnings", []),
+                "widget_mounted": install.get("widget_mounted", False),
             })
 
         except Exception as e:
@@ -284,7 +707,9 @@ async def test_agent(
     user: PlatformUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Test an agent definition with a message (returns simulated trace)."""
+    """Test an agent with a message: a real model call against its compiled definition.
+
+    Tools are shown, not executed (see services/agent_test_run.py)."""
     project = await get_project_with_auth(project_id, user, db)
     if not project.output_dir:
         raise HTTPException(status_code=400, detail="No output directory")
@@ -293,32 +718,14 @@ async def test_agent(
     if not agent_file.exists():
         raise HTTPException(status_code=404, detail="Agent definition not found")
 
+    from services.agent_spend import MAX_CONSOLE_CALLS, gate, meter_for
+    from services.agent_test_run import run_agent_test
+
     agent_data = json.loads(agent_file.read_text())
-    nodes = agent_data.get("nodes", [])
-    edges = agent_data.get("edges", [])
-
-    # Build a simulated execution trace by walking the graph
-    trace = []
-    for node in nodes:
-        node_data = node.get("data", {})
-        trace.append({
-            "node_id": node.get("id", ""),
-            "node_type": node_data.get("nodeType", ""),
-            "label": node_data.get("label", ""),
-            "started_at": datetime.now(timezone.utc).isoformat(),
-            "completed_at": datetime.now(timezone.utc).isoformat(),
-            "status": "completed",
-            "duration_ms": 50,
-            "tokens_used": 0,
-        })
-
-    return {
-        "response": f"[Test mode] Agent '{agent_data.get('name', 'Unnamed')}' processed your message: \"{req.message}\". "
-                     f"This is a simulated response. Apply the agent to generate actual runtime code.",
-        "trace": trace,
-        "total_tokens": 0,
-        "total_duration_ms": len(trace) * 50,
-    }
+    # One real model call on the platform's key: checked against the balance and limits like any other paid work, capped, and recorded.
+    await gate(db, project, user, calls=1)
+    return await run_agent_test(agent_data, req.message, req.conversation_history,
+                                meter=meter_for(project, user, "agent_test", MAX_CONSOLE_CALLS))
 
 
 # ---------------------------------------------------------------------------

@@ -40,6 +40,9 @@ PUBLIC: tuple[PlatformRoute, ...] = (
     # cannot sign in yet to the sign-in they cannot complete. It shows only
     # the email its own one-time token resolves to.
     PlatformRoute("/set-password", False, "where an invited person chooses a password"),
+    # Forgot password: the emailed code and a new password, by someone who
+    # by definition cannot sign in. It shows nothing but the form.
+    PlatformRoute("/reset-password", False, "where a person who forgot their password enters the emailed code"),
     # What an installed app shows with no network. The service worker keeps
     # it; gated, a signed-out visitor offline was sent to a sign-in that
     # cannot load.

@@ -65,6 +65,11 @@ class DeploySnapshot:
     project_slug: str
     output_dir: str
     integrations: dict[str, str] = field(default_factory=dict)
+    #: The app's payment gateways' keys for this side (`services.payments`),
+    #: applied after the side's own key rules; and the payment variables this
+    #: side must NOT carry (a gateway no longer chosen, a live key on Test).
+    payments_env: dict[str, str] = field(default_factory=dict)
+    remove_env: tuple[str, ...] = ()
     existing_deployment_id: Optional[str] = None
     triggered_by: Optional[str] = None  # platform user id, for audit
     #: Which side of the app this publish goes to: "production" (the live

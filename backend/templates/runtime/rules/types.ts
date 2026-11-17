@@ -156,6 +156,8 @@ export interface ConditionActionConfig {
   /** entity = form + server; form = client only; server = server only. */
   scope?: "entity" | "form" | "server";
   salience?: number;
+  /** When it fires: on a record being created, updated, or both (absent). */
+  on?: Array<"create" | "update">;
 }
 
 /** A form-only outcome (visibility/required/readonly/recommendation) — collected
@@ -164,6 +166,8 @@ export interface FieldHint {
   field: string;
   hidden?: boolean;
   required?: boolean;
+  /** A required field's own sentence ("A manager note is needed above 7000."). */
+  message?: string;
   readonly?: boolean;
   recommendation?: { value?: string; message?: string
   /** set_options — the options the field offers while a rule holds. */

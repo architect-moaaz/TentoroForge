@@ -52,7 +52,7 @@ def test_every_start_seals_what_is_still_plain_and_a_publish_ships_the_key():
     assert "async function sealPlainSensitive()" in seed and "await sealPlainSensitive();" in seed
     assert "_loadEncryptionKey()" in seed
     deploy = (ROOT / "services/deploy/vercel_provider.py").read_text()
-    assert '(*VAPID_KEYS, "SENSITIVE_ENCRYPTION_KEY")' in deploy
+    assert '(*VAPID_KEYS, "SENSITIVE_ENCRYPTION_KEY"' in deploy
 
 
 def test_columns_rows_are_found_by_are_never_sealed():

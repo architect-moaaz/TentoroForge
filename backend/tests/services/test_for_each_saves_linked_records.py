@@ -124,9 +124,9 @@ def test_signup_completes_the_login_row_when_the_account_lives_in_it():
     """SnapIT's account entity is "User" on the platform's `users` table; a
     second insert there had no password and every signup failed."""
     from pathlib import Path
-    route = (Path(__file__).resolve().parents[2] / "templates/app-foundation/src/app/api/auth/signup/route.ts").read_text()
+    route = (Path(__file__).resolve().parents[2] / "templates/app-foundation/src/app/api/auth/signup/route.ts").read_text() + (Path(__file__).resolve().parents[2] / "templates/app-foundation/src/lib/account-row.ts").read_text()
     assert "(accountTable as unknown) === (users as unknown)" in route
-    assert "tx.update(users).set(own as any).where(eq(users.id, created.id))" in route
+    assert "tx.update(users).set(own as any).where(eq(users.id, loginId as any))" in route
     assert '!["id", "email", "password"].includes(k)' in route
 
 

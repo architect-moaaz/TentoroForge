@@ -28,6 +28,8 @@ import { toast } from "sonner";
 import { useSchemaChange } from "@/hooks/useSchemaChange";
 import { useWorkflowStore } from "@/stores/workflow";
 import { WorkflowCanvas } from "./WorkflowCanvas";
+import { RuleChecksContext, type RuleCheck } from "./ruleChecks";
+import { OPEN_WORKFLOW_EVENT, takeOpenWorkflow, type OpenWorkflowDetail } from "@/lib/ask-smith";
 import { WorkflowSimulator } from "./simulator/WorkflowSimulator";
 import { NodePalette } from "./NodePalette";
 import { NodePropertiesPanel } from "./NodePropertiesPanel";
@@ -87,6 +89,15 @@ export function WorkflowPanel({ projectId, orgId }: WorkflowPanelProps) {
       api.get<WorkflowListItem[]>(`/api/projects/${projectId}/workflows`),
   });
 
+  // The business rules each save step checks (by the app, always) — shown on
+  // the steps; read from the server, never stored in the workflow.
+  const { data: ruleLinks } = useQuery({
+    queryKey: ["project", projectId, "business-rules-links"],
+    queryFn: () => api.get<{ links: Record<string, Record<string, RuleCheck[]>> }>(
+      `/api/projects/${projectId}/business-rules-links`),
+    refetchOnWindowFocus: true,
+  });
+
   // Fetch app model for variable picker
   const { data: appModel } = useQuery({
     queryKey: ["project", projectId, "app-model"],
@@ -111,6 +122,29 @@ export function WorkflowPanel({ projectId, orgId }: WorkflowPanelProps) {
     },
     [projectId, setCurrentWorkflow, setSelectedNodeId],
   );
+
+  // The rules each step of the workflow on the canvas checks.
+  const blueprintId = (currentWorkflow as { blueprintId?: string } | null)?.blueprintId
+    ?? workflows.find((w) => w.id === currentWorkflow?.id)?.blueprintId ?? null;
+  const stepRuleChecks = (blueprintId && ruleLinks?.links?.[blueprintId]) || {};
+
+  // ASKED FOR BY NAME ELSEWHERE (the Business Rules tab's "used in"): open
+  // that workflow once the list is here — the request may have come before
+  // this tab was on the screen.
+  useEffect(() => {
+    const go = (wanted: string | null) => {
+      if (!wanted) return;
+      const item = workflows.find((w) => w.blueprintId === wanted || w.id === wanted);
+      if (item) void openWorkflow(item.id);
+    };
+    if (workflows.length) go(takeOpenWorkflow(projectId));
+    const on = (e: Event) => {
+      const d = (e as CustomEvent<OpenWorkflowDetail>).detail;
+      if (d?.projectId === projectId && workflows.length) { takeOpenWorkflow(projectId); go(d.workflow); }
+    };
+    window.addEventListener(OPEN_WORKFLOW_EVENT, on);
+    return () => window.removeEventListener(OPEN_WORKFLOW_EVENT, on);
+  }, [projectId, workflows, openWorkflow]);
 
   // Create a new workflow
   const createWorkflow = useCallback(() => {
@@ -562,6 +596,7 @@ export function WorkflowPanel({ projectId, orgId }: WorkflowPanelProps) {
           <>
             <NodePalette />
             <div className="flex-1">
+              <RuleChecksContext.Provider value={stepRuleChecks}>
               <WorkflowCanvas
                 initialNodes={nodes}
                 initialEdges={edges}
@@ -608,6 +643,7 @@ export function WorkflowPanel({ projectId, orgId }: WorkflowPanelProps) {
                 }}
                 layoutVersion={layoutVersion}
               />
+              </RuleChecksContext.Provider>
             </div>
             {selectedNode ? (
               <NodePropertiesPanel

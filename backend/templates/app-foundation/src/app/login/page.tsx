@@ -45,8 +45,39 @@ function LoginForm() {
   // NOTE: the hook's contract is `isLoading` / `handleSubmit` — destructuring
   // `loading` / `onSubmit` yields undefined, the form loses its handler and
   // does a NATIVE GET submit (URL becomes "/login?" and nothing happens).
-  const { email, setEmail, password, setPassword, error, isLoading, handleSubmit } =
-    useLogin(callbackUrl);
+  const { email, setEmail, password, setPassword, code, setCode, remember, setRemember, step, stop, error, isLoading,
+          handleSubmit, resend, back } = useLogin(callbackUrl);
+  // TWO-STEP: the password was right and a code was emailed; no session yet.
+  if (step === "code") {
+    return (
+      <form onSubmit={handleSubmit} className="w-full max-w-sm space-y-5">
+        <div className="space-y-1.5">
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">Check your email</h1>
+          <p className="text-sm text-muted-foreground">We sent a 6-digit code to {stop?.sentTo ?? email}. It works for 10 minutes.</p>
+          {stop?.notice && <p className="text-xs text-muted-foreground">The code could not be emailed: {stop.notice}</p>}
+        </div>
+        {error && <p className="text-sm text-destructive">{error}</p>}
+        <div className="space-y-1.5">
+          <label htmlFor="code" className="text-sm font-medium text-foreground">Code</label>
+          <input id="code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} required value={code}
+            onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
+            className="w-full rounded-[var(--radius)] border border-input bg-background px-3 py-2 text-sm tracking-[0.4em] text-foreground outline-none focus:ring-2 focus:ring-ring" />
+        </div>
+        <label className="flex items-center gap-2 text-sm text-foreground">
+          <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+          Trust this browser for 30 days
+        </label>
+        <button type="submit" disabled={isLoading || code.length !== 6}
+          className="w-full rounded-[var(--radius)] bg-primary px-3 py-2.5 text-sm font-medium text-primary-foreground shadow-sm transition hover:opacity-90 disabled:opacity-50">
+          {isLoading ? "Checking…" : "Sign in"}
+        </button>
+        <div className="flex justify-between text-sm">
+          <button type="button" onClick={back} className="text-muted-foreground hover:underline">Back</button>
+          <button type="button" onClick={resend} disabled={isLoading} className="font-medium text-primary hover:underline">Send a new code</button>
+        </div>
+      </form>
+    );
+  }
   return (
     <form onSubmit={handleSubmit} className="w-full max-w-sm space-y-5">
       <div className="space-y-1.5">
@@ -72,6 +103,9 @@ function LoginForm() {
         className="w-full rounded-[var(--radius)] bg-primary px-3 py-2.5 text-sm font-medium text-primary-foreground shadow-sm transition hover:opacity-90 disabled:opacity-50">
         {isLoading ? "Signing in…" : "Sign in"}
       </button>
+      <p className="text-center text-sm">
+        <a href="/reset-password" className="text-primary hover:underline">Forgot password?</a>
+      </p>
       <SignInMethods email={email} />
       <p className="text-center text-sm text-muted-foreground">
         Don&apos;t have an account? <a href="/signup" className="font-medium text-primary hover:underline">Sign up</a>

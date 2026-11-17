@@ -96,17 +96,17 @@ export function ConditionBuilder({
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2">
-        <Label className="text-xs font-medium">Condition</Label>
+        <Label className="text-xs font-medium">Match</Label>
         <Select
           value={group.logic}
           onValueChange={(v) => setLogic(v as "AND" | "OR")}
         >
-          <SelectTrigger className="h-7 w-[80px] text-xs">
+          <SelectTrigger className="h-7 w-[120px] text-xs" aria-label="Match all or any">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="AND" className="text-xs">AND</SelectItem>
-            <SelectItem value="OR" className="text-xs">OR</SelectItem>
+            <SelectItem value="AND" className="text-xs">all of these</SelectItem>
+            <SelectItem value="OR" className="text-xs">any of these</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -155,7 +155,7 @@ export function ConditionBuilder({
             onClick={addCondition}
           >
             <Plus className="mr-1 h-3 w-3" />
-            Condition
+            Add a condition
           </Button>
           <Button
             type="button"
@@ -165,7 +165,7 @@ export function ConditionBuilder({
             onClick={addNestedGroup}
           >
             <Plus className="mr-1 h-3 w-3" />
-            Group
+            Add a group
           </Button>
         </div>
       </div>

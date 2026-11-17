@@ -1,0 +1,47 @@
+# The proxy in front of the website and the API.
+#
+#  - default: plain HTTP on :80 only, no certificates, nothing on 443 (so logins are NOT encrypted on the public address)
+#  - PUBLIC_DOMAIN=name.example.com in .env (a DNS name that points at this server, ports 80 and 443 open): Caddy also gets a
+#    certificate for that name by itself and serves it over HTTPS, and sends http://name.example.com to https. The cleartext
+#    :80 site stays, because the SSH-tunnel address 127.0.0.1:3100 and the server's bare IP address use it.
+#  - the compose file passes the name in as TTF_SITE (a plain-http placeholder nobody uses when PUBLIC_DOMAIN is unset)
+{
+	admin off
+}
+
+(app) {
+	encode zstd gzip
+
+	# the platform API (streams, e.g. a blast or a live watch, must not be buffered)
+	handle /api/* {
+		reverse_proxy backend:6500 {
+			flush_interval -1
+			transport http {
+				read_timeout 600s
+				write_timeout 600s
+			}
+		}
+	}
+	handle /health {
+		reverse_proxy backend:6500
+	}
+
+	# everything else is the website
+	handle {
+		reverse_proxy frontend:3000 {
+			flush_interval -1
+		}
+	}
+
+	request_body {
+		max_size 25MB
+	}
+}
+
+:80 {
+	import app
+}
+
+{$TTF_SITE:http://domain-not-set.invalid} {
+	import app
+}

@@ -32,6 +32,31 @@ def handle(**kwargs: Any) -> Outcome:
         out = _handle(**kwargs)
     if check_after and not kwargs.get("unattended"):
         out = _checked(str(kwargs.get("output_dir") or ""), out, asked=str(kwargs.get("message") or ""))
+    if not kwargs.get("unattended"):
+        out = _payments_sensed(str(kwargs.get("output_dir") or ""), out, asked=str(kwargs.get("message") or ""))
+    return out
+
+
+def _payments_sensed(output_dir: str, out: Outcome, *, asked: str = "") -> Outcome:
+    """A CHANGE THAT MAKES THE APP TAKE MONEY ASKS HOW. When a turn changed the
+    definition and now the app sells something with no gateway chosen, the
+    answer ends with that question and the chip that opens the dialog
+    (`services.payments.app_payments.sense_after_change`)."""
+    if out.status not in ("resolved", "needs_user") or not any(".forge/blueprint" in str(t) for t in out.touched or []):
+        return out
+    if "Choose payment gateways" in (out.options or []):
+        return out
+    try:
+        from services.payments.app_payments import sense_after_change
+        sensed = sense_after_change(output_dir, asked)
+    except Exception:  # noqa: BLE001 — the change stands; the Payments tab can still be opened
+        import logging
+        logging.getLogger(__name__).exception("[smith4] sensing payments after a change failed")
+        return out
+    if not sensed:
+        return out
+    out.said = f"{out.said}\n\n{sensed['said']}" if out.said else sensed["said"]
+    out.options = list(out.options or []) + [o for o in sensed["options"] if o not in (out.options or [])]
     return out
 
 
@@ -76,7 +101,8 @@ def _handle(*, project_id: str, output_dir: str, message: str,
            evidence: list[str] | None = None,
            app_name: str = "",
            unattended: bool = False,
-           asked_from: str = "") -> Outcome:
+           asked_from: str = "",
+           user_id: str = "") -> Outcome:
     """One turn on a built application. `choose` decides each step; absent,
     `services.smith.loop.next_step` on the real model. `move` is the tree
     editor for layout pages; absent, `move_dispatcher`."""
@@ -95,7 +121,8 @@ def _handle(*, project_id: str, output_dir: str, message: str,
                    attachments=list(attachments or []), history=list(history or []),
                    evidence=[str(e) for e in (evidence or []) if str(e).strip()],
                    app_name=str(app_name or ""), engine_refreshed=_once(refreshed),
-                   unattended=unattended, asked_from=asked_from or (planned_from if step else ""))
+                   unattended=unattended, asked_from=asked_from or (planned_from if step else ""),
+                   user_id=str(user_id or ""))
 
     # A TURN THE PLATFORM STARTED is the fault and nothing else: the person's
     # waiting plan or held question is theirs, not something to clear or join.

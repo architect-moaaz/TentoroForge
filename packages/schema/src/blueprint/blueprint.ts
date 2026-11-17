@@ -839,6 +839,16 @@ export const PageContract = z.object({
    *  `designSources[].frames[].nodeId`, whichever provider holds it. */
   figmaFrame: z.string().optional(),
   /**
+   * THE PAGE IS ITS OWN WHOLE SCREEN: it draws its own header, so a public
+   * page gets no public frame (the application's menu of public pages and its
+   * page width) around it. An employer's careers site is the employer's, not
+   * the platform's; framed, it showed a bar listing "Splash", "Candidate App
+   * Home"… above the employer's own header, in a boxed column (DITANS CP-1,
+   * 2026-11-17). A page with a `figmaFrame` already is one; this says so for a
+   * page drawn where the design could not be connected.
+   */
+  wholeScreen: z.boolean().optional(),
+  /**
    * THE OTHER DRAWN FRAMES THIS PAGE IS MADE OF. A design draws a screen
    * several times — with its dialog open, on its second tab, at step three of
    * its wizard, empty — and each drawing is a frame. One page per frame made
@@ -2351,6 +2361,10 @@ export const DecisionTableColumn = z.object({
   label: z.string().optional(),
   type: z.enum(["string", "number", "boolean", "date", "any"]).default("any"),
   variableBinding: z.string().optional(),
+  /** The values the column takes, in priority order: Priority picks the
+   * matching row whose output comes first here, and a cell naming a value
+   * not listed is refused as a typo. Filled from an enum field's values. */
+  values: z.array(z.string()).optional(),
 });
 
 export const DecisionTableRow = z.object({
@@ -2362,6 +2376,8 @@ export const DecisionTableRow = z.object({
 
 export const DecisionTable = z.object({
   hitPolicy: z.enum(["U", "F", "A", "P", "C", "R"]).default("F"),
+  /** Collect only: one value per output instead of a list. */
+  aggregation: z.enum(["SUM", "COUNT", "MIN", "MAX"]).optional(),
   inputs: z.array(DecisionTableColumn).default([]),
   outputs: z.array(DecisionTableColumn).default([]),
   rules: z.array(DecisionTableRow).default([]),
@@ -2419,6 +2435,9 @@ export const BusinessRule = z.object({
   otherwise: z.array(RuleAction).default([]),
   scope: z.enum(["entity", "form", "server"]).default("entity"),
   salience: z.number().int().default(0),
+  /** When the rule fires: a record being created, updated, or both (absent).
+   * A rule about a change ("a closed expense cannot be reopened") fires on update. */
+  on: z.array(z.enum(["create", "update"])).optional(),
   ...artifactBase,
 });
 
@@ -2478,6 +2497,66 @@ export const Integration = z.object({
     })
     .optional(),
   ...artifactBase,
+});
+
+// ===========================================================================
+// §11 · payments — whether the application takes money, how, and through which gateways
+// ===========================================================================
+
+/**
+ * A subscription plan the application sells. `prices` are MAJOR units per
+ * ISO 4217 currency (`{"INR": 499, "USD": 9}`): a payer pays in one of them,
+ * and the gateway for that currency takes it. The plan is created at each
+ * gateway once, the first time someone subscribes, and reused.
+ */
+export const PaymentPlan = z.object({
+  id: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,39}$/).describe("Stable slug: 'pro', 'team-yearly'."),
+  name: z.string().min(1).max(60),
+  description: z.string().max(300).default(""),
+  interval: z.enum(["day", "week", "month", "year"]),
+  intervalCount: z.number().int().min(1).max(12).default(1),
+  prices: z.record(z.string().regex(/^[A-Z]{3}$/), z.number().positive().max(10_000_000)),
+  trialDays: z.number().int().min(0).max(365).default(0),
+  features: z.array(z.string().max(120)).max(20).default([]),
+  highlighted: z.boolean().default(false),
+});
+
+/**
+ * A gateway the owner chose for this application — one of the organisation's
+ * (Settings → Payments), by its id there. Never a key: those stay on the
+ * platform and reach the app's environment by NAME.
+ */
+export const PaymentGatewayChoice = z.object({
+  gateway: z.string().min(1),
+  provider: z.enum(["stripe", "razorpay", "paypal"]),
+  label: z.string().default(""),
+  coverage: z.enum(["domestic", "international", "both"]).default("both"),
+  homeCountry: z.string().nullable().optional(),
+  currencies: z.array(z.string().regex(/^[A-Z]{3}$/)).default([]),
+});
+
+/**
+ * WHETHER THE APPLICATION TAKES MONEY, decided once and written down.
+ *
+ * Forge decides `needed` and `models` from the request and the definition
+ * (`services.payments.need`) and says why in `reason`; the person confirms or
+ * changes it when they press Build, choosing the `gateways` from their
+ * organisation's. `decidedBy` keeps who decided, so Forge never overrides a
+ * person's own choice. `access: "app"` means an active subscription is needed
+ * to use the application beyond its pricing, billing and sign-in pages;
+ * `"none"` means plans are offered and nothing is locked. `basis` is a digest
+ * of what the decision was read from: a definition that changes is decided
+ * again (unless a person decided).
+ */
+export const Payments = z.object({
+  needed: z.boolean().optional(),
+  models: z.array(z.enum(["one_time", "subscription"])).default([]),
+  reason: z.string().max(400).default(""),
+  decidedBy: z.enum(["forge", "person", "smith"]).optional(),
+  gateways: z.array(PaymentGatewayChoice).default([]),
+  plans: z.array(PaymentPlan).max(8).default([]),
+  access: z.enum(["app", "none"]).default("none"),
+  basis: z.string().optional(),
 });
 
 // ===========================================================================
@@ -3666,6 +3745,8 @@ export const Blueprint = z.object({
   businessRules: z.array(BusinessRule).default([]),
   apis: z.array(ApiEndpoint).default([]),
   integrations: z.array(Integration).default([]),
+  /** Whether it takes money, how, through which of the organisation's gateways. */
+  payments: Payments.default({}),
   security: Security.default({}),
   /**
    * THE APPLICATION ON A PHONE. `installable`: it offers itself for the home

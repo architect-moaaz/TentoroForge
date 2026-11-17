@@ -29,10 +29,12 @@ def test_a_new_account_starts_pending_and_only_a_digest_is_kept():
     user = (ROOT / "templates/app-foundation/src/db/schema/user.ts").read_text()
     for col in ('"email_verification"', '"email_code_hash"', '"email_code_expires_at"', '"email_code_attempts"'):
         assert col in user
-    signup = (ROOT / "templates/app-foundation/src/app/api/auth/signup/route.ts").read_text()
+    signup = (ROOT / "templates/app-foundation/src/app/api/auth/signup/route.ts").read_text() + (ROOT / "templates/app-foundation/src/lib/account-row.ts").read_text()
     assert 'signInPolicy().verifyEmail ? { emailVerification: "pending" }' in signup
     auth = (ROOT / "templates/app-foundation/src/auth.ts").read_text()
-    assert '"emailCodeHash", "emailCodeExpiresAt"' in auth, "the code's digest never rides in the session"
+    guard = (ROOT / "templates/app-foundation/src/lib/sign-in-guard.ts").read_text()
+    assert "...SIGN_IN_COLUMNS].includes(k)" in auth and '"emailCodeHash", "emailCodeExpiresAt"' in guard, \
+        "the code's digest never rides in the session"
 
 
 def test_the_route_sends_to_the_own_address_and_checks_with_limits():

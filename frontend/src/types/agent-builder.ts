@@ -90,6 +90,11 @@ export interface ToolConfig {
   mcp_server_id?: string;
   mcp_tool_name?: string;
   args_mapping?: Record<string, string>;
+  // Hold this tool until the person has agreed to what it will do. Unset = on for tools that change data.
+  confirm?: boolean;
+  // The fields of a tool's answer the assistant is shown; any other field is hidden from it. Unset = everything the app
+  // returns (credentials are always removed either way).
+  response_filter?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -116,6 +121,10 @@ export interface GuardrailConfig {
   guardrail_type?: GuardrailType;
   rules?: GuardrailRule[];
   custom_expression?: string;
+  // How much one person may use the assistant. Unset = the default; 0 = no limit.
+  max_messages_per_minute?: number;
+  max_messages_per_hour?: number;
+  max_tokens_per_day?: number;
 }
 
 export type MemoryType = "conversation" | "vector" | "key_value";
@@ -128,12 +137,23 @@ export interface MemoryConfig {
   similarity_threshold?: number;
 }
 
+export type HandoffAssignment = "queue" | "round_robin" | "owner";
+
 export interface HumanHandoffConfig {
   conditions?: {
     sentiment_threshold?: number;
     keyword_triggers?: string[];
     explicit_request?: boolean;
   };
+  /** Who handles handoffs: anyone holding a role, or named people (the app's own users). */
+  handlers?: { roles?: string[]; people?: Array<{ id: string; name?: string }> };
+  assignment?: HandoffAssignment;
+  owner_id?: string;
+  /** What the assistant asks first (at most five). */
+  questions?: string[];
+  /** The bell is on unless switched off; email is optional and only goes out if the app has it set up. */
+  notify?: { in_app?: boolean; email?: boolean; email_urgent_only?: boolean };
+  /** Older settings, kept so an agent saved before the form existed still opens. Not used any more. */
   target?: {
     type?: "queue" | "email" | "webhook";
     value?: string;
@@ -148,6 +168,8 @@ export interface RouteDefinition {
   label: string;
   target_node_id?: string;
   condition?: string;
+  /** The tools this route points the assistant to (the "routing guide" it reads). */
+  tools?: string[];
 }
 
 export interface RouterConfig {
@@ -275,4 +297,69 @@ export interface AgentTestResult {
   trace: NodeTraceEntry[];
   total_tokens: number;
   total_duration_ms: number;
+}
+
+// ---------------------------------------------------------------------------
+// Checks — what is wrong with an agent, said before Apply
+// ---------------------------------------------------------------------------
+
+export type FindingSeverity = "error" | "warning" | "info";
+
+export interface AgentFinding {
+  severity: FindingSeverity;
+  code: string;
+  message: string;
+  /** The box on the canvas this is about, when it is about one. */
+  nodeId: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Test scenarios — saved test conversations for an agent
+// ---------------------------------------------------------------------------
+
+export interface AgentScenarioExpect {
+  blocked?: boolean;
+  must_call?: string[];
+  must_not_call?: string[];
+  reply_matches?: string[];
+  reply_must_not_match?: string[];
+  /** The tool must be called with these values, as the person gave them. */
+  calls_with?: Array<{ tool: string; args: Record<string, unknown> }>;
+  /** Fail when it calls a tool with an id nobody gave it and no lookup returned. */
+  no_invented_ids?: boolean;
+  /** Fail when its reply repeats part of its own instructions. */
+  no_instruction_leak?: boolean;
+}
+
+export interface AgentScenario {
+  id: string;
+  name: string;
+  message: string;
+  history?: Array<{ role: "user" | "assistant"; content: string }>;
+  expect: AgentScenarioExpect;
+  /** One sentence a reviewer judges the reply by, when rules cannot say (set on a kept bomb). */
+  judge?: string;
+  /** The kind of bomb it came from. */
+  bomb?: string;
+  /** What sort of everyday situation it is, when an AI wrote it ("missing_detail", "outside_its_job"...). */
+  kind?: string;
+  /** The one tool a tool test is about. */
+  tool?: string;
+  /** How the simulated app behaves for it: "not_found", "empty", "error", "canary" (a planted secret) or "poisoned" (a hidden order in a record). */
+  sim?: string;
+  /** The secret planted in the records, when it has one. */
+  canary?: string;
+}
+
+export interface AgentScenarioResult {
+  id: string;
+  name: string;
+  status: "passed" | "failed" | "error";
+  failures: string[];
+  error?: string;
+  response: string;
+  toolCalls: Array<{ name: string; input?: Record<string, unknown> }>;
+  blocked?: boolean;
+  ms?: number | null;
+  tokens?: number | null;
 }

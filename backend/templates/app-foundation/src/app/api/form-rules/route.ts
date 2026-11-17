@@ -14,6 +14,12 @@ export async function POST(request: Request) {
     const values =
       body?.values && typeof body.values === "object" ? body.values : {};
     if (!model) return NextResponse.json({ patches: {}, formHints: [] });
+    // An edit form says which record it edits and how it was loaded: rules
+    // about a change ("a rejected one stays rejected", "only on create") are
+    // then asked as a change. Only hints — the save checks the stored record.
+    const id = typeof body?.id === "string" || typeof body?.id === "number" ? body.id : undefined;
+    const previous =
+      body?.previous && typeof body.previous === "object" && !Array.isArray(body.previous) ? body.previous : null;
 
     const { evaluateFormRules } = await import("@/lib/rules");
     // The person is the SERVER session, never a `user` the form wrote into the
@@ -21,7 +27,7 @@ export async function POST(request: Request) {
     // hint (a field shown, a value filled) is one anybody could ask for as anyone.
     const session = await auth();
     const user = session?.user ?? undefined;
-    const result = await evaluateFormRules(model, values, user);
+    const result = await evaluateFormRules(model, id !== undefined ? { ...values, id } : values, user, previous);
     return NextResponse.json({
       patches: result.patches ?? {},
       formHints: result.formHints ?? [],

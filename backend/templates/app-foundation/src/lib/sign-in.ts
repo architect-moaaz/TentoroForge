@@ -10,11 +10,18 @@
  */
 import { createHash, randomBytes } from "node:crypto";
 import { SIGN_IN, type SsoEntry } from "@/lib/sign-in-policy";
+import * as accountModule from "@/lib/account";
+import { sessionCookiePrefix } from "@/lib/session-cookie";
 
 export type { SsoEntry };
 
-/** Issuers the provider itself fixes, so an owner sets only the client. */
-const FIXED_ISSUER: Record<string, string> = { google: "https://accounts.google.com" };
+/** Issuers the provider itself fixes, so an owner sets only the client.
+ *  Microsoft's is the one for every organisation and personal accounts alike
+ *  ("Continue with Microsoft"); one tenant's own issuer, set by name, wins. */
+const FIXED_ISSUER: Record<string, string> = {
+  google: "https://accounts.google.com",
+  entra: "https://login.microsoftonline.com/common/v2.0",
+};
 
 /** The claim a provider carries a person's groups in, when the policy does not say. */
 const GROUP_CLAIM: Record<string, string> = { entra: "groups", okta: "groups", google: "hd", oidc: "groups", saml: "groups" };
@@ -89,6 +96,39 @@ export function methods(env: NodeJS.ProcessEnv = process.env) {
   return {
     password: SIGN_IN.password !== false,
     magicLink: SIGN_IN.magicLink === true,
-    sso: ssoEntries().map((e) => ({ id: e.id, name: e.name, kind: e.kind, connected: connected(e, env) })),
+    // `signUp`: a new person may make their account through it (it provisions
+    // just in time); an invite-only provider signs in only the people it knows.
+    sso: ssoEntries().map((e) => ({ id: e.id, name: e.name, kind: e.kind, connected: connected(e, env), signUp: e.provisioning === "just_in_time" })),
   };
+}
+
+/** The cookie a new person's choice rides in while they are at the provider. */
+export function signupIntentCookie(): string {
+  return `${sessionCookiePrefix()}.signup-as`;
+}
+
+/** The roles signup lets a person give themselves (`security.signupRoles`, else the one signup role). */
+export function signupRoles(): string[] {
+  const m = accountModule as unknown as { SIGNUP_ROLES?: string[]; SIGNUP_ROLE?: string | null };
+  const out = [...(m.SIGNUP_ROLES ?? [])];
+  if (m.SIGNUP_ROLE && !out.includes(m.SIGNUP_ROLE)) out.push(m.SIGNUP_ROLE);
+  return out;
+}
+
+/** The role asked for, when signup offers it; null otherwise. */
+export function offeredSignupRole(asked: unknown): string | null {
+  const v = typeof asked === "string" ? asked.trim() : "";
+  return v && signupRoles().includes(v) ? v : null;
+}
+
+/** What a cookie written by POST /api/auth/methods carried, checked again. */
+export function readSignupIntent(raw: string | undefined | null): { as: string | null; account: Record<string, unknown> } {
+  if (!raw) return { as: null, account: {} };
+  try {
+    const parsed = JSON.parse(Buffer.from(raw, "base64url").toString("utf8")) as { as?: unknown; account?: unknown };
+    const account = parsed.account && typeof parsed.account === "object" && !Array.isArray(parsed.account) ? (parsed.account as Record<string, unknown>) : {};
+    return { as: offeredSignupRole(parsed.as), account };
+  } catch {
+    return { as: null, account: {} };
+  }
 }

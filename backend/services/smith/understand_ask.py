@@ -79,7 +79,16 @@ def _default_provider(prompt: str | list, reasoning: Callable[[str], None] | Non
             except Exception as exc:  # noqa: BLE001 — a picture that will not load is left out, said
                 logger.info("[smith] attachment not shown to the model (%s)", exc)
         if blocks:
-            content = [*blocks, *text_blocks]
+            # WHERE THE PICTURES GO. Ahead of everything, a turn with a
+            # screenshot shared no cached prefix with any other: the rules and
+            # the application, written to the cache again on its first step
+            # (forge-v3, 2026-11-16). They go after the leading blocks marked
+            # for the cache — what a caller keeps the same for every turn —
+            # and still ahead of the ask.
+            at = 0
+            while at < len(text_blocks) and text_blocks[at].get("cache_control"):
+                at += 1
+            content = [*text_blocks[:at], *blocks, *text_blocks[at:]]
     # ROOM TO THINK AND THEN ANSWER. The cap covers thinking and the reply
     # together; at 4000 a turn deep in its reads thought until the cap and
     # answered nothing (TCommerce, 2026-10-06). Only what is used is billed.

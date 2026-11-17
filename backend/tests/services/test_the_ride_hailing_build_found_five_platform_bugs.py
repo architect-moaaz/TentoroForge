@@ -78,7 +78,8 @@ def test_a_new_account_starts_offline_and_pending_and_with_nothing_awarded():
 
 
 def test_the_signup_route_checks_that_a_phone_is_a_phone():
-    src = (BACKEND / "templates" / "app-foundation" / "src" / "app" / "api" / "auth" / "signup" / "route.ts").read_text(encoding="utf-8")
+    # the check lives where every way of making an account reads it (password sign-up and a provider's both)
+    src = (BACKEND / "templates" / "app-foundation" / "src" / "lib" / "account-row.ts").read_text(encoding="utf-8")
     assert 'f.kind === "tel"' in src and "must be a phone number" in src
     assert 'f.kind === "email"' in src and "must be an email address" in src
 

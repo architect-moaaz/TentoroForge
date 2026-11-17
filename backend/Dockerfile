@@ -31,6 +31,15 @@ RUN ARCH=$(dpkg --print-architecture) && \
     rm /tmp/node.tar.xz && \
     node --version && npm --version
 
+# THE RULE LAB'S BUNDLER. The rules editor's "Test it", a decision table's
+# check and the fold of a workflow's copy of a rule run the app's own rules
+# engine, bundled with esbuild (services/blueprint/rule_lab.py). On a
+# checkout it is the repository's node_modules; this image has no repository
+# root, so without this the lab answered "unavailable" on forge-v3 (PR #29).
+# Pinned to the repository's own version; on the PATH, where rule_lab finds it.
+ARG ESBUILD_VERSION=0.27.7
+RUN npm install -g --no-audit --no-fund "esbuild@${ESBUILD_VERSION}" && esbuild --version
+
 # Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
@@ -76,6 +85,12 @@ COPY . .
 # there is no repo root — so every attempt to open a page in the editor
 # answered "Cannot find package '@babel/parser'" (UAT, both stacks).
 RUN cd /app/static && npm install --omit=dev --no-audit --no-fund --no-package-lock
+
+# The lab's bundle, made once here and checked to answer: the first "Test it"
+# does not wait for it, and an image whose lab cannot run fails its build.
+RUN esbuild scripts/rules/lab.ts --bundle --platform=node --format=cjs \
+      --outfile=scripts/rules/lab.cjs --log-level=error && \
+    echo '{"op":"batch","conditions":[],"saves":[]}' | node scripts/rules/lab.cjs | grep -q '"conditions"'
 
 # Create output directory
 RUN mkdir -p /app/output
