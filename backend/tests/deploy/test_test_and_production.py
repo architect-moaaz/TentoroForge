@@ -302,6 +302,26 @@ async def test_starting_the_test_data_again(db_session, sample_project_id, tmp_p
 
 
 @pytest.mark.asyncio
+async def test_a_new_test_database_is_seeded_though_an_earlier_publish_kept_the_data(
+        db_session, sample_project_id, tmp_path):
+    """The switch an earlier publish left on Vercel is taken off: a database
+    just made is seeded with demo data, not preserved empty."""
+    _mk_app_tree(tmp_path)
+    await _publish(db_session, sample_project_id, tmp_path, _vercel(), _neon(), environment="test")
+    vercel = _vercel()
+    vercel.list_env.return_value = [{"id": "env_keep", "key": "FORGE_KEEP_DB_STATE", "target": ["preview"]}]
+    await _publish(db_session, sample_project_id, tmp_path, vercel, _neon(created=True), environment="test",
+                   reset_test_data=True)
+    assert "FORGE_KEEP_DB_STATE" not in _pushed(vercel)
+    vercel.delete_env.assert_any_await("prj_abc", "env_keep")
+    # and a publish that keeps what testers entered leaves it on
+    vercel = _vercel()
+    vercel.list_env.return_value = [{"id": "env_keep", "key": "FORGE_KEEP_DB_STATE", "target": ["preview"]}]
+    await _publish(db_session, sample_project_id, tmp_path, vercel, _neon(created=False), environment="test")
+    assert all(c.args[1] != "env_keep" for c in vercel.delete_env.await_args_list)
+
+
+@pytest.mark.asyncio
 async def test_production_after_test_uses_the_live_database_and_production_settings(
         db_session, sample_project_id, tmp_path, _quiet, monkeypatch):
     _mk_app_tree(tmp_path)
