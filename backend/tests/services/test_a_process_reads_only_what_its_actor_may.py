@@ -20,7 +20,7 @@ def test_the_engine_lends_its_scope_to_a_table():
     assert "export async function accessConditions(" in engine
     body = engine.split("export async function scopeForTable(", 1)[1].split("\n}\n", 1)[0]
     assert "if (!user?.id) return undefined;" in body, "no acting person: the application's own, unscoped"
-    assert "accessConditions(name, rec, { user }, op)" in body, "the same rules the data API applies"
+    assert "accessConditions(name, rec, { user, via }, op)" in body, "the same rules the data API applies"
 
 
 def test_every_reading_and_writing_step_asks_for_it():

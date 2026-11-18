@@ -2,7 +2,8 @@
 
 What matters: it asks only when the plan has a map and no key is set; once; with the box and the list of Google APIs to turn on;
 the box is the one Settings stores (same provider and key, so a pasted key is the one the apps get); the key never appears in
-the words; the ask never stops a build; and the panel's "saved" / "free map" replies are recognised only after the ask."""
+the words; the ask never stops a build; it carries no answer buttons (a second open question beside the platform question
+made the page send both answers as one reply, which Smith read as neither); and the panel's "saved" reply is recognised only after the ask."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -43,7 +44,8 @@ def test_the_ask_has_the_box_the_apis_and_a_way_out(tmp_path):
     for api in mk.APIS:
         assert api in msg["text"], api
     assert "never written into this conversation" in msg["text"]
-    assert mk.SKIP in msg["options"] and msg["status"] == "asked"
+    assert msg["status"] == "asked"
+    assert "options" not in msg, "no answer buttons: it must not become a second open question beside the platform question"
 
 
 def test_the_box_stores_the_key_settings_has(tmp_path):
@@ -77,9 +79,9 @@ def test_a_lookup_that_fails_asks_rather_than_blocks(tmp_path, monkeypatch):
 def test_saved_and_free_map_are_recognised_only_after_the_ask():
     ask = ("smith", mk.TEXT.format(why="a screen shows records on a map"))
     later = [ask, ("smith", "Building the pages…"), ("smith", "Done.")]   # the build carried on after the ask
-    assert mk.key_saved_in(mk.SAVED, later) and mk.skipped_in(mk.SKIP, later)
+    assert mk.key_saved_in(mk.SAVED, later)
     other = [("smith", "Anything else?")]
-    assert not mk.key_saved_in(mk.SAVED, other) and not mk.skipped_in(mk.SKIP, other)
+    assert not mk.key_saved_in(mk.SAVED, other)
     assert not mk.key_saved_in("hello", later) and not mk.key_saved_in(mk.SAVED, [])
 
 
@@ -151,3 +153,9 @@ def test_the_build_gate_names_the_folder_without_assuming_it_is_a_path_object():
     """`_run_dag` is handed a str; `.name` on it would turn a harmless suggestion into a crash."""
     src = (BACKEND / "routers" / "blueprint_generate.py").read_text(encoding="utf-8")
     assert "Path(str(output_dir)).name, exc)" in src and 'logger.warning("[smith-chat] maps key not asked for %s: %s", output_dir.name' not in src
+
+
+def test_there_is_no_free_map_button_or_handler_left():
+    assert not hasattr(mk, "SKIP") and not hasattr(mk, "skipped_in")
+    src = (BACKEND / "routers" / "blueprint_generate.py").read_text(encoding="utf-8")
+    assert "skipped_in" not in src and "Use the free map" not in src

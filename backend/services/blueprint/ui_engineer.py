@@ -1133,7 +1133,7 @@ def plan_prompt(doc: dict, page: dict, brief: str = "") -> str:
     """Ask for the decisions, not the code."""
     wanted = (f"\n\nWhat is wanted of it — this decides the layout:\n{brief}" if brief else "")
     return ("Decide how to build this page — do not write it yet.\n\n```json\n"
-            + json.dumps(_page_brief(doc, page), indent=2) + "\n```" + wanted + "\n\n"
+            + json.dumps(_page_brief(doc, page), indent=2) + "\n```" + zone_note(doc, page) + wanted + "\n\n"
             "Answer with its state, its sections in order, and one line per behaviour the code must "
             "satisfy. Short lines. You will be asked for the code next, with this plan in front of you, "
             "so decide here and write there.")
@@ -1350,10 +1350,36 @@ def _icon_rule(html: str) -> str:
             + ". Import each from `lucide-react` (`h-4 w-4`, `currentColor`) where the design has it.\n")
 
 
+_ZONE_PAGE = re.compile(r"zone|geofenc|alert|crossing|live|map|monitor|track|dispatch|depot|fence", re.I)
+
+
+def zone_note(doc: dict, page: dict) -> str:
+    """For an app whose plan HAS zones, a page about zones, alerts or a live map is told which zones exist and to use the
+    engine's screens for them. The general rule in the system prompt was not enough: Depot Fleet's writer saw its own
+    DepotZone entity and drew a second map and a second zone list from it, so the engine's zone (in Bengaluru) was on no
+    page and the app's own records sat in the ocean (2026-11-18). Empty for any other page or app."""
+    zones = [z for z in ((doc or {}).get("geofencing") or {}).get("zones") or [] if isinstance(z, dict) and z.get("name")]
+    if not zones:
+        return ""
+    text = " ".join(str(page.get(k) or "") for k in ("name", "route", "purpose")) + " " + " ".join(str(t) for t in page.get("primaryTasks") or [])
+    if not _ZONE_PAGE.search(text):
+        return ""
+    names = ", ".join(f'"{z["name"]}"' for z in zones)
+    return ("\nZONES FOR THIS APP: the zones the request named already exist as zones (" + names + "), kept by the platform "
+            "with their own map and screens. On THIS page use them: `<GeofenceMap />` for where they are, `<GeofenceMonitor "
+            "entity=\"…\" />` for who is arriving and leaving, `<GeofenceEventTimeline />` on a record, `<GeofenceEditor />` "
+            "and `<GeofenceSettings />` on an admin screen, all from \"@/sdk/geofence\". An entity in the data model that "
+            "also describes a zone (a depot, a site, an area) is NOT where zones are drawn or listed: never build a second "
+            "map, circle or zone list from it. A crossing (entered, left, stayed) is shown by the monitor or the timeline, "
+            "never rebuilt from an alerts table.")
+
+
 def user_prompt(doc: dict, page: dict, *, feedback: str = "", brief: str = "",
                 current: dict | None = None, plan: dict | None = None,
                 relayout_of: dict | None = None, reference: dict | None = None) -> str:
     out = ["Write this page.\n\n```json\n" + json.dumps(_page_brief(doc, page), indent=2) + "\n```"]
+    if note := zone_note(doc, page):
+        out.append(note)
     if reference and not current:
         out.append(reference_block(reference))
     if plan:
@@ -2234,6 +2260,8 @@ def frame_prompt(doc: dict, page: dict, parts: list[dict], *, plan: dict | None 
         out.append(reference_block(reference))
     if plan:
         out.append("\nYour plan for the screen:\n```json\n" + json.dumps(plan, indent=2) + "\n```")
+    if note := zone_note(doc, page):
+        out.append(note)
     if brief:
         out.append(f"\nWhat is wanted of it now:\n{brief}")
     if current:
@@ -2273,6 +2301,8 @@ def part_prompt(doc: dict, page: dict, part: dict, load: str, *, feedback: str =
         out.append(reference_block(reference)
                    + "This is the whole screen as drawn. Write ONLY the region that shows the sections above, "
                    "in the design's own style; the frame draws the rest.\n")
+    if note := zone_note(doc, {**page, "name": f"{page.get('name') or ''} {part.get('label') or ''} {part.get('key') or ''}"}):
+        out.append(note)
     if brief:
         out.append(f"\nWhat is wanted of the screen now:\n{brief}")
     if current:

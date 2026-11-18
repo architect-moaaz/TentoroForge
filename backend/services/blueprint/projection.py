@@ -3444,6 +3444,16 @@ _SEED_ANCHORS = {"IN": (12.9716, 77.5946), "GB": (51.5074, -0.1278), "US": (40.7
 
 
 def _seed_anchor(doc: dict | None) -> tuple[float, float]:
+    # THE BRIEF'S OWN PLACE FIRST. A brief that names a place ("the depot in HSR Layout, Bengaluru") gave the fleet app a
+    # zone at 12.9716, 77.5946, while its app-level zone records sat near 0,0 (no locale on the Blueprint), so every map
+    # showed open ocean (Depot Fleet, 2026-11-18). Demo places go beside the zone the plan already placed.
+    for z in ((doc or {}).get("geofencing") or {}).get("zones") or []:
+        try:
+            lat, lng = float(z["lat"]), float(z["lng"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if -90 <= lat <= 90 and -180 <= lng <= 180 and (lat, lng) != (0.0, 0.0):
+            return lat, lng
     product = (doc or {}).get("product") or {}
     locale = str(product.get("locale") or "").replace("_", "-")
     region = locale.split("-")[-1].upper() if "-" in locale else ""

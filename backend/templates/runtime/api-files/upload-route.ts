@@ -11,12 +11,13 @@ export const runtime = "nodejs";
  * WHAT MAY BE UPLOADED. A file is served back under the type it was uploaded
  * with, so an uploaded web page or script was one click from running inside
  * another person's signed-in session. Only the kinds an application takes as
- * a document or a picture are kept: photos, PDFs, plain text, office files.
+ * a document or a picture are kept: photos, PDFs, plain text, office files, and audio, video and zip archives (kept and
+ * downloaded, never served as a page: see download-route.ts). A file is at most MAX_BYTES.
  * Pages, scripts, SVG (it can carry script) and programs are refused by their
  * declared type AND by their file name, whichever disagrees.
  */
 const ALLOWED_TYPE =
-  /^(image\/(png|jpe?g|gif|webp|avif|heic|heif)|application\/pdf|text\/(plain|csv)|application\/(msword|vnd\.ms-(excel|powerpoint)|vnd\.openxmlformats-officedocument\.[a-z.]+|octet-stream))$/i;
+  /^(image\/(png|jpe?g|gif|webp|avif|heic|heif)|application\/pdf|(audio|video)\/[a-z0-9.+-]+|text\/(plain|csv)|application\/(zip|x-zip-compressed|msword|vnd\.ms-(excel|powerpoint)|vnd\.openxmlformats-officedocument\.[a-z.]+|octet-stream))$/i;
 const BLOCKED_NAME = /\.(html?|xhtml|svg|svgz|xml|js|mjs|cjs|jsx|tsx?|php\d?|phtml|asp|aspx|jsp|exe|dll|bat|cmd|sh|ps1|vbs|jar|py|rb|pl|swf|apk|msi)$/i;
 const MAX_BYTES = 15 * 1024 * 1024;
 

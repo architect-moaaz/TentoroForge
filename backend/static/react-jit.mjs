@@ -123,7 +123,13 @@ function resolveLoose(dir, sub) {
 const BASE_BUILD = {
   bundle: true, write: false, platform: "browser", target: "es2020", jsx: "automatic", sourcemap: false,
   metafile: true, logLevel: "silent",
-  define: { "process.env.NODE_ENV": '"development"', "process.env.NEXT_PUBLIC_BASE_PATH": '""', "process.env.NEXT_BASE_PATH": '""' },
+  // `process` does not exist in the browser, and Next inlines `process.env.NEXT_PUBLIC_*` at build time while this bundler does
+  // not. Every one the SDK reads at load time is named here (sdk/map.tsx reads the three map ones), or any page with a map
+  // renders blank in a look, is scored 1/10, and is written again for nothing. An unset provider/style is `undefined`, as in a real app.
+  define: {
+    "process.env.NODE_ENV": '"development"', "process.env.NEXT_PUBLIC_BASE_PATH": '""', "process.env.NEXT_BASE_PATH": '""',
+    "process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY": '""', "process.env.NEXT_PUBLIC_MAP_PROVIDER": "undefined", "process.env.NEXT_PUBLIC_MAP_STYLE": "undefined",
+  },
   loader: { ".png": "dataurl", ".jpg": "dataurl", ".svg": "dataurl", ".woff2": "dataurl", ".woff": "dataurl" },
 };
 

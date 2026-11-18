@@ -29,7 +29,6 @@ KEY = "GOOGLE_MAPS_API_KEY"
 #: The sentence that identifies the ask in a transcript: `key_saved_in` accepts the saved words only straight after it.
 _MARK = "needs Google Maps"
 SAVED = "Google Maps key saved"
-SKIP = "Use the free map"
 
 #: The Google APIs the one key must be allowed to use, in the words Google's console shows.
 APIS = ("Maps JavaScript API", "Routes API", "Directions API", "Geocoding API", "Places API", "Maps SDK for Android")
@@ -168,7 +167,7 @@ def ask(doc: dict, output_dir: str | Path, brief: str = "") -> dict[str, Any] | 
     if not why or asked(output_dir) or key_set(output_dir):
         return None
     _mark_asked(output_dir)
-    return {"text": TEXT.format(why=why), "options": [SKIP], "secret": dict(SECRET_FIELD), "status": "asked"}
+    return {"text": TEXT.format(why=why), "secret": dict(SECRET_FIELD), "status": "asked"}
 
 
 def is_prompt(text: str) -> bool:
@@ -189,11 +188,6 @@ def _asked_lately(history: Iterable[tuple[str, str]], within: int = 40) -> bool:
 def key_saved_in(message: str, history: Iterable[tuple[str, str]]) -> bool:
     """Whether `message` is the panel saying the key was saved, after the ask."""
     return _norm(message) == _norm(SAVED) and _asked_lately(history)
-
-
-def skipped_in(message: str, history: Iterable[tuple[str, str]]) -> bool:
-    """Whether `message` is the owner choosing the free map, after the ask."""
-    return _norm(message) == _norm(SKIP) and _asked_lately(history)
 
 
 def ask_after_turn(output_dir: str | Path, brief: str = "") -> dict[str, Any] | None:

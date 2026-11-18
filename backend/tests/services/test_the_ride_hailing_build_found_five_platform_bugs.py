@@ -199,3 +199,22 @@ def test_a_dark_rail_on_a_dark_app_is_not_painted_with_a_light_inverse():
     assert "var(--inverse))" not in light_inverse and "hsl(var(--card))" in light_inverse
     dark_inverse = json.dumps(rail("#0B1220"))
     assert "hsl(var(--inverse))" in dark_inverse, "a light app's dark rail still uses its dark inverse"
+
+
+def test_the_upload_rules_let_through_what_people_attach_and_refuse_what_runs():
+    """Run the SHIPPED regexes, not their text: audio, video and zip are kept (a voice note, a clip, an archive of photos);
+    pages, scripts, SVG and programs are refused by type AND by name."""
+    import re
+    up = (BACKEND / "templates" / "runtime" / "api-files" / "upload-route.ts").read_text(encoding="utf-8")
+    pick = lambda name: re.search(rf"const {name} =\s*/(.+)/i;", up).group(1)
+    allowed, blocked = re.compile(pick("ALLOWED_TYPE"), re.I), re.compile(pick("BLOCKED_NAME"), re.I)
+    for ok in ("image/png", "image/jpeg", "application/pdf", "text/csv", "audio/mpeg", "audio/webm;codecs=opus".split(";")[0],
+               "video/mp4", "video/quicktime", "application/zip", "application/x-zip-compressed",
+               "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/octet-stream"):
+        assert allowed.match(ok), ok
+    for bad in ("text/html", "image/svg+xml", "application/javascript", "application/x-msdownload", "application/xml"):
+        assert not allowed.match(bad), bad
+    for name in ("page.html", "logo.svg", "run.js", "tool.exe", "shell.sh", "x.PHP", "app.apk"):
+        assert blocked.search(name), name
+    for name in ("photo.png", "clip.mp4", "voice.m4a", "photos.zip", "report.pdf"):
+        assert not blocked.search(name), name

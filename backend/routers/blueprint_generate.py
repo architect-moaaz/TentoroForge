@@ -2088,16 +2088,13 @@ async def smith_chat(
                 defined = bool(svc.doc.get("requirements")
                                or svc.doc.get("pages"))
 
-            # GOOGLE MAPS KEY: "saved" (the box stored it; this turn's start already copied it into the app) or "use the free
-            # map". Both are the panel's own words, recognised only after Smith's ask (`maps_key`), and they need no definition:
-            # the ask can come with the very first plan.
+            # GOOGLE MAPS KEY: "saved" (the box stored it; this turn's start already copied it into the app). Those are the
+            # panel's own words, recognised only after Smith's ask (`maps_key`), and they need no definition: the ask can come
+            # with the very first plan. The ask has no answer buttons on purpose: a second open question beside the platform
+            # question made the page send both answers as one reply, which read as neither.
             _chat_so_far = [(t.role, t.text) for t in req.history if t.text]
             if maps_key.key_saved_in(req.message, _chat_so_far):
                 emit("message", {"text": maps_key.SAVED_TEXT, "status": "reported"})
-                return {"status": "reported"}
-            if maps_key.skipped_in(req.message, _chat_so_far):
-                emit("message", {"text": "The free map it is. You can add a Google key any time under Settings → Integrations → Google Maps.",
-                                 "status": "reported"})
                 return {"status": "reported"}
 
             # DEFECT-STATUS-VERB: a typed `status` is a COMMAND, not a brief to

@@ -13,6 +13,6 @@ def test_record_inputs_and_queries_open_sealed_values():
     assert "export async function openSealed" in engine
     assert 'key.endsWith("_encrypted")' in engine and "decryptSensitive(blob)" in engine
     assert "return row ? await openSealed(row) : null;" in engine, "a record input is opened"
-    assert "queryResult(await Promise.all((rows ?? []).map((r: Record<string, unknown>) => openSealed(r))))" in engine, \
+    assert "queryResult(await Promise.all((rows ?? []).map(async (r: Record<string, unknown>) => numericColumnsAsNumbers(table, await openSealed(r)))))" in engine, \
         "a query's rows are opened"
     assert '`${plain}_mask`' in engine, "a value that cannot be opened reads as present, never as empty"

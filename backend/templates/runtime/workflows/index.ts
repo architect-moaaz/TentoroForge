@@ -1206,7 +1206,7 @@ export function _finalizeInsert(
  * so a process started by a vendor reads and changes the vendor's rows, as
  * their pages do. A run with no acting person is the application's own.
  */
-async function _scoped(table: any, where: any, ctx: WorkflowExecutionContext, op: "read" | "write"): Promise<any> {
+export async function _scoped(table: any, where: any, ctx: WorkflowExecutionContext, op: "read" | "write"): Promise<any> {
   const user = (ctx as any)?.user;
   if (!user?.id) return where;
   // an event's run is the application's own (`__byEvent`, set by the bus): it sees what the application sees, whoever caused it

@@ -25,9 +25,29 @@ async function rules(): Promise<Rule[]> {
 /** A rule was added or changed: look again at once. */
 export function rulesChanged(): void { rulesCache = null; }
 
+/**
+ * Tell people a zone rule fired: an IN-APP notification first (the bell every app has: a row naming the person, or naming
+ * nobody and their role), then a web push. Push alone reached only a browser that had subscribed to it, so an admin who never
+ * had was told nothing and nothing was recorded (found building a fleet app end to end, 2026-11-18). The push is best effort;
+ * the rule fails only when NEITHER reached anyone.
+ */
 async function notifyPeople(to: { role?: string; userIds?: string[] }, m: { title: string; body?: string; link?: string; tag?: string }): Promise<void> {
-  const { sendPush } = await import("@/lib/push");
-  await sendPush(to, m);
+  let inApp = false;
+  try {
+    const { db } = await import("@/db");
+    const { forgeNotifications } = await import("@/db/schema/_forge_notifications");
+    const base = { title: m.title, message: m.body ?? "", type: "info", link: m.link ?? null };
+    const rows = to.userIds?.length
+      ? to.userIds.map((u) => ({ ...base, userId: String(u), role: to.role ?? null }))
+      : to.role ? [{ ...base, userId: null, role: to.role }] : [];
+    if (rows.length) { await db.insert(forgeNotifications).values(rows); inApp = true; }
+  } catch { /* an app with no notifications table still gets the push below */ }
+  try {
+    const { sendPush } = await import("@/lib/push");
+    await sendPush(to, m);
+  } catch (err) {
+    if (!inApp) throw err;
+  }
 }
 
 const ruleDeps = (): Omit<RuleDeps, "rules"> => ({

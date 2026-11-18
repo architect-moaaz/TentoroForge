@@ -92,6 +92,8 @@ _TEMPLATES: dict[str, dict] = {
         "rules": [
             ("Depot", "geofence.entered", _emit("vehicle.arrived_at_depot", vehicleId="{{entityId}}"), "a vehicle is back"),
             ("Depot", "geofence.exited", _emit("vehicle.left_depot", vehicleId="{{entityId}}"), "a vehicle went out"),
+            # "Alert the admin when a vehicle leaves" is a person told, not only an event on the bus nobody may be listening to.
+            ("Depot", "geofence.exited", _notify("Vehicle left the depot", "A vehicle has left the depot."), "tell a manager a vehicle went out"),
             ("Depot", "geofence.dwell", _notify("Vehicle idle at depot", "A vehicle has stayed at the depot a long time."), "tell a manager about a long stay"),
         ],
         "notes": ["Dwell is judged by the zone's stay time, set on the zone."],

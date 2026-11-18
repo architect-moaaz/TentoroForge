@@ -219,3 +219,61 @@ def test_erasing_and_purging_also_clear_the_copy_on_the_event_bus():
 def test_a_zone_never_widens_to_everyone_because_one_entry_was_misspelt():
     route = (RUNTIME / "api-geofence-zones" / "route.ts").read_text(encoding="utf-8")
     assert route.count("assign.length !== b.assign.length") == 2, "both adding and changing a zone refuse a dropped entry"
+
+
+def test_alert_the_admin_when_a_vehicle_leaves_tells_the_admin():
+    """The brief says "alert the admin when a vehicle leaves the depot": a person told, not only an event nobody may listen to."""
+    plan = gp.analyse("Fleet depot app. Alert the admin when a vehicle leaves the depot. Zone: Depot - circle 200 m at 12.9716, 77.5946")
+    told = [r for r in plan.rules if r["onEvent"] == "geofence.exited" and r["action"]["kind"] == "notify"]
+    assert told and told[0]["action"]["role"] == "Admin" and told[0]["action"]["title"]
+    assert any(r["onEvent"] == "geofence.exited" and r["action"]["kind"] == "emit_event" for r in plan.rules), "the event stays for workflows"
+
+
+def test_a_zone_rule_that_notifies_writes_the_in_app_bell_before_the_push():
+    """Push alone reached only a browser that had subscribed, so an admin who never had was told nothing and nothing was recorded
+    (found building a fleet app end to end, 2026-11-18). The rule writes the bell's row first, by role or by person, and the push
+    is best effort: the rule fails only when neither reached anyone."""
+    src = (RUNTIME / "geofence" / "index.ts").read_text(encoding="utf-8")
+    body = src[src.index("async function notifyPeople"):src.index("const ruleDeps")]
+    assert "forgeNotifications" in body and "db.insert(forgeNotifications)" in body
+    assert body.index("db.insert(forgeNotifications)") < body.index("sendPush"), "the bell first, then the push"
+    assert "userId: null, role: to.role" in body, "a role alert names nobody and the role, which is how the bell reads it"
+    assert "if (!inApp) throw err" in body, "a push that fails is fine once the bell has it; failing both is a failed rule"
+
+
+def test_demo_places_sit_beside_the_zone_the_brief_placed_not_at_zero_zero():
+    """Depot Fleet (2026-11-18): the plan put the depot in Bengaluru, but the app's own zone records were seeded near 0,0 (no
+    locale on the Blueprint), so every map showed open ocean."""
+    from services.blueprint.projection import _seed_anchor, _seed_value
+    doc = {"geofencing": {"zones": [{"name": "Depot", "lat": 12.9716, "lng": 77.5946}]}}
+    assert _seed_anchor(doc) == (12.9716, 77.5946)
+    place = _seed_value({"name": "center", "type": "location", "required": True}, "DepotZone", 1, anchor=_seed_anchor(doc))
+    assert abs(place["lat"] - 12.9716) < 0.05 and abs(place["lng"] - 77.5946) < 0.05
+    # A zone still waiting to be drawn has no place to follow; a bad one is skipped, never fatal.
+    assert _seed_anchor({"geofencing": {"zones": [{"name": "X", "lat": None, "lng": None}, {"lat": "x", "lng": 1}]}}) == (0.0, 0.0)
+    assert _seed_anchor({"geofencing": {"zones": [{"lat": 0, "lng": 0}]}}) == (0.0, 0.0)
+
+
+def test_a_zone_page_of_an_app_with_zones_is_told_to_use_the_engines_zone_screens():
+    """Depot Fleet (2026-11-18): the writer built a second zone map from the app's own DepotZone entity."""
+    from services.blueprint.ui_engineer import zone_note, user_prompt, plan_prompt
+    doc = {"geofencing": {"zones": [{"name": "Depot", "lat": 12.9, "lng": 77.5}]}, "pages": []}
+    live = {"id": "PAGE-004", "name": "Fleet Live Map", "route": "/map", "purpose": "see vehicles", "primaryTasks": []}
+    note = zone_note(doc, live)
+    assert '"Depot"' in note and "GeofenceMap" in note and "@/sdk/geofence" in note and "second" in note
+    assert note.strip() in user_prompt(doc, live) and note.strip() in plan_prompt(doc, live)
+    # A page about something else, or an app with no zones, hears nothing about it.
+    assert zone_note(doc, {"id": "P", "name": "Invoices", "route": "/invoices", "purpose": "bills"}) == ""
+    assert zone_note({"pages": []}, live) == ""
+    assert zone_note({"geofencing": {"zones": []}}, live) == ""
+
+
+def test_the_parts_of_a_split_zone_screen_hear_about_the_zones_too():
+    """The Live Map is a split screen: its parts are written by part_prompt, which did not carry the note (2026-11-18)."""
+    from services.blueprint.ui_engineer import part_prompt, frame_prompt
+    doc = {"geofencing": {"zones": [{"name": "Depot", "lat": 12.9, "lng": 77.5}]}, "pages": []}
+    page = {"id": "PAGE-001", "name": "Fleet Live Map", "route": "/"}
+    part = {"key": "depotZone", "label": "Depot zone", "workflows": [], "sections": [], "component": "DepotZone", "kind": "panel"}
+    assert "GeofenceMap" in part_prompt(doc, page, part, "")
+    assert "GeofenceMap" in frame_prompt(doc, page, [part])
+    assert "GeofenceMap" not in part_prompt({"pages": []}, page, part, "")

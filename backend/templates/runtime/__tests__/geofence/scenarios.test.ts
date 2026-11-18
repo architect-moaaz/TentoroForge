@@ -148,8 +148,10 @@ test("fleet: a vehicle's arrival, long stay and departure are each reported once
     ...walk([dep, offset(dep, 1500, 0)], { ...opts, entityId: "v1", startAt: 1_200_000 + 40 * 60 * 1000 + 10_000 }),
   ]);
   assert.deepEqual(types(a.emitted, "v1"), ["vehicle.arrived_at_depot", "vehicle.left_depot"]);
-  assert.equal(a.notified.length, 1, "one dwell alert for the visit");
-  assert.equal(a.notified[0].to.role, "Admin");
+  // the admin is told twice for the visit, each once: the vehicle stayed a long time, and then it left the depot
+  assert.equal(a.notified.length, 2, "one stay alert and one departure alert for the visit");
+  assert.deepEqual(a.notified.map((n) => n.title).sort(), ["Vehicle idle at depot", "Vehicle left the depot"]);
+  assert.ok(a.notified.every((n) => n.to.role === "Admin"));
 });
 
 test("attendance: reaching the site is reported, and being near it never checks anyone in", { skip }, async () => {
