@@ -2211,6 +2211,29 @@ export function registerDefaultActions(): void {
     let to = String(_resolveRef((config as any).to ?? (config as any).email ?? "", ctx) ?? "");
     const subject = String(_resolveRef((config as any).subject ?? (config as any).title ?? "", ctx) ?? "");
     const body = String(_resolveRef((config as any).body ?? (config as any).message ?? (config as any).html ?? "", ctx) ?? "");
+    // THE FILES A MESSAGE CARRIES (CARES, 18 Nov 2026): an invoice or a receipt kept on a record goes with the
+    // e-mail itself, because a link to the app's files asks the reader to sign in, which a guest cannot do.
+    // `attachments` names stored files by id (a list, or ids separated by commas); a file that cannot be read
+    // is left off, and the step's notice says so.
+    const attachIds: string[] = (() => {
+      const raw = _resolveRef((config as any).attachments ?? "", ctx);
+      const list: unknown[] = Array.isArray(raw) ? raw : String(raw ?? "").split(",");
+      const ids = list.map((x: any) => String((x && typeof x === "object" ? (x.fileId ?? x.id) : x) ?? "").trim()).filter(Boolean);
+      return Array.from(new Set(ids)).slice(0, 10);
+    })();
+    const attached: { filename: string; content: Buffer; contentType: string }[] = [];
+    const unreadable: string[] = [];
+    if (attachIds.length) {
+      const { loadFile } = await import("@/lib/storage");
+      for (const id of attachIds) {
+        const f = await loadFile(id).catch(() => null);
+        if (f) attached.push({ filename: f.filename, content: f.buffer, contentType: f.contentType });
+        else unreadable.push(id);
+      }
+    }
+    const attachNotice = unreadable.length
+      ? `${unreadable.length} attachment${unreadable.length === 1 ? "" : "s"} could not be read and ${unreadable.length === 1 ? "was" : "were"} left off`
+      : undefined;
     // When the generator only supplied `recipientRole` (the common case for
     // planner-emitted "email the admin when X" workflows), the config carries
     // no `to` and every provider path used to fall through to the in-app
@@ -2271,6 +2294,7 @@ export function registerDefaultActions(): void {
     const fromNotice = ownFrom || from === smtpUser
       ? undefined
       : `sent from ${from} — set FORGE_EMAIL_FROM to the address you want people to see`;
+    const sentNotice = [fromNotice, attachNotice].filter(Boolean).join("; ") || undefined;
 
     // 1. SMTP: the declared provider, or an SMTP_HOST in the environment when
     //    nothing is declared. A DECLARED provider is never overridden by the
@@ -2295,9 +2319,10 @@ export function registerDefaultActions(): void {
           secure: port === 465, // 465 = SSL, 587/25 = STARTTLS (nodemailer negotiates)
           auth: user && pass ? { user, pass } : undefined,
         });
-        const info: any = await transporter.sendMail({ from, to: sendTo, subject, html: `<p>${body}</p>` });
+        const info: any = await transporter.sendMail({ from, to: sendTo, subject, html: `<p>${body}</p>`,
+                                                       ...(attached.length ? { attachments: attached } : {}) });
         // Contract-declared `messageId`. nodemailer surfaces it as info.messageId.
-        return { sent: true, channel: "smtp", messageId: info?.messageId ?? null, notice: fromNotice };
+        return { sent: true, channel: "smtp", messageId: info?.messageId ?? null, attached: attached.length, notice: sentNotice };
       } catch (e) {
         console.warn("[workflow] send_email: smtp failed:", e);
         refused = `${service?.name ?? "the mail server"} refused the message (${e instanceof Error ? e.message : String(e)})`;
@@ -2315,11 +2340,12 @@ export function registerDefaultActions(): void {
           const res = await fetch("https://api.resend.com/emails", {
             method: "POST",
             headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-            body: JSON.stringify({ from, to: sendTo, subject, html: `<p>${body}</p>` }),
+            body: JSON.stringify({ from, to: sendTo, subject, html: `<p>${body}</p>`,
+                                   ...(attached.length ? { attachments: attached.map((f) => ({ filename: f.filename, content: f.content.toString("base64") })) } : {}) }),
           });
           if (res.ok) {
             const j: any = await res.json().catch(() => null);
-            return { sent: true, channel: "email", messageId: j?.id ?? null, notice: fromNotice };
+            return { sent: true, channel: "email", messageId: j?.id ?? null, attached: attached.length, notice: sentNotice };
           }
           console.warn("[workflow] send_email: resend error", res.status);
           refused = `${service?.name ?? "Resend"} rejected the message (HTTP ${res.status})`;

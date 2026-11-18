@@ -180,6 +180,8 @@ export interface NodeConfig {
   to?: string;       // process variable or literal
   subject?: string;
   template?: string;
+  /** Stored files sent with the message, by id: a list, or ids separated by commas. */
+  attachments?: string | string[];
 
   // send_notification
   message?: string;
