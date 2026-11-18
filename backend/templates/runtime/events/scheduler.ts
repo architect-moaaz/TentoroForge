@@ -16,7 +16,7 @@
 
 import { db } from "@/db";
 import { sql } from "drizzle-orm";
-import { isDue } from "./cron";
+import { fromDbTime, isDue } from "./cron";
 import { getTriggerContract } from "./triggers";
 
 function _rows(res: unknown): any[] {
@@ -55,7 +55,7 @@ export async function runDueSchedules(
         const row = _rows(res)[0];
         if (row) {
           enabled = row.enabled !== false;
-          lastRunAt = row.last_run_at ? new Date(row.last_run_at) : null;
+          lastRunAt = fromDbTime(row.last_run_at);  // written as UTC — not the server's own zone
         }
       } catch {
         /* table missing on an older app — treat as never-run */

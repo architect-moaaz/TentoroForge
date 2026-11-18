@@ -16,6 +16,7 @@
  */
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
+import { fromDbTime } from "./events/cron";
 // Read as a namespace: an application built before `DECLARED` existed has a
 // connected.ts without it, and reads as declaring nothing.
 import * as connected from "@/lib/integrations/connected";
@@ -697,7 +698,7 @@ export async function syncStays(ref?: unknown, opts: { now?: Date; budgetMs?: nu
     startedAt = String(pending.startedAt);
     cursor = pending.cursor ?? null;
   } else {
-    const since = state?.synced_through ? new Date(state.synced_through) : null;
+    const since = fromDbTime(state?.synced_through);  // written as UTC — not the server's own zone
     // Changed since the last finished pass, a few minutes back for clock
     // drift — or, the first time and after a long gap, the whole window.
     filter = since && since > windowStart
@@ -707,8 +708,8 @@ export async function syncStays(ref?: unknown, opts: { now?: Date; budgetMs?: nu
     startedAt = _iso(now);
   }
   const remember = (next: Record<string, unknown> | null) => db.execute(sql`
-    INSERT INTO forge_mews_sync (connection, pending, last_run_at) VALUES (${connection}, ${next ? JSON.stringify(next) : null}::jsonb, now())
-    ON CONFLICT (connection) DO UPDATE SET pending = EXCLUDED.pending, last_run_at = now()`);
+    INSERT INTO forge_mews_sync (connection, pending, last_run_at) VALUES (${connection}, ${next ? JSON.stringify(next) : null}::jsonb, (now() AT TIME ZONE 'UTC'))
+    ON CONFLICT (connection) DO UPDATE SET pending = EXCLUDED.pending, last_run_at = (now() AT TIME ZONE 'UTC')`);
   let kept = 0;
   let complete = false;
   let error: string | null = null;
@@ -767,10 +768,10 @@ export async function syncStays(ref?: unknown, opts: { now?: Date; budgetMs?: nu
   if (complete) await remember(null);
   await db.execute(sql`
     INSERT INTO forge_mews_sync (connection, synced_through, last_run_at, last_error, stays)
-    VALUES (${connection}, ${complete ? startedAt : null}, now(), ${error}, ${kept})
+    VALUES (${connection}, ${complete ? startedAt : null}, (now() AT TIME ZONE 'UTC'), ${error}, ${kept})
     ON CONFLICT (connection) DO UPDATE SET
       synced_through = COALESCE(${complete ? startedAt : null}::timestamp, forge_mews_sync.synced_through),
-      last_run_at = now(), last_error = EXCLUDED.last_error, stays = EXCLUDED.stays`);
+      last_run_at = (now() AT TIME ZONE 'UTC'), last_error = EXCLUDED.last_error, stays = EXCLUDED.stays`);
   // Stays that left the window are not kept.
   await db.execute(sql`
     DELETE FROM forge_mews_stays WHERE connection = ${connection} AND departure_date < ${_day(_iso(windowStart))}`);
@@ -843,7 +844,7 @@ export async function suggestStays(term: unknown, ref?: unknown, limit = 8):
   // After that the cron tick keeps them fresh, and a search never waits on it.
   const any = _rows(await db.execute(sql`
     SELECT 1 AS one FROM forge_mews_stays WHERE connection = ${connection} LIMIT 1`)).length > 0;
-  const ranAgo = Date.now() - (state?.last_run_at ? new Date(state.last_run_at).getTime() : 0);
+  const ranAgo = Date.now() - (fromDbTime(state?.last_run_at)?.getTime() ?? 0);
   if (!any && ranAgo > 60_000) {
     await _syncOnce(connection, () => syncStays(ref, { budgetMs: 15_000 }));
     refreshed = true;

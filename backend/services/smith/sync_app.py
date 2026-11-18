@@ -92,6 +92,9 @@ RUNTIME_FILES: tuple[tuple[str, str], ...] = (
     # The tick that runs what is due — and keeps the Mews stays a desk
     # searches fresh. An app kept the one it was built with.
     ("api-cron/route.ts", "src/app/api/cron/tick/route.ts"),
+    # The live-refresh stream: reads where it got to as UTC, so a server
+    # outside UTC does not send the last hours' events again (2026-11-18).
+    ("api-events-stream/route.ts", "src/app/api/events/stream/route.ts"),
 )
 
 #: Sign-in logic every app runs, the platform's: where a signed-in person
