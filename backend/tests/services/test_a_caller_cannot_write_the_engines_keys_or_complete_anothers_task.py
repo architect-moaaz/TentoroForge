@@ -35,7 +35,7 @@ def _execute_route() -> str:
 def test_a_client_cannot_write_the_engines_keys():
     route = _execute_route()
     strip = route.index("THE ENGINE'S OWN KEYS ARE NOT THE CALLER'S TO WRITE")
-    assert "/^__(step_|user$|guest$|origin$)/.test(k)" in route[strip:strip + 900]
+    assert "/^__(step_|user$|guest$|origin$|eventChain$)/.test(k)" in route[strip:strip + 1100]
     # The strip comes before the route sets those keys itself.
     assert strip < route.index("input.__origin =") and strip < route.index("(input as any).__guest = _guest")
     assert strip < route.index("[`__step_${resumeTaskRow.node_id}_completed`]: true")
