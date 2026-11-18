@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { Providers } from "./providers";
 import { TestRibbon } from "@/components/TestRibbon";
+import { ViewerTime } from "@/components/ViewerTime";
 // compileTokens converts the token groups into a flat CSS custom-property map
 // (e.g. { "--token-primary-500": "#3b82f6" }) that is applied on <html>.
 // This makes every token available as a CSS variable throughout the app,
@@ -47,6 +48,7 @@ export default function RootLayout({
     >
       <body suppressHydrationWarning>
         <TestRibbon />
+        <ViewerTime />
         <Providers>{children}</Providers>
       </body>
     </html>

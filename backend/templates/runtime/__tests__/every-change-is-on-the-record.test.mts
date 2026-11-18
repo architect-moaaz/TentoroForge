@@ -19,21 +19,28 @@ installHarness({ stubs: {
       ? Object.fromEntries(Object.keys(v).sort((a, b) => a.length - b.length || (a < b ? -1 : a > b ? 1 : 0)).map((k) => [k, order(v[k])]))
       : v;
     const jsonb = (text) => order(JSON.parse(text));
-    export const db = {
+    export const db = globalThis.__fakeDb = {
       async execute(q) {
         globalThis.__SQL__.push(q.text);
         if (q.text.includes("SELECT hash FROM forge_audit ORDER BY seq DESC")) {
           const last = globalThis.__ROWS__.at(-1); return last ? [{ hash: last.hash }] : [];
         }
         if (q.text.startsWith("\\n    INSERT INTO forge_audit")) {
-          const v = q.values; const row = { seq: globalThis.__ROWS__.length + 1, at: v[0], actor_id: v[1], action: v[7],
-            entity: v[8], entity_id: v[9], before: jsonb(v[10]), after: jsonb(v[11]), prev_hash: v[17], hash: v[18] };
-          globalThis.__ROWS__.push(row); return [{ seq: row.seq, hash: row.hash }];
+          // one row, or a batch: VALUES joined from one fragment per row (recordAuditMany)
+          const batch = q.values.length === 1 && Array.isArray(q.values[0]?.values) && q.values[0].values[0]?.values
+            ? q.values[0].values.map((f) => f.values) : [q.values];
+          let last;
+          for (const v of batch) {
+            const row = { seq: globalThis.__ROWS__.length + 1, at: v[0], actor_id: v[1], action: v[7],
+              entity: v[8], entity_id: v[9], before: jsonb(v[10]), after: jsonb(v[11]), prev_hash: v[17], hash: v[18] };
+            globalThis.__ROWS__.push(row); last = row;
+          }
+          return [{ seq: last.seq, hash: last.hash }];
         }
         if (q.text.includes("FROM forge_audit ORDER BY seq ASC")) return globalThis.__ROWS__;
         return [];
       },
-      async transaction(fn) { return fn(this); },
+      async transaction(fn) { globalThis.__TX__ = (globalThis.__TX__ ?? 0) + 1; return fn(this); },
     };`,
   "./audit-policy": `export const AUDIT = { level: "regulated", reviewers: ["Compliance"], retentionDays: 30, reasonRequired: ["invoices"] };`,
 } });
@@ -66,4 +73,28 @@ eqJson(await audit.verifyChain(), { ok: false, checked: 1, brokenAt: 1 }, "a row
 const big = "x".repeat(70_000);
 const three = await audit.recordAudit((await import("@/db")).db, { action: "create", entity: "Note", entityId: "n", after: { body: big } });
 ok(three && rows[2].after.truncated === true && rows[2].after.bytes > 64 * 1024, "a huge value is cut and says so");
+// WHAT A READ SAW, IN ONE STATEMENT (17 Nov 2026): a batch chains row to row and to the trail before it, keeps each
+// row's record id, and takes the lock and the chain's last hash once.
+rows.length = 0; (globalThis as any).__SQL__.length = 0;
+const lead = await audit.recordAudit((await import("@/db")).db, { action: "create", entity: "Guest", entityId: "g-0", after: { fullName: "x" } });
+const sqlBefore = (globalThis as any).__SQL__.length;
+const n = await audit.recordAuditMany((await import("@/db")).db, ["g-1", "g-2", "g-3"].map((id) => ({
+  action: "read_sensitive", entity: "Guest", entityId: id, changed: ["fullName", "email"], actor: { id: "u-2", role: "Requester" } })));
+const batchSql = (globalThis as any).__SQL__.slice(sqlBefore);
+ok(lead && n === 3 && rows.length === 4, "three reads were written as three rows");
+eqJson(rows.map((r: any) => r.entity_id), ["g-0", "g-1", "g-2", "g-3"], "each row keeps the record it was about");
+eqJson(rows.slice(1).map((r: any) => r.prev_hash), rows.slice(0, 3).map((r: any) => r.hash), "each row chains to the one before it");
+eqJson(batchSql.filter((t: string) => t.includes("pg_advisory_xact_lock")).length, 1, "one lock for the batch");
+eqJson(batchSql.filter((t: string) => t.includes("INSERT INTO forge_audit")).length, 1, "one statement for the batch");
+eqJson(await audit.verifyChain(), { ok: true, checked: 4 }, "a batch verifies as the rows written one by one do");
+eqJson(await audit.recordAuditMany((await import("@/db")).db, []), 0, "nothing seen, nothing written");
+// THE LOCK HOLDS: on the bare connection the lock, the last hash and the insert run in one transaction; given a
+// write's own transaction, the entry rides in it and opens no other.
+const tx0 = (globalThis as any).__TX__ ?? 0;
+await audit.recordAudit((await import("@/db")).db, { action: "login", entity: "users", entityId: "u-9" });
+await audit.recordAuditMany((await import("@/db")).db, [{ action: "read_sensitive", entity: "Guest", entityId: "g-9", changed: ["email"] }]);
+eqJson(((globalThis as any).__TX__ ?? 0) - tx0, 2, "each write on the bare connection takes its own transaction");
+const tx1 = (globalThis as any).__TX__;
+await audit.recordAudit({ execute: (q: any) => (globalThis as any).__fakeDb.execute(q) }, { action: "create", entity: "Note", entityId: "n-9" });
+eqJson((globalThis as any).__TX__, tx1, "inside a write's transaction it opens no other");
 done("every change is on the record");

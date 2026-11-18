@@ -82,6 +82,16 @@ def test_authoritative_config_traces_every_runtime_read_file():
         assert glob in AUTHORITATIVE_NEXT_CONFIG, glob
 
 
+def test_the_mail_library_the_engine_loads_lazily_is_shipped():
+    """The engine imports nodemailer with `webpackIgnore` (optional dependency), so
+    the tracer cannot see it: deployed, every code email failed "Cannot find
+    package 'nodemailer'" (DITANS, 2026-11-17). Its files are traced in."""
+    assert "./node_modules/nodemailer/**/*" in AUTHORITATIVE_NEXT_CONFIG
+    from pathlib import Path
+    template = Path(__file__).resolve().parents[1] / "templates/standalone-app/next.config.js"
+    assert "./node_modules/nodemailer/**/*" in template.read_text()
+
+
 def test_a_config_without_the_basepath_wiring_is_healed():
     """An older-generation config that predates the preview basePath must be
     re-asserted on the next sweep, not left to render a blank preview."""

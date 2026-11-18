@@ -26,7 +26,7 @@ import secrets
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 
 import httpx
 from sqlalchemy import select
@@ -53,6 +53,24 @@ _POLL_CEILING_S = 45 * 60
 # on the first request; give it room.
 _SMOKE_TIMEOUT_S = 20
 _SMOKE_RETRIES = 3
+
+
+async def _refused_over_quota(neon: Any, project_id: str, database: str) -> bool:
+    """True when Neon turns a connection to the project away because the plan's
+    quota is spent ("Your account or project has exceeded the quota"). Any
+    other answer — it connects, the network blips, the API is slow — is False:
+    only that refusal moves Test out of a project it shares."""
+    try:
+        import asyncpg
+        url = await neon.get_connection_uri(project_id, database_name=database, pooled=False)
+        conn = await asyncpg.connect(url, timeout=20)
+    except Exception as exc:  # noqa: BLE001
+        return "exceeded the quota" in str(exc).lower()
+    try:
+        await conn.close()
+    except Exception:  # noqa: BLE001
+        pass
+    return False
 
 
 async def _smoke_test_db(url: str) -> tuple[bool, str | None]:
@@ -143,7 +161,15 @@ _PLATFORM_REFRESH_RUNTIME_MAP = (
     ("db/forge-notifications.schema.ts", "src/db/schema/_forge_notifications.ts"),
     # The engine: foreign keys and yes/no groups shown by name on charts.
     ("data-engine.ts", "src/lib/data-engine.ts"),
+    # Dates drawn on the server in the viewer's zone and language, so the
+    # browser does not throw the page away and draw it again (2026-11-18).
+    ("viewer-time.ts", "src/lib/viewer-time.ts"),
 )
+#: The server's start-up hook, the platform's while it carries the platform's
+#: mark (an app that wrote its own keeps it). The older platform copy, which
+#: has no mark, is the platform's too.
+_INSTRUMENTATION_MARK = "Forge runtime — do not remove"
+_OLD_INSTRUMENTATION = Path(__file__).resolve().parents[2] / "templates" / "instrumentation.ts"
 _TEMPLATE_RUNTIME_DIR = (
     Path(__file__).resolve().parents[2] / "templates" / "runtime"
 )
@@ -176,10 +202,14 @@ _PLATFORM_REFRESH_FOUNDATION_FILES = (
     "src/lib/SchemaPageBoundary.tsx",
     # The test version's label (and noindex); renders nothing on the live app.
     "src/components/TestRibbon.tsx",
+    # Tells the server the viewer's time zone and language (`lib/viewer-time.ts`).
+    "src/components/ViewerTime.tsx",
 )
 
 
 _RIBBON = "\n        <TestRibbon />"
+_VIEWER_TIME = "\n        <ViewerTime />"
+_VIEWER_TIME_IMPORT = 'import { ViewerTime } from "@/components/ViewerTime";\n'
 _RIBBON_IMPORT = 'import { TestRibbon } from "@/components/TestRibbon";\n'
 #: The ribbon once put after a `<body>` written in a comment
 #: ("onto <html>/<body> before React hydrates") instead of the tag.
@@ -211,6 +241,51 @@ def _ensure_test_ribbon(output_dir: Path) -> bool:
     return True
 
 
+def _ensure_viewer_time(output_dir: Path) -> bool:
+    """The root layout tells the server where its viewer is: `<ViewerTime />`
+    beside the ribbon, as a newly built layout has it. True when it changed."""
+    layout = output_dir / "src" / "app" / "layout.tsx"
+    if not layout.is_file():
+        return False
+    before = layout.read_text("utf-8")
+    text = before
+    if "<ViewerTime />" not in text and "<TestRibbon />" in text:
+        at = text.index("<TestRibbon />") + len("<TestRibbon />")
+        text = text[:at] + _VIEWER_TIME + text[at:]
+    elif "<ViewerTime />" not in text:
+        # No ribbon: straight after the real <body> tag, never one named in a comment.
+        for m in re.finditer(r"<body\b[^>]*>", text):
+            line = text[text.rfind("\n", 0, m.start()) + 1: m.start()].lstrip()
+            if line.startswith(("//", "*", "/*", "{/*")):
+                continue
+            text = text[: m.end()] + _VIEWER_TIME + text[m.end():]
+            break
+    if "<ViewerTime />" in text and _VIEWER_TIME_IMPORT.strip() not in text:
+        text = _VIEWER_TIME_IMPORT + text
+    if text == before:
+        return False
+    layout.write_text(text, "utf-8")
+    return True
+
+
+def _refresh_instrumentation(output_dir: Path) -> bool:
+    """The start-up hook written where the app has none or has the platform's."""
+    src = _TEMPLATE_RUNTIME_DIR / "instrumentation.ts"
+    dst = output_dir / "src" / "instrumentation.ts"
+    if not src.is_file():
+        return False
+    current = dst.read_text("utf-8") if dst.is_file() else None
+    old = _OLD_INSTRUMENTATION.read_text("utf-8") if _OLD_INSTRUMENTATION.is_file() else None
+    if current is not None and _INSTRUMENTATION_MARK not in current and current != old:
+        return False                       # the app's own: left as it is
+    text = src.read_text("utf-8")
+    if current == text:
+        return False
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    dst.write_text(text, "utf-8")
+    return True
+
+
 def _refresh_platform_files(output_dir: Path) -> None:
     """Copy platform-owned config files from templates → output_dir.
 
@@ -239,6 +314,8 @@ def _refresh_platform_files(output_dir: Path) -> None:
         dst.parent.mkdir(parents=True, exist_ok=True)
         dst.write_bytes(src.read_bytes())
     _ensure_test_ribbon(output_dir)
+    _ensure_viewer_time(output_dir)
+    _refresh_instrumentation(output_dir)
     # THE FRAME TOO — the platform's version of each frame file, or the one
     # the application owns (`frameCode`). A frame fix (the current page lit
     # in the rail) otherwise reached a published app only after a Smith turn.
@@ -382,17 +459,37 @@ class VercelDeployProvider:
             # so recreating either would 409. `is_first_publish` (used
             # later to decide NEXTAUTH_SECRET stability) treats "first"
             # as: no prior row set any resource id at all.
-            prior_neon = await self._latest_prior_with_neon(snapshot)
+            #
+            # EACH SIDE HAS ITS OWN NEON PROJECT, and reuses only one its own
+            # rows hold. Neon's limits — data sent out, compute, storage — are
+            # per project, and Test and production shared one: DITANS's testing
+            # spent the free plan's 5 GB of November's outgoing data and took the
+            # live app down with it (wzml1sa6, 2026-11-18).
+            prior_neon = await self._latest_prior_with_neon(snapshot, environment=side)
             prior_vercel = await self._latest_prior_with_vercel(snapshot)
             reused_neon = bool(prior_neon and prior_neon.neon_project_id)
             if side == envs.TEST:
-                # THE TEST SIDE'S OWN DATABASE: an empty one inside the app's
-                # Neon project (made with it on a first publish), so the build
-                # seeds demo data into it and the live data is never copied.
-                if reused_neon:
-                    neon_project_id = prior_neon.neon_project_id
-                else:
-                    r = await self.neon.create_project(name=snapshot.project_slug, region_id=snapshot.neon_region)
+                # THE TEST SIDE'S OWN DATABASE: an empty one in Test's own Neon
+                # project (made on its first publish), so the build seeds demo
+                # data into it and the live data is never copied.
+                neon_project_id = prior_neon.neon_project_id if reused_neon else None
+                if neon_project_id:
+                    live = await self._latest_prior_with_neon(snapshot, environment=envs.PRODUCTION)
+                    # An app published before this keeps its Test data in
+                    # production's project — until that project stops answering
+                    # for its quota: what is in it cannot be read then anyway,
+                    # and production's allowance is not Test's to spend.
+                    if (live and live.neon_project_id == neon_project_id
+                            and await _refused_over_quota(self.neon, neon_project_id, envs.TEST_DATABASE)):
+                        yield DeployEvent(
+                            "provision_db",
+                            "The Neon project Test shared with production is over its plan's quota — "
+                            "Test gets its own, started from demo data; what testers entered stays in the "
+                            "old one…")
+                        neon_project_id = None
+                if not neon_project_id:
+                    r = await self.neon.create_project(name=f"{snapshot.project_slug}-test",
+                                                       region_id=snapshot.neon_region)
                     neon_project_id = r["project_id"]
                     # THE PROJECT IS ON THE ROW BEFORE ANYTHING ELSE IS ASKED OF
                     # IT: a failure in the next step must leave a row that names

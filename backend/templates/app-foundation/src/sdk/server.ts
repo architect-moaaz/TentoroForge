@@ -255,10 +255,23 @@ export async function record<E extends EntityName>(
 export async function recordsById<E extends EntityName>(
   entity: E, ids: ReadonlyArray<string | null | undefined>,
 ): Promise<Record<string, Entities[E]>> {
-  const unique = [...new Set(ids.filter((id): id is string => typeof id === "string" && id.length > 0))].slice(0, 200);
-  const rows = await Promise.all(unique.map((id) => record(entity, id)));
+  // ONE QUERY FOR THE LOT (17 Nov 2026): each id used to be its own read — its own query, access check and, in a
+  // regulated app, its own audit write — and a screen naming fifty cases' guests, hotels and stays took a minute.
+  // A masked value ("••••") or a malformed id is no id: it is dropped, as `record` answers null for it.
+  const unique = [...new Set(ids.filter((id): id is string => typeof id === "string" && id.length > 0
+    && !/[[\]]/.test(id) && !/[•·*]/.test(id)))].slice(0, 200);
   const out: Record<string, Entities[E]> = {};
-  unique.forEach((id, i) => { const row = rows[i]; if (row) out[id] = row; });
+  if (!unique.length || (await reviewingEmpty())) return out;
+  await ensureDataEngineInitialized();
+  try {
+    const rows = await engine.findByIds(entity, unique, await actor());
+    for (const r of rows) out[String((r as { id?: unknown }).id)] = plain(entity, r);
+  } catch (err) {
+    // A batch the engine could not run (an id of the wrong shape for its column) falls back to one read each.
+    swallowed("recordsById", entity, err);
+    const rows = await Promise.all(unique.map((id) => record(entity, id)));
+    unique.forEach((id, i) => { const row = rows[i]; if (row) out[id] = row; });
+  }
   return out;
 }
 

@@ -303,7 +303,7 @@ async function admitSso(e: SsoEntry, user: Record<string, any>, claims: Record<s
     const role = claimed || intent.as || SIGNUP_ROLE || undefined;
     const name = String(user.name ?? email.split("@")[0]);
     const { accountValues, writeAccountRow } = await import("@/lib/account-row");
-    const account = accountValues(intent.account, email, name);
+    const account = accountValues(intent.account, email, name, role);
     if (account.error) console.warn(`[auth] ${email} signed up through ${e.id} without an account record: ${account.error}`);
     row = await (db as any).transaction(async (tx: any) => {
       const [created] = await tx.insert(users).values({

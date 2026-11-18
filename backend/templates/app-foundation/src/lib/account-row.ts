@@ -12,6 +12,7 @@
  */
 import { users } from "@/db/schema/user";
 import { eq } from "drizzle-orm";
+import * as accountModule from "@/lib/account";
 import { ACCOUNT, ACCOUNT_INITIAL } from "@/lib/account";
 import { accountTable } from "@/lib/account-table";
 import { sealSensitive } from "@/lib/data-engine";
@@ -19,7 +20,26 @@ import { ensureDataEngineInitialized } from "@/lib/data-init";
 
 const NAME_LIKE = /^(display_?name|name|full_?name|user_?name|nick_?name)$/i;
 
-export function accountValues(input: Record<string, unknown>, email: string, name = ""): { values?: Record<string, unknown>; error?: string } {
+/** WHOSE RECORD THE ACCOUNT ENTITY IS FIRST. The role people sign up as by
+ *  default (SIGNUP_ROLE), an account type of it, or no role at all must make
+ *  the record: a missing required field refuses the signup. Another role
+ *  offered at signup (`security.signupRoles` — an employer, an agency) may
+ *  keep its person elsewhere: it gets the record when what it sent makes one,
+ *  and is never refused for the record's fields. Every recruiter sign-up on
+ *  DITANS was refused "Plan is required" by the Candidate record (2026-11-17). */
+export function ownsAccountRecord(role: string | null | undefined): boolean {
+  const m = accountModule as unknown as { SIGNUP_ROLE?: string | null; SIGNUP_ROLES?: string[] };
+  if (!role || role === m.SIGNUP_ROLE) return true;
+  return !(m.SIGNUP_ROLES ?? []).includes(role);
+}
+
+export function accountValues(input: Record<string, unknown>, email: string, name = "", role?: string | null): { values?: Record<string, unknown>; error?: string } {
+  if (!ACCOUNT) return {};
+  const made = recordFrom(input, email, name);
+  return made.error && !ownsAccountRecord(role) ? {} : made;
+}
+
+function recordFrom(input: Record<string, unknown>, email: string, name: string): { values?: Record<string, unknown>; error?: string } {
   if (!ACCOUNT) return {};
   // WHERE A NEW ACCOUNT STARTS. The form asks only what a person types, so
   // the state a process owns — a verification that has not happened yet — is

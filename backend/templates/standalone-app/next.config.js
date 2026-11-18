@@ -38,6 +38,8 @@ module.exports = {
       "./src/schemas/**/*.json",
       "./src/contracts/**/*.json",
       "./registry.json",
+      // the engine loads nodemailer lazily (webpackIgnore), out of the tracer's sight
+      "./node_modules/nodemailer/**/*",
     ],
   },
   // Generated apps ship with LLM-authored code that occasionally has

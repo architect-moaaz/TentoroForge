@@ -48,6 +48,10 @@ def _quiet(monkeypatch):
     async def ok(url):
         return True, None
     monkeypatch.setattr("services.deploy.vercel_provider._smoke_test_db", ok)
+
+    async def answers(*a, **k):
+        return False
+    monkeypatch.setattr("services.deploy.vercel_provider._refused_over_quota", answers)
     attached: list = []
 
     async def attach(*a, **k):
@@ -207,6 +211,75 @@ async def test_a_test_publish_never_touches_production(db_session, sample_projec
     assert row.source_digest and len(row.source_digest) == 64
 
 
+async def _shared_since_before(db, project_id):
+    """An app published before each side had its own Neon project: both
+    sides' rows name production's."""
+    for side in ("production", "test"):
+        db.add(Deployment(project_id=project_id, target="vercel", environment=side, status="succeeded",
+                          neon_project_id="np_shared", neon_branch_id="br_s", vercel_project_id="prj_abc"))
+    await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_a_first_test_publish_makes_tests_own_project(db_session, sample_project_id, tmp_path):
+    _mk_app_tree(tmp_path)
+    neon = _neon(created=True)
+    await _publish(db_session, sample_project_id, tmp_path, _vercel(), neon, environment="test")
+    assert neon.create_project.call_args.kwargs["name"] == "acme-test"
+
+
+@pytest.mark.asyncio
+async def test_test_sharing_with_production_keeps_its_data_while_the_project_answers(
+        db_session, sample_project_id, tmp_path):
+    _mk_app_tree(tmp_path)
+    await _shared_since_before(db_session, sample_project_id)
+    vercel, neon = _vercel(), _neon(created=False)
+    await _publish(db_session, sample_project_id, tmp_path, vercel, neon, environment="test")
+    neon.create_project.assert_not_called()
+    neon.ensure_database.assert_awaited_once_with("np_shared", "forge_test")
+    assert _pushed(vercel)["FORGE_KEEP_DB_STATE"][0] == "1"
+
+
+@pytest.mark.asyncio
+async def test_test_moves_out_when_the_shared_project_is_over_its_quota(
+        db_session, sample_project_id, tmp_path, monkeypatch):
+    _mk_app_tree(tmp_path)
+    await _shared_since_before(db_session, sample_project_id)
+    asked = []
+
+    async def refused(neon, project_id, database):
+        asked.append((project_id, database))
+        return True
+    monkeypatch.setattr("services.deploy.vercel_provider._refused_over_quota", refused)
+    vercel, neon = _vercel(), _neon(created=True)
+    neon.create_project.return_value = {"project_id": "np_own", "branch_id": "br_own",
+                                        "database_url": "postgres://u:p@ep-own.neon.tech/neondb"}
+    events = await _publish(db_session, sample_project_id, tmp_path, vercel, neon, environment="test")
+    assert asked == [("np_shared", "forge_test")]
+    assert neon.create_project.call_args.kwargs["name"] == "acme-test"
+    neon.ensure_database.assert_awaited_once_with("np_own", "forge_test")
+    assert "FORGE_KEEP_DB_STATE" not in _pushed(vercel), "a new database is seeded with demo data"
+    assert any("over its plan's quota" in e.message for e in events)
+    rows = await _rows(db_session, sample_project_id)
+    assert rows[-1].neon_project_id == "np_own"
+    # production is never moved onto Test's project
+    asked.clear()
+    trial_on = []
+
+    async def trial(neon, project_id, *a, **k):
+        trial_on.append(project_id)
+        return {"ok": True, "fixed": False}
+    monkeypatch.setattr("services.deploy.migration_trial.ensure_publishable", trial)
+    neon = _neon()
+    await _publish(db_session, sample_project_id, tmp_path, _vercel(), neon, environment="production")
+    assert trial_on == ["np_shared"] and asked == []
+    neon.get_connection_uri.assert_awaited_with("np_shared")
+    # and a later Test publish stays in its own project without asking again
+    neon = _neon(created=False)
+    await _publish(db_session, sample_project_id, tmp_path, _vercel(), neon, environment="test")
+    assert asked == [] and neon.ensure_database.await_args.args == ("np_own", "forge_test")
+
+
 @pytest.mark.asyncio
 async def test_a_second_test_publish_keeps_what_testers_entered(db_session, sample_project_id, tmp_path):
     _mk_app_tree(tmp_path)
@@ -240,13 +313,16 @@ async def test_production_after_test_uses_the_live_database_and_production_setti
     monkeypatch.setattr("services.deploy.migration_trial.ensure_publishable", trial)
     await _publish(db_session, sample_project_id, tmp_path, _vercel(), _neon(), environment="test")
     vercel, neon = _vercel(), _neon()
+    neon.create_project.return_value = {"project_id": "np_live", "branch_id": "br_live",
+                                        "database_url": "postgres://u:p@ep-live.neon.tech/neondb"}
     await _publish(db_session, sample_project_id, tmp_path, vercel, neon, environment="production",
                    integrations={"STRIPE_SECRET_KEY": "sk_l", "STRIPE_TEST_SECRET_KEY": "sk_t"})
     assert tried == [], "production has never run: nothing live to try the change on"
+    assert neon.create_project.call_args.kwargs["name"] == "acme", "its own project, not Test's"
     assert vercel.create_deployment.call_args.kwargs["target"] == "production"
     pushed = _pushed(vercel)
     assert all(t == ["production"] for _, t in pushed.values())
-    assert pushed["DATABASE_URL"][0].endswith("/neondb"), "the live database, not the test one"
+    assert pushed["DATABASE_URL"][0] == "postgres://u:p@ep-live.neon.tech/neondb", "the live database, not the test one"
     assert pushed["STRIPE_SECRET_KEY"][0] == "sk_l" and "STRIPE_TEST_SECRET_KEY" not in pushed
     assert pushed["FORGE_ENVIRONMENT"][0] == "production" and "FORGE_TEST_RECIPIENTS" not in pushed
     neon.ensure_database.assert_not_called()
@@ -256,7 +332,12 @@ async def test_production_after_test_uses_the_live_database_and_production_setti
     assert [r.environment for r in rows] == ["test", "production"]
     # and the next production publish asks the live data first
     await _publish(db_session, sample_project_id, tmp_path, _vercel(), _neon(), environment="production")
-    assert tried == ["np_123"]
+    assert tried == ["np_live"]
+    # and the next Test publish stays in Test's own project
+    neon = _neon(created=False)
+    await _publish(db_session, sample_project_id, tmp_path, _vercel(), neon, environment="test")
+    neon.ensure_database.assert_awaited_once_with("np_123", "forge_test")
+    neon.create_project.assert_not_called()
 
 
 @pytest.mark.asyncio

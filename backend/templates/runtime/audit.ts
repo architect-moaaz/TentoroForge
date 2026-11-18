@@ -214,9 +214,22 @@ async function _ensureGuard(executor: any): Promise<void> {
 }
 
 /** One row, chained, inside `executor` (a transaction when the caller has one). */
+// ONE WRITER AT A TIME, FOR REAL (17 Nov 2026). The chain's lock is a transaction lock: taken on the bare
+// connection — a read's audit, a sign-in — it was released the moment its statement ended, so writers running at
+// once read the same last hash and the chain forked (Test: entries 4, 5, 6… all chained to entry 2, thousands of
+// times a day). Given the bare connection, the lock, the read of the last hash and the insert now share one
+// transaction; given a write's own transaction (`withAudit`), they ride in it as before.
+function _inOwnTransaction<T>(executor: any, work: (tx: any) => Promise<T>): Promise<T> {
+  return executor === db && typeof (db as any).transaction === "function" ? (db as any).transaction(work) : work(executor);
+}
+
 export async function recordAudit(executor: any, entry: AuditEntry): Promise<{ seq: number; hash: string } | null> {
   await policy();
   if (!auditOn()) return null;
+  return _inOwnTransaction(executor, (tx) => _recordAudit(tx, entry));
+}
+
+async function _recordAudit(executor: any, entry: AuditEntry): Promise<{ seq: number; hash: string } | null> {
   await ensureGuard(executor);
   const at = new Date().toISOString();
   const actor = entry.actor ?? {};
@@ -249,6 +262,53 @@ export async function recordAudit(executor: any, entry: AuditEntry): Promise<{ s
   `);
   const row = _rows(res)[0];
   return row ? { seq: Number(row.seq), hash: String(row.hash) } : null;
+}
+
+/**
+ * MANY ENTRIES, ONE LOCK, ONE STATEMENT. A regulated app records every sensitive
+ * value a reader sees; written one entry per field per row, each with its own
+ * lock and chain read, a screen of fifty guests wrote three hundred entries in a
+ * row and took a minute (CARES on Test, 17 Nov 2026). The entries a read made are
+ * chained here in memory — each hash over the previous one, as `recordAudit`
+ * does — and inserted together. Same rows, same chain, one round trip.
+ */
+export async function recordAuditMany(executor: any, entries: AuditEntry[]): Promise<number> {
+  if (!entries.length) return 0;
+  await policy();
+  if (!auditOn()) return 0;
+  return _inOwnTransaction(executor, (tx) => _recordAuditMany(tx, entries));
+}
+
+async function _recordAuditMany(executor: any, entries: AuditEntry[]): Promise<number> {
+  await ensureGuard(executor);
+  await executor.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${LOCK_KEY}))`);
+  const prev = _rows(await executor.execute(sql`SELECT hash FROM forge_audit ORDER BY seq DESC LIMIT 1`))[0];
+  let prevHash: string | null = prev?.hash ?? null;
+  const at = new Date().toISOString();
+  const values = entries.map((entry) => {
+    const actor = entry.actor ?? {};
+    const actorId = actor.id != null ? String(actor.id) : null;
+    const before = _bounded(entry.before);
+    const after = _bounded(entry.after);
+    const changed = entry.changed ?? (entry.action === "update" ? changedColumns(entry.before, entry.after) : null);
+    const hash = rowHash({ at, actorId, action: entry.action, entity: entry.entity, entityId: entry.entityId ?? null,
+      before, after, prevHash });
+    const row = sql`(${at}::timestamptz, ${actorId}, ${actor.role ?? null}, ${actor.orgId ?? null},
+            ${actor.kind ?? (actorId ? "user" : "system")}, ${entry.via ?? "api"}, ${entry.runId ?? null},
+            ${entry.action}, ${entry.entity}, ${entry.entityId ?? null},
+            ${JSON.stringify(before)}::jsonb, ${JSON.stringify(after)}::jsonb,
+            (SELECT array_agg(c) FROM jsonb_array_elements_text(${changed == null ? null : JSON.stringify(changed)}::jsonb) AS t(c)),
+            ${entry.reason ?? null}, ${entry.requestId ?? null}, ${entry.ip ?? null},
+            ${entry.userAgent ?? null}, ${prevHash}, ${hash})`;
+    prevHash = hash;
+    return row;
+  });
+  await executor.execute(sql`
+    INSERT INTO forge_audit (at, actor_id, actor_role, actor_org_id, actor_kind, via, run_id, action, entity, entity_id,
+                             before, after, changed, reason, request_id, ip, user_agent, prev_hash, hash)
+    VALUES ${sql.join(values, sql`, `)}
+  `);
+  return entries.length;
 }
 
 /**

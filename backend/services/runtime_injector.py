@@ -1357,6 +1357,14 @@ def _inject_file_storage(output_path: Path) -> list[str]:
         instr_dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(instr_src, instr_dst)
         written.append("src/instrumentation.ts")
+    # instrumentation.ts installs it: dates drawn on the server in the viewer's
+    # zone and language, so the browser does not redraw the page (2026-11-18).
+    vt_src = _TEMPLATE_DIR / "viewer-time.ts"
+    if vt_src.exists():
+        vt_dst = output_path / "src" / "lib" / "viewer-time.ts"
+        vt_dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(vt_src, vt_dst)
+        written.append("src/lib/viewer-time.ts")
     vercel_src = _TEMPLATE_DIR / "vercel.json"
     vercel_dst = output_path / "vercel.json"
     if vercel_src.exists() and not vercel_dst.exists():
