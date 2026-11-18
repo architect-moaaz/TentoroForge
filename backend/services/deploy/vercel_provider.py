@@ -143,7 +143,15 @@ _PLATFORM_REFRESH_RUNTIME_MAP = (
     ("db/forge-notifications.schema.ts", "src/db/schema/_forge_notifications.ts"),
     # The engine: foreign keys and yes/no groups shown by name on charts.
     ("data-engine.ts", "src/lib/data-engine.ts"),
+    # Dates drawn on the server in the viewer's zone and language, so the
+    # browser does not throw the page away and draw it again (2026-11-18).
+    ("viewer-time.ts", "src/lib/viewer-time.ts"),
 )
+#: The server's start-up hook, the platform's while it carries the platform's
+#: mark (an app that wrote its own keeps it). The older platform copy, which
+#: has no mark, is the platform's too.
+_INSTRUMENTATION_MARK = "Forge runtime — do not remove"
+_OLD_INSTRUMENTATION = Path(__file__).resolve().parents[2] / "templates" / "instrumentation.ts"
 _TEMPLATE_RUNTIME_DIR = (
     Path(__file__).resolve().parents[2] / "templates" / "runtime"
 )
@@ -176,10 +184,14 @@ _PLATFORM_REFRESH_FOUNDATION_FILES = (
     "src/lib/SchemaPageBoundary.tsx",
     # The test version's label (and noindex); renders nothing on the live app.
     "src/components/TestRibbon.tsx",
+    # Tells the server the viewer's time zone and language (`lib/viewer-time.ts`).
+    "src/components/ViewerTime.tsx",
 )
 
 
 _RIBBON = "\n        <TestRibbon />"
+_VIEWER_TIME = "\n        <ViewerTime />"
+_VIEWER_TIME_IMPORT = 'import { ViewerTime } from "@/components/ViewerTime";\n'
 _RIBBON_IMPORT = 'import { TestRibbon } from "@/components/TestRibbon";\n'
 #: The ribbon once put after a `<body>` written in a comment
 #: ("onto <html>/<body> before React hydrates") instead of the tag.
@@ -211,6 +223,51 @@ def _ensure_test_ribbon(output_dir: Path) -> bool:
     return True
 
 
+def _ensure_viewer_time(output_dir: Path) -> bool:
+    """The root layout tells the server where its viewer is: `<ViewerTime />`
+    beside the ribbon, as a newly built layout has it. True when it changed."""
+    layout = output_dir / "src" / "app" / "layout.tsx"
+    if not layout.is_file():
+        return False
+    before = layout.read_text("utf-8")
+    text = before
+    if "<ViewerTime />" not in text and "<TestRibbon />" in text:
+        at = text.index("<TestRibbon />") + len("<TestRibbon />")
+        text = text[:at] + _VIEWER_TIME + text[at:]
+    elif "<ViewerTime />" not in text:
+        # No ribbon: straight after the real <body> tag, never one named in a comment.
+        for m in re.finditer(r"<body\b[^>]*>", text):
+            line = text[text.rfind("\n", 0, m.start()) + 1: m.start()].lstrip()
+            if line.startswith(("//", "*", "/*", "{/*")):
+                continue
+            text = text[: m.end()] + _VIEWER_TIME + text[m.end():]
+            break
+    if "<ViewerTime />" in text and _VIEWER_TIME_IMPORT.strip() not in text:
+        text = _VIEWER_TIME_IMPORT + text
+    if text == before:
+        return False
+    layout.write_text(text, "utf-8")
+    return True
+
+
+def _refresh_instrumentation(output_dir: Path) -> bool:
+    """The start-up hook written where the app has none or has the platform's."""
+    src = _TEMPLATE_RUNTIME_DIR / "instrumentation.ts"
+    dst = output_dir / "src" / "instrumentation.ts"
+    if not src.is_file():
+        return False
+    current = dst.read_text("utf-8") if dst.is_file() else None
+    old = _OLD_INSTRUMENTATION.read_text("utf-8") if _OLD_INSTRUMENTATION.is_file() else None
+    if current is not None and _INSTRUMENTATION_MARK not in current and current != old:
+        return False                       # the app's own: left as it is
+    text = src.read_text("utf-8")
+    if current == text:
+        return False
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    dst.write_text(text, "utf-8")
+    return True
+
+
 def _refresh_platform_files(output_dir: Path) -> None:
     """Copy platform-owned config files from templates → output_dir.
 
@@ -239,6 +296,8 @@ def _refresh_platform_files(output_dir: Path) -> None:
         dst.parent.mkdir(parents=True, exist_ok=True)
         dst.write_bytes(src.read_bytes())
     _ensure_test_ribbon(output_dir)
+    _ensure_viewer_time(output_dir)
+    _refresh_instrumentation(output_dir)
     # THE FRAME TOO — the platform's version of each frame file, or the one
     # the application owns (`frameCode`). A frame fix (the current page lit
     # in the rail) otherwise reached a published app only after a Smith turn.

@@ -14,6 +14,7 @@
  */
 export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
+  await installViewerTimeDefaults();
   if (process.env.FORGE_CRON_DISABLE === "1") return;
   const g = globalThis as any;
   if (g.__forgeCronStarted) return;
@@ -29,4 +30,32 @@ export async function register(): Promise<void> {
   };
   setTimeout(tick, 15000);   // first sweep shortly after boot
   setInterval(tick, ms);
+}
+
+/**
+ * Dates drawn on the server in the viewer's zone and language (`lib/viewer-time.ts`),
+ * read from the request Next is drawing. A server without the store (another
+ * Next) keeps the old defaults: nothing breaks, the page is only redrawn.
+ */
+async function installViewerTimeDefaults(): Promise<void> {
+  try {
+    const [{ installViewerTime, viewerOf, VIEWER_TIME_COOKIE }, store] = await Promise.all([
+      import("./lib/viewer-time"),
+      import("next/dist/server/app-render/work-unit-async-storage.external"),
+    ]);
+    const als = (store as { workUnitAsyncStorage?: { getStore(): any } }).workUnitAsyncStorage;
+    if (!als) return;
+    installViewerTime(() => {
+      const s = als.getStore();
+      if (!s || s.type !== "request") return null;
+      return viewerOf({
+        pathname: s.url?.pathname,
+        cookie: s.cookies?.get?.(VIEWER_TIME_COOKIE)?.value ?? null,
+        ipTimeZone: s.headers?.get?.("x-vercel-ip-timezone") ?? null,
+        acceptLanguage: s.headers?.get?.("accept-language") ?? null,
+      });
+    });
+  } catch {
+    /* no request store here — dates keep the server's defaults */
+  }
 }
