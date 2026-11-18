@@ -64,7 +64,8 @@ def test_changing_zones_and_rules_needs_a_zone_manager_and_reading_events_follow
 
 def test_the_data_engine_can_say_which_records_are_readable_without_reading_them():
     engine = read(RUNTIME / "data-engine.ts")
-    body = engine[engine.index("export async function visibleIds"):engine.index("export async function query(")]
+    start = engine.index("export async function visibleIds")
+    body = engine[start:engine.index("export async function", start + 10)]   # this function alone, not the one that follows it
     assert "accessConditions(" in body, "the same ownership and row rules"
     assert "select({ id:" in body.replace("\n", " "), "only the id column is selected"
     assert "_maskOrUnmaskOnRead" not in body

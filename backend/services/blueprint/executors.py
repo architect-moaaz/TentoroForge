@@ -3813,6 +3813,10 @@ _DECLARED_PAGE_FIELDS: frozenset[str] = frozenset({
     # answered: Refund And Chargeback (0qtb9jiy, forge-v3 2026-10-20) was
     # refused twice for fifteen pages and the build stopped with no screens.
     "users",
+    # HOW A ROLE'S HOME PAGE IS DRAWN ON A PHONE (`phone: {experience: "map_first", covers: [...]}`). The page-set call is
+    # asked for it (see its task) and `map_first` reads it, but this list dropped it, so a declared map-first screen
+    # never reached the document (found by the suite on the merged branch, 2026-11-18).
+    "phone",
 })
 
 #: What the declaration decided and the contract author may not move.

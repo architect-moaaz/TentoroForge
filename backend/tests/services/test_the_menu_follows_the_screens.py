@@ -15,7 +15,9 @@ TREE = [
 ]
 PAGES = [
     {"id": "PAGE-001", "name": "My orders", "route": "/orders", "pattern": "master_detail",
-     "menuEntry": "Orders"},
+     "menuEntry": "Orders",
+     # A menu entry opens a saved view only when the page declares that view (see the ride-hailing test of the same rule).
+     "views": [{"key": "active", "label": "Active orders"}, {"key": "history", "label": "Order history"}]},
     {"id": "PAGE-002", "name": "Setup", "route": "/ops/setup", "pattern": "master_detail",
      "menuEntry": "Admin Console > Cities & Zones"},
     {"id": "PAGE-003", "name": "Marketing", "route": "/ops/marketing", "pattern": "master_detail",
