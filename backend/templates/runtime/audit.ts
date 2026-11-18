@@ -347,20 +347,34 @@ export async function verifyChain(limit = 100_000): Promise<{ ok: boolean; check
     SELECT seq, at, actor_id, action, entity, entity_id, before, after, prev_hash, hash
     FROM forge_audit ORDER BY seq ASC LIMIT ${limit}
   `));
+  // A PRUNED TRAIL STARTS WHERE A PRUNE SAYS IT CUT. The prune's own row is
+  // written AFTER the rows it kept (it is appended when it runs), so walking
+  // from the oldest row met the first kept row — linked to a removed one —
+  // before any prune, and every trail that was ever pruned read as broken
+  // (DITANS, 2026-11-18). Each prune names the last hash it removed; a first
+  // row that links to one of those is where the chain was cut, not a break.
+  // Read on their own: a long trail's prunes lie beyond the walk's limit.
+  const cuts = new Set(_rows(await db.execute(sql`
+    SELECT prev_hash FROM forge_audit WHERE action = 'prune' AND prev_hash IS NOT NULL
+  `)).map((r: any) => String(r.prev_hash)));
   let prevHash: string | null = null;
   let checked = 0;
   let unproven = 0;
+  let first = true;
   for (const row of rows) {
     checked += 1;
     if (row.action === "prune") {
-      // A prune carries the last hash it kept; the chain resumes from it.
+      // A prune carries the last hash it removed; the rows after it chain to the prune.
       prevHash = String(row.hash);
+      first = false;
       continue;
     }
     const facts = { at: new Date(row.at).toISOString(), actorId: row.actor_id ?? null, action: row.action,
       entity: row.entity, entityId: row.entity_id ?? null, before: row.before ?? null, after: row.after ?? null,
       prevHash: row.prev_hash ?? null };
-    if ((row.prev_hash ?? null) !== prevHash) return { ok: false, checked, brokenAt: Number(row.seq) };
+    const cutHere = first && prevHash === null && row.prev_hash != null && cuts.has(String(row.prev_hash));
+    first = false;
+    if ((row.prev_hash ?? null) !== prevHash && !cutHere) return { ok: false, checked, brokenAt: Number(row.seq) };
     const stored = String(row.hash);
     if (stored.startsWith(HASH_FORM)) {
       if (stored !== rowHash(facts)) return { ok: false, checked, brokenAt: Number(row.seq) };
