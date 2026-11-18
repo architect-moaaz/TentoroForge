@@ -53,6 +53,7 @@ import { embedQuery, embedWrittenRow, stripEmbeddings } from "./embeddings";
 // rule for it — empty for apps that authorise by role alone, so
 // scopeConditions() fast-paths to [].
 import { ownershipRulesFor, type OwnershipRule } from "./ownership-rules";
+import { recordEventSlug } from "./events/triggers";
 
 /**
  * FK-label expansion. A list row only carries the FK id (a UUID), so a table that
@@ -1064,9 +1065,14 @@ function _persistEvent(
   op: "created" | "updated" | "deleted",
   entityName: string,
   payload: Record<string, any>,
+  table?: unknown,
 ): void {
   try {
-    const slug = String(entityName).toLowerCase();
+    // Named from the TABLE, as the Blueprint's db_change triggers are
+    // (events/triggers.ts recordEventType) — not from whatever the caller
+    // called the record, which announced `application.updated` to a
+    // process waiting on `applications.updated`.
+    const slug = table ? recordEventSlug(getTableName(table as any)) : String(entityName).toLowerCase();
     void import("./events/bus")
       .then((bus) =>
         bus.emitEventAndProcess(`${slug}.${op}`, {
@@ -1393,7 +1399,7 @@ export async function create(
   // Emit event for workflow engine
   emit(event, { entityId: record.id, entity: record, user: ctx.user }).catch(console.error);
   // R1: durable bus row ("<slug>.created") — non-fatal, fire-and-forget.
-  _persistEvent("created", entityName, { entity: record, user: ctx.user });
+  _persistEvent("created", entityName, { entity: record, user: ctx.user }, entity.table);
   // Fire rule side effects (trigger_workflow / send_notification) after the write.
   fireRuleEffects(ruleEffects, record, ctx, entity.table).catch(console.error);
 
@@ -1503,7 +1509,7 @@ export async function update(
 
   emit(event, { entityId: record.id, entity: record, previousEntity: existing, user: ctx.user }).catch(console.error);
   // R1: durable bus row ("<slug>.updated") — non-fatal, fire-and-forget.
-  _persistEvent("updated", entityName, { entity: record, previousEntity: existing, user: ctx.user });
+  _persistEvent("updated", entityName, { entity: record, previousEntity: existing, user: ctx.user }, entity.table);
   fireRuleEffects(ruleEffects, record, ctx, entity.table).catch(console.error);
 
   await _maskOrUnmaskOnRead(entityName, record, ctx);
@@ -1537,7 +1543,7 @@ export async function remove(
 
   emit(event, { entityId: id, entity: existing, user: ctx.user }).catch(console.error);
   // R1: durable bus row ("<slug>.deleted") — non-fatal, fire-and-forget.
-  _persistEvent("deleted", entityName, { entity: existing, user: ctx.user });
+  _persistEvent("deleted", entityName, { entity: existing, user: ctx.user }, entity.table);
 
   return { data: existing, event };
 }

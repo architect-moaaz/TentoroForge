@@ -29,7 +29,7 @@ import {
   buildTimeoutResumeInput,
   WAITING_EVENT_VAR,
 } from "./triggers";
-import { buildTimerResumeInput, eventRunInput } from "./triggers";
+import { buildTimerResumeInput, eventRunInput, eventChainRefusal, EVENT_CHAIN_VAR } from "./triggers";
 
 /** The person a paused run was acting as, as the pause stored them. */
 function _actorOf(pv: Record<string, unknown> | undefined): { id: string; role?: string; email?: string } | undefined {
@@ -230,9 +230,17 @@ async function _dispatchEvent(
   const all = await wfmod.listWorkflows();
   const matching = findWorkflowsForEvent(all, evt.type);
   let started = 0;
+  const stopped: string[] = [];
   for (const wf of matching) {
     const payload =
       evt.payload && typeof evt.payload === "object" ? evt.payload : {};
+    // A process does not start from its own changes (events/triggers.ts).
+    const refusal = eventChainRefusal((payload as Record<string, unknown>)[EVENT_CHAIN_VAR], String(wf.id));
+    if (refusal) {
+      console.warn(`[events] ${evt.type}: ${refusal}`);
+      stopped.push(refusal);
+      continue;
+    }
     const input = eventRunInput(evt);
     const user = (payload as { user?: { id: string; role?: string; email?: string } }).user;
     // triggerWorkflow persists a pending task itself if the run pauses.
@@ -242,6 +250,17 @@ async function _dispatchEvent(
     // asks the same question again. Only a run that broke is retried.
     if (result?.status === "failed" && !result.refused) {
       throw new Error(`workflow ${wf.id} failed: ${result.error ?? "unknown"}`);
+    }
+  }
+  // Said on the event's own row, where someone asking "why did it not run"
+  // looks; a dispatch failure (thrown above) writes the same column instead.
+  if (stopped.length) {
+    try {
+      await db.execute(sql`
+        UPDATE forge_events SET error = ${stopped.join("; ").slice(0, 2000)} WHERE id = ${evt.id}::uuid
+      `);
+    } catch {
+      /* observability write only — never escalate */
     }
   }
   return started;

@@ -1691,8 +1691,10 @@ export async function POST(
     // node, an approval too. This route sets what it means to (a resume's markers,
     // the guest token, the origin) after this line; what a client sent under those
     // names is dropped. `__decision` and `__form` are the caller's, on a resume.
+    // `__eventChain` is the bus's (events/triggers.ts): a caller who wrote it
+    // would keep the processes it names from starting on this run's changes.
     for (const k of Object.keys(input)) {
-      if (/^__(step_|user$|guest$|origin$)/.test(k)) delete (input as any)[k];
+      if (/^__(step_|user$|guest$|origin$|eventChain$)/.test(k)) delete (input as any)[k];
     }
     // WHERE THE APPLICATION IS, for a step that builds an absolute address
     // (a checkout's return pages): the request's own origin, behind a proxy too.

@@ -47,6 +47,74 @@ export function eventTypeFor(
 }
 
 /**
+ * THE NAME A RECORD'S CHANGE GOES BY, FROM ITS TABLE. The Blueprint projects
+ * a `db_change` trigger to the table's drizzle export name, lowercased
+ * (`_trigger_contract`): `stage_events` → `stageEvents` → `stageevents.created`.
+ * That is the table with its separators gone. The data engine named the event
+ * after whatever the caller called the record instead — `create("Application")`
+ * announced `application.created` to a process listening for
+ * `applications.created`. Every writer names it from the table now: the data
+ * engine and the workflow write steps alike.
+ */
+export function recordEventType(
+  tableName: string,
+  op: "created" | "updated" | "deleted",
+): string {
+  return eventTypeFor(recordEventSlug(tableName), op);
+}
+
+/** The table's name as a record event spells it (`stage_events` → `stageevents`). */
+export function recordEventSlug(tableName: string): string {
+  return String(tableName ?? "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+}
+
+/**
+ * The run variable — and the event payload field — that says which processes
+ * led to a change. A process a record change started, writing records itself,
+ * hands its own id on with every change it makes; the next event carries the
+ * chain, and the run that event starts holds it here.
+ */
+export const EVENT_CHAIN_VAR = "__eventChain";
+
+/** How many processes one change may set off, one after another. */
+export const MAX_EVENT_CHAIN = 8;
+
+/** The chain a run held when it started — the ids of the processes before it. */
+export function eventChainOf(variables: Record<string, unknown> | null | undefined): string[] {
+  const c = variables?.[EVENT_CHAIN_VAR];
+  return Array.isArray(c) ? c.map((x) => String(x)).filter(Boolean) : [];
+}
+
+/** The chain a change made by `workflowId`'s run passes on. */
+export function eventChainAfter(
+  variables: Record<string, unknown> | null | undefined,
+  workflowId: string | null | undefined,
+): string[] {
+  const chain = eventChainOf(variables);
+  return workflowId ? [...chain, String(workflowId)] : chain;
+}
+
+/**
+ * Why `workflowId` must not start from an event its chain says, or null.
+ *
+ * A PROCESS IS NOT STARTED BY ITS OWN CHANGES. One that runs when an
+ * application is updated and updates that application would start itself
+ * again for ever; one that leads, through others, back to itself would too.
+ * It runs once per change a person (or a schedule, or an outside system)
+ * made, and a chain of different processes stops at MAX_EVENT_CHAIN.
+ */
+export function eventChainRefusal(chain: unknown, workflowId: string): string | null {
+  const ids = Array.isArray(chain) ? chain.map((x) => String(x)) : [];
+  if (ids.includes(String(workflowId))) {
+    return `${workflowId} was not started: this change came from its own run (${[...ids, workflowId].join(" → ")})`;
+  }
+  if (ids.length >= MAX_EVENT_CHAIN) {
+    return `${workflowId} was not started: ${ids.length} processes in a row already followed from one change (${ids.join(" → ")})`;
+  }
+  return null;
+}
+
+/**
  * Read a workflow's trigger contract, tolerating both the new top-level
  * shape and the legacy `definition.trigger` shape. Returns null when the
  * workflow has no event/schedule trigger (manual / button workflows).
