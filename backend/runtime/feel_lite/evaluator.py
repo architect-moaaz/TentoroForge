@@ -8,6 +8,7 @@ Provides:
 
 from __future__ import annotations
 
+import calendar
 import math
 import re
 from datetime import date, datetime, timedelta, timezone
@@ -195,25 +196,99 @@ def _fn_today(args: list) -> str:
 
 
 @_register("duration")
-def _fn_duration(args: list) -> timedelta | None:
-    if not args:
+def _fn_duration(args: list) -> "timedelta | CalendarDuration | None":
+    """ISO 8601 duration: a timedelta, or a CalendarDuration when it has years
+    or months. Nothing stays nothing; a duration that is not one is an error."""
+    if not args or args[0] is None or args[0] == "":
         return None
-    s = str(args[0])
-    # Simple ISO 8601 duration parsing: P[n]D, PT[n]H[n]M[n]S
-    try:
-        days = 0
-        hours = 0
-        minutes = 0
-        seconds = 0
-        m = re.match(r"P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?", s)
-        if m:
-            days = int(m.group(1) or 0)
-            hours = int(m.group(2) or 0)
-            minutes = int(m.group(3) or 0)
-            seconds = int(m.group(4) or 0)
-        return timedelta(days=days, hours=hours, minutes=minutes, seconds=seconds)
-    except Exception:
+    v = args[0]
+    if isinstance(v, (timedelta, CalendarDuration)):
+        return v
+    if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v):
+        return timedelta(milliseconds=v)
+    d = parse_duration(str(v))
+    if d is None:
+        raise ValueError(
+            f'Not a duration: "{v}" — write ISO 8601, e.g. "P1M", "P1Y2M10D", "P30D", "PT2H"')
+    return d
+
+
+# A MONTH IS A PLACE ON THE CALENDAR, NOT A NUMBER OF SECONDS. `duration()` read
+# only days and clock time and matched the start of any text, so "P1M" was no
+# time at all and `$today + duration("P1M")` was today: a DITANS subscription's
+# first period ended the day it began (FLOW-071, 2026-11-18). Years and months
+# are a CalendarDuration; a date plus one lands on the same day that many months
+# on, or the last day of a shorter month (31 Jan + P1M = 28/29 Feb). Months
+# move first, then days and time. Mirrors the TypeScript engine.
+_ISO_DURATION = re.compile(
+    r"(-)?P(?:(\d+)Y)?(?:(\d+)M)?(?:(\d+)W)?(?:(\d+)D)?"
+    r"(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?", re.IGNORECASE)
+
+
+class CalendarDuration:
+    """A duration with years or months in it: whole months, then a timedelta."""
+
+    __slots__ = ("months", "delta")
+
+    def __init__(self, months: int, delta: timedelta) -> None:
+        self.months = months
+        self.delta = delta
+
+    def __neg__(self) -> "CalendarDuration":
+        return CalendarDuration(-self.months, -self.delta)
+
+    def __eq__(self, other: object) -> bool:
+        return (isinstance(other, CalendarDuration)
+                and (self.months, self.delta) == (other.months, other.delta))
+
+    def __hash__(self) -> int:
+        return hash((self.months, self.delta))
+
+    def __str__(self) -> str:
+        return _iso_duration(self.months, self.delta)
+
+    __repr__ = __str__
+
+
+def parse_duration(text: str) -> "timedelta | CalendarDuration | None":
+    """The duration an ISO 8601 string names, or None when it names none."""
+    s = text.strip()
+    m = _ISO_DURATION.fullmatch(s)
+    # "P", "PT" and "P1DT" name no amount: each part present must carry one.
+    if not m or re.fullmatch(r"-?PT?", s, re.IGNORECASE) or s[-1:] in ("T", "t"):
         return None
+    n = lambda i: float(m.group(i)) if m.group(i) else 0  # noqa: E731
+    sign = -1 if m.group(1) else 1
+    months = int(n(2) * 12 + n(3))
+    delta = timedelta(days=n(4) * 7 + n(5), hours=n(6), minutes=n(7), seconds=n(8))
+    if months == 0:
+        return delta * sign
+    return CalendarDuration(sign * months, delta * sign)
+
+
+def _iso_duration(months: int, delta: timedelta) -> str:
+    ms = round(delta / timedelta(milliseconds=1))
+    if months and ms and (months > 0) != (ms > 0):
+        return f"{_iso_duration(months, timedelta(0))} {_iso_duration(0, delta)}"
+    neg = months < 0 or ms < 0
+    mo, rest = abs(months), abs(ms) / 1000
+    y, mo = divmod(mo, 12)
+    d = int(rest // 86400); rest -= d * 86400
+    h = int(rest // 3600); rest -= h * 3600
+    mi = int(rest // 60); rest -= mi * 60
+    secs = f"{round(rest, 3):g}S" if rest else ""
+    day_part = (f"{y}Y" if y else "") + (f"{mo}M" if mo else "") + (f"{d}D" if d else "")
+    time_part = (f"{h}H" if h else "") + (f"{mi}M" if mi else "") + secs
+    body = day_part + (f"T{time_part}" if time_part else "")
+    return ("-" if neg else "") + "P" + (body or "T0S")
+
+
+def _shift_by_calendar(m: datetime, d: CalendarDuration) -> datetime:
+    """Months first (the day kept, or the month's last day), then the rest."""
+    index = m.month - 1 + d.months
+    year, month = m.year + index // 12, index % 12 + 1
+    last = calendar.monthrange(year, month)[1]
+    return m.replace(year=year, month=month, day=min(m.day, last)) + d.delta
 
 
 @_register("abs")
@@ -367,6 +442,8 @@ def evaluate(node: ASTNode, ctx: dict) -> Any:
 
     if isinstance(node, UnaryExpr):
         operand = evaluate(node.operand, ctx)
+        if isinstance(operand, (CalendarDuration, timedelta)):
+            return -operand if node.operator == "-" else operand
         if node.operator == "-":
             return -_to_number(operand)
         return _to_number(operand)
@@ -646,7 +723,33 @@ def _time_arithmetic(op: str, left: Any, right: Any) -> Any:
             return lm[0] - rm[0]
         if lm and _as_duration(right) is not None:
             return _from_moment(lm[0] - _as_duration(right), lm[1])
+    if op == "+":
+        if lm and isinstance(right, CalendarDuration):
+            return _from_moment(_shift_by_calendar(lm[0], right), lm[1])
+        if rm and isinstance(left, CalendarDuration):
+            return _from_moment(_shift_by_calendar(rm[0], left), rm[1])
+    if op == "-" and lm and isinstance(right, CalendarDuration):
+        return _from_moment(_shift_by_calendar(lm[0], -right), lm[1])
+    # Durations with months add, subtract and scale as durations.
+    if isinstance(left, CalendarDuration) or isinstance(right, CalendarDuration):
+        lc, rc = _as_calendar(left), _as_calendar(right)
+        if lc and rc and op == "+":
+            return CalendarDuration(lc.months + rc.months, lc.delta + rc.delta)
+        if lc and rc and op == "-":
+            return CalendarDuration(lc.months - rc.months, lc.delta - rc.delta)
+        if op == "*":
+            c, k = (left, right) if isinstance(left, CalendarDuration) else (right, left)
+            if isinstance(k, (int, float)) and not isinstance(k, bool) and float(k).is_integer():
+                return CalendarDuration(c.months * int(k), c.delta * int(k))
+            raise ValueError(f"A duration of months is multiplied by a whole number, not {k}")
     return _NOT_TIME
+
+
+def _as_calendar(v: Any) -> CalendarDuration | None:
+    if isinstance(v, CalendarDuration):
+        return v
+    d = _as_duration(v)
+    return CalendarDuration(0, d) if d is not None else None
 
 
 _NOT_TIME = object()

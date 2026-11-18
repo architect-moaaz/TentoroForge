@@ -75,19 +75,7 @@ const BUILT_IN_FUNCTIONS: Record<string, (...args: unknown[]) => unknown> = {
   },
   now: () => new Date().toISOString(),
   today: () => calendarToday(),
-  duration: (x: unknown) => {
-    // Parse ISO 8601 duration string to seconds
-    const str = String(x);
-    const m = str.match(
-      /^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/i,
-    );
-    if (!m) return null;
-    const days = parseInt(m[1] || "0");
-    const hours = parseInt(m[2] || "0");
-    const minutes = parseInt(m[3] || "0");
-    const seconds = parseInt(m[4] || "0");
-    return (days * 86400 + hours * 3600 + minutes * 60 + seconds) * 1000;
-  },
+  duration: (x: unknown) => toDuration(x),
 };
 
 function flattenNumbers(args: unknown[]): number[] {
@@ -135,6 +123,90 @@ function fromMoment(ms: number, day: boolean): string {
 }
 
 const isDuration = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+
+// A MONTH IS A PLACE ON THE CALENDAR, NOT A NUMBER OF MILLISECONDS. `duration()`
+// read only days and clock time, so `duration("P1M")` was nothing and
+// `$today + duration("P1M")` was today: a DITANS subscription's first period
+// ended the day it began (FLOW-071, 2026-11-18). A duration of days and clock
+// time is still milliseconds; one with years or months is a CalendarDuration,
+// and a date plus one lands on the same day that many months on, or on the
+// last day of a shorter month (31 Jan + P1M = 28 or 29 Feb). Months move
+// first, then days and time. A duration that is not one is an error, not 0.
+export class CalendarDuration {
+  readonly months: number;
+  readonly ms: number;
+  constructor(months: number, ms: number) {
+    this.months = months;
+    this.ms = ms;
+  }
+  negate(): CalendarDuration { return new CalendarDuration(-this.months, -this.ms); }
+  /** As ISO 8601 — what it reads as in text, in a message or a column. */
+  toString(): string { return isoDuration(this.months, this.ms); }
+  toJSON(): string { return this.toString(); }
+}
+
+const ISO_DURATION =
+  /^(-)?P(?:(\d+)Y)?(?:(\d+)M)?(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$/i;
+
+/** The duration an ISO 8601 string names — milliseconds when it has no years
+ *  or months, a CalendarDuration when it has — or null when it names none. */
+export function parseDuration(text: string): number | CalendarDuration | null {
+  const s = text.trim();
+  const m = s.match(ISO_DURATION);
+  // "P", "PT" and "P1DT" name no amount: each part present must carry one.
+  if (!m || /^-?PT?$/i.test(s) || /T$/i.test(s)) return null;
+  const n = (i: number) => (m[i] ? Number(m[i]) : 0);
+  const sign = m[1] ? -1 : 1;
+  const months = n(2) * 12 + n(3);
+  const ms = Math.round(((n(4) * 7 + n(5)) * 86400 + n(6) * 3600 + n(7) * 60 + n(8)) * 1000);
+  if (months === 0) return sign * ms;
+  return new CalendarDuration(sign * months, sign * ms);
+}
+
+/** `duration(x)`: nothing stays nothing; anything else must be a duration. */
+function toDuration(x: unknown): number | CalendarDuration | null {
+  if (x == null || x === "") return null;
+  if (x instanceof CalendarDuration || isDuration(x)) return x;
+  const d = parseDuration(String(x));
+  if (d === null) {
+    throw new Error(`Not a duration: "${String(x)}" — write ISO 8601, e.g. "P1M", "P1Y2M10D", "P30D", "PT2H"`);
+  }
+  return d;
+}
+
+function isoDuration(months: number, ms: number): string {
+  if (months !== 0 && ms !== 0 && Math.sign(months) !== Math.sign(ms)) {
+    // Mixed signs have no single ISO form; say each part.
+    return `${isoDuration(months, 0)} ${isoDuration(0, ms)}`;
+  }
+  const neg = months < 0 || ms < 0;
+  let mo = Math.abs(months);
+  let rest = Math.abs(ms) / 1000;
+  const y = Math.floor(mo / 12); mo %= 12;
+  const d = Math.floor(rest / 86400); rest -= d * 86400;
+  const h = Math.floor(rest / 3600); rest -= h * 3600;
+  const mi = Math.floor(rest / 60); rest -= mi * 60;
+  const date = (y ? `${y}Y` : "") + (mo ? `${mo}M` : "") + (d ? `${d}D` : "");
+  const time = (h ? `${h}H` : "") + (mi ? `${mi}M` : "") + (rest ? `${+rest.toFixed(3)}S` : "");
+  const body = date + (time ? `T${time}` : "");
+  return (neg ? "-" : "") + "P" + (body || "T0S");
+}
+
+/** A moment moved by a calendar duration: months first (the day kept, or the
+ *  month's last day when it has fewer), then days and clock time. In UTC. */
+function shiftByCalendar(ms: number, d: CalendarDuration): number {
+  const t = new Date(ms);
+  const monthIndex = t.getUTCMonth() + d.months;
+  const year = t.getUTCFullYear() + Math.floor(monthIndex / 12);
+  const month = ((monthIndex % 12) + 12) % 12;
+  const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  const moved = Date.UTC(year, month, Math.min(t.getUTCDate(), lastDay),
+    t.getUTCHours(), t.getUTCMinutes(), t.getUTCSeconds(), t.getUTCMilliseconds());
+  return moved + d.ms;
+}
+
+const asCalendar = (v: unknown): CalendarDuration | null =>
+  v instanceof CalendarDuration ? v : isDuration(v) ? new CalendarDuration(0, v) : null;
 
 // A DATE'S PARTS, AS FEEL NAMES THEM. Data Collector 4 built its reference
 // numbers from date($today).year, .month and .day; each read as nothing and
@@ -266,7 +338,9 @@ export function evaluate(node: ASTNode, ctx: Context): unknown {
     }
 
     case "UnaryExpression": {
-      const val = toNumber(evaluate(node.operand, ctx));
+      const raw = evaluate(node.operand, ctx);
+      if (raw instanceof CalendarDuration) return node.operator === "-" ? raw.negate() : raw;
+      const val = toNumber(raw);
       return node.operator === "-" ? -val : val;
     }
 
@@ -281,10 +355,26 @@ export function evaluate(node: ASTNode, ctx: Context): unknown {
       if (node.operator === "+") {
         if (lm && isDuration(right)) return fromMoment(lm.ms + right, lm.day);
         if (rm && isDuration(left)) return fromMoment(rm.ms + left, rm.day);
+        if (lm && right instanceof CalendarDuration) return fromMoment(shiftByCalendar(lm.ms, right), lm.day);
+        if (rm && left instanceof CalendarDuration) return fromMoment(shiftByCalendar(rm.ms, left), rm.day);
       }
       if (node.operator === "-") {
         if (lm && rm) return lm.ms - rm.ms;
         if (lm && isDuration(right)) return fromMoment(lm.ms - right, lm.day);
+        if (lm && right instanceof CalendarDuration) return fromMoment(shiftByCalendar(lm.ms, right.negate()), lm.day);
+      }
+      // Durations with months add, subtract and scale as durations.
+      if (left instanceof CalendarDuration || right instanceof CalendarDuration) {
+        const lc = asCalendar(left);
+        const rc = asCalendar(right);
+        if (lc && rc && node.operator === "+") return new CalendarDuration(lc.months + rc.months, lc.ms + rc.ms);
+        if (lc && rc && node.operator === "-") return new CalendarDuration(lc.months - rc.months, lc.ms - rc.ms);
+        if (node.operator === "*") {
+          const c = (left instanceof CalendarDuration ? left : right) as CalendarDuration;
+          const k = Number(left instanceof CalendarDuration ? right : left);
+          if (Number.isInteger(k)) return new CalendarDuration(c.months * k, c.ms * k);
+          throw new Error(`A duration of months is multiplied by a whole number, not ${String(left instanceof CalendarDuration ? right : left)}`);
+        }
       }
 
       switch (node.operator) {
