@@ -26,7 +26,7 @@ import secrets
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 
 import httpx
 from sqlalchemy import select
@@ -53,6 +53,24 @@ _POLL_CEILING_S = 45 * 60
 # on the first request; give it room.
 _SMOKE_TIMEOUT_S = 20
 _SMOKE_RETRIES = 3
+
+
+async def _refused_over_quota(neon: Any, project_id: str, database: str) -> bool:
+    """True when Neon turns a connection to the project away because the plan's
+    quota is spent ("Your account or project has exceeded the quota"). Any
+    other answer — it connects, the network blips, the API is slow — is False:
+    only that refusal moves Test out of a project it shares."""
+    try:
+        import asyncpg
+        url = await neon.get_connection_uri(project_id, database_name=database, pooled=False)
+        conn = await asyncpg.connect(url, timeout=20)
+    except Exception as exc:  # noqa: BLE001
+        return "exceeded the quota" in str(exc).lower()
+    try:
+        await conn.close()
+    except Exception:  # noqa: BLE001
+        pass
+    return False
 
 
 async def _smoke_test_db(url: str) -> tuple[bool, str | None]:
@@ -441,17 +459,37 @@ class VercelDeployProvider:
             # so recreating either would 409. `is_first_publish` (used
             # later to decide NEXTAUTH_SECRET stability) treats "first"
             # as: no prior row set any resource id at all.
-            prior_neon = await self._latest_prior_with_neon(snapshot)
+            #
+            # EACH SIDE HAS ITS OWN NEON PROJECT, and reuses only one its own
+            # rows hold. Neon's limits — data sent out, compute, storage — are
+            # per project, and Test and production shared one: DITANS's testing
+            # spent the free plan's 5 GB of November's outgoing data and took the
+            # live app down with it (wzml1sa6, 2026-11-18).
+            prior_neon = await self._latest_prior_with_neon(snapshot, environment=side)
             prior_vercel = await self._latest_prior_with_vercel(snapshot)
             reused_neon = bool(prior_neon and prior_neon.neon_project_id)
             if side == envs.TEST:
-                # THE TEST SIDE'S OWN DATABASE: an empty one inside the app's
-                # Neon project (made with it on a first publish), so the build
-                # seeds demo data into it and the live data is never copied.
-                if reused_neon:
-                    neon_project_id = prior_neon.neon_project_id
-                else:
-                    r = await self.neon.create_project(name=snapshot.project_slug, region_id=snapshot.neon_region)
+                # THE TEST SIDE'S OWN DATABASE: an empty one in Test's own Neon
+                # project (made on its first publish), so the build seeds demo
+                # data into it and the live data is never copied.
+                neon_project_id = prior_neon.neon_project_id if reused_neon else None
+                if neon_project_id:
+                    live = await self._latest_prior_with_neon(snapshot, environment=envs.PRODUCTION)
+                    # An app published before this keeps its Test data in
+                    # production's project — until that project stops answering
+                    # for its quota: what is in it cannot be read then anyway,
+                    # and production's allowance is not Test's to spend.
+                    if (live and live.neon_project_id == neon_project_id
+                            and await _refused_over_quota(self.neon, neon_project_id, envs.TEST_DATABASE)):
+                        yield DeployEvent(
+                            "provision_db",
+                            "The Neon project Test shared with production is over its plan's quota — "
+                            "Test gets its own, started from demo data; what testers entered stays in the "
+                            "old one…")
+                        neon_project_id = None
+                if not neon_project_id:
+                    r = await self.neon.create_project(name=f"{snapshot.project_slug}-test",
+                                                       region_id=snapshot.neon_region)
                     neon_project_id = r["project_id"]
                     # THE PROJECT IS ON THE ROW BEFORE ANYTHING ELSE IS ASKED OF
                     # IT: a failure in the next step must leave a row that names
