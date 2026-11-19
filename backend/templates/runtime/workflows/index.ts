@@ -2015,7 +2015,18 @@ export function registerDefaultActions(): void {
       } else if (auth && typeof auth === "object" && auth.secretRef) {
         const name = String(auth.secretRef);
         const value = process.env[name];
-        if (!value) return { error: `${name} is not set in this environment`, status: 0, ok: false };
+        if (!value) {
+          // NOT CONNECTED IS NOT ALWAYS A FAILURE. A step the process can do
+          // without (DITANS's e-signature request, 2026-11-19: "DOCUSIGN_API_KEY
+          // is not set" stopped every offer on Test) says what the person is
+          // told instead: the call is skipped, the run goes on, and the
+          // sentence comes back as the run's notice (engine.ts noticesOf).
+          const instead = (config as any).ifNotConnected;
+          if (typeof instead === "string" && instead.trim()) {
+            return { skipped: true, connected: false, ok: false, status: 0, notice: String(resolveDeep(instead)) };
+          }
+          return { error: `${name} is not set in this environment`, status: 0, ok: false };
+        }
         const where = String(auth.in || "bearer");
         if (where === "header") headers[String(auth.name || "X-API-Key")] = value;
         else if (where === "basic") headers["Authorization"] = `Basic ${Buffer.from(value).toString("base64")}`;

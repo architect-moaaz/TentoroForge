@@ -11,3 +11,4 @@ node --experimental-strip-types --no-warnings "$DIR/a-step-reaches-mews-the-way-
 node --experimental-strip-types --no-warnings "$DIR/a-mews-call-reaches-the-property-it-names.test.mts"
 node --experimental-strip-types --no-warnings "$DIR/a-stay-is-found-in-mews.test.mts"
 node --experimental-strip-types --no-warnings "$DIR/a-guest-is-suggested-as-the-desk-types.test.mts"
+node --experimental-strip-types --no-warnings "$DIR/a-call-the-process-can-do-without-is-skipped.test.mts"

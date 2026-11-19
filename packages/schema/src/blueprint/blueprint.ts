@@ -2174,6 +2174,17 @@ export const WorkflowStep = z.object({
           }),
         ])
         .optional(),
+      /**
+       * On an `http_call` signed with a `secretRef`: what the person is told
+       * when this environment does not hold that secret — the service is not
+       * connected. With it, the call is skipped instead of failing the run:
+       * its output says `skipped: true` (so a later step can record what did
+       * not happen), and this sentence reaches the person who ran it as a
+       * notice. Without it, a missing secret fails the run, as before. For a
+       * call the process can do without (an e-signature request, a courtesy
+       * sync), never for one it cannot.
+       */
+      ifNotConnected: z.string().optional(),
       /** On a human step: minutes until it is overdue. */
       dueIn: z.number().int().positive().optional(),
       /** On a human step: the role an overdue task is handed to. */
