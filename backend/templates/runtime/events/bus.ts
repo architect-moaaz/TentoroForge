@@ -12,9 +12,10 @@
  *      that event (workflow_tasks rows with task_type='wait_for_event').
  *
  * Serverless-first: NO long-lived LISTEN/NOTIFY daemon. Processing runs
- * inline after each emit (fire-and-forget with error logging) and from
- * the /api/cron/tick sweeper, which retries anything the inline pass
- * missed (cold start crash, timeout).
+ * inline after each emit (not awaited by the writer, but held open on a host
+ * that freezes after the reply — events/keep-alive.ts) and from the
+ * /api/cron/tick sweeper, which retries anything the inline pass missed
+ * (cold start crash, timeout).
  *
  * Every failure here is non-fatal — a bus outage must never fail the
  * write or workflow that emitted the event.
@@ -30,6 +31,7 @@ import {
   WAITING_EVENT_VAR,
 } from "./triggers";
 import { buildTimerResumeInput, eventRunInput, eventChainRefusal, EVENT_CHAIN_VAR } from "./triggers";
+import { keepRunning } from "./keep-alive";
 
 /** The person a paused run was acting as, as the pause stored them. */
 function _actorOf(pv: Record<string, unknown> | undefined): { id: string; role?: string; email?: string } | undefined {
@@ -129,9 +131,12 @@ export async function emitEventAndProcess(
   const row = await emitEvent(type, opts);
   if (row && "duplicate" in row) return row;
   if (row) {
-    void _kickProcessing().catch((err) =>
+    const work = _kickProcessing().catch((err) =>
       console.warn("[events] inline processing failed (cron will sweep):", err),
     );
+    // A host that freezes the process after the reply (Vercel) is asked to
+    // keep it running until this is done (events/keep-alive.ts).
+    await keepRunning(work);
   }
   return row;
 }

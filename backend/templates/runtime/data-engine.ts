@@ -54,6 +54,7 @@ import { embedQuery, embedWrittenRow, stripEmbeddings } from "./embeddings";
 // scopeConditions() fast-paths to [].
 import { ownershipRulesFor, type OwnershipRule } from "./ownership-rules";
 import { recordEventSlug } from "./events/triggers";
+import { keepRunning } from "./events/keep-alive";
 
 /**
  * FK-label expansion. A list row only carries the FK id (a UUID), so a table that
@@ -1073,7 +1074,7 @@ function _persistEvent(
     // called the record, which announced `application.updated` to a
     // process waiting on `applications.updated`.
     const slug = table ? recordEventSlug(getTableName(table as any)) : String(entityName).toLowerCase();
-    void import("./events/bus")
+    const work = import("./events/bus")
       .then((bus) =>
         bus.emitEventAndProcess(`${slug}.${op}`, {
           entity: slug,
@@ -1084,6 +1085,10 @@ function _persistEvent(
       .catch((e) =>
         console.warn(`[DataEngine] event bus emit failed for ${slug}.${op} (non-fatal):`, e),
       );
+    // Not awaited — the write does not wait for the bus — but on a host that
+    // freezes after the reply the event is still written and processed
+    // (events/keep-alive.ts).
+    void keepRunning(work);
   } catch (e) {
     console.warn("[DataEngine] event bus emit failed (non-fatal):", e);
   }

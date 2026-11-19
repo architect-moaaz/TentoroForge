@@ -16,6 +16,7 @@ DIR="$(cd "$(dirname "$0")" && pwd)"
 node --experimental-strip-types "$DIR/event-cron.test.mts"
 node "$DIR/a-schedule-fires-once-in-its-window.test.mts"
 node --experimental-transform-types --no-warnings "$DIR/a-process-write-starts-the-process-that-watches-it.test.mts"
+node --experimental-transform-types --no-warnings "$DIR/an-event-is-processed-before-the-host-stops.test.mts"
 
 # esbuild lives in the repo root node_modules; fall back to npx.
 BIN="$(cd "$DIR/../../../.." && pwd)/node_modules/.bin"
