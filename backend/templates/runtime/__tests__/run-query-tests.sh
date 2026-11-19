@@ -13,3 +13,6 @@ node /tmp/query-result-test.mjs
 
 # One record carries the same name labels a list does (customerId + customerIdLabel).
 node --experimental-transform-types --no-warnings "$DIR/find-by-id-names.test.mts"
+
+# A lookup that says which row it means (orderBy / limit) reads that row.
+node --experimental-strip-types --no-warnings "$DIR/a-lookup-reads-the-row-it-orders-first.test.mts"

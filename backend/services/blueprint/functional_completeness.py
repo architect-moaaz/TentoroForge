@@ -2177,13 +2177,24 @@ def column_findings(doc: dict) -> list[dict]:
             if not isinstance(st, dict):
                 continue
             cfg = st.get("config") or {}
-            if cfg.get("actionType") not in ("db_insert", "db_update", "db_delete"):
+            if cfg.get("actionType") not in ("db_insert", "db_update", "db_delete", "db_query"):
                 continue
             entity = _entity_for_table(doc, cfg.get("table"))
             if entity is None:
                 continue
             fields = {str(f.get("name")) for f in entity.get("fields") or [] if f.get("name")}
             if not fields:                       # cannot judge without a field list
+                continue
+            # A lookup is judged by the field it orders by: the engine refuses an
+            # `orderBy` that is not a column, where it once ignored it.
+            if cfg.get("actionType") == "db_query":
+                order_by = (str(cfg.get("orderBy") or "").split() or [""])[0]
+                if order_by and order_by not in fields and order_by.lower().replace("_", "") not in _SYSTEM_COLUMNS:
+                    out.append({"rule": "workflow-column-unknown", "page": str(wf.get("id")),
+                                "detail": f"{wf.get('name') or wf.get('id')}, step {st.get('key')!r}: orders its rows by "
+                                          f"{order_by!r}, which {entity.get('name')} does not have (fields: "
+                                          f"{', '.join(sorted(fields))}) — the lookup fails at run time. Order by a "
+                                          f"field the entity has, or leave `orderBy` out."})
                 continue
             columns: set[str] = set()
             for key in ("values", "where"):

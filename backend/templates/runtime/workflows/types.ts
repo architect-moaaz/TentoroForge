@@ -169,6 +169,10 @@ export interface NodeConfig {
   query?: string;
   where?: Record<string, string>;  // field → process variable
   values?: Record<string, string>; // field → process variable
+  /** db_query: "<field>" or "<field> desc" — the order rows come back in (ascending unless desc). */
+  orderBy?: string;
+  /** db_query: at most this many rows. */
+  limit?: number;
 
   // http_call
   url?: string;

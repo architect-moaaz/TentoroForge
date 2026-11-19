@@ -1838,6 +1838,30 @@ export function registerDefaultActions(): void {
     }
   });
 
+  // A LOOKUP THAT MEANS ONE ROW SAYS WHICH. Rows came back in whatever order
+  // Postgres kept them, and a step read the first: DITANS's "latest credit
+  // balance" read a September ledger row on every run, so every invitation
+  // and contact request wrote the same balance (2026-11-19). Writers already
+  // put `orderBy` ("createdAt", "score desc", "position asc") and `limit` on
+  // their lookups, and the engine dropped both. `orderBy` reads as SQL does:
+  // a field, ascending unless it says desc.
+  const _sorted = (table: any, q: any, config: any) => {
+    const spec = typeof config?.orderBy === "string" ? config.orderBy.trim() : "";
+    if (spec) {
+      const m = /^([A-Za-z_][A-Za-z0-9_]*)(?:\s+(asc|desc))?$/i.exec(spec);
+      const col = m ? table[m[1]] : undefined;
+      if (!col) throw new Error(`orderBy "${spec}" is not a column of ${getTableName(table)}, optionally followed by asc or desc`);
+      // drizzle's own desc(col) is this; a bare column sorts ascending.
+      q = q.orderBy(m![2]?.toLowerCase() === "desc" ? sql`${col} desc` : col);
+    }
+    const limit = Number(config?.limit);
+    if (config?.limit != null && config.limit !== "") {
+      if (!Number.isInteger(limit) || limit < 1) throw new Error(`limit ${JSON.stringify(config.limit)} is not a whole number of rows`);
+      q = q.limit(limit);
+    }
+    return q;
+  };
+
   registerActionHandler("db_query", async (config, ctx) => {
     const table = _resolveTable((config as any).table);
     if (!table) return { rows: [] };
@@ -1851,7 +1875,7 @@ export function registerDefaultActions(): void {
       const where = _buildWhere(table, (config as any).where, ctx, { strict: false });
       if (where === MATCHES_NOTHING) return queryResult([]);
       const kept = await _scoped(table, where, ctx, "read");
-      const rows = await (kept ? q.where(kept) : q);
+      const rows = await _sorted(table, kept ? q.where(kept) : q, config);
       // THE ONE ROW A LOOKUP LOOKED UP, READABLE AS ITSELF. A step written to
       // fetch one record is read as that record — `check_member_verified.
       // kycStatus`, `fetch_tool_owner.ownerId`. Templates had a fallback for

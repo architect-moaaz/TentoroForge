@@ -405,6 +405,28 @@ def test_system_columns_and_real_fields_are_not_flagged():
     assert not [f for f in functional_findings(doc) if f["rule"] == "workflow-column-unknown"]
 
 
+def _lookup_doc(order_by):
+    doc = _write_doc(["fullName"])
+    doc["workflows"][0]["steps"] = [{"key": "latest", "config": {
+        "actionType": "db_query", "table": "records", "where": {"fullName": "x"}, "orderBy": order_by, "limit": 1}}]
+    return doc
+
+
+def test_a_lookup_ordered_by_a_field_the_entity_lacks_is_caught():
+    # The engine refuses an orderBy that is not a column (it used to drop it,
+    # and a "latest" lookup read an arbitrary row). The writer hears it first.
+    hits = [f for f in functional_findings(_lookup_doc("score desc")) if f["rule"] == "workflow-column-unknown"]
+    assert hits and "orders its rows by 'score'" in hits[0]["detail"]
+    # Not phrased as a write: the add-the-missing-field repair must not read it.
+    from services.smith.workflow_change import missing_fields
+    assert missing_fields(hits[0]["detail"]) == []
+
+
+def test_a_lookup_ordered_by_a_real_or_system_field_is_accepted():
+    for order_by in ("age desc", "createdAt desc", "fullName"):
+        assert not [f for f in functional_findings(_lookup_doc(order_by)) if f["rule"] == "workflow-column-unknown"], order_by
+
+
 # ---------------------------------------------------------------------------
 # The form side of the field-dependency ripple: a Form collects fields the
 # entity it writes still has. A field renamed/removed leaves the form collecting
