@@ -1,46 +1,11 @@
-"""A workflow's own write raises the same record-change event a data-API write raises.
+"""A run an EVENT starts is the application's own, not the person who caused the event.
 
-The event bus carried only writes that went through the data API. A workflow that starts when a record changes ("an order has just
-become ready: offer it to the drivers") never started when ANOTHER workflow made the change ("Mark ready for pickup"): no event, no
-offers, and a driver could not see the order (Zomato, 2026-11-16). The workflow handlers now announce what they write.
+(A workflow's own write used to be announced here by `announceRecordChange`; smithv5's `_announce` replaced it and has its own
+behaviour test, `a-process-write-starts-the-process-that-watches-it.test.mts`. What stays is the marking and the scoping.)
 """
 from pathlib import Path
 
 WORKFLOWS = (Path(__file__).resolve().parents[2] / "templates" / "runtime" / "workflows" / "index.ts").read_text(encoding="utf-8")
-
-
-def _handler(name: str) -> str:
-    start = WORKFLOWS.index(f'registerActionHandler("{name}"')
-    nxt = WORKFLOWS.find("registerActionHandler(", start + 10)
-    return WORKFLOWS[start:nxt if nxt > 0 else len(WORKFLOWS)]
-
-
-def test_an_update_announces_each_row_with_the_row_it_was():
-    h = _handler("db_update")
-    assert 'announceRecordChange("updated", table, r,' in h
-    assert "was.get(String(r?.id))" in h               # `previousEntity`: a trigger can ask what the record WAS
-
-
-def test_the_previous_rows_are_read_whether_or_not_the_audit_is_on():
-    h = _handler("db_update")
-    assert "auditOn() ? await" not in h                # it used to read them only for the audit trail
-
-
-def test_an_insert_announces_the_record_it_made():
-    assert 'announceRecordChange("created", table, sealedRow' in _handler("db_insert")
-
-
-def test_the_event_has_the_same_name_and_shape_the_data_engine_gives():
-    helper = WORKFLOWS[WORKFLOWS.index("function announceRecordChange"):WORKFLOWS.index("function numericColumnsAsNumbers")]
-    assert "`${key}.${op}`" in helper                  # `orders.updated`, as the trigger names it
-    assert "entity: row" in helper and "previousEntity: previous" in helper
-    assert "emitEventAndProcess" in helper
-
-
-def test_a_bus_failure_never_fails_the_write_and_the_platforms_own_tables_are_left_alone():
-    helper = WORKFLOWS[WORKFLOWS.index("function announceRecordChange"):WORKFLOWS.index("function numericColumnsAsNumbers")]
-    assert ".catch(" in helper and "non-fatal" in helper
-    assert 'key.startsWith("forge_")' in helper
 
 
 BUS = (Path(__file__).resolve().parents[2] / "templates" / "runtime" / "events" / "bus.ts").read_text(encoding="utf-8")

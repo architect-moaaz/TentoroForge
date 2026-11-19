@@ -211,3 +211,34 @@ def test_null_is_a_literal_the_engine_reads():
     assert template_findings(doc) == []
     engine = (Path(__file__).resolve().parents[2] / "templates/runtime/workflows/engine.ts").read_text()
     assert "(true|false|null)" in engine
+
+
+# A DURATION THAT IS NOT ONE IS REFUSED BEFORE IT RUNS. `duration("P1M")` once
+# read as no time at all and a DITANS subscription's first period ended the day
+# it began (FLOW-071, 2026-11-18); months are calendar months now, and a
+# duration the engine cannot read is an error the check reports, never 0.
+@needs_node
+def test_a_duration_that_is_not_one_is_refused():
+    errors = check_expressions([
+        ("month", 'date($now) + duration("P1M")'),
+        ("mixed", '$today + duration("P1Y2M10D")'),
+        ("bad", '$today + duration("1 month")'),
+        ("letter", 'date($now) + duration("P1X")'),
+    ])
+    assert "month" not in errors and "mixed" not in errors
+    assert "Not a duration" in errors["bad"] and "Not a duration" in errors["letter"]
+
+
+@needs_node
+def test_a_date_counted_from_now_is_read_as_a_formula():
+    doc = {"data": {"entities": []}, "businessRules": [], "pages": [], "pageLayouts": [],
+           "workflows": [{"id": "FLOW-071", "name": "Start Subscription", "inputs": [], "steps": [
+               {"key": "start", "type": "action",
+                "config": {"actionType": "db_insert", "entity": "Subscription",
+                           "values": {"periodEnd": '$today + duration("1 month")',
+                                      "renewsOn": '$today + duration("P1M")'}}}]}]}
+    from services.blueprint.functional_completeness import template_findings
+    found = [f for f in template_findings(doc) if f["rule"] == "template-computes"]
+    assert len(found) == 1, found
+    assert 'duration("1 month")' in found[0]["detail"] and "Not a duration" in found[0]["detail"]
+    assert "{{" not in found[0]["detail"].split(" is worked out")[0]

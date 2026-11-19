@@ -51,14 +51,22 @@ interface StreamEvent {
   entityId: string | null;
 }
 
+/** A record's name as its events spell it: lowercased, separators gone. */
+function slugOf(name: unknown): string {
+  return String(name ?? "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+}
+
 export function LiveRefresh({ entities }: { entities: string[] }) {
   const router = useRouter();
   // Router identity changes across renders; keep the latest without
   // re-subscribing the EventSource.
   const routerRef = useRef(router);
   routerRef.current = router;
+  // One spelling on both sides: a record event names its table with the
+  // separators gone (`stage_events` → `stageevents`, events/triggers.ts), and
+  // a page may say `stageEvents`, `stage_events` or `stage-events`.
   const watched = entities
-    .map((e) => String(e || "").toLowerCase())
+    .map((e) => slugOf(e))
     .filter(Boolean)
     .sort()
     .join(",");
@@ -97,10 +105,10 @@ export function LiveRefresh({ entities }: { entities: string[] }) {
     };
 
     const matches = (evt: StreamEvent): boolean => {
-      const entity = String(evt.entity ?? "").toLowerCase();
+      const entity = slugOf(evt.entity);
       if (entity && slugs.has(entity)) return true;
       // "<slug>.created" events carry the slug in the type prefix too.
-      const prefix = String(evt.type ?? "").split(".")[0].toLowerCase();
+      const prefix = slugOf(String(evt.type ?? "").split(".")[0]);
       return !!prefix && slugs.has(prefix);
     };
 

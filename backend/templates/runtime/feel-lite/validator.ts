@@ -3,6 +3,7 @@
 import { tokenize } from "./tokenizer";
 import { parse, ParseError } from "./parser";
 import type { ASTNode } from "./ast";
+import { parseDuration } from "./evaluator";
 
 export interface VariableSchema {
   name: string;
@@ -111,6 +112,21 @@ export function validateExpression(
             severity: "warning",
             message: `Unknown function: "${node.name}"`,
           });
+        }
+        // A DURATION WRITTEN OUT IS READ HERE. `duration("P1M")` was nothing at
+        // run time and `$today + duration("P1M")` was today (DITANS FLOW-071,
+        // 2026-11-18); the engine now refuses a duration that is not one, so
+        // the check refuses it first.
+        if (node.name === "duration" && node.args.length === 1) {
+          const arg = node.args[0];
+          const text = arg.type === "StringLiteral" ? arg.value
+            : arg.type === "NumberLiteral" ? String(arg.value) : null;
+          if (text !== null && parseDuration(text) === null) {
+            issues.push({
+              severity: "error",
+              message: `Not a duration: "${text}" — write ISO 8601, e.g. "P1M", "P1Y2M10D", "P30D", "PT2H"`,
+            });
+          }
         }
         for (const arg of node.args) walk(arg);
         break;

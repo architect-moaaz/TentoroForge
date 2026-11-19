@@ -54,6 +54,8 @@ import { embedQuery, embedWrittenRow, stripEmbeddings } from "./embeddings";
 // scopeConditions() fast-paths to [].
 import { ownershipRulesFor, type OwnershipRule } from "./ownership-rules";
 import { appliesTo, reachesNothing } from "./ownership-roles";
+import { recordEventSlug } from "./events/triggers";
+import { keepRunning } from "./events/keep-alive";
 
 /**
  * FK-label expansion. A list row only carries the FK id (a UUID), so a table that
@@ -1086,10 +1088,15 @@ function _persistEvent(
   op: "created" | "updated" | "deleted",
   entityName: string,
   payload: Record<string, any>,
+  table?: unknown,
 ): void {
   try {
-    const slug = String(entityName).toLowerCase();
-    void import("./events/bus")
+    // Named from the TABLE, as the Blueprint's db_change triggers are
+    // (events/triggers.ts recordEventType) — not from whatever the caller
+    // called the record, which announced `application.updated` to a
+    // process waiting on `applications.updated`.
+    const slug = table ? recordEventSlug(getTableName(table as any)) : String(entityName).toLowerCase();
+    const work = import("./events/bus")
       .then((bus) =>
         bus.emitEventAndProcess(`${slug}.${op}`, {
           entity: slug,
@@ -1100,6 +1107,10 @@ function _persistEvent(
       .catch((e) =>
         console.warn(`[DataEngine] event bus emit failed for ${slug}.${op} (non-fatal):`, e),
       );
+    // Not awaited — the write does not wait for the bus — but on a host that
+    // freezes after the reply the event is still written and processed
+    // (events/keep-alive.ts).
+    void keepRunning(work);
   } catch (e) {
     console.warn("[DataEngine] event bus emit failed (non-fatal):", e);
   }
@@ -1416,7 +1427,7 @@ export async function create(
   // Emit event for workflow engine
   emit(event, { entityId: record.id, entity: record, user: ctx.user }).catch(console.error);
   // R1: durable bus row ("<slug>.created") — non-fatal, fire-and-forget.
-  _persistEvent("created", entityName, { entity: record, user: ctx.user });
+  _persistEvent("created", entityName, { entity: record, user: ctx.user }, entity.table);
   // Fire rule side effects (trigger_workflow / send_notification) after the write.
   fireRuleEffects(ruleEffects, record, ctx, entity.table).catch(console.error);
 
@@ -1527,7 +1538,7 @@ export async function update(
 
   emit(event, { entityId: record.id, entity: record, previousEntity: existing, user: ctx.user }).catch(console.error);
   // R1: durable bus row ("<slug>.updated") — non-fatal, fire-and-forget.
-  _persistEvent("updated", entityName, { entity: record, previousEntity: existing, user: ctx.user });
+  _persistEvent("updated", entityName, { entity: record, previousEntity: existing, user: ctx.user }, entity.table);
   fireRuleEffects(ruleEffects, record, ctx, entity.table).catch(console.error);
 
   await _maskOrUnmaskOnRead(entityName, record, ctx);
@@ -1561,7 +1572,7 @@ export async function remove(
 
   emit(event, { entityId: id, entity: existing, user: ctx.user }).catch(console.error);
   // R1: durable bus row ("<slug>.deleted") — non-fatal, fire-and-forget.
-  _persistEvent("deleted", entityName, { entity: existing, user: ctx.user });
+  _persistEvent("deleted", entityName, { entity: existing, user: ctx.user }, entity.table);
 
   return { data: existing, event };
 }

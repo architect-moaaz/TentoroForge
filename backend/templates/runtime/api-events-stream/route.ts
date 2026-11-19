@@ -23,6 +23,7 @@
  */
 import { db } from "@/db";
 import { sql } from "drizzle-orm";
+import { fromDbTime } from "@/lib/events/cron";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -65,7 +66,7 @@ export async function GET(req: Request): Promise<Response> {
           const rows = _rows(res);
           if (rows.length) {
             const last = rows[rows.length - 1];
-            since = new Date(last.created_at);
+            since = fromDbTime(last.created_at) ?? since;  // written as UTC — not the server's own zone
             const events = rows.map((r) => ({
               type: String(r.type),
               entity: r.entity ?? null,

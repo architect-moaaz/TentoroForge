@@ -37,7 +37,9 @@ installHarness({ stubs: {
           }
           return [{ seq: last.seq, hash: last.hash }];
         }
-        if (q.text.includes("FROM forge_audit ORDER BY seq ASC")) return globalThis.__ROWS__;
+        if (q.text.includes("FROM forge_audit ORDER BY seq ASC")) return globalThis.__ROWS__.slice(0, q.values?.[0] ?? undefined);
+        if (q.text.includes("WHERE action = 'prune'"))
+          return globalThis.__ROWS__.filter((r) => r.action === "prune" && r.prev_hash != null).map((r) => ({ prev_hash: r.prev_hash }));
         return [];
       },
       async transaction(fn) { globalThis.__TX__ = (globalThis.__TX__ ?? 0) + 1; return fn(this); },
@@ -97,4 +99,26 @@ eqJson(((globalThis as any).__TX__ ?? 0) - tx0, 2, "each write on the bare conne
 const tx1 = (globalThis as any).__TX__;
 await audit.recordAudit({ execute: (q: any) => (globalThis as any).__fakeDb.execute(q) }, { action: "create", entity: "Note", entityId: "n-9" });
 eqJson((globalThis as any).__TX__, tx1, "inside a write's transaction it opens no other");
+// A PRUNED TRAIL STILL VERIFIES (18 Nov 2026): forge_audit_prune removes the oldest rows and appends a row naming
+// the last hash it removed — after the rows it kept. Walking from the oldest, the first kept row links to a removed
+// one; that is where the prune cut, not a break. Every pruned trail read as broken before.
+rows.length = 0;
+for (const id of ["p-1", "p-2", "p-3", "p-4"]) {
+  await audit.recordAudit((await import("@/db")).db, { action: "create", entity: "Note", entityId: id, after: { id } });
+}
+const cut = rows.splice(0, 2);
+rows.forEach((r: any, i: number) => { r.seq = i + 3; });
+rows.push({ seq: 5, at: new Date().toISOString(), action: "prune", entity: "forge_audit", entity_id: null, actor_id: null,
+  before: null, after: { removed: 2, lastHash: cut[1].hash }, prev_hash: cut[1].hash, hash: "prune-hash-1" });
+eqJson(await audit.verifyChain(), { ok: true, checked: 3 }, "a pruned trail verifies from where the prune cut");
+await audit.recordAudit((await import("@/db")).db, { action: "create", entity: "Note", entityId: "p-5", after: { id: "p-5" } });
+eqJson(rows.at(-1).prev_hash, "prune-hash-1", "a row written after the prune chains to it");
+eqJson(await audit.verifyChain(), { ok: true, checked: 4 }, "and the trail verifies past the prune");
+eqJson(await audit.verifyChain(2), { ok: true, checked: 2 }, "a walk that stops before the prune row still knows where it cut");
+rows[0].prev_hash = "not-a-removed-row";
+eqJson(await audit.verifyChain(), { ok: false, checked: 1, brokenAt: 3 }, "a first row that links to nothing a prune removed is a break");
+rows[0].prev_hash = cut[1].hash;
+rows[1].prev_hash = cut[0].hash;
+eqJson(await audit.verifyChain(), { ok: false, checked: 2, brokenAt: 4 }, "only the first kept row may start at the cut");
+
 done("every change is on the record");

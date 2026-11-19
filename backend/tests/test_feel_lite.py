@@ -583,3 +583,42 @@ class TestRound2Regressions:
         assert evaluate_expression("age >= 18", {"age": "9"}) is False
         assert evaluate_expression("age >= 18", {"age": "21"}) is True
         assert evaluate_expression("x < y", {"x": "90", "y": "100"}) is True
+
+
+class TestCalendarDurations:
+    """`duration("P1M")` was no time at all, so `$today + duration("P1M")` was
+    today (DITANS FLOW-071, 2026-11-18). Years and months are calendar months,
+    clamped at a short month's end; a duration that is not one is an error."""
+
+    def _month_on(self, d, months):
+        import calendar
+        from datetime import date as _date
+        i = d.month - 1 + months
+        y, m = d.year + i // 12, i % 12 + 1
+        return _date(y, m, min(d.day, calendar.monthrange(y, m)[1])).isoformat()
+
+    def test_today_plus_a_month_and_a_year(self):
+        from datetime import date as _date
+        today = _date.today()
+        assert evaluate_expression('$today + duration("P1M")', {}) == self._month_on(today, 1)
+        assert evaluate_expression('$today + duration("P1M")', {}) != today.isoformat()
+        assert evaluate_expression('$today + duration("P1Y")', {}) == self._month_on(today, 12)
+
+    def test_years_months_and_days(self):
+        assert evaluate_expression('d + duration("P1Y2M10D")', {"d": "2026-01-15"}) == "2027-03-25"
+        assert evaluate_expression('d + duration("P1Y")', {"d": "2028-02-29"}) == "2029-02-28"
+
+    def test_month_end_is_clamped(self):
+        assert evaluate_expression('d + duration("P1M")', {"d": "2026-01-31"}) == "2026-02-28"
+        assert evaluate_expression('d + duration("P1M")', {"d": "2028-01-31"}) == "2028-02-29"
+        assert evaluate_expression('d - duration("P1M")', {"d": "2026-03-31"}) == "2026-02-28"
+
+    def test_days_are_unchanged(self):
+        from datetime import timedelta as _td
+        assert evaluate_expression('duration("P1D")', {}) == _td(days=1)
+        assert evaluate_expression('d + duration("P30D")', {"d": "2026-11-18"}) == "2026-12-18"
+
+    @pytest.mark.parametrize("bad", ["P1X", "1M", "P", "PT", "P1DT", "month", "30"])
+    def test_a_bad_duration_is_refused(self, bad):
+        with pytest.raises(ValueError, match="Not a duration"):
+            evaluate_expression(f'd + duration("{bad}")', {"d": "2026-11-18"})

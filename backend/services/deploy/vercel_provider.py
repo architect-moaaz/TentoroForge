@@ -686,6 +686,15 @@ class VercelDeployProvider:
                 if prior and prior.get("id") and gone not in env:
                     await self.vercel.delete_env(vercel_project_id, prior["id"])
 
+            # A DATABASE JUST MADE IS SEEDED: "keep the data" is only ever set,
+            # so one left by an earlier publish told the build to preserve an
+            # empty database — DITANS's new Test database came up with no
+            # demo data and its demo accounts in no organisation (2026-11-18),
+            # and "start the test data again" never reseeded.
+            kept = existing_by_key.get("FORGE_KEEP_DB_STATE")
+            if kept and kept.get("id") and "FORGE_KEEP_DB_STATE" not in env:
+                await self.vercel.delete_env(vercel_project_id, kept["id"])
+
             # NEXTAUTH_URL is intentionally unset so NextAuth falls back to
             # Vercel's own VERCEL_URL — the real host — on both preview and
             # per-deployment URLs. A prior deploy may have pinned a stale

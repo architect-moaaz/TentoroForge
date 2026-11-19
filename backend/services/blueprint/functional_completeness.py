@@ -1887,6 +1887,10 @@ def record_event(doc: dict, wf: dict) -> tuple[set[str], dict | None]:
     return roots, ent
 
 
+#: A value the engine evaluates as a formula on the clock (`$now + duration("P30D")`).
+_CLOCK_FORMULA_RE = re.compile(r"^\s*\$(now|today)\s*[-+]")
+
+
 def template_findings(doc: dict) -> list[dict]:
     out: list[dict] = []
     formulas: list[tuple[str, dict, dict, str]] = []
@@ -1903,6 +1907,13 @@ def template_findings(doc: dict) -> list[dict]:
         seen: set[str] = set()
         for st in steps:
             for text in _strings(st.get("config") or {}):
+                # A DATE COUNTED FROM NOW IS A FORMULA. The engine works out a
+                # value written `$today + duration("P1M")` (`_resolveRef`), and
+                # keeps it as its own text when it cannot — `duration("1 month")`
+                # once read as no time at all (DITANS FLOW-071, 2026-11-18).
+                if _CLOCK_FORMULA_RE.match(text):
+                    formulas.append((f"{len(formulas)}", wf, st, text.strip()))
+                    continue
                 # A TEMPLATE NAMES A VALUE; IT DOES NOT COMPUTE ONE.
                 # `{{count(list_results)}}` reached the database as that text
                 # and SnapIT's last step failed on it (2026-09-29): the pattern
@@ -1992,9 +2003,10 @@ def template_findings(doc: dict) -> list[dict]:
         errors = check_expressions([(i, expr) for i, _wf, _st, expr in formulas])
         for i, wf, st, expr in formulas:
             if i in errors:
+                shown = expr if _CLOCK_FORMULA_RE.match(expr) else f"{{{{{expr}}}}}"
                 out.append({"rule": "template-computes", "page": str(wf.get("id")),
                             "detail": f"{wf.get('name') or wf.get('id')}, step {st.get('key')!r}: "
-                                      f"{{{{{expr}}}}} is worked out as a formula, and the engine cannot "
+                                      f"{shown} is worked out as a formula, and the engine cannot "
                                       f"parse it — {errors[i]}; as written it is stored as its own text. "
                                       f"Formulas are FEEL: `=` not `==`, `and`/`or`/`not`, "
                                       f"`if a then b else c`, names without braces"})

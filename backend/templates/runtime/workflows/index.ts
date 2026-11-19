@@ -46,6 +46,7 @@ import { embedWrittenRow } from "../embeddings";
 // is injected lazily below so loading the workflow runtime never drags in
 // the event tables on apps that predate them.
 import { makeEmitEventHandler } from "../events/emit-node";
+import { EVENT_CHAIN_VAR, eventChainAfter, recordEventSlug, recordEventType } from "../events/triggers";
 import { evaluateExpression } from "../feel-lite";
 import type {
   WorkflowDefinition,
@@ -802,29 +803,6 @@ export function _resolveRef(ref: unknown, ctx: WorkflowExecutionContext): unknow
 }
 
 /**
- * A WORKFLOW'S OWN WRITE IS A RECORD CHANGE TOO. The event bus carried only the writes that went through the data API, so a
- * workflow that starts when a record changes ("an order has just become ready: offer it to the drivers") NEVER started when
- * another workflow made the change ("Mark ready for pickup"): no event, no offers, and a driver could not see the order
- * (Zomato, 2026-11-16). The same `<table>.created|updated` event, the same payload shape the data engine gives
- * (`entity`, `previousEntity`). Fire-and-forget and non-fatal: a bus failure must never fail the write.
- */
-function announceRecordChange(op: "created" | "updated", table: unknown, row: Record<string, unknown>, previous: Record<string, unknown> | null, ctx: unknown): void {
-  try {
-    const key = String(getTableName(table as any));
-    if (!key || key.startsWith("forge_") || key.startsWith("_")) return;      // the platform's own tables are not the app's records
-    void import("../events/bus")
-      .then((bus) => bus.emitEventAndProcess(`${key}.${op}`, {
-        entity: key,
-        entityId: row?.id != null ? String(row.id) : null,
-        payload: { entity: row, ...(previous ? { previousEntity: previous } : {}), user: (ctx as { user?: unknown })?.user },
-      }))
-      .catch((e) => console.warn(`[workflow] event bus emit failed for ${key}.${op} (non-fatal):`, e));
-  } catch (e) {
-    console.warn("[workflow] event bus emit failed (non-fatal):", e);
-  }
-}
-
-/**
  * A numeric (money) column read by a step as a NUMBER. node-postgres returns numeric as text
  * ("100.00"), so a step that added a fee to a total joined them — `469 + "100.00"` read
  * "469100" and an order cost crores (Zomato, 2026-11-13). The column knows it is a number.
@@ -1095,6 +1073,49 @@ async function _seal(table: any, values: Record<string, any>): Promise<Record<st
   }
 }
 
+/**
+ * A RECORD A PROCESS WRITES IS A CHANGE LIKE ANY OTHER. Only the data engine
+ * announced its writes on the event bus; a db_insert / db_update / db_delete
+ * wrote straight to the table and said nothing, so in an app whose records
+ * mostly change through processes no record-change process ever ran — DITANS
+ * (wzml1sa6, 2026-11-18): forge_events empty, "Record Placement And Fee",
+ * "Apply Credential Hold", "Record Application Stage Event" and "Ask Stage
+ * Survey" never once started. The same event now, named the same way
+ * (events/triggers.ts recordEventType), with the record as the database holds
+ * it, the record before, and who acted — plus the chain of processes that led
+ * here, so a process is never started again by its own changes.
+ *
+ * Never fails the step: a bus that is down loses the event, not the write.
+ */
+async function _announce(
+  ctx: WorkflowExecutionContext,
+  table: any,
+  op: "created" | "updated" | "deleted",
+  row: unknown,
+  previous?: unknown,
+): Promise<void> {
+  try {
+    if (!row || typeof row !== "object") return;
+    const name = getTableName(table);
+    const workflowId = (ctx as any).workflowId || (ctx as any).workflow?.id || null;
+    const payload: Record<string, unknown> = {
+      entity: row,
+      ...(previous && typeof previous === "object" ? { previousEntity: previous } : {}),
+      user: (ctx as any).user ?? null,
+      [EVENT_CHAIN_VAR]: eventChainAfter(ctx.variables as Record<string, unknown>, workflowId),
+    };
+    const id = (row as Record<string, unknown>).id;
+    const { emitEventAndProcess } = await import("../events/bus");
+    await emitEventAndProcess(recordEventType(name, op), {
+      entity: recordEventSlug(name),
+      entityId: id != null ? String(id) : null,
+      payload,
+    });
+  } catch (e) {
+    console.warn(`[workflow] could not announce a ${op} record (non-fatal):`, e);
+  }
+}
+
 export function _finalizeInsert(
   table: any, values: Record<string, unknown>, ctx: WorkflowExecutionContext,
 ): Record<string, unknown> {
@@ -1245,10 +1266,6 @@ async function _trail(ctx: WorkflowExecutionContext, action: "create" | "update"
   } catch (err) {
     console.warn("[workflow] the trail could not be written:", err);
   }
-}
-
-function auditOn(): boolean {
-  try { return Boolean(require("../audit").auditOn()); } catch { return false; }
 }
 
 export const MATCHES_NOTHING = Symbol("matches-nothing");
@@ -1533,6 +1550,7 @@ export function registerDefaultActions(): void {
             const rows = await (db as any).insert(table).values(values).returning();
             const row = Array.isArray(rows) ? rows[0] : rows;
             await _trail(ctx, "create", table, null, row);
+            await _announce(ctx, table, "created", row);
             if (row) inserted.push({ ...(await embedWrittenRow(table, row)), ...plain });
           } catch (err) {
             console.warn(`[workflow] db_insert (row-fanout): row failed —`, err);
@@ -1579,7 +1597,10 @@ export function registerDefaultActions(): void {
           if (Object.keys(fill).length) {
             await _seal(table, fill);
             const [updated] = await (db as any).update(table).set(fill).where(cond).returning();
-            if (updated) existing = updated;
+            if (updated) {
+              await _announce(ctx, table, "updated", updated, existing);
+              existing = updated;
+            }
           }
           const nid = (config as any).__nodeId;
           if (nid) ctx.variables[nid] = existing;
@@ -1591,7 +1612,7 @@ export function registerDefaultActions(): void {
       const rows = await (db as any).insert(table).values(values).returning();
       const sealedRow = Array.isArray(rows) ? rows[0] : rows;
       await _trail(ctx, "create", table, null, sealedRow);
-      if (sealedRow && typeof sealedRow === "object") announceRecordChange("created", table, sealedRow as Record<string, unknown>, null, ctx);
+      await _announce(ctx, table, "created", sealedRow);
       const row = sealedRow && typeof sealedRow === "object" ? { ...sealedRow, ...plain } : sealedRow;
       if (row && typeof row === "object") await embedWrittenRow(table, row);
       if (row && typeof row === "object") {
@@ -1758,14 +1779,16 @@ export function registerDefaultActions(): void {
       } catch (e: any) { _rethrowIfRulesFailed(e, (config as any).table, "write"); }
       await _seal(table, raw);
       const q = (db as any).update(table).set(raw);
+      // What each record was: the trail keeps it, and the change announced
+      // carries it as `previousEntity`, as the data engine's does.
       const before: any[] = await (db as any).select().from(table).where(kept);
       const rows = await q.where(kept).returning();
       if (Array.isArray(rows)) {
-        const was = new Map(before.map((b: any) => [String(b?.id), b]));
+        const was = new Map((Array.isArray(before) ? before : []).map((b: any) => [String(b?.id), b]));
         for (const r of rows) {
           await embedWrittenRow(table, r, null, Object.keys(raw));
           await _trail(ctx, "update", table, was.get(String(r?.id)) ?? null, r);
-          announceRecordChange("updated", table, r, was.get(String(r?.id)) ?? null, ctx);
+          await _announce(ctx, table, "updated", r, was.get(String(r?.id)) ?? null);
         }
       }
       const count = Array.isArray(rows) ? rows.length : 1;
@@ -1812,7 +1835,10 @@ export function registerDefaultActions(): void {
       try {
         const rows: any = await (q.where(kept) as any).returning();
         count = Array.isArray(rows) ? rows.length : 0;
-        for (const r of Array.isArray(rows) ? rows : []) await _trail(ctx, "delete", table, r, null);
+        for (const r of Array.isArray(rows) ? rows : []) {
+          await _trail(ctx, "delete", table, r, null);
+          await _announce(ctx, table, "deleted", r);
+        }
       } catch {
         await q.where(kept);
       }
@@ -2534,14 +2560,20 @@ export function registerDefaultActions(): void {
   // an {error} the engine would escalate.
   // NOTE: the string literal stays adjacent to registerActionHandler( —
   // services/workflow_node_contracts.py parses registrations with a regex.
-  registerActionHandler("emit_event", makeEmitEventHandler({
+  // The event carries the chain of processes behind it, as a record change
+  // does (_announce): a process emitting what it listens for stops there.
+  registerActionHandler("emit_event", (config, ctx) => makeEmitEventHandler({
     emit: async (type, opts) => {
       const { emitEventAndProcess } = await import("../events/bus");
-      return emitEventAndProcess(type, opts);
+      const workflowId = (ctx as any).workflowId || (ctx as any).workflow?.id || null;
+      return emitEventAndProcess(type, { ...opts, payload: {
+        ...(opts.payload ?? {}),
+        [EVENT_CHAIN_VAR]: eventChainAfter(ctx.variables as Record<string, unknown>, workflowId),
+      } });
     },
-    resolveRef: (ref, ctx) => _resolveRef(ref, ctx as WorkflowExecutionContext),
-    resolveMap: (map, ctx) => _resolveMap(map, ctx as WorkflowExecutionContext),
-  }));
+    resolveRef: (ref, c) => _resolveRef(ref, c as WorkflowExecutionContext),
+    resolveMap: (map, c) => _resolveMap(map, c as WorkflowExecutionContext),
+  })(config, ctx));
 
   // R3: wait_for_event is intercepted by engine.ts BEFORE handler
   // dispatch (it pauses the run through the human-task mechanism). This

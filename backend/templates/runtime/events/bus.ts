@@ -12,9 +12,10 @@
  *      that event (workflow_tasks rows with task_type='wait_for_event').
  *
  * Serverless-first: NO long-lived LISTEN/NOTIFY daemon. Processing runs
- * inline after each emit (fire-and-forget with error logging) and from
- * the /api/cron/tick sweeper, which retries anything the inline pass
- * missed (cold start crash, timeout).
+ * inline after each emit (not awaited by the writer, but held open on a host
+ * that freezes after the reply — events/keep-alive.ts) and from the
+ * /api/cron/tick sweeper, which retries anything the inline pass missed
+ * (cold start crash, timeout).
  *
  * Every failure here is non-fatal — a bus outage must never fail the
  * write or workflow that emitted the event.
@@ -29,7 +30,8 @@ import {
   buildTimeoutResumeInput,
   WAITING_EVENT_VAR,
 } from "./triggers";
-import { buildTimerResumeInput, eventRunInput } from "./triggers";
+import { buildTimerResumeInput, eventRunInput, eventChainRefusal, EVENT_CHAIN_VAR } from "./triggers";
+import { keepRunning } from "./keep-alive";
 
 /** The person a paused run was acting as, as the pause stored them. */
 function _actorOf(pv: Record<string, unknown> | undefined): { id: string; role?: string; email?: string } | undefined {
@@ -129,9 +131,12 @@ export async function emitEventAndProcess(
   const row = await emitEvent(type, opts);
   if (row && "duplicate" in row) return row;
   if (row) {
-    void _kickProcessing().catch((err) =>
+    const work = _kickProcessing().catch((err) =>
       console.warn("[events] inline processing failed (cron will sweep):", err),
     );
+    // A host that freezes the process after the reply (Vercel) is asked to
+    // keep it running until this is done (events/keep-alive.ts).
+    await keepRunning(work);
   }
   return row;
 }
@@ -235,9 +240,17 @@ async function _dispatchEvent(
   const all = await wfmod.listWorkflows();
   const matching = findWorkflowsForEvent(all, evt.type);
   let started = 0;
+  const stopped: string[] = [];
   for (const wf of matching) {
     const payload =
       evt.payload && typeof evt.payload === "object" ? evt.payload : {};
+    // A process does not start from its own changes (events/triggers.ts).
+    const refusal = eventChainRefusal((payload as Record<string, unknown>)[EVENT_CHAIN_VAR], String(wf.id));
+    if (refusal) {
+      console.warn(`[events] ${evt.type}: ${refusal}`);
+      stopped.push(refusal);
+      continue;
+    }
     // A RUN AN EVENT STARTS IS THE APPLICATION REACTING, not the person who caused the event acting: it is marked, and its
     // steps read and write as the application. Scoped to the restaurant manager who pressed "ready", the dispatch step found no
     // drivers (a manager reaches none) and no driver was ever offered the order (Zomato, 2026-11-16).
@@ -250,6 +263,17 @@ async function _dispatchEvent(
     // asks the same question again. Only a run that broke is retried.
     if (result?.status === "failed" && !result.refused) {
       throw new Error(`workflow ${wf.id} failed: ${result.error ?? "unknown"}`);
+    }
+  }
+  // Said on the event's own row, where someone asking "why did it not run"
+  // looks; a dispatch failure (thrown above) writes the same column instead.
+  if (stopped.length) {
+    try {
+      await db.execute(sql`
+        UPDATE forge_events SET error = ${stopped.join("; ").slice(0, 2000)} WHERE id = ${evt.id}::uuid
+      `);
+    } catch {
+      /* observability write only — never escalate */
     }
   }
   return started;

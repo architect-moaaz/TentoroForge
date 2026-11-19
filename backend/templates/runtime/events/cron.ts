@@ -130,6 +130,26 @@ export function cronMatches(expr: string, date: Date, timezone?: string): boolea
   return true;
 }
 
+/**
+ * A `timestamp` (WITHOUT time zone) as the database hands it back — text such
+ * as "2026-11-18 10:48:05.082" — read as the UTC it was written in (the
+ * runtime writes `toISOString()`). `new Date()` of that text reads it as the
+ * SERVER's local time: on a machine in India every last run looked 5½ hours
+ * old, every schedule was always due, and the local DITANS copy ran
+ * close-filled-jobs (every 15 minutes) 270 times an hour (2026-11-18).
+ * A value that names its zone, or is already a Date, is taken as it is.
+ */
+export function fromDbTime(v: unknown): Date | null {
+  if (v == null || v === "") return null;
+  if (v instanceof Date) return Number.isNaN(v.getTime()) ? null : v;
+  let s = String(v).trim().replace(" ", "T");
+  if (/^\d{4}-\d\d-\d\d$/.test(s)) s += "T00:00:00Z";
+  else if (/[+-]\d\d$/.test(s)) s += ":00";
+  else if (!/([zZ]|[+-]\d\d:?\d\d)$/.test(s)) s += "Z";
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 // How far back a sweep will look for a missed firing. Covers a daily
 // schedule even when the cron pinger was down for a whole day.
 const _LOOKBACK_MS = 26 * 60 * 60 * 1000;
