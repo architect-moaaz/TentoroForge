@@ -156,6 +156,83 @@ apiFetch(path, init?) / apiJson(path, { body? }) // raw calls to the app, sessio
 
 Money fields hold MAJOR units; never divide or multiply by 100.
 
+`<Avatar image={record.photo} />` takes the stored file's id or a link as it is and loads it itself: never wrap it in `fileSource(...)` (that returns an image object, which is only for an `<Image source>` you draw yourself).
+
+### Live tracking and maps (a driver on the move, a customer watching)
+
+Use these when a page is about someone on the move: a driver, courier or technician sharing where they are, or a customer
+following a ride or an order. Do NOT draw a map for a page that only shows an address as text.
+
+```tsx
+import { FleetBeacon, TripBeacon, ShareLocation, LiveTrackingMap, MapView, useRoute, useLiveTrip, minutesText } from "@/sdk";
+
+<FleetBeacon entity="Driver" trip={driver.id} on={driver.availabilityStatus === "online"} />
+    // the driver is ONLINE: this shares their position by itself while it is on screen. Put it on the page that shows
+    // the online state, once. Never add a second "Go online" button next to the workflow's own.
+<TripBeacon entity="Ride" trip={ride.id} stage={ride.status === "in_progress" ? "to_dropoff" : "to_pickup"} />
+    // a delivery or ride IN PROGRESS: shares that trip's position by itself while it is on screen. USE THIS for the mover's
+    // screen of a job under way: a person on a job does not press a button to be followed.
+<ShareLocation entity="Ride" trip={ride.id} />
+    // only where sharing is the person's own choice: a Start / End button that shares for that trip only
+<LiveTrackingMap entity="Ride" trip={ride.id} pickup={{ lat, lng }} dropoff={{ lat, lng }} height={320} />   // optional `heading="pickup"|"dropoff"`: which end they are going to (else read from the trip's stage)
+    // the driver, both ends, the road, "To pickup: 2.1 mi · 9 min · arrives 14:05" and where the route came from
+<MapView points={[{ id, lat, lng, label, tone }]} route={path} keepInView />   // any other map: pins and a line
+```
+
+- `entity` is the record type the trip is (the same one the web page names) and `trip` its id: the server lets only
+  the people who may open that record follow or share it.
+- The person on the move shares; the customer and the administrator watch. The phone asks permission itself.
+- A screen shows a distance and a time, never coordinates. `useRoute(from, to)` gives `{ route, remainingKm, etaMin,
+  arriveAt }` if a page needs the numbers alone.
+- Sharing works while the app is open in front of the person. It does not run with the screen off (that needs
+  background location and a real build, not Expo Go); say so on a screen where it matters.
+- The map uses Apple Maps on iPhone and Google Maps on Android (the Android build's key is `GOOGLE_MAPS_ANDROID_KEY`).
+- `MapView` takes `height` (points; default 320) and `keepInView`. A pin's `tone` is one of `primary`, `accent`, `muted`,
+  `danger` and nothing else (there is no `neutral`); the end being driven to is `accent`, the other `muted`.
+- Some values are narrow, and a wider word fails to compile: `WorkflowForm`'s `submitVariant` is `primary` or `accent` only,
+  and a `Text` tone is one of the tones listed for `Text` (not `neutral`). `useWidget(...)` returns the widget in `.data`.
+
+### A map that IS the screen (a person out and moving: a driver, a courier, a technician on the way)
+
+For someone who works from the road, the map is the app, the way every ride-hailing and delivery app is built: the map fills
+the glass, a compact panel floats on top, round buttons float at the side, and a sheet slides up from the bottom with what
+to do next. Use `MapScreen` for that screen. Do NOT use it for a form, a list or a settings page, and do not put a map
+inside a card on a page of cards for a person who is driving.
+
+```tsx
+import { MapScreen, BottomSheet, FloatingPanel, FloatingButton, Row, Text, Button, StatusBadge } from "@/ui";
+
+<MapScreen
+  points={[{ id: "pickup", lat, lng, label: "Pickup", tone: "accent" }]}   // only places the record really has
+  route={nav.route?.path}                                                  // from useRoute(from, to)
+  top={<FloatingPanel><Row>…avatar, Online / Offline, earnings today…</Row></FloatingPanel>}
+  controls={<FloatingButton icon="call" label="Call the rider" onPress={call} />}
+>
+  <BottomSheet snapPoints={[0.24, 0.55]} header={<Text variant="heading">Arrived at pickup</Text>}>
+    …who, where, how far… <Button variant="accent" onPress={start}>Start ride</Button>
+  </BottomSheet>
+</MapScreen>
+```
+
+- `MapScreen` follows this device's position (blue dot, camera) until the person drags the map, and a recentre button takes it
+  back. It says in words when the location is blocked, cannot be found, or is old. `followUser={false}` frames the places given
+  instead (a request preview). It draws no header: it is the whole screen.
+- ONE STATE, ONE SHEET. The screen is a state machine over the record's own status (waiting, request, to pickup, arrived,
+  in trip, done): each state is one `BottomSheet` with its header, the few facts that matter, and the ONE `variant="accent"`
+  action. The sheet changes when the status changes (`index` makes it controlled); never show every fact at once, never a
+  long scroll. A request is a sheet over the map with a countdown and Accept / Decline, not another page.
+- A sheet's `snapPoints` are resting heights (shares of the room, e.g. `[0.24, 0.55, 0.9]`, or points). The person drags it;
+  it never dims the map. A pick-one or a confirmation is still a `Sheet` / `Dialog`.
+- Put floating parts in `top` (a `FloatingPanel`: compact, one line of facts), round buttons in `controls`
+  (`FloatingButton`, 48 pt or more, with a `label`). Nothing else floats: the map stays visible. Never repeat the tab bar's
+  destinations (earnings, history, profile) as floating buttons: the buttons are for what helps the job now (call the rider).
+- NEVER TICK IN A SCREEN. A `setInterval` (or a `now` in `useState`) that sets state in the screen redraws the map, the sheet and the
+  panels on every tick, and a slow phone falls behind and draws without rest. Clocks live in small parts: `<Countdown until={iso} />`
+  (m:ss to a time, e.g. a request's own expiry), `<Elapsed since={iso} />` (12 min), and `useExpired(iso)` (false until that time,
+  then true, with one redraw) to drop an offer when it runs out. Polling is `useLive()`, never a timer of your own.
+- `MapView height="fill"` is the same map without the screen around it. `useDevicePosition()` reads where the device is
+  if a screen needs the number. No made-up position, ever: with no fix show the last known spot and say so.
+
 ## `@/ui` — the component kit
 
 React Native core only; every colour/size/radius comes from the theme; 44 pt

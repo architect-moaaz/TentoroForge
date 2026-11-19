@@ -68,6 +68,8 @@ export const PROVIDERS: Record<string, ProviderInfo> = {
   push: { name: "Web push", purpose: "The keys the apps use to send notifications to installed phones and browsers.", group: "platform",
           note: "Generated per app when absent; set here only to share one identity across apps." },
   mews: { name: "Mews", purpose: "The apps read and write hotels' reservations, guests and rooms in Mews. The client token is your integration's, set once here. Each hotel's access token is added by the app's administrator on the app's own Mews properties page; set one here only for a single hotel, or as a portfolio token.", group: "systems" },
+  google_maps: { name: "Google Maps", purpose: "The map, the road and the arrival time in apps with maps, live tracking or zones. Without a key the apps use a free map and a free demo router.", group: "systems",
+                 note: "One key does it all. In Google Cloud turn billing on, enable on the project: Maps JavaScript API, Routes API, Directions API, Geocoding API, Places API (address search) and Maps SDK for Android (phone app). Make one key, restrict it to your apps, and paste it here once." },
   figma: { name: "Figma", purpose: "Read a Figma file so an app is built to its design.", group: "design" },
   uxpilot: { name: "UX Pilot", purpose: "Generate page designs with UX Pilot when an app is laid out.", group: "design" },
   s3: { name: "Amazon S3", purpose: "Where the apps keep files people upload.", group: "files" },

@@ -206,7 +206,11 @@ def check_access(app: Any, doc: dict, *, only: set[str] | None = None,
         for rule in rules:
             column = str(rule.get("column") or "")
             exempt = exempt_roles(doc, rule)
+            named = {str(x) for x in rule.get("roles") or []}
             for role in roles:
+                # A RULE ADDRESSED TO ROLES is those roles' only: another role is held to another rule of the entity.
+                if named and role not in named and role not in exempt:
+                    continue
                 total += 1
                 label = f"{ename} as {role}"
                 it = lambda why: item(f"{eid}:{role}", label, why, eid)  # noqa: E731

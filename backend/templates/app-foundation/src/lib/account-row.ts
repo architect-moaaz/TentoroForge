@@ -59,6 +59,15 @@ function recordFrom(input: Record<string, unknown>, email: string, name: string)
       if (f.required) return { error: `${f.label} is required` };
       continue;
     }
+    // A PHONE IS DIGITS, AN EMAIL IS AN ADDRESS. The form's `type="tel"` checks
+    // nothing, and a server that trusts it saved "abc" as a driver's phone
+    // number. Seven to fifteen digits, with the usual + space - ( ) around them.
+    if (f.kind === "tel" && (!/^\+?[0-9\s\-()]{7,20}$/.test(String(v)) || String(v).replace(/\D/g, "").length < 7)) {
+      return { error: `${f.label} must be a phone number, for example +91 98765 43210` };
+    }
+    if (f.kind === "email" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v))) {
+      return { error: `${f.label} must be an email address` };
+    }
     values[f.name] = f.kind === "number" ? Number(v) : f.kind === "checkbox" ? Boolean(v) : v;
   }
   return { values };

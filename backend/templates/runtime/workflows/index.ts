@@ -802,6 +802,24 @@ export function _resolveRef(ref: unknown, ctx: WorkflowExecutionContext): unknow
   return ref; // literal
 }
 
+/**
+ * A numeric (money) column read by a step as a NUMBER. node-postgres returns numeric as text
+ * ("100.00"), so a step that added a fee to a total joined them — `469 + "100.00"` read
+ * "469100" and an order cost crores (Zomato, 2026-11-13). The column knows it is a number.
+ */
+function numericColumnsAsNumbers<T extends Record<string, unknown>>(table: unknown, row: T): T {
+  const out: Record<string, unknown> = { ...row };
+  for (const [key, value] of Object.entries(row)) {
+    if (typeof value !== "string") continue;
+    const col = (table as Record<string, unknown> | null)?.[key];
+    const kind = col && typeof col === "object" ? String((col as { columnType?: unknown }).columnType ?? "") : "";
+    if (!/PgNumeric|PgDecimal|PgMoney/.test(kind)) continue;
+    const n = Number(value);
+    if (Number.isFinite(n)) out[key] = n;
+  }
+  return out as T;
+}
+
 // Drizzle timestamp columns expect a Date, not a string. Coerce ISO
 // date/datetime strings so db_insert/db_update don't blow up on
 // `value.toISOString is not a function`.
@@ -1209,11 +1227,13 @@ export function _finalizeInsert(
  * so a process started by a vendor reads and changes the vendor's rows, as
  * their pages do. A run with no acting person is the application's own.
  */
-async function _scoped(table: any, where: any, ctx: WorkflowExecutionContext, op: "read" | "write"): Promise<any> {
+export async function _scoped(table: any, where: any, ctx: WorkflowExecutionContext, op: "read" | "write"): Promise<any> {
   const user = (ctx as any)?.user;
   if (!user?.id) return where;
+  // an event's run is the application's own (`__byEvent`, set by the bus): it sees what the application sees, whoever caused it
+  if ((ctx as any)?.variables?.__byEvent) return where;
   const { scopeForTable } = await import("../data-engine");
-  const scope = await scopeForTable(table, user, op);
+  const scope = await scopeForTable(table, user, op, "workflow");
   if (!scope) return where;
   return where ? and(where, scope) : scope;
 }
@@ -1862,7 +1882,7 @@ export function registerDefaultActions(): void {
       // `rows`, which keep their own names when a column shares one — the
       // first row whenever there is one, the row a template reads too
       // (`_firstRowFallback`; AquaTrack's three active goals, m1dck85j).
-      return queryResult(await Promise.all((rows ?? []).map((r: Record<string, unknown>) => openSealed(r))));
+      return queryResult(await Promise.all((rows ?? []).map(async (r: Record<string, unknown>) => numericColumnsAsNumbers(table, await openSealed(r)))));
     } catch (err) { console.error("[workflow] db_query failed:", err); return { error: String(err), rows: [], count: 0 }; }
   });
 
@@ -2202,6 +2222,24 @@ export function registerDefaultActions(): void {
       ?? (config as any).recipientId ?? (config as any).recipientUserId ?? null;
     const userId = _resolveRef(who, ctx);
     const role = (config as any).toRole ?? (config as any).assigneeRole ?? (config as any).recipientRole ?? null;
+    // THE NEAREST PEOPLE: `nearest: { entity: "Driver", from: "{{ride.pickupLocation}}", limit: 5, maxKm: 15 }` alerts the
+    // on-duty people of that kind closest to a place, from the live fleet (the phones that are sharing a position right now).
+    // Whoever has gone quiet for `maxAgeSeconds` (two minutes by default) is not near, whatever their last position was.
+    const near = (config as any).nearest;
+    let nearIds: string[] | null = null;
+    let nearNotice: string | undefined;
+    if (near && typeof near === "object") {
+      try {
+        const { fleetOnDuty } = await import("@/lib/tracking/hub");
+        const { fleetKey } = await import("@/lib/tracking/rules");
+        const { whoIsNear } = await import("@/lib/tracking/nearest");
+        const kind = String(near.entity ?? "").trim();
+        const duty = kind ? fleetOnDuty(fleetKey(kind)).map((m) => ({ id: m.id, who: m.who, lat: m.lat, lng: m.lng, at: m.heardAt })) : [];
+        const out = whoIsNear(near, _resolveRef(near.from, ctx), duty);
+        nearIds = out.userIds;
+        nearNotice = out.notice;
+      } catch (e) { nearNotice = `could not look for who is near: ${e instanceof Error ? e.message : String(e)}`; }
+    }
     const type = String((config as any).notificationType ?? (config as any).type ?? "info");
     const entityId = _resolveRef((config as any).entityId ?? null, ctx);
     // WHERE IT OPENS: the address of the record it is about, filled when the
@@ -2212,32 +2250,38 @@ export function registerDefaultActions(): void {
     const link = typeof linkRaw === "string" && linkRaw.startsWith("/") && !linkRaw.includes("{{") ? linkRaw : null;
     const table = (schema as any).forgeNotifications;
     let notificationId: string | null = null;
+    // one in-app notification for each person it goes to (the bell shows it), or one for the role / nobody in particular
+    const people: Array<string | null> = nearIds ? nearIds : [userId ? String(userId) : null];
     if (table) {
-      try {
-        const inserted: any = await (db as any).insert(table).values({
-          title, message, userId: userId ? String(userId) : null,
-          role: role ? String(role) : null, type, entityId: entityId ? String(entityId) : null, read: false,
-          ...(link && "link" in table ? { link } : {}),
-        }).returning();
-        const row = Array.isArray(inserted) ? inserted[0] : inserted;
-        notificationId = row?.id ?? null;
-      } catch (e) { console.warn("[workflow] send_notification persist failed:", e); }
+      for (const person of people) {
+        try {
+          const inserted: any = await (db as any).insert(table).values({
+            title, message, userId: person,
+            role: nearIds ? null : (role ? String(role) : null), type, entityId: entityId ? String(entityId) : null, read: false,
+            ...(link && "link" in table ? { link } : {}),
+          }).returning();
+          const row = Array.isArray(inserted) ? inserted[0] : inserted;
+          notificationId = notificationId ?? row?.id ?? null;
+        } catch (e) { console.warn("[workflow] send_notification persist failed:", e); }
+      }
     }
     // TO THE PERSON'S DEVICES TOO, when the step says `push` and the
     // application sends it: signed with its own keys, reaching every device
     // they subscribed. Said when it could not (no device, no keys).
     const channels = Array.isArray((config as any).channels) ? (config as any).channels.map(String) : ["in_app"];
     let pushed: { sent: number; pruned: number; notice?: string } | null = null;
-    if (channels.includes("push")) {
+    if (channels.includes("push") && !(nearIds && nearIds.length === 0)) {
       try {
         const { sendPush } = await import("@/lib/push");
-        pushed = await sendPush({ userIds: userId ? [String(userId)] : [], role: role ? String(role) : undefined },
-                                { title, body: message, link });
+        const ttl = Number((config as any).ttlSeconds);
+        pushed = await sendPush(nearIds ? { userIds: nearIds } : { userIds: userId ? [String(userId)] : [], role: role ? String(role) : undefined },
+                                { title, body: message, link, ...(ttl > 0 ? { ttl } : {}) });
       } catch (e) { pushed = { sent: 0, pruned: 0, notice: `push failed: ${e instanceof Error ? e.message : String(e)}` }; }
     }
     // Contract-declared `notificationId` — was always null before.
-    return { sent: true, channel: pushed && pushed.sent > 0 ? "in_app+push" : "in_app", notificationId,
-             ...(pushed ? { pushed: pushed.sent, pushNotice: pushed.notice } : {}) };
+    return { sent: nearIds ? nearIds.length > 0 : true, channel: pushed && pushed.sent > 0 ? "in_app+push" : "in_app", notificationId,
+             ...(pushed ? { pushed: pushed.sent, pushNotice: pushed.notice } : {}),
+             ...(nearIds ? { nearby: nearIds.length } : {}), ...(nearNotice ? { notice: nearNotice } : {}) };
   });
 
   // Real email. THE APPLICATION KNOWS WHICH SERVICE IT IS MEANT TO SEND

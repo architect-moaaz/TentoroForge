@@ -7,7 +7,7 @@ import bcrypt from "bcryptjs";
 import { sessionCookies } from "@/lib/session-cookie";
 import { db } from "@/db";
 import { users } from "@/db/schema/user";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { connected, digest, domainAllowed, issuerOf, readSignupIntent, roleFromClaims, signupIntentCookie, ssoEntries, policy as signInPolicy, type SsoEntry } from "@/lib/sign-in";
 import { SIGN_IN_COLUMNS } from "@/lib/sign-in-guard";
 
@@ -27,6 +27,23 @@ function profileOf(row: Record<string, unknown>): Record<string, unknown> {
     else if (Array.isArray(v) && v.length <= 200 && v.every((x) => ["string", "number"].includes(typeof x))) out[k] = v;
   }
   return out;
+}
+
+/** THE ACCOUNT'S OWN FIELDS, for the session. The person behind a login has a record of their own (a restaurant manager's
+ *  `restaurantId`, a driver's `vehicleType`): that is what a workspace scope's `actorColumn` and a row rule's `user.<column>`
+ *  read, and the session used to carry only the platform's thin users row, so such a column was never there and everyone
+ *  reached no row. The account's scalar columns ride along; the users row wins where both name a column. An application
+ *  with no account entity (or whose account IS the users table) adds nothing. */
+async function accountProfile(id: string): Promise<Record<string, unknown>> {
+  try {
+    const table = (await import("@/lib/account-table")).accountTable as any;
+    if (!table || table === (users as unknown)) return {};
+    const [row] = await db.select().from(table).where(eq(table.id, id)).limit(1);
+    return row ? profileOf(row as Record<string, unknown>) : {};
+  } catch (err) {
+    console.warn("[auth] the account's own fields could not be read:", err);
+    return {};
+  }
 }
 
 /** A sign-in, or a failed one, on the trail when the level is `regulated`. */
@@ -54,7 +71,7 @@ async function _signIn(user: any, email: string, ok: boolean, via = "sign-in"): 
  * held everywhere (`resolve` is the plain role elsewhere).
  */
 async function sessionUserOf(user: Record<string, any>): Promise<Record<string, any>> {
-  const profile = profileOf(user);
+  const profile = { ...(await accountProfile(String(user.id))), ...profileOf(user) };
   const stored = user.role || user.accountType || "user";
   const tenancy = await import("@/lib/tenancy");
   const inOrg = await tenancy.resolve({ id: String(user.id), role: stored, activeOrgId: user.activeOrgId ?? null });
@@ -71,7 +88,8 @@ async function sessionUserOf(user: Record<string, any>): Promise<Record<string, 
 }
 
 async function userByEmail(email: string): Promise<Record<string, any> | null> {
-  const [row] = await db.select().from(users).where(eq(users.email, email)).limit(1);
+  // The address is compared without regard to capitals: an account made as "Ana@x.com" signs in as "ana@x.com".
+  const [row] = await db.select().from(users).where(sql`lower(${users.email}) = ${String(email).trim().toLowerCase()}`).limit(1);
   return (row as any) ?? null;
 }
 
@@ -408,7 +426,7 @@ export const authOptions: NextAuthOptions = {
           const [row] = await db.select().from(users).where(eq(users.id, String(token.id))).limit(1);
           // WHAT THE PERSON'S ROW SAYS NOW — the properties they were given
           // since signing in reach the session too, tenancy or not.
-          if (row) (token as any).profile = { ...profileOf(row as Record<string, unknown>), activeOrgId: (token as any).activeOrgId ?? null };
+          if (row) (token as any).profile = { ...(await accountProfile(String(token.id))), ...profileOf(row as Record<string, unknown>), activeOrgId: (token as any).activeOrgId ?? null };
           const tenancy = await import("@/lib/tenancy");
           await tenancy.policy();
           if (tenancy.tenancyOn()) {
@@ -418,7 +436,7 @@ export const authOptions: NextAuthOptions = {
               token.role = inOrg.role || stored;
               (token as any).activeOrgId = inOrg.activeOrgId;
               (token as any).orgRole = inOrg.orgRole;
-              (token as any).profile = { ...profileOf(row as Record<string, unknown>), activeOrgId: inOrg.activeOrgId };
+              (token as any).profile = { ...(await accountProfile(String(token.id))), ...profileOf(row as Record<string, unknown>), activeOrgId: inOrg.activeOrgId };
             }
           }
         } catch (err) {

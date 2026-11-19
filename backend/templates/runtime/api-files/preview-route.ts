@@ -50,10 +50,14 @@ export async function GET(req: Request): Promise<Response> {
   // clients plus percent-encoded `filename*=UTF-8''…` for modern ones.
   const asciiName = f.filename.replace(/[^\x20-\x7E]/g, "_").replace(/"/g, "");
   const utf8Name = encodeURIComponent(f.filename);
+  // A FILE IS NEVER ALLOWED TO RUN AS A PAGE (see download-route.ts).
+  const inlineOk = /^(image\/(png|jpe?g|gif|webp|avif|heic|heif)|application\/pdf)$/i.test(f.contentType);
   return new Response(new Uint8Array(f.buffer), {
     headers: {
-      "Content-Type": f.contentType,
-      "Content-Disposition": `inline; filename="${asciiName}"; filename*=UTF-8''${utf8Name}`,
+      "Content-Type": inlineOk ? f.contentType : "application/octet-stream",
+      "Content-Disposition": `${inlineOk ? "inline" : "attachment"}; filename="${asciiName}"; filename*=UTF-8''${utf8Name}`,
+      "X-Content-Type-Options": "nosniff",
+      "Content-Security-Policy": "sandbox; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'",
       "Cache-Control": "private, max-age=3600",
     },
   });

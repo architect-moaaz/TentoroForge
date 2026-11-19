@@ -153,7 +153,7 @@ async def _collect_integrations(
     res = await db.execute(
         select(PlatformIntegration).where(PlatformIntegration.org_id == org_id)
     )
-    from services.node_config_specs import platform_only_keys
+    from services.node_config_specs import platform_only_keys, with_aliases
     platform_only = platform_only_keys()
     out: dict[str, str] = {}
     for row in res.scalars().all():
@@ -166,6 +166,7 @@ async def _collect_integrations(
                 "skipping corrupted integration row org=%s key=%s: %s",
                 row.org_id, row.key, e,
             )
+    out = with_aliases(out)  # one stored key an app reads under several names
     # THE ORGANISATION'S MCP SERVERS TRAVEL WITH IT. A published app's
     # `mcp_tool_call` resolves a server from MCP_SERVER_* in its environment,
     # and nothing put them there, so a Firecrawl step that ran nowhere else

@@ -265,7 +265,15 @@ def _written_by_workflows(doc: dict, entity_id: str) -> dict[str, dict]:
             for field, value in (config.get("values") or {}).items():
                 written = out.setdefault(str(field), {"decided": set(), "typed": False})
                 if isinstance(value, str) and "{{" in value:
-                    written["typed"] = True          # the person's own value, passed through
+                    # Only a bare input (`{{displayName}}`) is the person's own
+                    # value passed through. A formula (`{{totalRides + 1}}`) or a
+                    # step's output (`{{find_driver.totalRides}}`) is worked out by
+                    # the process: the person did not type it.
+                    inner = value.strip()[2:-2].strip() if value.strip().startswith("{{") and value.strip().endswith("}}") else ""
+                    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", inner):
+                        written["typed"] = True
+                    else:
+                        written["decided"].add(value)
                 elif isinstance(value, str) and value.startswith("$"):
                     written["decided"].add(value)    # $now, $user.id — the runtime's
                 elif isinstance(value, str) and value:
@@ -277,8 +285,21 @@ def _written_by_workflows(doc: dict, entity_id: str) -> dict[str, dict]:
     return out
 
 
+#: Fields the PLATFORM keeps about a person, never the person: how others rate
+#: them, how many things they have done, when they were last seen, and what a
+#: reviewer wrote about them. Asked at signup, a new driver could award
+#: themselves five stars and a thousand rides.
+_PLATFORM_COMPUTED = re.compile(
+    r"^(rating|averageRating|avgRating|score|reputation|totalRides|totalOrders|totalEarnings|totalTrips|"
+    r"completedRides|lastActiveAt|lastSeenAt|lastLoginAt|onlineSince)$"
+    r"|^(verification|admin|internal|review|moderation|approval)\w*Notes?$", re.I)
+
+
 def _system_owned(written: dict[str, dict], name: str) -> bool:
-    """A field only ever written by a process, never from what someone typed."""
+    """A field only ever written by a process, never from what someone typed —
+    or one the platform keeps about the person (see `_PLATFORM_COMPUTED`)."""
+    if _PLATFORM_COMPUTED.search(name):
+        return True
     entry = written.get(name)
     return bool(entry) and not entry["typed"] and bool(entry["decided"])
 
@@ -306,7 +327,12 @@ def account_initial(doc: dict) -> dict[str, Any]:
         if values:
             decided = written.get(name, {}).get("decided") or set()
             unwritten = [v for v in values if v not in decided]
-            out[name] = unwritten[0] if unwritten else values[0]
+            # When every value is written by some process (online AND offline),
+            # a new record starts in the one that means "not yet": offline,
+            # pending, new. Taking the first listed made every new driver
+            # start ONLINE before anyone had approved them.
+            at_rest = [v for v in values if re.match(r"^(offline|off_?duty|inactive|unavailable|pending|new|draft|unverified|closed|idle)", v, re.I)]
+            out[name] = unwritten[0] if unwritten else (at_rest[0] if at_rest else values[0])
         elif _is_credential(name):
             # An older Blueprint put a credential on the account entity (new
             # ones are refused). The column is NOT NULL and the person must

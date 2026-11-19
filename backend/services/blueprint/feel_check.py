@@ -17,6 +17,7 @@ from __future__ import annotations
 from services.proc_compat import tool
 import json
 import logging
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -34,7 +35,10 @@ def _ensure_bundle() -> Path | None:
     if _BUNDLE.exists() and _BUNDLE.stat().st_mtime >= max(
             (p.stat().st_mtime for p in _FEEL_SRC.glob("*.ts")), default=0):
         return _BUNDLE
-    esbuild = _BACKEND.parent / "node_modules" / ".bin" / "esbuild"
+    # On Windows the extensionless `esbuild` in `.bin` is a shell script, which the OS cannot run
+    # ([WinError 193]); the launcher beside it is `esbuild.cmd`.
+    bin_dir = _BACKEND.parent / "node_modules" / ".bin"
+    esbuild = bin_dir / ("esbuild.cmd" if os.name == "nt" else "esbuild")
     cmd = [str(esbuild)] if esbuild.exists() else [tool("npx"), "esbuild"]
     try:
         subprocess.run(cmd + [str(_ENTRY), "--bundle", "--platform=node", "--format=cjs",

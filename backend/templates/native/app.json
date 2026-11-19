@@ -22,7 +22,7 @@
       "infoPlist": {
         "NSCameraUsageDescription": "This app uses the camera to capture photos and documents.",
         "NSPhotoLibraryUsageDescription": "This app accesses photos to upload them into records.",
-        "NSLocationWhenInUseUsageDescription": "This app uses your approximate location when you ask it to.",
+        "NSLocationWhenInUseUsageDescription": "This app uses your location while it is open: to show where you are on the map and, when you choose to share it, to let others follow your trip.",
         "ITSAppUsesNonExemptEncryption": false
       }
     },
@@ -35,8 +35,14 @@
       },
       "permissions": [
         "CAMERA",
-        "ACCESS_COARSE_LOCATION"
-      ]
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION"
+      ],
+      "config": {
+        "googleMaps": {
+          "apiKey": "__GOOGLE_MAPS_ANDROID_KEY__"
+        }
+      }
     },
     "web": {
       "bundler": "metro",

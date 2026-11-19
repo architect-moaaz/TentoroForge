@@ -211,6 +211,11 @@ export async function processPendingEvents(limit = 50): Promise<{
         out.dispatched += await _dispatchEvent(wfmod, evt);
         out.resumed += await _resumeWaiters(wfmod, evt);
       }
+      // A held geofence action may have been waiting for exactly this event (a code verified, a manager's tap).
+      if (!evt.type.startsWith("geofence.")) {
+        try { await (await import("@/lib/geofence")).confirmationArrived(evt); }
+        catch (err) { console.warn("[events] geofence release failed (non-fatal):", err); }
+      }
     } catch (err) {
       out.errors += 1;
       const msg = err instanceof Error ? err.message : String(err);
@@ -246,7 +251,10 @@ async function _dispatchEvent(
       stopped.push(refusal);
       continue;
     }
-    const input = eventRunInput(evt);
+    // A RUN AN EVENT STARTS IS THE APPLICATION REACTING, not the person who caused the event acting: it is marked, and its
+    // steps read and write as the application. Scoped to the restaurant manager who pressed "ready", the dispatch step found no
+    // drivers (a manager reaches none) and no driver was ever offered the order (Zomato, 2026-11-16).
+    const input = { ...eventRunInput(evt), __byEvent: evt.type };
     const user = (payload as { user?: { id: string; role?: string; email?: string } }).user;
     // triggerWorkflow persists a pending task itself if the run pauses.
     const result = await wfmod.triggerWorkflow(wf.id, input, user);

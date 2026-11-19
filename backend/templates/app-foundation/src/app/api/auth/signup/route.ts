@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import { db } from "@/db";
 import { users } from "@/db/schema/user";
 import { policy as signInPolicy } from "@/lib/sign-in";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import * as accountModule from "@/lib/account";
 import { SIGNUP_ROLE } from "@/lib/account";
@@ -23,7 +23,8 @@ const SIGNUP_ROLES: string[] =
 
 const signupSchema = z.object({
   name: z.string().min(1, "Name is required"),
-  email: z.string().email("Invalid email"),
+  // ONE ADDRESS, ONE ACCOUNT: kept trimmed and lower-case, so "A@x.com" and "a@x.com" are the same person.
+  email: z.string().trim().toLowerCase().email("Invalid email"),
   password: z.string().min(6, "Password must be at least 6 characters"),
   // Only enforced when the app offers a choice; a lone or absent option means
   // signup never sends one and this stays undefined.
@@ -47,7 +48,7 @@ export async function POST(request: Request) {
     const [existing] = await db
       .select({ id: users.id })
       .from(users)
-      .where(eq(users.email, data.email))
+      .where(sql`lower(${users.email}) = ${data.email}`)
       .limit(1);
 
     if (existing) {

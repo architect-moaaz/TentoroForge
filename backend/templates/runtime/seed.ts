@@ -253,6 +253,13 @@ async function ensureAccountRow(id: string | null, email: string, name: string):
   const row: Record<string, unknown> = { id };
   for (const f of ACCOUNT.fields) if (f.kind === "email" && f.name in accountTable) row[f.name] = email;
   if (ACCOUNT.labelField && ACCOUNT.labelField in accountTable) row[ACCOUNT.labelField] = name;
+  // WHERE A NEW PERSON STARTS, AS SIGNUP DOES IT: offline, pending, zero rides.
+  // Without this the generic filler below wrote the person's NAME into every
+  // required column it could not otherwise guess, including an enum: the demo
+  // admin showed up on the dashboard as a driver whose availability was
+  // "Default Admin".
+  const starting = ((accountModule as unknown as { ACCOUNT_INITIAL?: Record<string, unknown> }).ACCOUNT_INITIAL) ?? {};
+  for (const [k, v] of Object.entries(starting)) if (!(k in row) && k in (accountTable as any)) row[k] = v;
   await resolveRequiredFks(accountTable, row);
   Object.assign(row, minimalRow(accountTable, name, row, /* skipFk */ true));
   try {
@@ -950,8 +957,15 @@ async function seedDomain(adminId: string | null, imported: Set<string> = new Se
           for (let i = 0; i < keyed.length; i++) {
             try {
               const values = prepRow(table, keyed[i], ids, i);
-              const res: any = await db.insert(table).values(values)
-                .onConflictDoNothing({ target: emailCol }).returning();
+              // A person's email is NOT always a unique column (a Driver or Member
+              // record whose sign-in lives on the users table). A conflict target
+              // on a column with no unique index is refused by Postgres, so the
+              // row is looked up by email first; the plain no-target conflict
+              // clause then covers a race without naming a constraint.
+              const there: any[] = await db.select({ id: (table as any).id }).from(table)
+                .where(eq(emailCol, String(keyed[i].email))).limit(1);
+              if (there.length) continue;
+              const res: any = await db.insert(table).values(values).onConflictDoNothing().returning();
               const id = res?.[0]?.id;
               if (id != null) got.push(String(id));
             } catch (e: any) {
@@ -1178,6 +1192,37 @@ async function seedEverything(): Promise<void> {
   try { await seedEverythingElse(); } finally { await giveLoginsReach(); }
 }
 
+/**
+ * The zones and rules the brief named (contracts/geofence-plan.json), when it named any. A zone with coordinates is made, one
+ * without is left for the owner to draw; a rule is made only beside its zone. Safe on every start (see geofence/plan.ts), and
+ * it never takes the seed down: an app with no plan, or no geofence tables, simply has nothing to do here.
+ */
+async function seedGeofencePlan(): Promise<void> {
+  const file = path.join(process.cwd(), "contracts", "geofence-plan.json");
+  if (!fs.existsSync(file)) return;
+  try {
+    const { applyPlan } = await import("../lib/geofence/plan");
+    const rowsOf = (r: unknown): any[] => (Array.isArray(r) ? r : ((r as { rows?: any[] })?.rows ?? []));
+    const plan = JSON.parse(fs.readFileSync(file, "utf8"));
+    const done = await applyPlan(plan, {
+      zoneId: async (name) => rowsOf(await db.execute(sql`SELECT id FROM forge_geofences WHERE lower(name) = lower(${name}) LIMIT 1`))[0]?.id ?? null,
+      addZone: async (z) => String(rowsOf(await db.execute(sql`
+        INSERT INTO forge_geofences (name, shape, rules, created_by)
+        VALUES (${z.name}, ${JSON.stringify({ type: "circle", center: { lat: z.lat, lng: z.lng }, radiusM: z.radiusM })}::jsonb, ${JSON.stringify(z.rules ?? {})}::jsonb, 'forge-plan')
+        RETURNING id`))[0].id),
+      hasRule: async (zone, onEvent, action) => rowsOf(await db.execute(sql`
+        SELECT 1 FROM forge_geofence_rules
+        WHERE geofence_id IS NOT DISTINCT FROM ${zone}::uuid AND on_event = ${onEvent} AND action = ${JSON.stringify(action)}::jsonb LIMIT 1`)).length > 0,
+      addRule: async (r) => { await db.execute(sql`
+        INSERT INTO forge_geofence_rules (geofence_id, on_event, action, sensitive)
+        VALUES (${r.geofenceId}::uuid, ${r.onEvent}, ${JSON.stringify(r.action)}::jsonb, ${r.sensitive})`); },
+    });
+    console.log(`[seed] geofencing — zones: ${done.zonesAdded.length} added, ${done.zonesKept.length} kept, ${done.zonesToDraw.length} to draw; rules: ${done.rulesAdded} added, ${done.rulesKept} kept, ${done.rulesWaiting.length} waiting for a zone, ${done.rulesRefused.length} refused`);
+  } catch (err) {
+    console.warn(`[seed] geofencing plan skipped: ${String(err).slice(0, 200)}`);
+  }
+}
+
 async function seedEverythingElse(): Promise<void> {
   const forceSeed = /^(1|true|yes)$/i.test(String(process.env.FORCE_SEED || ""));
 
@@ -1195,6 +1240,7 @@ async function seedEverythingElse(): Promise<void> {
   // AND SO MUST THE PEOPLE THE OWNER ADDED — for the same reason and above the
   // same gates. An app whose staff cannot log in is not in use.
   await seedAccounts();
+  await seedGeofencePlan();
 
   // THE OWNER'S OWN RECORDS COME BEFORE THE DEMO ONES, and before both skip
   // gates below: a database reused from an earlier deploy must still take the

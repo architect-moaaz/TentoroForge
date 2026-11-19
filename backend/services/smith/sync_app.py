@@ -64,6 +64,14 @@ ENGINE_DIRS: dict[str, str] = {
     "payments": "src/lib/payments",
 }
 
+#: Kept current only where the app already has them, FILE BY FILE (they are not part of every app's engine: a missing file
+#: is not written here, because the whole directory would pull in the sign-in modules some of its files need). The pieces
+#: the workflow engine imports are supplied on demand by `complete_imports`.
+ENGINE_DIRS_WHERE_PRESENT: dict[str, str] = {
+    # who is on duty and nearest: the live fleet an alert is sent to
+    "tracking": "src/lib/tracking",
+}
+
 
 #: Single runtime files the platform owns: template (under templates/runtime)
 #: -> where the app keeps it. Written only where the app has it already.
@@ -79,6 +87,7 @@ RUNTIME_FILES: tuple[tuple[str, str], ...] = (
     # The engine's reads (labels on a chart's groups) and the seed (a login
     # per role) are the platform's logic, copied verbatim into every app.
     ("data-engine.ts", "src/lib/data-engine.ts"),
+    ("ownership-roles.ts", "src/lib/ownership-roles.ts"),
     ("seed.ts", "src/db/seed.ts"),
     # THE TRAIL, SEALED VALUES, PUSH AND ORGANISATIONS are the platform's too.
     # They were left off this list, so a fix to the audit chain never reached
@@ -203,6 +212,11 @@ USER_SCHEMA = "src/db/schema/user.ts"
 #: DITANS was built (QA DIT-005, 2026-11-05).
 AUTH_ROUTES: tuple[tuple[str, str], ...] = (
     ("api-auth-email-code/route.ts", "src/app/api/auth/email-code/route.ts"),
+    # A PHONE'S ALERTS: where the native app registers its Expo token, the table that holds it, the sender. They answer only
+    # where `mobile.push` is on; the table is written (and read by the push module) whether or not.
+    ("api-push/device/route.ts", "src/app/api/push/device/route.ts"),
+    ("db/forge-device-tokens.schema.ts", "src/db/schema/_forge_device_tokens.ts"),
+    ("expo-push.ts", "src/lib/expo-push.ts"),
     # Two-step sign-in, a password reset by code, the devices list (2026-11-12).
     ("api-auth-two-step/route.ts", "src/app/api/auth/two-step/route.ts"),
     ("api-auth-password-reset/route.ts", "src/app/api/auth/password-reset/route.ts"),
@@ -235,7 +249,8 @@ def refresh_engine(app_root: str | Path, doc: dict | None = None, *, complete: b
 
     root = Path(app_root)
     changed: list[str] = []
-    for src_name, dst_rel in ENGINE_DIRS.items():
+    wanted = {**ENGINE_DIRS, **{k: v for k, v in ENGINE_DIRS_WHERE_PRESENT.items() if (root / v).is_dir()}}
+    for src_name, dst_rel in wanted.items():
         src = _TEMPLATE_DIR / src_name
         if not src.is_dir():
             continue
@@ -246,6 +261,8 @@ def refresh_engine(app_root: str | Path, doc: dict | None = None, *, complete: b
             if any(rel == p or rel.startswith(p.rstrip("/") + "/") for p in PROJECTED_PATHS):
                 continue
             dst = root / rel
+            if src_name in ENGINE_DIRS_WHERE_PRESENT and not dst.is_file():
+                continue
             data = f.read_bytes()
             try:
                 if dst.read_bytes() == data:
@@ -527,8 +544,9 @@ def refresh_frame(app_root: str | Path, doc: dict, *, complete: bool = True) -> 
 #: `templates/app-foundation/src` has them: `@/<module>` -> its template under
 #: `templates/runtime` (`runtime_injector` copies the same ones on a build).
 def _runtime_modules() -> dict[str, str]:
-    mods = {"lib/push": "push.ts",
-            "db/schema/_forge_push_subscriptions": "db/forge-push-subscriptions.schema.ts"}
+    mods = {"lib/push": "push.ts", "lib/expo-push": "expo-push.ts", "lib/ownership-roles": "ownership-roles.ts",
+            "db/schema/_forge_push_subscriptions": "db/forge-push-subscriptions.schema.ts",
+            "db/schema/_forge_device_tokens": "db/forge-device-tokens.schema.ts"}
     for tmpl, dst in RUNTIME_FILES + (MEWS_LIB, MEWS_FILES[0]):
         mods.setdefault(dst.removeprefix("src/").rsplit(".", 1)[0], tmpl)
     return mods

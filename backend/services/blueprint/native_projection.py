@@ -62,9 +62,16 @@ ROOT_REDIRECT_SOURCE = (
     "// Generated from the Living Blueprint. The application has no page at \"/\": the root forwards to\n"
     "// where a signed-in person lands (the sign-in gate sends everyone else to /login).\n"
     "import { Redirect, type Href } from \"expo-router\";\n"
-    "import { HOME } from \"@/config.generated\";\n\n"
+    "import { useSession } from \"@/sdk\";\n"
+    "import { HOME } from \"@/config.generated\";\n"
+    "import { ROLE_HOME } from \"@/navigation.generated\";\n\n"
     "export default function Index() {\n"
-    "  return <Redirect href={HOME as Href} />;\n"
+    "  // each role lands on its own first tab (ROLE_HOME); everyone else on the app's home\n"
+    "  const { user, status } = useSession();\n"
+    "  // not before the session is known: until then every role would be sent to the app's home\n"
+    "  if (status === \"loading\") return null;\n"
+    "  const home = ROLE_HOME[String((user as { role?: unknown } | null)?.role ?? \"\")] || HOME;\n"
+    "  return <Redirect href={home as Href} />;\n"
     "}\n")
 
 #: Patterns that are not destinations: a form is an action reached from a list, a record is one thing
@@ -255,6 +262,15 @@ def _kept_link(app_json: Path, written: str) -> str:
     base_slug = str(expo.get("slug") or "")
     if base_slug and kept_slug.startswith(base_slug + "-"):
         expo["slug"] = kept_slug
+    # A MAPS KEY THE PERSON PUT IN `app.json` IS KEPT when the platform has none to write: projecting again would
+    # otherwise blank it, and the Android map would be gone until they typed it in once more. Never printed.
+    def _maps_key(block: dict) -> str:
+        return str((((block.get("android") or {}).get("config") or {}).get("googleMaps") or {}).get("apiKey") or "").strip()
+
+    kept_key = _maps_key(before)
+    if kept_key and not _maps_key(expo):
+        config = expo.setdefault("android", {}).setdefault("config", {})
+        config.setdefault("googleMaps", {})["apiKey"] = kept_key
     return json.dumps(data, indent=2) + "\n"
 
 
@@ -275,6 +291,10 @@ def project_fixed_half(doc: dict, output_dir: str | Path) -> list[str]:
         # Where the web app is is known when it is published; the build is handed it then
         # (`EXPO_PUBLIC_APP_URL`), and a person running it locally writes a `.env`.
         "__DEPLOYED_URL__": "", "__EAS_PROJECT_ID__": prior,
+        # The Android build's key for Google Maps (the Maps SDK for Android; it is made to sit inside the app, and is
+        # restricted to the app's package in Google Cloud). Empty when not set: the app still builds, and the
+        # map on Android stays blank until it is. Never printed.
+        "__GOOGLE_MAPS_ANDROID_KEY__": os.environ.get("GOOGLE_MAPS_ANDROID_KEY", ""),
     }
     written: list[str] = []
     drawn_auth = drawn_auth_files(doc)
@@ -417,7 +437,23 @@ def can_sign_up(doc: dict) -> bool:
                for p in _live(doc.get("pages")))
 
 
-def config_module(doc: dict) -> str:
+def maps_key_set(output_dir: str | Path | None) -> bool:
+    """Does this application's Android build have a Google Maps key? Read from the `app.json` the person (or the platform)
+    keeps it in, else from the platform's own setting. A FLAG, never the key: the app cannot read `android.config` at run
+    time (Expo leaves it out of the config an app can read, because it holds secrets), and Google's map code closes the
+    whole app when it has none, so the map must know before it mounts."""
+    if output_dir is not None:
+        try:
+            expo = json.loads((native_root(output_dir) / "app.json").read_text("utf-8")).get("expo") or {}
+            key = (((expo.get("android") or {}).get("config") or {}).get("googleMaps") or {}).get("apiKey")
+            if str(key or "").strip():
+                return True
+        except (OSError, ValueError):
+            pass
+    return bool(os.environ.get("GOOGLE_MAPS_ANDROID_KEY", "").strip())
+
+
+def config_module(doc: dict, output_dir: str | Path | None = None) -> str:
     """`src/config.generated.ts`: what the Blueprint says about the application
     that the fixed half needs (see the template's README)."""
     from services.blueprint.account_model import account_entity, account_fields, home_route
@@ -442,6 +478,7 @@ def config_module(doc: dict) -> str:
             + f"export const LANGUAGES: readonly {{ tag: string; dir: \"ltr\" | \"rtl\" }}[] = {_ts(rows)};\n"
             + f"export const PRIMARY: string = {json.dumps(tags[0])};\n"
             + f"export const HOME: string = {json.dumps(home)};\n"
+            + f"export const ANDROID_MAPS_KEY_SET: boolean = {json.dumps(maps_key_set(output_dir))};\n"
             + f"export const CAN_SIGN_UP: boolean = {json.dumps(can_sign_up(doc))};\n"
             + f"export const AFTER_SIGNUP: string = {json.dumps(after_signup)};\n"
             + f"export const PUBLIC_ROUTES: readonly string[] = {_ts(public)};\n"
@@ -467,7 +504,7 @@ def project_generated_modules(doc: dict, output_dir: str | Path) -> list[str]:
             written.append(f"{SDK_DIR}/{stem}")
     from services.blueprint.native_fonts import fonts_module
 
-    for rel, text in (("src/theme.generated.ts", theme_module(doc)), ("src/config.generated.ts", config_module(doc)),
+    for rel, text in (("src/theme.generated.ts", theme_module(doc)), ("src/config.generated.ts", config_module(doc, output_dir)),
                       ("src/navigation.generated.ts", navigation_module(doc)),
                       ("src/fonts.generated.ts", fonts_module(doc))):
         if _write(root / rel, text):
@@ -495,23 +532,62 @@ def has_account_tab(doc: dict) -> bool:
     return has_sign_in(doc) and not any(str(p.get("route") or "").strip("/") == "account" for p in drawn_pages(doc))
 
 
-def main_pages(doc: dict) -> list[dict]:
+def phone_roles(doc: dict) -> list[str]:
+    """The roles that have their OWN phone navigation: the roles `mobile.nativeRoles` names, by the names the
+    Blueprint's roles carry. Empty unless there are two or more: one role's phone is the one bar it always had."""
+    from services.blueprint.platform_plan import canonical_role
+
+    keep = (doc.get("mobile") or {}).get("nativeRoles") if isinstance(doc, dict) else None
+    if not keep:
+        return []
+    names = [str(r.get("name")) for r in _live(doc.get("roles")) if r.get("name")]
+    out: list[str] = []
+    for want in keep:
+        hit = next((n for n in names if canonical_role(n) == canonical_role(str(want))), None)
+        if hit and hit not in out:
+            out.append(hit)
+    return out if len(out) >= 2 else []
+
+
+def _item_roles(doc: dict, item: dict) -> set[str]:
+    """The roles a navigation entry is for, by name. Empty: for everyone."""
+    by_key = {}
+    for r in _live(doc.get("roles")):
+        for k in ("id", "name"):
+            if r.get(k) and r.get("name"):
+                by_key[str(r[k])] = str(r["name"])
+    return {by_key[str(x)] for x in item.get("roles") or [] if str(x) in by_key}
+
+
+def main_pages(doc: dict, role: str | None = None) -> list[dict]:
     """The application's MAIN pages: the pages its navigation lists (the rail the web app shows), in that
     order, that are destinations — not a form, not one record, nothing with a parameter in its route — and
-    that get a native screen."""
+    that get a native screen. With a `role`: only the entries that are for that role (or for everyone)."""
     drawn = {str(p.get("id")): p for p in drawn_pages(doc)}
     out: list[dict] = []
+    reach: dict[str, int] = {}  # for a role: how many roles a page is for; the role's own pages go first
     seen: set[str] = set()
     for item in _nav_items((doc.get("navigation") or {}).get("tree")):
         pid = str(item.get("page") or "")
         page = drawn.get(pid)
         if page is None or pid in seen:
             continue
+        breadth = 0
+        if role is not None:
+            # the entry's own roles when it names any, else the roles of the page it opens (a restricted page is for them)
+            from services.blueprint.projection import restricted_roles
+            who = _item_roles(doc, item) or {str(r) for r in restricted_roles(doc, page)}
+            if who and role not in who:
+                continue
+            breadth = len(who) or 999
         route = str(page.get("route") or "/")
         if "[" in route or str(page.get("pattern") or "") in _NOT_A_TAB or route_file(route, tab=True) is None:
             continue
         seen.add(pid)
+        reach[pid] = breadth
         out.append({**page, "_icon": item.get("icon"), "_label": item.get("label")})
+    if role is not None:
+        out.sort(key=lambda p: reach.get(str(p.get("id")), 0))   # stable: the navigation's order within the same reach
     return out
 
 
@@ -527,14 +603,15 @@ def nav_style(doc: dict) -> str:
     return "tabs" if len(main_pages(doc)) <= (MAX_TABS - 1 if has_account_tab(doc) else MAX_TABS) else "drawer"
 
 
-def tab_layout(doc: dict) -> tuple[list[dict], list[dict]]:
+def tab_layout(doc: dict, role: str | None = None) -> tuple[list[dict], list[dict]]:
     """`(tabs, more)`: the main pages that get a tab, and the ones that go behind the More tab.
+    With a `role`, the layout of that role's own bar.
 
     A bar holds MAX_TABS (the account tab is one of them). With the account tab one main page is a bar (two
     tabs); without it two are needed. When the main pages do not all fit, the first ones get a tab and the
     rest are LISTED on a More tab, which takes the last slot before Account: a long application is not left
     with no bar (and no way to reach its pages), nor with a bar too crowded to tap."""
-    out = main_pages(doc)
+    out = main_pages(doc, role)
     account = has_account_tab(doc)
     capacity = MAX_TABS - 1 if account else MAX_TABS
     if nav_style(doc) == "drawer" or len(out) < (1 if account else 2):
@@ -544,13 +621,36 @@ def tab_layout(doc: dict) -> tuple[list[dict], list[dict]]:
     return out[:capacity - 1], out[capacity - 1:]
 
 
+def role_layouts(doc: dict) -> dict[str, tuple[list[dict], list[dict]]]:
+    """Each phone role's own bar: `{role: (tabs, more)}`. Empty when the roles do not have their own bars."""
+    return {r: tab_layout(doc, r) for r in phone_roles(doc)}
+
+
+def _union(groups: list[list[dict]]) -> list[dict]:
+    seen: set[str] = set()
+    out: list[dict] = []
+    for g in groups:
+        for p in g:
+            if str(p.get("id")) not in seen:
+                seen.add(str(p.get("id")))
+                out.append(p)
+    return out
+
+
 def tab_pages(doc: dict) -> list[dict]:
-    """The pages that have a tab of their own."""
+    """The pages that have a tab of their own: for the one bar, its tabs; where the roles have their own bars,
+    the tabs of every role (a role sees only its own; the route files are all in the tab folder)."""
+    layouts = role_layouts(doc)
+    if layouts:
+        return _union([bar for bar, _more in layouts.values()])
     return tab_layout(doc)[0]
 
 
 def more_pages(doc: dict) -> list[dict]:
     """The main pages listed on the More tab; they open on top of the bar like any other page."""
+    layouts = role_layouts(doc)
+    if layouts:
+        return _union([more for _bar, more in layouts.values()])
     return tab_layout(doc)[1]
 
 
@@ -565,20 +665,41 @@ def is_menu_page(doc: dict, page_id: str) -> bool:
 
 def navigation_module(doc: dict) -> str:
     """`src/navigation.generated.ts`: the tabs, in order."""
-    tabs = []
-    pages_in_bar, listed = tab_layout(doc)
-    shown = pages_in_bar + listed
-    icons = tab_icons([(p.get("_icon"), str(p.get("_label") or p.get("name") or ""), str(p.get("pattern") or "")) for p in shown])
-    for p, icon in zip(pages_in_bar, icons):
-        route = str(p.get("route") or "/")
-        name = (route.strip("/").split("/")[-1] or "index")
-        tabs.append({"name": name, "title": str(p.get("_label") or p.get("name") or name), "icon": icon, "route": route})
-    more = [{"title": str(p.get("_label") or p.get("name") or ""), "icon": icon, "route": str(p.get("route") or "/")}
-            for p, icon in zip(listed, icons[len(pages_in_bar):])]
-    if more:
-        tabs.append({"name": "more", "title": "More", "icon": "ellipsis-horizontal", "route": "/more"})
-    if pages_in_bar and has_account_tab(doc):
-        tabs.append({"name": "account", "title": "Account", "icon": ACCOUNT_ICON, "route": "/account"})
+    def build(pages_in_bar: list[dict], listed: list[dict]) -> tuple[list[dict], list[dict]]:
+        tabs: list[dict] = []
+        shown = pages_in_bar + listed
+        icons = tab_icons([(p.get("_icon"), str(p.get("_label") or p.get("name") or ""), str(p.get("pattern") or "")) for p in shown])
+        for p, icon in zip(pages_in_bar, icons):
+            route = str(p.get("route") or "/")
+            # the tab is named by the path of its route file inside the tab folder (`rides/history`), the name the router knows
+            # it by; the last word alone matched no screen, so the bar showed the raw path and a warning
+            name = (route.strip("/") or "index")
+            tabs.append({"name": name, "title": str(p.get("_label") or p.get("name") or name), "icon": icon, "route": route})
+        more_rows = [{"title": str(p.get("_label") or p.get("name") or ""), "icon": icon, "route": str(p.get("route") or "/")}
+                     for p, icon in zip(listed, icons[len(pages_in_bar):])]
+        if more_rows:
+            tabs.append({"name": "more", "title": "More", "icon": "ellipsis-horizontal", "route": "/more"})
+        if pages_in_bar and has_account_tab(doc):
+            tabs.append({"name": "account", "title": "Account", "icon": ACCOUNT_ICON, "route": "/account"})
+        return tabs, more_rows
+
+    layouts = role_layouts(doc)
+    role_tabs: dict[str, list[dict]] = {}
+    role_more: dict[str, list[dict]] = {}
+    if layouts:
+        # EACH ROLE HAS ITS OWN BAR. The bar declares every role's tabs and shows the signed-in person's: a delivery
+        # partner is not given the customer's Restaurants and Orders, and lands on their own first tab.
+        for role, (bar, listed) in layouts.items():
+            role_tabs[role], role_more[role] = build(bar, listed)
+        tabs = []
+        for rows in role_tabs.values():
+            for t in rows:
+                if all(t["name"] != x["name"] for x in tabs):
+                    tabs.append(t)
+        more = [m for rows in role_more.values() for m in rows]
+    else:
+        tabs, more = build(*tab_layout(doc))
+    role_home = {r: (rows[0]["route"] if rows else "") for r, rows in role_tabs.items()}
     # The drawer's menu: every main page, in the navigation's order, then Account.
     menu: list[dict] = []
     if nav_style(doc) == "drawer":
@@ -593,6 +714,13 @@ def navigation_module(doc: dict) -> str:
             + _ts(tabs) + ";\n\n"
             + "/** The main pages that do not fit the bar, listed on the More tab. */\n"
             + "export const MORE: readonly { title: string; icon: string; route: string }[] = " + _ts(more) + ";\n\n"
+            + "/** Each role's own bar, by the name of the role: the tab names it shows, in order. Empty when everyone shares one bar. */\n"
+            + "export const ROLE_TABS: Readonly<Record<string, readonly string[]>> = "
+            + _ts({r: [t["name"] for t in rows] for r, rows in role_tabs.items()}) + ";\n\n"
+            + "/** Each role's More list. */\n"
+            + "export const ROLE_MORE: Readonly<Record<string, readonly { title: string; icon: string; route: string }[]>> = " + _ts(role_more) + ";\n\n"
+            + "/** Where each role lands once signed in (its first tab). */\n"
+            + "export const ROLE_HOME: Readonly<Record<string, string>> = " + _ts(role_home) + ";\n\n"
             + "/** How a phone navigates: a bottom bar of tabs, or a hamburger menu. */\n"
             + f"export const NAV_STYLE: \"tabs\" | \"drawer\" = {json.dumps(nav_style(doc))};\n\n"
             + "/** The drawer's menu: every main page, then Account. Empty for a tab app. */\n"
@@ -619,9 +747,28 @@ def screen_path(page_id: str) -> str:
 def drawn_pages(doc: dict) -> list[dict]:
     """The pages that get a native screen: the ones the web writes code for,
     without the sign-in and sign-up pages — signing in is the SDK's."""
+    from services.blueprint.map_first import covered_by
     from services.blueprint.orchestrator import native_page_subjects
     wanted = set(native_page_subjects(doc))
-    return [p for p in _live(doc.get("pages")) if str(p.get("id")) in wanted]
+    folded = covered_by(doc)      # a page folded into a map-first screen is a state of that screen: no screen, no tab
+    return [p for p in _live(doc.get("pages")) if str(p.get("id")) in wanted and str(p.get("id")) not in folded
+            and for_phone_roles(doc, p)]
+
+
+def for_phone_roles(doc: dict, page: dict) -> bool:
+    """Is this page drawn on the phone, under the plan role by role? With no plan (`mobile.nativeRoles` absent) every
+    page is. With one, a page nobody in particular is kept to (a profile, a help page) is, and a page restricted to
+    roles is only when one of them has the phone app: the driver's pages are drawn, the administrator's are not."""
+    keep = (doc.get("mobile") or {}).get("nativeRoles") if isinstance(doc, dict) else None
+    if not keep:
+        return True
+    from services.blueprint.platform_plan import canonical_role
+    from services.blueprint.projection import restricted_roles
+    roles = restricted_roles(doc, page)
+    if not roles:
+        return True
+    wanted = {canonical_role(r) for r in keep}
+    return any(canonical_role(r) in wanted for r in roles)
 
 
 def auth_file(page: dict) -> str | None:
@@ -715,6 +862,19 @@ def project_screens(doc: dict, output_dir: str | Path) -> list[str]:
             expected.add(rel)
             if _write(root / rel, text if text.endswith("\n") else text + "\n"):
                 written.append(rel)
+    # A PAGE FOLDED INTO A MAP SCREEN OPENS THAT SCREEN: its address (a link, a deep link, a notification) lands on the map,
+    # which shows the state the job is in. Written only once the map screen exists.
+    from services.blueprint.map_first import covered_by
+    have_screens = {str(r.get("page")) for r in _live(doc.get("nativeCode")) if r.get("screen")}
+    live_pages = {str(p.get("id")): p for p in _live(doc.get("pages"))}
+    for covered, cover in covered_by(doc).items():
+        page = live_pages.get(covered)
+        target = route_file(str(page.get("route") or "/"), tab=False) if page else None
+        if not target or cover not in have_screens:
+            continue
+        expected.add(target)
+        if _write(root / target, f'export {{ default }} from "@/screens/{cover}";\n'):
+            written.append(target)
     # A PAGE WITH NO PHONE SCREEN STILL HAS A ROUTE. The tab, the menu entry or the link leads somewhere that says what
     # happened and where the page is, instead of "This screen does not exist". When a screen is written for it later
     # the same file is overwritten with the real one.

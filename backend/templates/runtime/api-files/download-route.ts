@@ -21,10 +21,17 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   // `filename*=UTF-8''…` that carries the real name for anything modern.
   const asciiName = f.filename.replace(/[^\x20-\x7E]/g, "_").replace(/"/g, "");
   const utf8Name = encodeURIComponent(f.filename);
+  // A FILE IS NEVER ALLOWED TO RUN AS A PAGE. Only a picture or a PDF is shown
+  // inline; anything else downloads. `nosniff` stops a browser re-deciding the
+  // type from the bytes, and the sandbox policy stops even an inline file from
+  // running script in this origin.
+  const inlineOk = /^(image\/(png|jpe?g|gif|webp|avif|heic|heif)|application\/pdf)$/i.test(f.contentType);
   return new Response(new Uint8Array(f.buffer), {
     headers: {
-      "Content-Type": f.contentType,
-      "Content-Disposition": `inline; filename="${asciiName}"; filename*=UTF-8''${utf8Name}`,
+      "Content-Type": inlineOk ? f.contentType : "application/octet-stream",
+      "Content-Disposition": `${inlineOk ? "inline" : "attachment"}; filename="${asciiName}"; filename*=UTF-8''${utf8Name}`,
+      "X-Content-Type-Options": "nosniff",
+      "Content-Security-Policy": "sandbox; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'",
       "Cache-Control": "private, max-age=3600",
     },
   });

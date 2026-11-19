@@ -42,7 +42,7 @@ def test_the_runtime_ships_the_stand_in_and_the_cart_waits_for_the_payment():
     # The ledger and the stand-in come with the rest of the payment files, from
     # the one installer a build, a sync and a publish share.
     installer = (ROOT / "services/payments/app_payments.py").read_text()
-    assert '"payments"]' in injector and "install_runtime as _install_payments" in injector
+    assert '"payments", "tracking", "geofence"]' in injector and "install_runtime as _install_payments" in injector
     assert "_forge_payments.ts" in installer and "src/app/pay/stand-in/page.tsx" in installer
     assert "input.__origin" in injector, "the run knows where the application is, for the return pages"
     cart = (ROOT / "templates/runtime/api-cart/checkout-route.ts").read_text()

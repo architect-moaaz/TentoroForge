@@ -165,7 +165,9 @@ def test_the_architect_chooses_the_tabs_and_their_icons():
 def test_a_view_of_a_page_is_its_own_destination(tmp_path):
     """0l133sp2: "My Listings" pointed at /tools like "Discover" — both lit,
     and the tab bar drew two children keyed `/tools`."""
-    doc = {"application": {"name": "T"}, "pages": [{"id": "P1", "route": "/tools"}],
+    # a view is linked only when the page has a saved view by that name (an entry naming one it lacks opened the
+    # whole list and lit several entries at once): "mine" is declared here, so it is linked
+    doc = {"application": {"name": "T"}, "pages": [{"id": "P1", "route": "/tools", "views": [{"key": "mine"}]}],
            "navigation": {"mobile": "tabs", "tree": [
                {"label": "Discover", "page": "P1", "tab": True},
                {"label": "My Listings", "page": "P1", "view": "mine", "tab": True},

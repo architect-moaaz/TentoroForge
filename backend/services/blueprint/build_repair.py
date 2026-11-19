@@ -119,7 +119,8 @@ def database_with_repair(svc: Any, app_root: str, issues: list[dict], *, usage: 
         result = data_gate.run(app_root, seed=True)
         # A SAMPLE THAT NAMES A MISSING PARENT is refused like a row the
         # database refused: it seeds, but beside the wrong record.
-        samples = data_gate.sample_findings(svc.doc)
+        # A SECRET EVERY READER CAN READ is refused too: a delivery code the driver can see.
+        samples = data_gate.sample_findings(svc.doc) + data_gate.secret_findings(svc.doc)
         if result.get("skipped") or (result.get("ok") and not samples):
             break
         found = samples + data_gate.findings(svc.doc, result, app_root)

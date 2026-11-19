@@ -75,7 +75,7 @@ _advance_state_to_review = _brief_mod.advance_to_review
 from services import build_slots, run_registry
 from services.smith import design_language
 from services.smith import figma_gate as ui_figma_gate
-from services.smith import ui_designer
+from services.smith import maps_key, ui_designer
 from services.smith.clarify_brief import (
     company_palette_option as clarify_company_option)
 from services.blueprint.run_progress import Progress
@@ -2088,6 +2088,15 @@ async def smith_chat(
                 defined = bool(svc.doc.get("requirements")
                                or svc.doc.get("pages"))
 
+            # GOOGLE MAPS KEY: "saved" (the box stored it; this turn's start already copied it into the app). Those are the
+            # panel's own words, recognised only after Smith's ask (`maps_key`), and they need no definition: the ask can come
+            # with the very first plan. The ask has no answer buttons on purpose: a second open question beside the platform
+            # question made the page send both answers as one reply, which read as neither.
+            _chat_so_far = [(t.role, t.text) for t in req.history if t.text]
+            if maps_key.key_saved_in(req.message, _chat_so_far):
+                emit("message", {"text": maps_key.SAVED_TEXT, "status": "reported"})
+                return {"status": "reported"}
+
             # DEFECT-STATUS-VERB: a typed `status` is a COMMAND, not a brief to
             # reason about. Answer it deterministically from the Blueprint and
             # return — it must NEVER fall through and trigger a define (which it
@@ -2469,6 +2478,9 @@ async def smith_chat(
                     "able to do in it, and I will define it.")
                 emit("message", {"text": answer_text, "options": turn_result.options,
                                  "status": turn_result.status})
+                _maps_ask = maps_key.ask_after_turn(output_dir, _brief_from(req.history, req.message))   # a map in the plan and no Google key: say so, once
+                if _maps_ask is not None:
+                    emit("message", _maps_ask)
                 if not _defined_now(str(output_dir)):
                     return {"status": turn_result.status}
                 # A DEFINITION LANDED THIS TURN: the design it named, the answers
@@ -2561,6 +2573,9 @@ async def smith_chat(
                 "status": turn_result.status,
                 "intent": turn_result.intent,
             })
+            _maps_ask = maps_key.ask_after_turn(output_dir, _brief_from(req.history, req.message))   # a map in the plan and no Google key: say so, once
+            if _maps_ask is not None:
+                emit("message", _maps_ask)
             # THE CHECK, AFTER THE ANSWER. The pages the change reaches are
             # opened as the people they are for and what this change broke is
             # repaired once; what was already not working is said as known.
@@ -3159,6 +3174,13 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
                     _documents.store(output_dir, documents)
                 emit("message", _stop)
                 return {"status": "asked"}
+            # A MAP IN THE PLAN WITH NO GOOGLE KEY: say so once, show the box, and carry on with the free map. Never a stop.
+            try:
+                _maps_ask = maps_key.ask(svc.doc, output_dir)
+                if _maps_ask is not None:
+                    emit("message", _maps_ask)
+            except Exception as exc:  # noqa: BLE001 — a suggestion never stops a build
+                logger.warning("[smith-chat] maps key not asked for %s: %s", Path(str(output_dir)).name, exc)
             # HOW IT TAKES MONEY, BEFORE IT IS BUILT, WHICHEVER DOOR IT CAME
             # THROUGH. An app that sells something waits for its owner to choose
             # the gateways (the dialog opens on this message); one that takes no

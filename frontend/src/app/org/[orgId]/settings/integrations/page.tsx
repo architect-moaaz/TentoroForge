@@ -15,7 +15,7 @@ import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
-  BellRing, Bot, Check, CloudUpload, Cog, CreditCard, ExternalLink, Eye, EyeOff, FileText, Globe, Hotel, Image as ImageIcon, KeyRound, Mail, PenTool, Plug,
+  BellRing, Bot, Check, CloudUpload, Cog, CreditCard, ExternalLink, Eye, EyeOff, FileText, Globe, Hotel, Image as ImageIcon, KeyRound, Mail, MapPin, PenTool, Plug,
   ScanText, Search, Server, Smartphone, Sparkles, Store, Timer, Lock, X as XIcon, type LucideIcon,
 } from "lucide-react";
 import { api } from "@/lib/api";
@@ -35,7 +35,7 @@ const ICONS: Record<string, LucideIcon> = {
   resend: Mail, smtp: Mail, anthropic: Bot, figma: PenTool, uxpilot: PenTool, s3: CloudUpload, paddleocr: ScanText,
   expo_eas: Smartphone, apple_asc: Store, google_play: Store, cron: Timer, encryption: Lock, mcp: Server,
   stripe: CreditCard, embeddings: Sparkles, unsplash: ImageIcon, cloudflare: Globe, route53: Globe, godaddy: Globe, push: BellRing,
-  mews: Hotel,
+  mews: Hotel, google_maps: MapPin,
 };
 
 const STATUS_STYLE: Record<Status, string> = {

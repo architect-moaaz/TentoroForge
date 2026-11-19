@@ -1184,6 +1184,28 @@
           },
           "syncNote": {
             "$ref": "#/properties/product/properties/capabilities/items/properties/syncNote"
+          },
+          "phone": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "How the PHONE app draws this page (the web is not affected). `experience: \"map_first\"`: the page is the whole map-first home of a person out and moving (a driver, a courier, a technician on the way): one screen whose map fills the glass and whose bottom sheet changes with where the job is. `covers` names the pages that are STATES of that job (an incoming offer, the current trip, the live position): they get no screen or tab of their own on the phone, and their data and controls become states of this screen's sheet.",
+            "properties": {
+              "experience": {
+                "type": "string",
+                "enum": [
+                  "screens",
+                  "map_first"
+                ],
+                "default": "screens"
+              },
+              "covers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              }
+            }
           }
         },
         "required": [
@@ -2236,6 +2258,40 @@
                           "push"
                         ]
                       }
+                    },
+                    "nearest": {
+                      "type": "object",
+                      "description": "A send_notification step alerts the people of one kind who are on duty and nearest to a place (a ride's pickup), instead of one named recipient.",
+                      "properties": {
+                        "entity": {
+                          "type": "string"
+                        },
+                        "from": {
+                          "type": "string"
+                        },
+                        "limit": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 50
+                        },
+                        "maxKm": {
+                          "type": "number",
+                          "exclusiveMinimum": 0
+                        },
+                        "maxAgeSeconds": {
+                          "type": "number",
+                          "exclusiveMinimum": 0
+                        }
+                      },
+                      "required": [
+                        "entity",
+                        "from"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "ttlSeconds": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0
                     }
                   },
                   "additionalProperties": {},
@@ -3268,6 +3324,13 @@
                     "description": "Role names that read and write this entity unscoped. Name a role only where the product genuinely grants it every row.",
                     "default": []
                   },
+                  "roles": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Apply this rule only to people holding one of these roles. One entity is often reached differently by different roles (an order is a customer's by customerId, a restaurant's by restaurantId, the driver's by driverId): write one rule per role, each naming its `roles`. A person in none of the named roles, and not named in `unscopedRoles`, reaches no row. Omit it for a rule that applies to everyone."
+                  },
                   "actorColumn": {
                     "type": "string",
                     "description": "For scope \"workspace\": the column on the users table whose value is the actor's workspace — homePropertyId, organisationId, tenantId. The session carries that column and the engine compares `column` to it. Omit for scope \"user\", where the actor's id is the value."
@@ -3301,6 +3364,28 @@
                     ],
                     "description": "Who may read the rows. \"scoped\": the same people who may write them (the default). \"everyone\": anyone, signed in or not, reads every row — a catalogue, a listing, a public profile — while `column` still decides who may change or remove it. Say \"everyone\" wherever visitors browse what owners manage; without it a signed-out visitor, who holds no role, reaches no row at all. \"visitors\": people who are not signed in read every row (a public job board), while each signed-in person still reads only what the rule gives them — an employer's workspace lists its own jobs, not every employer's.",
                     "default": "scoped"
+                  },
+                  "readsUnclaimed": {
+                    "type": "boolean",
+                    "description": "For work that is OFFERED before anyone holds it (a ride request offered to drivers, a job offered to technicians): signed-in people read the rows that are theirs AND the rows nobody holds yet (the column is empty). Once a row is held, only its holder reads it. Writes stay limited to the holder's own rows. Use it instead of leaving the entity unscoped, which lets every holder read every other holder's rows.",
+                    "default": false
+                  },
+                  "unclaimedWhere": {
+                    "type": "object",
+                    "description": "With `readsUnclaimed`: only the rows nobody holds yet whose column has one of these values are readable, e.g. {\"status\": \"ready_for_pickup\"}: a driver sees an order only once it is ready, not while it is being placed or cooked.",
+                    "additionalProperties": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      ]
+                    }
                   },
                   "guestColumn": {
                     "type": "string",
@@ -3490,6 +3575,20 @@
             "native_only",
             "pwa_only"
           ]
+        },
+        "nativeRoles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The roles that get the phone app, when the person chose a plan role by role (a driver gets phone screens, the administrator stays on the website). A page only those roles may open is drawn as a phone screen; a page only other roles may open is not. Absent or empty: every page is drawn, as before."
+        },
+        "mapFirstRoles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The roles whose phone app is map-first (they share a position as they move, navigate, or take jobs as they arrive): the home page of each has `phone.experience: \"map_first\"` and covers the pages that are states of the job. Absent or empty: every page is its own screen."
         }
       },
       "additionalProperties": false,
@@ -4992,6 +5091,137 @@
         "additionalProperties": false
       },
       "default": []
+    },
+    "geofencing": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "scenario": {
+          "type": "string",
+          "default": ""
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "zones": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "radiusM": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "purpose": {
+                "type": "string",
+                "default": ""
+              },
+              "lat": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": -90,
+                    "maximum": 90
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "lng": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": -180,
+                    "maximum": 180
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "needsDrawing": {
+                "type": "boolean",
+                "default": true
+              },
+              "rules": {
+                "type": "object",
+                "description": "How the zone behaves: approachM (metres out at which 'approaching' is raised), dwellSec (stay time), hysteresisM, minFixes, maxAccuracyM, staleMs, maxGapMs.",
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "default": {}
+              }
+            },
+            "required": [
+              "name",
+              "radiusM"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "zone": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "default": null
+              },
+              "onEvent": {
+                "type": "string",
+                "enum": [
+                  "geofence.entered",
+                  "geofence.exited",
+                  "geofence.dwell",
+                  "geofence.approaching"
+                ]
+              },
+              "action": {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              "note": {
+                "type": "string",
+                "default": ""
+              }
+            },
+            "required": [
+              "onEvent",
+              "action"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        }
+      },
+      "additionalProperties": false,
+      "description": "Zones on a map and what happens at them, written from what the brief says; present only when the app reacts to something entering, leaving or coming near a place. A zone has coordinates only when the brief gave them (the rest are drawn by the owner). A rule never finishes a job, takes payment or marks someone present from a crossing alone."
     },
     "completeness": {
       "type": "object",
