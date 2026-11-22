@@ -754,6 +754,9 @@ NODE_CONFIG_SPECS: dict[str, list[ConfigKey]] = {
     "wait_for_event": [],
 }
 
+#: An invite is an email: the set-up link goes out through the same service.
+NODE_CONFIG_SPECS["invite_account"] = NODE_CONFIG_SPECS["send_email"]
+
 
 # --------------------------------------------------------------------------- #
 # Query helpers — used by env_scaffold, integrations_scaffold, validators

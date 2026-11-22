@@ -53,7 +53,8 @@ export type ActionType =
   | "create_checkout"
   | "refund_payment"
   | "payment_status"
-  | "connect_account";
+  | "connect_account"
+  | "invite_account";
 
 export type NodeType =
   | "trigger"

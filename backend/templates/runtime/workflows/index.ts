@@ -2478,6 +2478,79 @@ export function registerDefaultActions(): void {
     };
   });
 
+  // invite_account — A LOGIN FOR SOMEONE ELSE. A process that brings a person
+  // into the application in a role (DITANS operations inviting a member of
+  // staff) used to stop at a record and an email saying "sign in with this
+  // work email": there was no account to sign in to, and nothing a workflow
+  // may write could make one, because a password is never a workflow's to
+  // hold. Now the step makes the account itself, inactive, with a password
+  // nobody knows, and emails a one-time link to the set-password page — the
+  // one place an account gets a password besides sign-up. Only the link's
+  // digest is kept (`forge_invites`), exactly as an organisation's member
+  // invites and the owner's roster do.
+  //
+  //   config: { email, name?, role, subject?, body?, orgId?, orgRole? }
+  //   output: { invited: true, userId, email } — or, for an address that
+  //           already has a login, { invited: false, existing: true, userId }
+  //           and nothing about that account changes.
+  //
+  // THE ROLE IS ONE THE APPLICATION DECLARES (`ROLES`, projected from the
+  // Blueprint's roles); anything else is refused, never stored.
+  registerActionHandler("invite_account", async (config, ctx) => {
+    const cfg = config as Record<string, unknown>;
+    const email = String(_resolveRef(cfg.email ?? cfg.to ?? "", ctx) ?? "").trim().toLowerCase();
+    const name = String(_resolveRef(cfg.name ?? "", ctx) ?? "").trim() || email;
+    const role = String(_resolveRef(cfg.role ?? "", ctx) ?? "").trim();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return { error: `invite_account: ${email || "no email"} is not an email address`, invited: false };
+    let roles: string[] = [];
+    try { roles = ((await import("@/lib/account")) as any).ROLES ?? []; } catch { roles = []; }
+    if (!role || !roles.includes(role)) {
+      return { error: `invite_account: "${role}" is not one of this application's roles (${roles.join(", ") || "none declared"})`, invited: false };
+    }
+    const users = (schema as any).users;
+    const invites = (schema as any).forgeInvites;
+    if (!users || !invites) return { error: "invite_account: this application has no accounts table", invited: false };
+    const roleColumn = "role" in users ? "role" : "accountType" in users ? "accountType" : null;
+    if (!roleColumn) return { error: "invite_account: the accounts table carries no role", invited: false };
+
+    const [existing] = await db.select().from(users).where(sql`lower(${users.email}) = ${email}`).limit(1);
+    if (existing) return { invited: false, existing: true, userId: String((existing as any).id), email };
+
+    const unusable = await (await import("bcryptjs")).default.hash(crypto.randomUUID(), 12);
+    const row: Record<string, unknown> = { email, password: unusable, [roleColumn]: role };
+    if ("name" in users) row.name = name;
+    if ("isActive" in users) row.isActive = false;
+    const orgId = String(_resolveRef(cfg.orgId ?? "", ctx) ?? "").trim();
+    if (orgId && "activeOrgId" in users) row.activeOrgId = orgId;
+    const [made] = await db.insert(users).values(row as any).onConflictDoNothing().returning();
+    if (!made) return { error: "invite_account: the account could not be made", invited: false };
+
+    const token = crypto.randomBytes(24).toString("base64url");
+    const tokenHash = crypto.createHash("sha256").update(token, "utf8").digest("hex");
+    const expiresAt = new Date(Date.now() + 7 * 86_400_000);
+    const invite: Record<string, unknown> = { email, tokenHash, issue: crypto.randomUUID(), purpose: "invite", expiresAt, usedAt: null };
+    if (orgId && "orgId" in invites) { invite.orgId = orgId; invite.role = String(_resolveRef(cfg.orgRole ?? role, ctx) ?? role); }
+    await db.insert(invites).values(invite as any).onConflictDoUpdate({
+      target: invites.email,
+      set: { tokenHash, issue: invite.issue, expiresAt, usedAt: null, ...(invite.orgId ? { orgId: invite.orgId, role: invite.role } : {}) } as any,
+    });
+
+    const origin = String((ctx.variables as any).__origin ?? process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000").replace(/\/$/, "");
+    const base = (process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/$/, "");
+    const link = `${origin}${base}/set-password?token=${token}`;
+    const subject = String(_resolveRef(cfg.subject ?? "", ctx) ?? "").trim() || "Set up your account";
+    const said = String(_resolveRef(cfg.body ?? cfg.message ?? "", ctx) ?? "").trim();
+    // send_email puts the body inside one <p>: the link is its own paragraph.
+    const body = `${said ? `${said}</p><p>` : ""}Choose your password here — the link works once, for 7 days:<br><a href="${link}">${link}</a>`;
+    const mail = getActionHandler("send_email");
+    const sent: any = mail ? await mail({ actionType: "send_email", to: email, subject, body } as any, ctx).catch((e: unknown) => ({ sent: false, notice: String(e) })) : { sent: false };
+    // NOT SENT IS SAID, never hidden: without a mail service the person has no
+    // way in until the link reaches them, so the run's notices carry it.
+    const notice = sent?.sent ? undefined
+      : `${email} has an account now, but the email with their set-up link was not sent${sent?.notice ? ` (${sent.notice})` : ""}. Send it again once email is connected.`;
+    return { invited: true, userId: String((made as any).id), email, emailed: Boolean(sent?.sent), ...(notice ? { notice } : {}) };
+  });
+
   // custom — a design-time compute step. Evaluates config.expression (or code)
   // through the sandboxed FEEL-lite engine (safe: expressions only, no host
   // access) against the process variables, and stores the result in config.assignTo

@@ -499,6 +499,24 @@
             ],
             "defaults": {}
           }
+        },
+        {
+          "key": "invite_account",
+          "label": "Invite a person",
+          "icon": "UserPlus",
+          "gradient": "bg-gradient-to-br from-sky-500 to-sky-700",
+          "description": "Give someone a login in a declared role and email them a one-time link to choose their password",
+          "config": {
+            "required": [
+              [
+                "email"
+              ],
+              [
+                "role"
+              ]
+            ],
+            "defaults": {}
+          }
         }
       ]
     },

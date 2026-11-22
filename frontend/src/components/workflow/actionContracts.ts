@@ -253,6 +253,24 @@ export const ACTION_CONTRACTS: Record<string, ActionContract> = {
     ],
   },
 
+  // --- People --------------------------------------------------------- //
+  invite_account: {
+    label: "Invite a person",
+    inputs: [
+      { name: "email", type: "string", required: true, label: "Their email" },
+      { name: "name", type: "string", label: "Their name" },
+      { name: "role", type: "string", required: true, label: "Role (a declared role)" },
+      { name: "subject", type: "string", label: "Email subject" },
+      { name: "body", type: "string", label: "Email message (the set-up link is added)" },
+    ],
+    outputs: [
+      { name: "invited", type: "boolean", label: "Account made" },
+      { name: "existing", type: "boolean", label: "Already had a login" },
+      { name: "userId", type: "string", label: "Account id" },
+      { name: "emailed", type: "boolean", label: "Link emailed" },
+    ],
+  },
+
   // --- Compute -------------------------------------------------------- //
   custom: {
     label: "Custom Function",

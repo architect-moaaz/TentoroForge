@@ -81,7 +81,8 @@ export type ActionType =
   | "emit_event"
   | "wait_for_event"
   | "custom" | "ocr_document"
-  | "create_checkout" | "refund_payment" | "payment_status" | "connect_account";
+  | "create_checkout" | "refund_payment" | "payment_status" | "connect_account"
+  | "invite_account";
 
 export type ApprovalType = "single" | "sequential" | "parallel_all" | "parallel_any" | "threshold";
 

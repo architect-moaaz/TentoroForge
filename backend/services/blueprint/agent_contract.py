@@ -777,6 +777,13 @@ def check_workflow_triggers(result: "AgentResult", doc: dict | None = None) -> N
                 problems.append(f"{name}/{key}: `config.dueIn` is a number of minutes")
             if "escalateTo" in cfg and str(cfg.get("escalateTo")) not in roles | role_names:
                 problems.append(f"{name}/{key}: `config.escalateTo` names a declared role; got {cfg.get('escalateTo')!r}")
+            if str(cfg.get("actionType") or "") == "invite_account":
+                if not str(cfg.get("email") or "").strip():
+                    problems.append(f"{name}/{key}: `invite_account` names the person's `email`")
+                role = str(cfg.get("role") or "").strip()
+                if not role or ("{{" not in role and role not in role_names):
+                    problems.append(f"{name}/{key}: `invite_account` gives a declared role's name as `role` "
+                                    f"(or a template to one); got {cfg.get('role')!r}")
             if str(cfg.get("actionType") or "") == "create_checkout":
                 ref = cfg.get("reference")
                 if not (isinstance(ref, dict) and ref.get("entity") and ref.get("id") is not None):
