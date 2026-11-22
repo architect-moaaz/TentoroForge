@@ -2448,8 +2448,12 @@ export function registerDefaultActions(): void {
     // send to, or the provider itself refused. `sent` is false for all four
     // — it used to be true, with `channel: "in_app"`, which is why an owner
     // could watch a workflow report success while no email existed.
+    // A PRIVATE MESSAGE IS NEVER KEPT. A one-time set-up link (invite_account)
+    // saved as a notification would sit in the database in plain text for
+    // whoever reads notifications; unsent, it is simply not sent.
+    const isPrivate = Boolean((config as any).__private);
     const table = (schema as any).forgeNotifications;
-    if (table) {
+    if (table && !isPrivate) {
       try {
         await (db as any).insert(table).values({ title: subject || "Email", message: body, userId: null, role: null, type: "email", entityId: null, read: false });
       } catch { /* ignore */ }
@@ -2467,14 +2471,17 @@ export function registerDefaultActions(): void {
       : service
         ? `Email is set up to go through ${service.name}, but its credential (${service.liveKey}) is not set in this environment — nothing was sent, and the message was saved as a notification instead.`
         : "No email service is connected to this application, so the email was not sent — it was saved as a notification instead. Ask Forge to connect one.";
+    const said = isPrivate
+      ? notice.replace(/,? and (?:the message )?was saved as a notification instead/, "").replace(/ — it was saved as a notification instead/, "")
+      : notice;
     return {
       sent: false,
       channel: "in_app",
       // A0-7: `messageId` is contract-declared, so the path stays resolvable
       // on this branch too; null says no provider issued one.
       messageId: null,
-      notice,
-      warning: notice,
+      notice: said,
+      warning: said,
     };
   });
 
@@ -2543,11 +2550,11 @@ export function registerDefaultActions(): void {
     // send_email puts the body inside one <p>: the link is its own paragraph.
     const body = `${said ? `${said}</p><p>` : ""}Choose your password here — the link works once, for 7 days:<br><a href="${link}">${link}</a>`;
     const mail = getActionHandler("send_email");
-    const sent: any = mail ? await mail({ actionType: "send_email", to: email, subject, body } as any, ctx).catch((e: unknown) => ({ sent: false, notice: String(e) })) : { sent: false };
+    const sent: any = mail ? await mail({ actionType: "send_email", to: email, subject, body, __private: true } as any, ctx).catch((e: unknown) => ({ sent: false, notice: String(e) })) : { sent: false };
     // NOT SENT IS SAID, never hidden: without a mail service the person has no
     // way in until the link reaches them, so the run's notices carry it.
     const notice = sent?.sent ? undefined
-      : `${email} has an account now, but the email with their set-up link was not sent${sent?.notice ? ` (${sent.notice})` : ""}. Send it again once email is connected.`;
+      : `${email} has an account now, but the email with their set-up link was not sent${sent?.notice ? `: ${String(sent.notice).replace(/\.$/, "")}` : ""}. The link was not kept anywhere.`;
     return { invited: true, userId: String((made as any).id), email, emailed: Boolean(sent?.sent), ...(notice ? { notice } : {}) };
   });
 

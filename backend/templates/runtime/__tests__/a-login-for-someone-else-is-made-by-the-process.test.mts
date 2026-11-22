@@ -87,5 +87,16 @@ g.__secrets = {};
 const quiet = await invite({ ...step, email: "noor@ditans.test" }, ctx);
 eqJson([quiet.invited, quiet.emailed], [true, false], "the account is still made");
 ok(String(quiet.notice).includes("noor@ditans.test has an account now, but the email with their set-up link was not sent"), "and the run says the link did not go");
+ok(!String(quiet.notice).includes("saved as a notification") && String(quiet.notice).endsWith("The link was not kept anywhere."), "without claiming it was kept");
+ok(!JSON.stringify(g.__persisted).includes("set-password?token="), "and the link is not saved as a notification for anyone to read");
+
+console.log("the test version, which emails only the organisation's own people");
+g.__secrets = { SMTP_HOST: "smtp.test", SMTP_USER: "u", SMTP_PASS: "p" };
+process.env.FORGE_ENVIRONMENT = "test"; process.env.FORGE_TEST_RECIPIENTS = "owner@forge.test";
+const mailedBefore = g.__mailed.length;
+const held = await invite({ ...step, email: "tester@outside.test" }, ctx);
+eqJson([held.invited, held.emailed, g.__mailed.length - mailedBefore], [true, false, 0], "holds the email to an outside address, as it holds every other");
+ok(String(held.notice).includes("This is the test version") && !JSON.stringify(g.__persisted).includes("set-password?token="), "says so, and keeps no link");
+delete process.env.FORGE_ENVIRONMENT; delete process.env.FORGE_TEST_RECIPIENTS;
 
 done("a login for someone else is made by the process");
