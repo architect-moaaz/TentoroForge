@@ -95,8 +95,9 @@ g.__secrets = { SMTP_HOST: "smtp.test", SMTP_USER: "u", SMTP_PASS: "p" };
 process.env.FORGE_ENVIRONMENT = "test"; process.env.FORGE_TEST_RECIPIENTS = "owner@forge.test";
 const mailedBefore = g.__mailed.length;
 const held = await invite({ ...step, email: "tester@outside.test" }, ctx);
-eqJson([held.invited, held.emailed, g.__mailed.length - mailedBefore], [true, false, 0], "holds the email to an outside address, as it holds every other");
-ok(String(held.notice).includes("This is the test version") && !JSON.stringify(g.__persisted).includes("set-password?token="), "says so, and keeps no link");
+eqJson([held.invited, held.emailed, g.__mailed.length - mailedBefore], [true, true, 1], "sends the invitation even to an outside address: held, the person could never set a password");
+const other = await g.__handlers["send_email"]({ actionType: "send_email", to: "stranger@outside.test", subject: "Hello", body: "Hi" }, ctx);
+ok(other.sent === false && String(other.notice).includes("This is the test version"), "while every other email to an outside address is still held");
 delete process.env.FORGE_ENVIRONMENT; delete process.env.FORGE_TEST_RECIPIENTS;
 
 done("a login for someone else is made by the process");

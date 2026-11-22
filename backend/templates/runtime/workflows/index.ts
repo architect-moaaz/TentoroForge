@@ -2355,7 +2355,11 @@ export function registerDefaultActions(): void {
     // A CODE TO THE PERSON'S OWN ADDRESS goes out on the test version too: it
     // is the tester's own sign-up, and held back no tester could ever verify
     // (DITANS QA DIT-005, 2026-11-05). Only the platform's sign-in routes set it.
-    if (to && process.env.FORGE_ENVIRONMENT === "test" && !(config as any).toTheirOwnAddress) {
+    // AN INVITATION goes out on the test version too (invite_account): the
+    // account was made for that address, and held back the person could never
+    // set a password — testers could not add a member of staff (DITANS,
+    // 2026-11-22; the owner chose to let invitations through).
+    if (to && process.env.FORGE_ENVIRONMENT === "test" && !(config as any).toTheirOwnAddress && !(config as any).__invitation) {
       const allowed = String(process.env.FORGE_TEST_RECIPIENTS ?? "").toLowerCase().split(",")
         .map((s) => s.trim()).filter(Boolean);
       const recipients = to.toLowerCase().split(",").map((s) => s.trim()).filter(Boolean);
@@ -2550,7 +2554,7 @@ export function registerDefaultActions(): void {
     // send_email puts the body inside one <p>: the link is its own paragraph.
     const body = `${said ? `${said}</p><p>` : ""}Choose your password here — the link works once, for 7 days:<br><a href="${link}">${link}</a>`;
     const mail = getActionHandler("send_email");
-    const sent: any = mail ? await mail({ actionType: "send_email", to: email, subject, body, __private: true } as any, ctx).catch((e: unknown) => ({ sent: false, notice: String(e) })) : { sent: false };
+    const sent: any = mail ? await mail({ actionType: "send_email", to: email, subject, body, __private: true, __invitation: true } as any, ctx).catch((e: unknown) => ({ sent: false, notice: String(e) })) : { sent: false };
     // NOT SENT IS SAID, never hidden: without a mail service the person has no
     // way in until the link reaches them, so the run's notices carry it.
     const notice = sent?.sent ? undefined
