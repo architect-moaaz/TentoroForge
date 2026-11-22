@@ -25,6 +25,7 @@ export const AFTER_SIGNUP: string = "/";
 
 /** Where a signed-in person lands: a route of the app. */
 export const HOME: string = "/";
+export const ANDROID_MAPS_KEY_SET: boolean = true;
 
 /** Routes (and their sub-routes) a signed-out visitor may open: public pages.
  *  Empty: everything needs a sign-in. */

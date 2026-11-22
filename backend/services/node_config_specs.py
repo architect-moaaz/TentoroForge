@@ -738,6 +738,22 @@ NODE_CONFIG_SPECS: dict[str, list[ConfigKey]] = {
         ),
     ],
 
+    # Google Maps: the map, the road and the arrival time of any app with maps, live tracking or zones.
+    # ONE key, one box: in one Google Cloud project (billing on) enable Maps JavaScript API, Routes API, Directions API,
+    # Geocoding API, Places API (address search) and Maps SDK for Android, make a key and paste it here. The apps read it under
+    # three names (the page, the server, the phone project), so `KEY_ALIASES` hands the one value to all three.
+    # The map falls back to a free one (and routes to a free demo router) while the key is missing, so an app still works.
+    "google_maps": [
+        ConfigKey(
+            key="GOOGLE_MAPS_API_KEY",
+            provider="google_maps",
+            label="Google Maps API key — turn on: Maps JavaScript, Routes, Directions, Geocoding, Places, Maps SDK for Android",
+            kind="password",
+            required=False,
+            help_url="https://console.cloud.google.com/google/maps-apis/credentials",
+        ),
+    ],
+
     # --- Event bus nodes (R3) — no secrets --------------------------- #
     # Registered explicitly (rather than omitted) so validators + the
     # editor recognise them as known runtime action types.
@@ -915,3 +931,24 @@ def all_providers() -> list[str]:
         for entry in entries:
             provs.add(entry.provider)
     return sorted(provs)
+
+
+#: A key stored once that an app reads under several names: the stored name -> the names written into the app.
+KEY_ALIASES: dict[str, tuple[str, ...]] = {
+    "GOOGLE_MAPS_API_KEY": ("NEXT_PUBLIC_GOOGLE_MAPS_API_KEY", "GOOGLE_MAPS_SERVER_KEY", "GOOGLE_MAPS_ANDROID_KEY"),
+}
+
+
+def alias_names() -> set[str]:
+    """Every name an alias is written under (the writer treats them as its own, so a cleared key takes them away too)."""
+    return {n for names in KEY_ALIASES.values() for n in names}
+
+
+def with_aliases(values: dict[str, str]) -> dict[str, str]:
+    """`values` plus each set aliased key under all its names."""
+    out = dict(values)
+    for stored, names in KEY_ALIASES.items():
+        if values.get(stored):
+            for n in names:
+                out[n] = values[stored]
+    return out

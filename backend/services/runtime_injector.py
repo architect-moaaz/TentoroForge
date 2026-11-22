@@ -252,7 +252,7 @@ def inject_runtime(output_dir: str, app_name: str | None = None, domain: str | N
     # "events" = the durable event bus + cron scheduler (R1/R2/R3):
     # workflows/index.ts imports ../events/emit-node and engine resumes
     # ride through events/bus.ts, so it MUST ship with the workflows dir.
-    for subdir in ["feel-lite", "workflows", "rules", "events", "payments"]:
+    for subdir in ["feel-lite", "workflows", "rules", "events", "payments", "tracking", "geofence"]:
         src = _TEMPLATE_DIR / subdir
         dst = src_lib / subdir
 
@@ -286,6 +286,12 @@ def inject_runtime(output_dir: str, app_name: str | None = None, domain: str | N
             copied.append(str(loader_dst.relative_to(output_path)))
         except Exception as e:
             errors.append(f"Failed to copy runtime-loader: {e}")
+
+    # WHICH OWNERSHIP RULES A ROLE IS HELD TO (the data engine imports it).
+    roles_src = _TEMPLATE_DIR / "ownership-roles.ts"
+    if roles_src.exists():
+        shutil.copy2(roles_src, src_lib / "ownership-roles.ts")
+        copied.append("src/lib/ownership-roles.ts")
 
     # Copy Data Engine
     data_engine_src = _TEMPLATE_DIR / "data-engine.ts"
@@ -981,6 +987,35 @@ def _inject_file_storage(output_path: Path) -> list[str]:
         shutil.copy2(stream_route, stream_dst)
         written.append("src/app/api/events/stream/route.ts")
 
+    # Live tracking: the driver posts "I am here", the customer's map listens.
+    # Two routes over one in-memory hub (src/lib/tracking/hub.ts, copied above).
+    for _tmpl, _dst in (("api-tracking-update", "update"), ("api-tracking-stream", "stream"), ("api-tracking-fleet", "fleet")):
+        _src = _TEMPLATE_DIR / _tmpl / "route.ts"
+        if _src.exists():
+            _out = output_path / "src" / "app" / "api" / "tracking" / _dst / "route.ts"
+            _out.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(_src, _out)
+            written.append(f"src/app/api/tracking/{_dst}/route.ts")
+
+    # Geofencing: the live line of zone crossings (a monitor listens; src/lib/geofence/hub.ts feeds it).
+    # and the zones, their rules and their history that the geofence screens (src/sdk/geofence.tsx) read and change.
+    for _tmpl, _dst in (("api-geofence-stream", "stream"), ("api-geofence-zones", "zones"), ("api-geofence-rules", "rules"), ("api-geofence-events", "events")):
+        _geo_src = _TEMPLATE_DIR / _tmpl / "route.ts"
+        if _geo_src.exists():
+            _geo_out = output_path / "src" / "app" / "api" / "geofence" / _dst / "route.ts"
+            _geo_out.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(_geo_src, _geo_out)
+            written.append(f"src/app/api/geofence/{_dst}/route.ts")
+
+    # Maps: the road and the time between two places (Google Routes when the app has
+    # a server key, a free routing service otherwise, a straight line at the least).
+    _maps_src = _TEMPLATE_DIR / "api-maps-route" / "route.ts"
+    if _maps_src.exists():
+        _maps_out = output_path / "src" / "app" / "api" / "maps" / "route" / "route.ts"
+        _maps_out.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(_maps_src, _maps_out)
+        written.append("src/app/api/maps/route/route.ts")
+
     # 5a'. forge_events table: the durable event bus (R1). emitEvent
     #      (runtime/events/bus.ts) inserts one row per domain event; the
     #      data-engine write paths + emit_event workflow nodes both write
@@ -1000,6 +1035,36 @@ def _inject_file_storage(output_path: Path) -> list[str]:
                     txt.rstrip() + '\nexport { forgeEvents } from "./_forge_events";\n',
                     encoding="utf-8",
                 )
+
+    # 5a-g. Geofencing tables. The tracking update route checks every position against the zones
+    #       (src/lib/geofence, copied above), so the tables ship with the route; with no zones it costs nothing.
+    geo_schema = _TEMPLATE_DIR / "db" / "forge-geofences.schema.ts"
+    if geo_schema.exists() and schema_dir.exists():
+        shutil.copy2(geo_schema, schema_dir / "_forge_geofences.ts")
+        written.append("src/db/schema/_forge_geofences.ts")
+        barrel = schema_dir / "index.ts"
+        if barrel.exists():
+            txt = barrel.read_text(encoding="utf-8")
+            if "_forge_geofences" not in txt:
+                barrel.write_text(
+                    txt.rstrip() + '\nexport { forgeGeofences, forgeGeofenceAssignments, forgeGeofenceState, forgeGeofenceEvents, forgeGeofenceRules } from "./_forge_geofences";\n',
+                    encoding="utf-8",
+                )
+
+    # 5a-g2. What the brief said about zones (`.forge/geofence-plan.json`, written from the brief): the app's seed makes the zones
+    #        that came with coordinates and the rules beside them (src/lib/geofence/plan.ts). No plan, no file, nothing to seed.
+    #        The plan is kept beside the project (`output/<id>/.forge`), and this runs on the app folder (`output/<id>/app`), so
+    #        it is read from the folder above first; a plan inside the app folder is still honoured.
+    geo_plan = next((p for p in (output_path.parent / ".forge" / "geofence-plan.json", output_path / ".forge" / "geofence-plan.json") if p.exists()),
+                    output_path / ".forge" / "geofence-plan.json")
+    if geo_plan.exists():
+        try:
+            dst = output_path / "contracts" / "geofence-plan.json"
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(geo_plan, dst)
+            written.append("contracts/geofence-plan.json")
+        except OSError:
+            pass  # no plan is not a broken app: the zones screen still works
 
     # 5a-v. forge_memberships: who belongs to which organisation; the
     #       organisation routes. The page and the switcher ship with the
@@ -1035,13 +1100,30 @@ def _inject_file_storage(output_path: Path) -> list[str]:
             txt = barrel.read_text(encoding="utf-8")
             if "_forge_push_subscriptions" not in txt:
                 barrel.write_text(txt.rstrip() + '\nexport { forgePushSubscriptions } from "./_forge_push_subscriptions";\n', encoding="utf-8")
+    # The phones of the native app listen too: their Expo tokens live in `forge_device_tokens`, and the alert goes out
+    # through Expo's push service (`expo-push.ts`), which needs no key of the app's own.
+    device_schema = _TEMPLATE_DIR / "db" / "forge-device-tokens.schema.ts"
+    if device_schema.exists() and schema_dir.exists():
+        shutil.copy2(device_schema, schema_dir / "_forge_device_tokens.ts")
+        written.append("src/db/schema/_forge_device_tokens.ts")
+        barrel = schema_dir / "index.ts"
+        if barrel.exists():
+            txt = barrel.read_text(encoding="utf-8")
+            if "_forge_device_tokens" not in txt:
+                barrel.write_text(txt.rstrip() + '\nexport { forgeDeviceTokens } from "./_forge_device_tokens";\n', encoding="utf-8")
+    expo_src = _TEMPLATE_DIR / "expo-push.ts"
+    if expo_src.exists():
+        (output_path / "src" / "lib").mkdir(parents=True, exist_ok=True)
+        shutil.copy2(expo_src, output_path / "src" / "lib" / "expo-push.ts")
+        written.append("src/lib/expo-push.ts")
     push_src = _TEMPLATE_DIR / "push.ts"
     if push_src.exists():
         (output_path / "src" / "lib").mkdir(parents=True, exist_ok=True)
         shutil.copy2(push_src, output_path / "src" / "lib" / "push.ts")
         written.append("src/lib/push.ts")
         _ensure_package_deps(output_path, {"web-push": "^3.6.7"})
-    for sub, dst in (("api-push/route.ts", "push/route.ts"), ("api-push/test/route.ts", "push/test/route.ts")):
+    for sub, dst in (("api-push/route.ts", "push/route.ts"), ("api-push/test/route.ts", "push/test/route.ts"),
+                     ("api-push/device/route.ts", "push/device/route.ts")):
         src = _TEMPLATE_DIR / sub
         if src.exists():
             target = output_path / "src" / "app" / "api" / dst

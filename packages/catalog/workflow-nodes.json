@@ -226,7 +226,8 @@
                 "user_id",
                 "channel",
                 "recipientRole",
-                "toRole"
+                "toRole",
+                "nearest"
               ],
               [
                 "message",

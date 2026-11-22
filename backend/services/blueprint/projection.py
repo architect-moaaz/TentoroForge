@@ -104,6 +104,10 @@ def _var_name(entity: dict) -> str:
 #: disagree about which columns they are.
 from services.blueprint.page_planner import DERIVED_ON_CREATE
 
+#: Timestamps in `DERIVED_ON_CREATE` that record something that happens after the
+#: record exists, so the database must NOT fill them in at creation.
+_HAPPENS_LATER = frozenset({"completedat", "readat", "deletedat", "archivedat"})
+
 
 def is_list_type(type_name: Any) -> bool:
     """`string[]`, `text[]`, `enum[]` — a column that holds several values."""
@@ -164,8 +168,14 @@ def drizzle_column(field: dict) -> tuple[str, str]:
     # green. The two rules are one fact seen from both ends: DERIVED_ON_CREATE
     # says nothing will supply this column, and a column nothing supplies needs
     # the database to fill it.
+    # ONLY WHAT IS STAMPED AT CREATION DEFAULTS TO NOW. `DERIVED_ON_CREATE` is the
+    # list of columns a FORM must not ask for, and it also holds events that
+    # happen LATER (completed, read, deleted, archived at). A ride's
+    # `completed_at` that defaulted to now was a ride born finished: the ledger
+    # showed a completed time on a request nobody had accepted.
     derived_now = (builder == "timestamp"
-                   and str(field.get("name") or "").lower() in DERIVED_ON_CREATE)
+                   and str(field.get("name") or "").lower() in DERIVED_ON_CREATE
+                   and str(field.get("name") or "").lower() not in _HAPPENS_LATER)
     if field.get("defaultNow") or derived_now:
         line += ".defaultNow()"
     default = field.get("default")
@@ -1238,6 +1248,17 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
             # /orders?tab=detail, a tab that does not exist (ToroCommerce).
             if section and (section_of.get((page_id, section)) or {}).get("placement", "tab") != "tab":
                 section = ""
+            # A `view` OPENS A SAVED VIEW, SO THE PAGE MUST HAVE ONE BY THAT NAME.
+            # A menu entry that named both a tab (`section: pending`) and a view
+            # (`view: pending_verification`) linked to `?view=pending_verification`
+            # on a screen with tabs and no such view: "Pending Verification" opened
+            # the whole list, and the rail lit four entries at once (the ride-hailing
+            # build, 2026-11-11).
+            declared = {str(v.get("key")) for p in (doc.get("pages") or [])
+                        if isinstance(p, dict) and str(p.get("id")) == page_id
+                        for v in (p.get("views") or []) if isinstance(v, dict)}
+            if view and view not in declared:
+                view = ""
             # A tab of a screen is its own destination: `?tab=<section key>`.
             out["route"] = (f"{route}?view={view}" if view
                             else f"{route}?tab={section}" if section else route)
@@ -1314,7 +1335,20 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
     # text and its accent, as the tokens the page already reads.
     # …AND IN THE TONE THE DESIGN CHOSE (`shell.tone`), not the inverse
     # surface on every app: see `RAIL_PAINT`.
-    paint = {**RAIL_PAINT[derive_shell(doc)["tone"]], **drawn_rail_paint(doc)}
+    tone = derive_shell(doc)["tone"]
+    base = dict(RAIL_PAINT[tone])
+    # A DARK RAIL IS PAINTED WITH A DARK SURFACE. `inverse` is the surface opposite to the page: dark
+    # on a light app, which is what the "dark" tone relied on. On an app that is itself dark, the
+    # `inverse` the design gives is LIGHT, and the rail came out a pale lavender that the layout still
+    # called dark (white menu text on it: unreadable, the ride-hailing build, 2026-11-11). When
+    # `inverse` is not dark, the dark rail takes the design's own card surface instead.
+    inverse = str(((doc.get("designSystem") or {}).get("colors") or {}).get("inverse") or "")
+    if tone == "dark" and re.fullmatch(r"#[0-9a-fA-F]{6}", inverse):
+        r_, g_, b_ = (int(inverse[i:i + 2], 16) / 255 for i in (1, 3, 5))
+        if 0.299 * r_ + 0.587 * g_ + 0.114 * b_ >= 0.55:
+            base = {"mode": "dark", "bg": "hsl(var(--card))", "text": "hsl(var(--foreground) / 0.85)",
+                    "muted": "hsl(var(--muted-foreground))"}
+    paint = {**base, **drawn_rail_paint(doc)}
     rail: dict[str, Any] = {"groups": groups, "appName": app_name, **paint, "accent": "hsl(var(--accent))"}
     # THE OWNER'S MARK GOES WHERE THE APPLICATION'S NAME IS. The rail's brand
     # block draws a square with the first letter of the name in it; given a
@@ -3329,6 +3363,13 @@ def entity_access(doc: dict) -> dict[str, dict[str, list[str]]]:
             eid = by_name[rule["entity"]]
             unscoped = {str(r) for r in (rule.get("unscopedRoles") or [])}
             readers[eid] |= unscoped & permitted[eid] if eid in permitted else unscoped
+            # A ROLE THE BLUEPRINT LETS READ A RECORD KIND WHOSE ROWS ARE EACH PERSON'S
+            # OWN reads exactly its own: the engine's row scope is the filter. With only
+            # the pages that declare a record counted, a driver's own notifications (a
+            # list on no driver page's primary entity) were 403 to the driver (the
+            # ride-hailing build: REQ-023 "notifications" on the driver's home).
+            if rule.get("kind", "scope") == "scope" and rule.get("scope", "user") == "user" and eid in permitted:
+                readers[eid] |= permitted[eid]
     # NO PAGE DECLARES IT: NOT LISTED. An entry with two empty lists refused
     # every role, the administrator's included, while the file and the data
     # route both say an entity left out is open to any signed-in role. A page
@@ -3393,8 +3434,39 @@ def _number(text: str) -> float | None:
         return None
 
 
+# Where a REQUIRED demo place sits, by the application's region. Only a place
+# the row cannot be saved without is invented: an optional one stays empty (a
+# person's own position is theirs, shared from their device). Unknown region:
+# 0,0, which no reader mistakes for a real address.
+_SEED_ANCHORS = {"IN": (12.9716, 77.5946), "GB": (51.5074, -0.1278), "US": (40.7128, -74.0060),
+                 "AU": (-33.8688, 151.2093), "CA": (43.6532, -79.3832), "DE": (52.52, 13.405),
+                 "FR": (48.8566, 2.3522), "AE": (25.2048, 55.2708), "SG": (1.3521, 103.8198)}
+
+
+def _seed_anchor(doc: dict | None) -> tuple[float, float]:
+    # THE BRIEF'S OWN PLACE FIRST. A brief that names a place ("the depot in HSR Layout, Bengaluru") gave the fleet app a
+    # zone at 12.9716, 77.5946, while its app-level zone records sat near 0,0 (no locale on the Blueprint), so every map
+    # showed open ocean (Depot Fleet, 2026-11-18). Demo places go beside the zone the plan already placed.
+    for z in ((doc or {}).get("geofencing") or {}).get("zones") or []:
+        try:
+            lat, lng = float(z["lat"]), float(z["lng"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if -90 <= lat <= 90 and -180 <= lng <= 180 and (lat, lng) != (0.0, 0.0):
+            return lat, lng
+    product = (doc or {}).get("product") or {}
+    locale = str(product.get("locale") or "").replace("_", "-")
+    region = locale.split("-")[-1].upper() if "-" in locale else ""
+    if region not in _SEED_ANCHORS:
+        # A locale of just "en" names no country; the currency usually does.
+        region = {"INR": "IN", "GBP": "GB", "USD": "US", "AUD": "AU", "CAD": "CA", "EUR": "DE",
+                  "AED": "AE", "SGD": "SG"}.get(str(product.get("currency") or "").upper(), "")
+    return _SEED_ANCHORS.get(region, (0.0, 0.0))
+
+
 def _seed_value(field: dict, entity_name: str, row: int,
-                tables_by_id: dict | None = None, *, period: int = 0, person: bool = False) -> Any:
+                tables_by_id: dict | None = None, *, period: int = 0, person: bool = False,
+                anchor: tuple[float, float] | None = None) -> Any:
     # A FOREIGN KEY IS A REFERENCE, NOT A LABEL. Written as "Committee Id 1"
     # it failed every child insert as an invalid uuid and the demo database
     # held nothing but the admin. The seeder resolves `ref:<table>[i]` to the
@@ -3421,7 +3493,15 @@ def _seed_value(field: dict, entity_name: str, row: int,
         # NO INVENTED PLACE. Demo rows sat a few streets apart in central
         # London for every application, so a reader in Bangalore saw each
         # demo tool "4995 mi" away. A place is the people's own, shared from
-        # their browser; demo rows have none.
+        # their browser; demo rows have none — EXCEPT where the field is
+        # required: a ride without a pickup cannot be saved at all, and the
+        # whole table then seeds nothing (the ride-hailing build seeded no
+        # rides, locations or earnings). Those get a demo place near the
+        # application's own region, spread a few streets apart by row.
+        if field.get("required") is True:
+            lat0, lng0 = anchor or (0.0, 0.0)
+            return {"lat": round(lat0 + (((row * 37) % 100) - 50) / 2500, 5),
+                    "lng": round(lng0 + (((row * 53) % 100) - 50) / 2500, 5)}
         return None
     # THE BLUEPRINT'S OWN EXAMPLES AND RANGES FIRST, as the editor's sample
     # server does: a demo reading list is real titles rated 1–5, not
@@ -3820,7 +3900,7 @@ def seed_rows(doc: dict, rows: int = SEED_ROWS, *, as_described: bool = True) ->
                 value = listed if listed is not None else (
                          _ref_by_label(field, row, tables_by_id, labels_by_id)
                          or _seed_value(field, name, row, tables_by_id, period=period,
-                                        person=bool(entity.get("account"))))
+                                        person=bool(entity.get("account")), anchor=_seed_anchor(doc)))
                 if (name, str(field.get("name"))) in owned and isinstance(value, str) and value.startswith("ref:"):
                     value = re.sub(r"\[\d+\]$", "[0]", value)
                 record[field.get("name")] = value
@@ -4230,6 +4310,17 @@ def ownership_rules(doc: dict) -> dict[str, list[dict]]:
         # every row, signed-in people what their scope gives them.
         if str(item.get("reads") or "") in ("everyone", "visitors"):
             rule["reads"] = str(item["reads"])
+        # WORK OFFERED BEFORE IT IS HELD: reads also reach the rows nobody holds yet; writes stay the holder's.
+        if item.get("readsUnclaimed") is True:
+            rule["readsUnclaimed"] = True
+            # ...and only the unclaimed rows in these states ({"status": "ready_for_pickup"}): a field, then a value or a list
+            where = item.get("unclaimedWhere")
+            if isinstance(where, dict) and where:
+                rule["unclaimedWhere"] = {str(k): (list(v) if isinstance(v, list) else v) for k, v in where.items()}
+        # A RULE FOR CERTAIN ROLES: an order is a customer's by one column, a restaurant's by another and a driver's by a
+        # third; each rule applies only to the roles it names (and a person in none of them reaches no row).
+        if isinstance(item.get("roles"), list) and item["roles"]:
+            rule["roles"] = [str(r) for r in item["roles"]]
         # OWNED THROUGH ANOTHER RECORD: `column` references a record of
         # `through`, and the row is reachable when that one is. Written as
         # the target's TABLE, which the engine's registry always resolves —
@@ -4326,6 +4417,11 @@ def render_ownership_rules_module(manifest: dict[str, list[dict]]) -> str:
         "   *  decides who may change or remove it. Absent: reads are scoped like writes. */\n"
         "  /** \"visitors\": people not signed in read every row; signed-in people stay scoped. */\n"
         '  reads?: "scoped" | "everyone" | "visitors";\n'
+        "  /** Reads also reach rows whose column is empty (work offered, not yet held); writes stay scoped. */\n"
+        "  readsUnclaimed?: boolean;\n"
+        "  /** With `readsUnclaimed`: only the unclaimed rows whose column is one of these values are read. */\n"
+        "  unclaimedWhere?: Record<string, string | string[]>;\n"
+        "  roles?: string[];\n"
         "  /** For scope \"member\": the membership table, its organisation column, and\n"
         "   *  the column matching the actor (their email, or their user id). */\n"
         "  members?: string;\n"

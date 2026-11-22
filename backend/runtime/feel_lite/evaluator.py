@@ -634,6 +634,21 @@ def _to_number(val: Any) -> float:
         return 0.0
 
 
+def _is_real_number(val: Any) -> bool:
+    return isinstance(val, (int, float)) and not isinstance(val, bool)
+
+
+def _is_numeric_text(val: Any) -> bool:
+    """A number written as text: "100.00", "-3", " 42 "."""
+    if not isinstance(val, str):
+        return False
+    try:
+        float(val.strip())
+    except ValueError:
+        return False
+    return bool(val.strip()) and val.strip().lstrip("-").replace(".", "", 1).isdigit()
+
+
 def _to_comparable(val: Any) -> Any:
     """Coerce value for comparison purposes."""
     if val is None:
@@ -777,6 +792,10 @@ def _eval_binary(op: str, left: Any, right: Any) -> Any:
     if timed is not _NOT_TIME:
         return timed
     if op == "+":
+        # A number and a number written as text is arithmetic ("100.00" from a numeric column
+        # plus 23.45), never text; text beside text (a phone number, a code) is still joined.
+        if (_is_real_number(left) and _is_numeric_text(right)) or (_is_real_number(right) and _is_numeric_text(left)):
+            return _to_number(left) + _to_number(right)
         # String concatenation if either side is a string
         if isinstance(left, str) or isinstance(right, str):
             return str(left if left is not None else "") + str(right if right is not None else "")

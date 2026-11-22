@@ -5,16 +5,18 @@
 // `src/navigation.generated.ts`.
 
 import { Card, Icon, Row, Screen, Stack, Text } from "@/ui";
-import { useNav } from "@/sdk";
-import { MORE } from "@/navigation.generated";
+import { useNav, useSession } from "@/sdk";
+import { MORE, ROLE_MORE } from "@/navigation.generated";
 import type { IconName } from "@/ui";
 
 export default function MoreScreen() {
   const nav = useNav();
+  const { user } = useSession();
+  const items = ROLE_MORE[String((user as { role?: unknown } | null)?.role ?? "")] ?? MORE;
   return (
     <Screen title="More" subtitle="Everything else in the app">
       <Stack gap="sm">
-        {MORE.map((item) => (
+        {items.map((item) => (
           <Card key={item.route} onPress={() => nav.push(item.route)} accessibilityLabel={item.title}>
             <Row gap="md" align="center">
               <Icon name={item.icon as IconName} size={22} />

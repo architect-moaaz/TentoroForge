@@ -2135,6 +2135,9 @@ def check_mobile(result: "AgentResult", doc: dict | None) -> None:
             problems.append("mobile.native: the phone signs in with email and password, and `security.signIn.password` is off — "
                             "turn password sign-in on, or turn the native app off")
     push_on = mobile.get("push") is True
+    entity_names = {str(e.get("name")) for e in ((doc.get("data") or {}).get("entities") or []) if isinstance(e, dict)}
+    entity_names |= {str(p.body.get("name")) for p in result.proposals
+                     if p.section == "data.entities" and isinstance(p.body, dict) and p.body.get("name")}
     for p in result.proposals:
         if p.section != "workflows" or not isinstance(p.body, dict):
             continue
@@ -2142,12 +2145,38 @@ def check_mobile(result: "AgentResult", doc: dict | None) -> None:
             if not isinstance(step, dict):
                 continue
             cfg = step.get("config") if isinstance(step.get("config"), dict) else {}
+            where = f"{p.body.get('name') or p.natural_key}: step {step.get('id') or step.get('name')!s}"
             channels = cfg.get("channels")
             if isinstance(channels, list) and "push" in [str(c) for c in channels] and not push_on:
-                problems.append(f"{p.body.get('name') or p.natural_key}: step {step.get('id') or step.get('name')!s} sends by `push`, "
+                problems.append(f"{where} sends by `push`, "
                                 "and the application does not send push (`mobile.push` is off) — drop the channel or turn push on")
+            if "nearest" in cfg:
+                problems += _nearest_faults(where, cfg.get("nearest"), entity_names)
     if problems:
         raise InvalidMobile(_all_of(problems))
+
+
+def _nearest_faults(where: str, nearest: Any, entity_names: set[str]) -> list[str]:
+    """A `send_notification` step's `nearest` alerts the on-duty people of one kind who are closest to a place:
+    `{entity, from, limit?, maxKm?, maxAgeSeconds?}`. It needs the kind of record to look for (one that exists, whose people
+    share a position while on duty) and where to measure from."""
+    if not isinstance(nearest, dict):
+        return [f"{where}: `nearest` is an object, `{{entity, from, limit?, maxKm?}}`"]
+    out: list[str] = []
+    kind = str(nearest.get("entity") or "").strip()
+    if not kind:
+        out.append(f"{where}: `nearest.entity` names the kind of record to alert (the people on duty, e.g. `Driver`)")
+    elif entity_names and kind not in entity_names:
+        out.append(f"{where}: `nearest.entity` is `{kind}`, which is not an entity of this application ({', '.join(sorted(entity_names)[:8])})")
+    origin = nearest.get("from")
+    if not isinstance(origin, str) or not origin.strip():
+        out.append(f"{where}: `nearest.from` is where to measure from, a template over the record (`{{{{entity.pickupLocation}}}}`)")
+    for key, lo, hi in (("limit", 1, 50), ("maxKm", 0, 500), ("maxAgeSeconds", 0, 3600)):
+        if key in nearest and nearest[key] is not None:
+            v = nearest[key]
+            if isinstance(v, bool) or not isinstance(v, (int, float)) or not (lo < v <= hi if key != "limit" else lo <= v <= hi):
+                out.append(f"{where}: `nearest.{key}` is a number up to {hi}")
+    return out
 
 
 class InvalidSignIn(AuthorRefusal):

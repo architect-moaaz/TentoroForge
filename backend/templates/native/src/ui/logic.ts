@@ -161,3 +161,63 @@ export function shares(values: number[]): number[] {
   const total = values.reduce((s, v) => s + (v > 0 ? v : 0), 0);
   return values.map((v) => (total > 0 && v > 0 ? Math.round((v / total) * 1000) / 10 : 0));
 }
+
+// ---- a bottom sheet over a map ----------------------------------------------------------------------------------------
+
+/** A sheet's resting heights, ascending, in points. A number of 1 or less is a share of `room` (the height there is to
+ *  fill), anything more is points; none may be under `floor` or over `room`, and a repeat is dropped. */
+export function sheetHeights(snaps: number[], room: number, floor = 72): number[] {
+  const out = snaps
+    .map((s) => (s <= 1 ? s * room : s))
+    .map((h) => Math.round(Math.min(Math.max(h, floor), Math.max(room, floor))))
+    .sort((a, b) => a - b);
+  return out.filter((h, i) => i === 0 || h !== out[i - 1]);
+}
+
+/** Where a sheet comes to rest when the finger lifts: `shown` is how much of it is showing, `velocity` is the
+ *  finger's speed in points per millisecond (positive is downward). A flick carries it on in its direction;
+ *  a slow drag goes to the nearest resting height. Returns the index into `heights`. */
+export function settleSheet(shown: number, velocity: number, heights: number[]): number {
+  if (heights.length === 0) return 0;
+  const aimed = shown - velocity * 220;
+  let best = 0;
+  for (let i = 1; i < heights.length; i++) {
+    if (Math.abs(heights[i] - aimed) < Math.abs(heights[best] - aimed)) best = i;
+  }
+  return best;
+}
+
+/** A drag, held inside the sheet's own range: it can be pulled a little past the ends (it gives), never off. */
+export function dragShown(start: number, dy: number, heights: number[], give = 24): number {
+  if (heights.length === 0) return start;
+  const lo = heights[0], hi = heights[heights.length - 1];
+  const raw = start - dy;
+  if (raw < lo) return lo - Math.min(give, (lo - raw) / 4);
+  if (raw > hi) return hi + Math.min(give, (raw - hi) / 4);
+  return raw;
+}
+
+// ---- clocks ---------------------------------------------------------------------------------------------------------------
+
+/** `m:ss` for a time left (never negative). */
+export function countdownText(ms: number): string {
+  const total = Math.max(0, Math.ceil(ms / 1000));
+  const s = total % 60;
+  return `${Math.floor(total / 60)}:${s < 10 ? "0" : ""}${s}`;
+}
+
+/** The milliseconds from `now` to an ISO time (negative once it has passed); null when there is no time. */
+export function msUntil(iso: string | null | undefined, now: number): number | null {
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  return Number.isNaN(t) ? null : t - now;
+}
+
+/** How long ago something began, in words a glance can take: `just now`, `12 min`, `1 h 5 min`. */
+export function elapsedText(ms: number): string {
+  const min = Math.max(0, Math.floor(ms / 60000));
+  if (min < 1) return "just now";
+  if (min < 60) return `${min} min`;
+  const h = Math.floor(min / 60), m = min % 60;
+  return m ? `${h} h ${m} min` : `${h} h`;
+}

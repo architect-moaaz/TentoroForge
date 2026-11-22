@@ -1571,6 +1571,46 @@ export const DrawnPair = z.object({
 });
 
 /**
+ * Zones on a map and what happens at them: written from what the brief says (`services/blueprint/geofence_plan.py`),
+ * present only when the app reacts to something entering, leaving or coming near a place.
+ *
+ * A zone has coordinates only when the brief gave them; the rest are `needsDrawing` (the owner draws them on the zones
+ * screen; nothing guesses where a restaurant is). A rule is bound to a zone by NAME and never finishes a job, takes payment
+ * or marks someone present from a crossing alone: those wait for a confirmation that is not GPS.
+ */
+export const Geofencing = z.object({
+  enabled: z.boolean().default(true),
+  /** delivery | ride | fleet | attendance | retail | restricted */
+  scenario: z.string().default(""),
+  /** The phrases in the brief that said so. */
+  evidence: z.array(z.string()).default([]),
+  zones: z
+    .array(
+      z.object({
+        name: z.string().min(1),
+        radiusM: z.number().positive(),
+        purpose: z.string().default(""),
+        lat: z.number().min(-90).max(90).nullable().default(null),
+        lng: z.number().min(-180).max(180).nullable().default(null),
+        needsDrawing: z.boolean().default(true),
+      }),
+    )
+    .default([]),
+  rules: z
+    .array(
+      z.object({
+        /** The zone's name; the rule is created only when that zone exists. */
+        zone: z.string().nullable().default(null),
+        onEvent: z.enum(["geofence.entered", "geofence.exited", "geofence.dwell", "geofence.approaching"]),
+        action: z.record(z.string(), z.unknown()),
+        note: z.string().default(""),
+      }),
+    )
+    .default([]),
+  notes: z.array(z.string()).default([]),
+});
+
+/**
  * A page as the phone shows it: one native screen per page, written as React
  * Native against the app's native SDK and kit (`templates/native`), beside the
  * web page's `PageCode`. One-to-one by design — the same Blueprint page, so the
@@ -3795,6 +3835,8 @@ export const Blueprint = z.object({
   drawnPairs: z.array(DrawnPair).default([]),
   /** The frame files this application owns (see `FrameCode`). */
   frameCode: z.array(FrameCode).default([]),
+  /** Zones and what happens at them, when the app reacts to places (see `Geofencing`). */
+  geofencing: Geofencing.optional(),
 
   requirements: z.array(Requirement).default([]),
   completeness: Completeness.default({}),

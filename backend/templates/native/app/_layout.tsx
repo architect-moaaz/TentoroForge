@@ -17,19 +17,22 @@ import { ErrorBoundary, ErrorState, Loading } from "@/ui";
 import { SessionProvider, ToastProvider, appConfigured, useOrganisations, useSession } from "@/sdk";
 import { gateDecision } from "@/sdk/gate";
 import { HOME, PUBLIC_ROUTES } from "@/config.generated";
+import { ROLE_HOME } from "@/navigation.generated";
 import { FONT_FILES } from "@/fonts.generated";
 import { theme } from "@/theme";
 
 function Gate() {
-  const { status, refresh } = useSession();
+  const { status, refresh, user } = useSession();
+  // where a signed-in person lands: their role's own first tab, else the app's home
+  const home = ROLE_HOME[String((user as { role?: unknown } | null)?.role ?? "")] || HOME;
   const { needsOrganisation } = useOrganisations();
   const pathname = usePathname();
   const router = useRouter();
 
   React.useEffect(() => {
-    const to = gateDecision({ status, needsOrganisation, pathname, publicRoutes: PUBLIC_ROUTES, home: HOME });
+    const to = gateDecision({ status, needsOrganisation, pathname, publicRoutes: PUBLIC_ROUTES, home });
     if (to) router.replace(to as Href);
-  }, [status, needsOrganisation, pathname, router]);
+  }, [status, needsOrganisation, pathname, router, home]);
 
   const cover = !appConfigured
     ? <ErrorState title="Not connected yet" message="This app does not know where its server is. Set EXPO_PUBLIC_APP_URL (or extra.appUrl in app.json) to the deployed address and rebuild." />

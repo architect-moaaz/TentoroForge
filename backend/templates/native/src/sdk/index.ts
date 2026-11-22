@@ -36,6 +36,14 @@ export { fileSource, pickImage, pickDocument, uploadFile, type PickedFile, type 
 export { formatCell, formatDate, formatNumber, formatPercent, humanize } from "./format";
 export { distanceKm, formatDistance, parseNear, roundPoint, isPoint, type GeoPoint } from "./geo";
 export { askPosition } from "./location";
+// Live tracking and maps: a driver shares where they are, a customer watches the trip with the road and the time.
+export { MapView, type MapPoint, type MapViewProps, type MapHandle } from "./map";
+export { useDevicePosition, type DevicePosition, type PositionState } from "./position";
+export { useRoute, minutesText, routeSource, type Navigation, type RouteInfo } from "./route";
+export {
+  useLiveTrip, useShareLocation, ShareLocation, FleetBeacon, TripBeacon, LiveTrackingMap,
+  type LiveTrip, type LivePosition, type LiveTrackingMapProps,
+} from "./tracking";
 export { CURRENCY, formatMoney } from "./money";
 export { useT, useLanguage } from "./i18n";
 export { apiFetch, apiJson, appUrl, appConfigured } from "./api";

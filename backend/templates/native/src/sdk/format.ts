@@ -8,6 +8,17 @@
 
 export type Format = "number" | "currency" | "percent" | "duration";
 
+/** A number formatter, made once per locale and options. Building an `Intl.NumberFormat` is slow on a phone (Hermes takes
+ *  milliseconds for each), and a screen that shows money draws it on every render, so the formatter is kept. One that throws
+ *  (a currency the engine does not know) is not kept: the caller's fallback runs every time. */
+const formatters = new Map<string, Intl.NumberFormat>();
+function numberFormat(locale: string | undefined, options: Intl.NumberFormatOptions): Intl.NumberFormat {
+  const key = `${locale ?? ""}|${JSON.stringify(options)}`;
+  let f = formatters.get(key);
+  if (!f) { f = new Intl.NumberFormat(locale, options); formatters.set(key, f); }
+  return f;
+}
+
 /** A text in one language, or in each: `{ en: "Orders", hi: "ऑर्डर" }`. */
 export type Text = string | Record<string, string>;
 
@@ -17,7 +28,7 @@ export type Text = string | Record<string, string>;
 export function formatMoney(amount: number, opts: { currency: string; locale?: string; maximumFractionDigits?: number }): string {
   if (!Number.isFinite(amount)) return "";
   try {
-    return new Intl.NumberFormat(opts.locale, {
+    return numberFormat(opts.locale, {
       style: "currency", currency: opts.currency, maximumFractionDigits: opts.maximumFractionDigits ?? 2,
     }).format(amount);
   } catch {
@@ -29,7 +40,7 @@ export function formatMoney(amount: number, opts: { currency: string; locale?: s
  *  figure. The code itself when the engine cannot say. */
 export function currencySymbol(currency: string, locale?: string): string {
   try {
-    const part = new Intl.NumberFormat(locale, { style: "currency", currency }).formatToParts(0).find((p) => p.type === "currency");
+    const part = numberFormat(locale, { style: "currency", currency }).formatToParts(0).find((p) => p.type === "currency");
     return part?.value ?? currency;
   } catch {
     return currency;
@@ -39,7 +50,7 @@ export function currencySymbol(currency: string, locale?: string): string {
 export function formatNumber(value: number, locale?: string, maximumFractionDigits = 2): string {
   if (!Number.isFinite(value)) return "";
   try {
-    return new Intl.NumberFormat(locale, { maximumFractionDigits }).format(value);
+    return numberFormat(locale, { maximumFractionDigits }).format(value);
   } catch {
     return String(Math.round(value * 100) / 100);
   }
@@ -49,7 +60,7 @@ export function formatNumber(value: number, locale?: string, maximumFractionDigi
 export function formatPercent(fraction: number, locale?: string): string {
   if (!Number.isFinite(fraction)) return "";
   try {
-    return new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 1 }).format(fraction);
+    return numberFormat(locale, { style: "percent", maximumFractionDigits: 1 }).format(fraction);
   } catch {
     return `${Math.round(fraction * 1000) / 10}%`;
   }
@@ -59,7 +70,7 @@ export function formatPercent(fraction: number, locale?: string): string {
 export function formatCompact(value: number, locale?: string): string {
   if (!Number.isFinite(value)) return "";
   try {
-    return new Intl.NumberFormat(locale, { notation: "compact", maximumFractionDigits: 1 }).format(value);
+    return numberFormat(locale, { notation: "compact", maximumFractionDigits: 1 }).format(value);
   } catch {
     return formatNumber(value, locale, 1);
   }

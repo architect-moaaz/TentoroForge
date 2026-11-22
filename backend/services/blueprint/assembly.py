@@ -65,6 +65,12 @@ SUPERSEDED_REPAIRS: dict[str, str] = {
 PROJECTED_PATHS: tuple[str, ...] = (
     "src/schemas", "src/contracts", "src/db/schema", "src/db/seed.json",
     "src/lib/workflows/definitions", "src/app/tokens.css",
+    # WHO MAY RUN EACH WORKFLOW (`projection.project_launch_roles`). Assembly's
+    # runtime injector clears `src/lib/workflows` of everything not listed here
+    # and then writes an EMPTY roles file where none exists. Left off this list,
+    # every build lost the real file, and the execute route let any signed-in
+    # person run any workflow: a driver could approve their own account.
+    "src/lib/workflows/launch-roles.ts",
     # The scaffold ships a middleware that gates everything; the projection
     # writes one from what each page declares. Assembly runs after projection,
     # so leaving this off the list silently restored the hardcoded gate and an

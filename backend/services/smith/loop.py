@@ -408,6 +408,32 @@ turn with `propose_plan` and every ask in their words, and they agree once.
 One thing asked for in several words is not a plan: "rename the delete
 button to archive" is one step. A yes to a plan already shown is not a plan.
 
+LIVE TRACKING IS SEVERAL CHANGES, NOT ONE. "Show the driver on a map", "let
+customers follow their order", "add live tracking", "dispatch should see every
+technician" mean someone watching a person or vehicle MOVE. End the turn with
+`propose_plan`, in this order: (1) the job record — a field for its status and
+fields of kind `location` for the pickup and the drop-off on the entity that
+already is the order, ride or visit; add an entity only when there is none,
+never a second one; (2) the follower's screen, which shows the driver's dot with
+`LiveTrackingMap` (give it the entity name and the record's id) from
+"@/sdk/tracking"; (3) the screen of the person on the move, which carries
+`ShareLocation` for that job, and the record must name that person in a field
+such as `driverId`; (4) only if they named a
+dispatcher or admin, a screen that shows everyone on a job. A DRIVER WHO GOES
+ONLINE AND WAITS FOR WORK, with an admin who watches them all on one map, is a
+fleet and not a job: the driver is their own record (a Driver entity with a
+name, a `userId` linking to their sign-in, a `vehicleType`, a `verificationStatus`
+that ends `approved`, and an `availabilityStatus` of online or offline), their
+home screen has the Go online workflow as its one switch (only for approved
+drivers) and shows `FleetBeacon` while they are online, and the admin's screen carries `FleetMap` with the
+entity name and a filter by vehicle type. Plan the Driver record first, the
+admin's map second, the driver's switch third, and say in the plan that a driver
+shows only while online and approved and is gone when they go offline. Say in the plan that
+the dot shows only while the job is under way and is gone when it ends. Never
+keep the moving position in a record. It is NOT tracking when they want a
+distance, "near me", a store locator, or a status a person types, such as "out
+for delivery": do those the ordinary way.
+
 END WITH `answer` when they asked a question rather than for a change, or when
 the honest outcome is that nothing needed doing. AN ANSWER ALREADY GIVEN ABOVE
 WAS WRITTEN FROM THE SLICE ALONE. If the question is about what the code does

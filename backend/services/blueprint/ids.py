@@ -297,6 +297,24 @@ def natural_key_for(
 # Allocator
 # ---------------------------------------------------------------------------
 
+def _replace_patiently(tmp: Path, target: Path, tries: int = 12) -> None:
+    """``os.replace``, patient where Windows is: the swap is refused (WinError 5/32) while anything else holds ``target``
+    open (a panel reading it, a scanner), for milliseconds. A build failed on ids.json with "Access is denied" for it
+    (Zomato, 2026-11-13). Elsewhere the first attempt is the only one."""
+    import time
+
+    from services.proc_compat import IS_WINDOWS
+
+    for attempt in range(1, tries + 1):
+        try:
+            os.replace(tmp, target)
+            return
+        except PermissionError:
+            if not IS_WINDOWS or attempt == tries:
+                raise
+            time.sleep(0.05 * attempt)
+
+
 @dataclass
 class IdAllocator:
     """Per-application registry of allocated Blueprint IDs.
@@ -353,7 +371,7 @@ class IdAllocator:
         }
         tmp = p.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(payload, indent=2, sort_keys=True), "utf-8")
-        os.replace(tmp, p)  # atomic
+        _replace_patiently(tmp, p)  # atomic
         return p
 
     @classmethod

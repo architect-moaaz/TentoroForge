@@ -67,7 +67,7 @@ const CSS = `
 .tf-row,.tf-sub{display:flex;align-items:center;gap:14px;padding:9px 20px;cursor:pointer;text-decoration:none;color:var(--tf-text);border-left:3px solid transparent;font-size:0.875rem}
 .tf-sub{padding:7px 20px 7px 30px;font-size:0.8125rem;color:var(--tf-muted)}
 .tf-row:hover,.tf-sub:hover{background:var(--tf-hover)}
-.tf-active{background:var(--tf-abg)!important;color:var(--tf-atext)!important;border-left-color:var(--tf-accent)!important}
+.tf-active{background:var(--tf-abg)!important;color:var(--tf-atext)!important;border-left-color:var(--tf-accent)!important;font-weight:600}
 .tf-label{opacity:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:opacity .14s ease .03s}
 .tf-logo{display:block;flex-shrink:0;height:28px;object-fit:contain;object-position:left center}
 .tf-brand{opacity:1;font-weight:600;overflow:hidden;transition:opacity .14s ease .03s;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-clamp:2;overflow-wrap:anywhere;line-height:1.2;font-size:0.875rem}
@@ -128,9 +128,9 @@ export function SideNav({
     ["--tf-text" as string]: cText,
     ["--tf-muted" as string]: cMuted,
     ["--tf-accent" as string]: cAccent,
-    ["--tf-hover" as string]: light ? "rgba(0,0,0,0.04)" : "rgba(255,255,255,0.05)",
-    ["--tf-abg" as string]: cActiveBg ?? (light ? "rgba(0,0,0,0.05)" : "rgba(255,255,255,0.09)"),
-    ["--tf-atext" as string]: light ? cAccent : "#fff",
+    ["--tf-hover" as string]: `color-mix(in srgb, ${cText} 9%, transparent)`,
+    ["--tf-abg" as string]: cActiveBg ?? `color-mix(in srgb, ${cAccent} 18%, transparent)`,
+    ["--tf-atext" as string]: cText,
     ["--tf-wc" as string]: `${collapsedWidth}px`,
     ["--tf-we" as string]: `${expandedWidth}px`,
   };

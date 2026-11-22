@@ -252,6 +252,11 @@ function toNumber(x: unknown): number {
   return isNaN(n) ? 0 : n;
 }
 
+/** A number written as text: "100.00", "-3", " 42 ". */
+function isNumericText(x: unknown): boolean {
+  return typeof x === "string" && /^\s*-?\d+(?:\.\d+)?\s*$/.test(x);
+}
+
 /** Today as the calendar shows it where the app runs — "2026-10-12" — the
  *  same date a step's `$today` writes. */
 function calendarToday(): string {
@@ -391,6 +396,13 @@ export function evaluate(node: ASTNode, ctx: Context): unknown {
 
       switch (node.operator) {
         case "+":
+          // A number and a number written as text is ARITHMETIC: a numeric column comes
+          // back from the database as "100.00", and `itemTotal + deliveryFee` joined them
+          // into "469100" — an order for crores (Zomato, 2026-11-13). Text beside text
+          // (a phone number, a code) is still joined.
+          if ((typeof left === "number" && isNumericText(right)) || (typeof right === "number" && isNumericText(left))) {
+            return l + r;
+          }
           // String concatenation if either is a string and non-numeric
           if (typeof left === "string" || typeof right === "string") {
             return String(left ?? "") + String(right ?? "");
