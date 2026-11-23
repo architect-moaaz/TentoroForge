@@ -56,7 +56,7 @@ export async function POST(): Promise<Response> {
   let notice: string | undefined;
   if (send) {
     const out: any = await send({
-      to: row.email, toTheirOwnAddress: true, subject: `${code} is your verification code`,
+      to: row.email, toTheirOwnAddress: true, __private: true, subject: `${code} is your verification code`,
       body: `Your verification code is ${code}. It expires in 10 minutes. If you did not create an account, ignore this email.`,
     }, { input: {}, variables: {}, log: [] } as any);
     if (!out?.sent) notice = String(out?.notice ?? out?.reason ?? "the code could not be sent: no email service is connected");

@@ -200,7 +200,7 @@ export async function sendCode(p: Person, purpose: CodeFor, now = Date.now()): P
   let notice: string | undefined;
   if (send) {
     const out: any = await send({
-      to: p.email, toTheirOwnAddress: true, subject: MAIL[purpose].subject(issued.code), body: MAIL[purpose].body(issued.code),
+      to: p.email, toTheirOwnAddress: true, __private: true, subject: MAIL[purpose].subject(issued.code), body: MAIL[purpose].body(issued.code),
     }, { input: {}, variables: {}, log: [] } as any);
     if (!out?.sent) notice = String(out?.notice ?? out?.reason ?? "the code could not be sent: no email service is connected");
   } else {
