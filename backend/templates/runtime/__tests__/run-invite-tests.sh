@@ -4,3 +4,4 @@
 set -e
 DIR="$(cd "$(dirname "$0")" && pwd)"
 node --experimental-strip-types --no-warnings "$DIR/a-login-for-someone-else-is-made-by-the-process.test.mts"
+node --experimental-strip-types --no-warnings "$DIR/a-persons-role-is-changed-by-the-process.test.mts"

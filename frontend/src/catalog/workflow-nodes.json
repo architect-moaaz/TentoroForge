@@ -517,6 +517,25 @@
             ],
             "defaults": {}
           }
+        },
+        {
+          "key": "set_account_role",
+          "label": "Change a person's role",
+          "icon": "Users",
+          "gradient": "bg-gradient-to-br from-sky-500 to-sky-700",
+          "description": "Move an existing login to another declared role; their open sessions end so the new role holds from their next sign-in",
+          "config": {
+            "required": [
+              [
+                "userId",
+                "email"
+              ],
+              [
+                "role"
+              ]
+            ],
+            "defaults": {}
+          }
         }
       ]
     },

@@ -54,7 +54,8 @@ export type ActionType =
   | "refund_payment"
   | "payment_status"
   | "connect_account"
-  | "invite_account";
+  | "invite_account"
+  | "set_account_role";
 
 export type NodeType =
   | "trigger"

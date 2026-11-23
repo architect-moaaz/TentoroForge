@@ -784,6 +784,13 @@ def check_workflow_triggers(result: "AgentResult", doc: dict | None = None) -> N
                 if not role or ("{{" not in role and role not in role_names):
                     problems.append(f"{name}/{key}: `invite_account` gives a declared role's name as `role` "
                                     f"(or a template to one); got {cfg.get('role')!r}")
+            if str(cfg.get("actionType") or "") == "set_account_role":
+                if not (str(cfg.get("userId") or "").strip() or str(cfg.get("email") or "").strip()):
+                    problems.append(f"{name}/{key}: `set_account_role` names the person's `userId` or `email`")
+                role = str(cfg.get("role") or "").strip()
+                if not role or ("{{" not in role and role not in role_names):
+                    problems.append(f"{name}/{key}: `set_account_role` gives a declared role's name as `role` "
+                                    f"(or a template to one); got {cfg.get('role')!r}")
             if str(cfg.get("actionType") or "") == "create_checkout":
                 ref = cfg.get("reference")
                 if not (isinstance(ref, dict) and ref.get("entity") and ref.get("id") is not None):

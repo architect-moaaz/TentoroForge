@@ -2562,6 +2562,48 @@ export function registerDefaultActions(): void {
     return { invited: true, userId: String((made as any).id), email, emailed: Boolean(sent?.sent), ...(notice ? { notice } : {}) };
   });
 
+  // set_account_role — A PERSON'S ROLE, CHANGED BY THE PROCESS. The role a
+  // login holds is the platform's (`users`), which no workflow may write, so
+  // an administrator could invite someone in a role and never move them to
+  // another (CARES Users & Roles, 2026-11-24). The step changes it to a role
+  // the application declares and ends the person's open sessions, so the new
+  // role — more access or less — holds from their next sign-in, never a
+  // session later. Nobody changes their own role: the last administrator
+  // could otherwise take themselves out.
+  //
+  //   config: { userId | email, role }
+  //   output: { changed, userId, role, previous } — `changed: false` when the
+  //           login already holds that role, and then nothing is touched.
+  registerActionHandler("set_account_role", async (config, ctx) => {
+    const cfg = config as Record<string, unknown>;
+    const userId = String(_resolveRef(cfg.userId ?? cfg.user ?? "", ctx) ?? "").trim();
+    const email = String(_resolveRef(cfg.email ?? "", ctx) ?? "").trim().toLowerCase();
+    const role = String(_resolveRef(cfg.role ?? "", ctx) ?? "").trim();
+    let roles: string[] = [];
+    try { roles = ((await import("@/lib/account")) as any).ROLES ?? []; } catch { roles = []; }
+    if (!role || !roles.includes(role)) {
+      return { error: `set_account_role: "${role}" is not one of this application's roles (${roles.join(", ") || "none declared"})`, changed: false };
+    }
+    const users = (schema as any).users;
+    if (!users) return { error: "set_account_role: this application has no accounts table", changed: false };
+    const roleColumn = "role" in users ? "role" : "accountType" in users ? "accountType" : null;
+    if (!roleColumn) return { error: "set_account_role: the accounts table carries no role", changed: false };
+    if (!userId && !email) return { error: "set_account_role: name the person's `userId` or `email`", changed: false };
+    const [row] = await db.select().from(users)
+      .where(userId ? eq(users.id, userId) : sql`lower(${users.email}) = ${email}`).limit(1);
+    if (!row) return { error: `set_account_role: there is no login for ${userId || email}`, changed: false };
+    const id = String((row as any).id);
+    const me = String(_resolveRef("$user.id", ctx) ?? "");
+    if (me && me === id) return { error: "set_account_role: a person cannot change their own role", changed: false };
+    const previous = String((row as any)[roleColumn] ?? "");
+    if (previous === role) return { changed: false, userId: id, role, previous };
+    const set: Record<string, unknown> = { [roleColumn]: role };
+    if (roleColumn === "role" && "accountType" in users) set.accountType = role;
+    if ("sessionVersion" in users) set.sessionVersion = sql`coalesce(${users.sessionVersion}, 0) + 1`;
+    await db.update(users).set(set as any).where(eq(users.id, id));
+    return { changed: true, userId: id, role, previous };
+  });
+
   // custom — a design-time compute step. Evaluates config.expression (or code)
   // through the sandboxed FEEL-lite engine (safe: expressions only, no host
   // access) against the process variables, and stores the result in config.assignTo

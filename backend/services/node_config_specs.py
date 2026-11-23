@@ -756,6 +756,8 @@ NODE_CONFIG_SPECS: dict[str, list[ConfigKey]] = {
 
 #: An invite is an email: the set-up link goes out through the same service.
 NODE_CONFIG_SPECS["invite_account"] = NODE_CONFIG_SPECS["send_email"]
+#: A role change touches only the app's own accounts: no service to configure.
+NODE_CONFIG_SPECS["set_account_role"] = []
 
 
 # --------------------------------------------------------------------------- #

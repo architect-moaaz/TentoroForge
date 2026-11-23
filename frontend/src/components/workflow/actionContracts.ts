@@ -271,6 +271,21 @@ export const ACTION_CONTRACTS: Record<string, ActionContract> = {
     ],
   },
 
+  set_account_role: {
+    label: "Change a person's role",
+    inputs: [
+      { name: "userId", type: "string", label: "Their account id" },
+      { name: "email", type: "string", label: "Or their email" },
+      { name: "role", type: "string", required: true, label: "New role (a declared role)" },
+    ],
+    outputs: [
+      { name: "changed", type: "boolean", label: "Role changed" },
+      { name: "userId", type: "string", label: "Account id" },
+      { name: "role", type: "string", label: "Role now" },
+      { name: "previous", type: "string", label: "Role before" },
+    ],
+  },
+
   // --- Compute -------------------------------------------------------- //
   custom: {
     label: "Custom Function",
