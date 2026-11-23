@@ -277,6 +277,25 @@ def _written_by_workflows(doc: dict, entity_id: str) -> dict[str, dict]:
     return out
 
 
+def role_field(doc: dict) -> str | None:
+    """The account record's own copy of the person's role: a choice whose
+    values are the application's roles. The login carries the role, and a
+    self-registering person gets the signup role — so the form never asks
+    for it. CARES's sign-up form offered every role, from Front Desk Agent to
+    Administrator, and a new account's staff record said Front Office Manager
+    while its login was a Front Desk Agent (kkb5mzo3, Test, 2026-11-23)."""
+    ent = account_entity(doc)
+    if ent is None:
+        return None
+    names = {str(r.get("name")) for r in _live(doc.get("roles")) if r.get("name")}
+    for f in ent.get("fields") or []:
+        values = [str(v) for v in (f or {}).get("enumValues") or []]
+        shared = set(values) & names
+        if len(shared) >= 2 and len(shared) >= 0.8 * len(values):
+            return str(f.get("name") or "") or None
+    return None
+
+
 def _system_owned(written: dict[str, dict], name: str) -> bool:
     """A field only ever written by a process, never from what someone typed."""
     entry = written.get(name)
@@ -296,9 +315,15 @@ def account_initial(doc: dict) -> dict[str, Any]:
         return {}
     written = _written_by_workflows(doc, str(ent.get("id") or ""))
     out: dict[str, Any] = {}
+    role_name, signup = role_field(doc), signup_role(doc)
     for f in ent.get("fields") or []:
         name = str((f or {}).get("name") or "")
-        if not name or not f.get("required") or name in _SYSTEM or f.get("primaryKey"):
+        if not name or name in _SYSTEM or f.get("primaryKey"):
+            continue
+        if name == role_name and signup:
+            out[name] = signup      # the record says the role the login is given
+            continue
+        if not f.get("required"):
             continue
         if not _system_owned(written, name) and not _is_credential(name):
             continue          # the person is asked for it, so they supply it
@@ -348,10 +373,12 @@ def account_fields(doc: dict) -> list[dict]:
     # all; this is what keeps one off the form when an older Blueprint has it.
     written = _written_by_workflows(doc, str(ent.get("id") or ""))
     out = []
+    # THE ROLE IS THE LOGIN'S: a person never picks their own (role_field).
+    role_name = role_field(doc) if signup_role(doc) else None
     for f in ent.get("fields") or []:
         name = str(f.get("name") or "")
         ftype = str(f.get("type") or "string").lower()
-        if not name or name in _SYSTEM or f.get("primaryKey") or f.get("references"):
+        if not name or name in _SYSTEM or f.get("primaryKey") or f.get("references") or name == role_name:
             continue
         if _is_credential(name) or _system_owned(written, name):
             continue
