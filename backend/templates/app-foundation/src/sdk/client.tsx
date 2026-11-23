@@ -256,9 +256,11 @@ const inputClass =
   "placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring " +
   "focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50";
 
-function Field({ name, spec, value, required, onChange }: {
+function Field({ name, spec, value, required, onChange, wide = true }: {
   name: string; spec: Exclude<FieldSpec<unknown>, { value: unknown }> & Record<string, unknown>;
   value: unknown; required: boolean; onChange: (v: unknown) => void;
+  /** The form has two columns, so a long field may take both. */
+  wide?: boolean;
 }) {
   const id = `f-${name}`;
   const kind = (spec.kind as string | undefined) ?? "text";
@@ -326,8 +328,12 @@ function Field({ name, spec, value, required, onChange }: {
       placeholder={spec.placeholder as string | undefined}
       value={(value as string) ?? ""} onChange={(e) => onChange(e.target.value)} />;
   }
+  // A FULL-WIDTH FIELD SPANS TWO COLUMNS ONLY WHERE THERE ARE TWO. In a
+  // one-column form the span made the grid an implicit second track and
+  // pushed the other fields out of their card (kkb5mzo3's Add training,
+  // 2026-11-23).
   return (
-    <div className={"grid gap-2" + (kind === "textarea" || spec.span === "full" ? " sm:col-span-2" : "")} data-forge-field={name}>
+    <div className={"grid gap-2" + (wide && (kind === "textarea" || spec.span === "full") ? " sm:col-span-2" : "")} data-forge-field={name}>
       {label}{control}{help}
     </div>
   );
@@ -619,6 +625,7 @@ export function WorkflowForm<I extends Json>({
     return spec && !("value" in spec) ? (
       <Field key={name} name={name} spec={spec as never} value={values[name]}
         required={required.has(name) && !["checkbox", "switch"].includes(String(spec.kind))}
+        wide={columns === 2}
         onChange={(v) => setValues((cur) => ({ ...cur, [name]: v }))} />
     ) : null;
   };
