@@ -245,6 +245,22 @@ export function parse(tokens: Token[]): ASTNode {
         advance();
         const propTok = expect(TokenType.Identifier);
         node = { type: "MemberExpression", object: node, property: propTok.value };
+      } else if (peek().type === TokenType.LBracket && tokens[pos + 1]?.type === TokenType.Number
+                 && tokens[pos + 2]?.type === TokenType.RBracket) {
+        // ONE ITEM OF A LIST BY POSITION, FROM 0. `{{find_route.output[0].id}}`
+        // was read in a template and refused in a formula, so DITANS's
+        // `set_variable` of `find_route.output[0].id` stored its own spelling
+        // as the route id and the next query died on "invalid input syntax for
+        // type uuid" (2026-11-24). Only a whole number fits between the
+        // brackets; anything else is the same error as before.
+        advance();
+        const idxTok = advance();
+        advance();
+        const index = Number(idxTok.value);
+        if (!Number.isInteger(index) || index < 0) {
+          throw new ParseError(`A list is read by position with a whole number from 0, as in rows[0]`, idxTok.start);
+        }
+        node = { type: "IndexExpression", object: node, index };
       } else {
         break;
       }

@@ -17,6 +17,7 @@ export type ASTNode =
   | IfExpression
   | FunctionCall
   | MemberExpression
+  | IndexExpression
   | WildcardExpression
   | BetweenExpression;
 
@@ -112,6 +113,14 @@ export interface MemberExpression {
   type: "MemberExpression";
   object: ASTNode;
   property: string;
+}
+
+/** `rows[0]`: one item of a list by position, counted from 0 — the same
+ *  reading a `{{rows[0].id}}` template gets. */
+export interface IndexExpression {
+  type: "IndexExpression";
+  object: ASTNode;
+  index: number;
 }
 
 export interface WildcardExpression {

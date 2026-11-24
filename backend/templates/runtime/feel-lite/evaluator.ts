@@ -307,8 +307,11 @@ function resolveIdentifier(name: string, ctx: Context): unknown {
 // both sides parse as numbers, else case-insensitive string compare, with null
 // handling. Keeps this shipped runtime in lockstep with the editor playground.
 function fuzzyEqual(a: unknown, b: unknown): boolean {
-  if (a === null && b === null) return true;
-  if (a === null || b === null) return false;
+  // NOTHING IS NULL. A field a record does not have, or a list item past the
+  // end, is `undefined`; `find_manager.output[0].organisationMemberId != null`
+  // over no rows was true, because only `null` itself counted as null.
+  if (a == null && b == null) return true;
+  if (a == null || b == null) return false;
   const emptyish = (v: unknown) => typeof v === "string" && v.trim() === "";
   if (!emptyish(a) && !emptyish(b)) {
     const na = Number(a);
@@ -347,6 +350,11 @@ export function evaluate(node: ASTNode, ctx: Context): unknown {
         return obj.map((el) => (el != null && typeof el === "object" ? (el as Record<string, unknown>)[node.property] : undefined));
       }
       return (obj as Record<string, unknown>)[node.property];
+    }
+
+    case "IndexExpression": {
+      const list = evaluate(node.object, ctx);
+      return Array.isArray(list) ? (list[node.index] ?? null) : null;
     }
 
     case "UnaryExpression": {

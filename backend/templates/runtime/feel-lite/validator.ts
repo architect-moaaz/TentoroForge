@@ -102,6 +102,7 @@ export function validateExpression(
         break;
 
       case "MemberExpression":
+      case "IndexExpression":
         walk(node.object);
         break;
 
