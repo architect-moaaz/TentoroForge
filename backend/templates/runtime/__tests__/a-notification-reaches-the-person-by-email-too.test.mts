@@ -96,6 +96,16 @@ const other = await g.__handlers["send_email"]({ actionType: "send_email", to: "
 ok(other.sent === false && String(other.notice).includes("This is the test version"), "a guest who was never invited is still held");
 const member = await g.__handlers["send_email"]({ actionType: "send_email", to: "owner@hotel.test", subject: "Hello", body: "Hi" }, ctx);
 ok(member.sent === true, "and the organisation's own member is still emailed");
+g.__mailed = [];
+const toRole = await g.__handlers["send_email"]({ actionType: "send_email", recipientRole: "GeneralManager", subject: "Exception?", body: "x" }, ctx);
+eqJson([toRole.sent, g.__mailed.map((m: any) => m.to)], [true, ["invited.gm@hotel.test"]],
+       "an email to a role reaches its logins (accountType), and the test version leaves off only the addresses it may not mail");
+ok(String(toRole.notice).includes("left demo.gm@example.com off"), "and says who was left off");
 delete process.env.FORGE_ENVIRONMENT; delete process.env.FORGE_TEST_RECIPIENTS;
+
+console.log("an email to a role, outside the test version");
+g.__mailed = [];
+await g.__handlers["send_email"]({ actionType: "send_email", recipientRole: "GeneralManager", subject: "Exception?", body: "x" }, ctx);
+eqJson(String(g.__mailed[0]?.to ?? "").split(",").sort(), ["demo.gm@example.com", "invited.gm@hotel.test"], "goes to every active login in the role");
 
 done("a notification reaches the person by email too");

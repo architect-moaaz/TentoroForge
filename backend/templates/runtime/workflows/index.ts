@@ -2378,26 +2378,18 @@ export function registerDefaultActions(): void {
     if (!to) {
       const roleRef = (config as any).recipientRole ?? (config as any).toRole ?? (config as any).assigneeRole;
       const role = roleRef ? String(_resolveRef(roleRef, ctx) ?? "") : "";
-      if (role) {
-        try {
-          const { sql } = await import("drizzle-orm");
-          const res: any = await (db as any).execute(
-            sql`SELECT email FROM users WHERE role = ${role} AND email IS NOT NULL LIMIT 1`,
-          );
-          const rows = Array.isArray(res) ? res : (res?.rows ?? []);
-          const email = rows[0]?.email;
-          if (email) to = String(email);
-        } catch {
-          // users table absent or no role/email column — fall through to
-          // the in-app persist with a warning in the return value.
-        }
-      }
+      // EVERY ACTIVE LOGIN IN THE ROLE, whichever column holds it: the SQL here
+      // read `users.role` only, so an application whose logins keep the role in
+      // `account_type` found nobody — CARES's exception mail to the CFO said
+      // "no email address could be worked out" (2026-11-24).
+      if (role) to = (await notificationAddresses(null, role)).join(",");
     }
     // THE TEST VERSION EMAILS ONLY THE ORGANISATION'S OWN PEOPLE. Published
     // to Test, the app carries FORGE_ENVIRONMENT=test and the members'
     // addresses; a message to anybody else is held back and saved as a
     // notification, so a tester never emails a real customer.
     let heldForTest = "";
+    let testDropped = "";
     // A CODE TO THE PERSON'S OWN ADDRESS goes out on the test version too: it
     // is the tester's own sign-up, and held back no tester could ever verify
     // (DITANS QA DIT-005, 2026-11-05). Only the platform's sign-in routes set it.
@@ -2424,8 +2416,15 @@ export function registerDefaultActions(): void {
           }
         } catch { invited = new Set(); }
       }
-      if (!rest.every((r) => invited.has(r))) {
+      const out = rest.filter((r) => !invited.has(r));
+      const kept = recipients.filter((r) => !out.includes(r));
+      if (out.length && !kept.length) {
         heldForTest = `This is the test version, which emails only your organisation's members and the people this application invited — the message to ${to} was not sent, and was saved as a notification instead.`;
+      } else if (out.length) {
+        // SOME OF A ROLE'S PEOPLE MAY BE EMAILED: the message goes to them, and the
+        // others (demo or outside addresses) are left off rather than the whole message held.
+        to = kept.join(",");
+        testDropped = `The test version left ${out.join(", ")} off this email: it emails only your organisation's members and the people this application invited.`;
       }
     }
     const sendTo = heldForTest ? "" : to;
@@ -2445,7 +2444,7 @@ export function registerDefaultActions(): void {
     const fromNotice = ownFrom || from === smtpUser
       ? undefined
       : `sent from ${from} — set FORGE_EMAIL_FROM to the address you want people to see`;
-    const sentNotice = [fromNotice, attachNotice].filter(Boolean).join("; ") || undefined;
+    const sentNotice = [fromNotice, attachNotice, testDropped].filter(Boolean).join("; ") || undefined;
 
     // 1. SMTP: the declared provider, or an SMTP_HOST in the environment when
     //    nothing is declared. A DECLARED provider is never overridden by the
