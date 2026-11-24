@@ -39,12 +39,21 @@ export function NotificationBell() {
 
   React.useEffect(() => {
     void load();
-    const t = setInterval(load, 30_000);
+    // A hidden tab does not ask: every ask is a database read, and a tab left
+    // open behind others asked twice a minute all day. Seen again, it asks once.
+    const t = setInterval(() => { if (document.visibilityState !== "hidden") void load(); }, 30_000);
     const onFocus = () => void load();
+    const onVisible = () => { if (document.visibilityState === "visible") void load(); };
     window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisible);
     // A workflow that just ran may have told someone something.
     window.addEventListener("forge:workflow-done", onFocus);
-    return () => { clearInterval(t); window.removeEventListener("focus", onFocus); window.removeEventListener("forge:workflow-done", onFocus); };
+    return () => {
+      clearInterval(t);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("forge:workflow-done", onFocus);
+    };
   }, [load]);
 
   React.useEffect(() => {

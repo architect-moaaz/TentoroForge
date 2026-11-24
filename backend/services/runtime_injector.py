@@ -980,6 +980,15 @@ def _inject_file_storage(output_path: Path) -> list[str]:
         stream_dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(stream_route, stream_dst)
         written.append("src/app/api/events/stream/route.ts")
+        # THE CLIENT TRAVELS WITH ITS STREAM. An app built before 2026-11-24
+        # kept the LiveRefresh that reloaded its page on every reconnect — the
+        # platform ends the stream every few minutes — and so re-read every
+        # open tab's page all day; a new stream under it changed nothing.
+        live = _TEMPLATE_DIR.parent / "app-foundation" / "src" / "lib" / "LiveRefresh.tsx"
+        live_dst = output_path / "src" / "lib" / "LiveRefresh.tsx"
+        if live.exists() and live_dst.parent.is_dir():
+            shutil.copy2(live, live_dst)
+            written.append("src/lib/LiveRefresh.tsx")
 
     # 5a'. forge_events table: the durable event bus (R1). emitEvent
     #      (runtime/events/bus.ts) inserts one row per domain event; the

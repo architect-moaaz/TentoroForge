@@ -29,5 +29,5 @@ def test_live_refresh_opens_the_stream_only_when_it_is_its_own():
     and the trials counted it against every control."""
     src = (TEMPLATE.parent.parent / "lib" / "LiveRefresh.tsx").read_text("utf-8")
     assert "streamIsOurs" in src and 'includes("text/event-stream")' in src
-    assert 'new EventSource(STREAM_URL)' in src and "NEXT_PUBLIC_BASE_PATH" in src
+    assert "new EventSource(lastId ? `${STREAM_URL}?since=" in src and "NEXT_PUBLIC_BASE_PATH" in src
     assert 'new EventSource("/api/events/stream")' not in src

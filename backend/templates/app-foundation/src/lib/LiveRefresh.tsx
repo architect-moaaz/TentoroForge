@@ -11,10 +11,19 @@
  * for pages with an explicit `poll` spec — those keep their contract).
  *
  * Failure posture: silent. If the stream 404s (older app without the
- * route), errors, or the platform caps the connection, EventSource's own
- * retry runs with capped backoff and the page simply behaves as before —
- * fresh on navigation. A refresh is also fired on reconnect, covering any
- * events missed while disconnected.
+ * route) or errors, the page simply behaves as before — fresh on navigation.
+ *
+ * A RECONNECT IS NOT A CHANGE. The platform caps the stream (60–300 s), and
+ * this refreshed the page on every reconnect "to cover missed events": every
+ * open tab re-read its whole page every few minutes doing nothing. Now each
+ * frame carries the stream's watermark as its id; EventSource reconnects with
+ * it and the stream replays what came after, so a refresh happens only for an
+ * event this page watches.
+ *
+ * A HIDDEN TAB HOLDS NO STREAM. It closes when the tab is hidden — an open
+ * stream polls the database every 2.5 s and keeps it awake — and reopens from
+ * the last watermark when the tab is seen again; what landed meanwhile
+ * arrives then, and refreshes the page once if it matters to it.
  */
 import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
@@ -89,8 +98,13 @@ export function LiveRefresh({ entities }: { entities: string[] }) {
     let es: EventSource | null = null;
     let debounce: ReturnType<typeof setTimeout> | null = null;
     let lastRefresh = 0;
-    let hadDrop = false;
     let stopped = false;
+    let ours = false;
+    // The stream's watermark, as its last frame named it.
+    let lastId = "";
+    // Reopened after being hidden with no watermark to carry on from (an
+    // older stream that sends none): refresh once on the first frame.
+    let catchUp = false;
 
     const refresh = () => {
       const now = Date.now();
@@ -112,43 +126,54 @@ export function LiveRefresh({ entities }: { entities: string[] }) {
       return !!prefix && slugs.has(prefix);
     };
 
+    const close = () => {
+      es?.close();
+      es = null;
+    };
+
     const subscribe = () => {
-    if (stopped) return;
-    try {
-      es = new EventSource(STREAM_URL);
-    } catch {
-      return; // ancient browser / route absent — degrade silently
-    }
-
-    es.onopen = () => {
-      // Reconnect after a drop: refresh once to cover missed events.
-      if (hadDrop) {
-        hadDrop = false;
-        scheduleRefresh();
-      }
-    };
-    es.onerror = () => {
-      hadDrop = true; // EventSource retries on its own
-    };
-    es.onmessage = (msg) => {
-      if (stopped) return;
+      if (stopped || es || !ours || document.visibilityState === "hidden") return;
       try {
-        const data = JSON.parse(msg.data) as { events?: StreamEvent[] };
-        if ((data.events ?? []).some(matches)) scheduleRefresh();
+        es = new EventSource(lastId ? `${STREAM_URL}?since=${encodeURIComponent(lastId)}` : STREAM_URL);
       } catch {
-        /* heartbeat / malformed frame — ignore */
+        return; // ancient browser / route absent — degrade silently
       }
-    };
+      es.onmessage = (msg) => {
+        if (stopped) return;
+        if (msg.lastEventId) lastId = msg.lastEventId;
+        if (catchUp) {
+          catchUp = false;
+          scheduleRefresh();
+          return;
+        }
+        try {
+          const data = JSON.parse(msg.data) as { events?: StreamEvent[] };
+          if ((data.events ?? []).some(matches)) scheduleRefresh();
+        } catch {
+          /* malformed frame — ignore */
+        }
+      };
     };
 
-    void streamIsOurs().then((ours) => {
-      if (ours) subscribe();
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") close();
+      else {
+        if (!es && !lastId) catchUp = true;
+        subscribe();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+
+    void streamIsOurs().then((yes) => {
+      ours = yes;
+      subscribe();
     });
 
     return () => {
       stopped = true;
       if (debounce) clearTimeout(debounce);
-      es?.close();
+      document.removeEventListener("visibilitychange", onVisibility);
+      close();
     };
   }, [watched]);
 
