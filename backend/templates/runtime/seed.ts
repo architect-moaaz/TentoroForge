@@ -42,6 +42,8 @@ const ROLES: string[] = ((accountModule as unknown as { ROLES?: string[] }).ROLE
 // The login's columns that decide which records a person reaches (account_model.scope_reach).
 type Reach = { column: string; table: string; many: boolean };
 const SCOPE_REACH: Reach[] = ((accountModule as unknown as { SCOPE_REACH?: Reach[] }).SCOPE_REACH) ?? [];
+// The roles whose login is a row of the account entity; null — every role.
+const ACCOUNT_ROLES: string[] | null = ((accountModule as unknown as { ACCOUNT_ROLES?: string[] | null }).ACCOUNT_ROLES) ?? null;
 import { accountTable } from "../lib/account-table";
 
 const ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL || "admin@example.com";
@@ -248,8 +250,11 @@ async function resolveRequiredFks(table: any, row: Record<string, unknown>): Pro
  * person; otherwise "my Member" was empty for the admin and every invited
  * login, and whatever they did could not be tied to them.
  */
-async function ensureAccountRow(id: string | null, email: string, name: string): Promise<void> {
+async function ensureAccountRow(id: string | null, email: string, name: string, role: string | null): Promise<void> {
   if (!ACCOUNT || !accountTable || !id) return;
+  // ONLY THE ROLES WHOSE LOGIN IS ONE (`security.accountRoles`). DITANS seeded
+  // a Candidate record for every member of staff and every employer.
+  if (Array.isArray(ACCOUNT_ROLES) && ACCOUNT_ROLES.length && !ACCOUNT_ROLES.includes(String(role || SIGNUP_ROLE || ""))) return;
   const row: Record<string, unknown> = { id };
   for (const f of ACCOUNT.fields) if (f.kind === "email" && f.name in accountTable) row[f.name] = email;
   if (ACCOUNT.labelField && ACCOUNT.labelField in accountTable) row[ACCOUNT.labelField] = name;
@@ -295,7 +300,7 @@ async function seedRoleLogins(): Promise<void> {
       const created = await db.insert(users).values(row as any)
         .onConflictDoNothing({ target: (users as any).email }).returning();
       if (created[0]?.id) {
-        await ensureAccountRow(String(created[0].id), email, `${role} (demo)`);
+        await ensureAccountRow(String(created[0].id), email, `${role} (demo)`, role);
         console.log(`✅ demo login: ${email} (${role}, password: ${ADMIN_PASSWORD})`);
       }
     } catch (e) {
@@ -489,7 +494,7 @@ async function seedOrganisations(): Promise<void> {
       const created = await db.insert(users).values(row as any).onConflictDoNothing({ target: (users as any).email }).returning();
       const second: any = created[0] ?? (await db.select().from(users).where(eq((users as any).email, email)).limit(1))[0];
       if (second?.id) {
-        await ensureAccountRow(String(second.id), email, `${role} (second)`);
+        await ensureAccountRow(String(second.id), email, `${role} (second)`, role);
         await join(String(second.id), orgIds[1], role);
       }
     } catch (e) {
@@ -550,7 +555,7 @@ async function seedAccounts(): Promise<void> {
       Object.assign(row, minimalRow(users, String(entry.name || email), row, /* skipFk */ true));
       const created = await db.insert(users).values(row as any)
         .onConflictDoNothing({ target: (users as any).email }).returning();
-      if (created[0]?.id) await ensureAccountRow(String(created[0].id), email, String(entry.name || email));
+      if (created[0]?.id) await ensureAccountRow(String(created[0].id), email, String(entry.name || email), entry.role ? String(entry.role) : null);
       // A ROSTERED PERSON IN AN ORGANISATION: the membership, by the
       // organisation's name (made when it does not exist), in their role.
       if (entry.organisation) {
@@ -1190,7 +1195,7 @@ async function seedEverythingElse(): Promise<void> {
   const adminId = await seedAdmin();
   await seedRoleLogins();
   await seedOrganisations();
-  await ensureAccountRow(adminId, ADMIN_EMAIL, "Admin");
+  await ensureAccountRow(adminId, ADMIN_EMAIL, "Admin", ADMIN_ROLE);
 
   // AND SO MUST THE PEOPLE THE OWNER ADDED — for the same reason and above the
   // same gates. An app whose staff cannot log in is not in use.

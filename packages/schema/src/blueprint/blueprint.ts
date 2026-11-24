@@ -2726,6 +2726,15 @@ export const Security = z.object({
    */
   signupRoles: z.array(RoleId).optional(),
   /**
+   * WHOSE LOGIN IS A ROW OF THE ACCOUNT ENTITY. The roles whose people are
+   * the entity marked `account` (a Candidate, a Member): their row is made
+   * with their login, at signup, on first sign-in and in the seed. Every
+   * other role signs in with a login alone. Absent, every role has one.
+   * DITANS's account entity is the Candidate, and every employer, recruiter
+   * and member of staff was also given a Candidate record (2026-11-24).
+   */
+  accountRoles: z.array(RoleId).optional(),
+  /**
    * HOW PEOPLE SIGN IN. `password`: email and password (the default).
    * `magicLink`: a one-time link sent to the address, good for fifteen
    * minutes, used once. `sso`: the identity providers an organisation signs

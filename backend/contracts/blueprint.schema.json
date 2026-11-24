@@ -3121,6 +3121,12 @@
             "$ref": "#/properties/roles/items/properties/id"
           }
         },
+        "accountRoles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/properties/roles/items/properties/id"
+          }
+        },
         "signIn": {
           "type": "object",
           "properties": {

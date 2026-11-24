@@ -84,6 +84,20 @@ def test_a_person_may_give_themselves_only_a_declared_role(tmp_path):
     assert 'SIGNUP_ROLES: string[] = ["Member", "Host"]' in (tmp_path / "src/lib/account.ts").read_text()
 
 
+def test_only_the_declared_roles_are_the_account_entity(tmp_path):
+    # DITANS (2026-11-24): the Candidate is the account entity; employers and
+    # staff sign in too and were each given a Candidate record.
+    three = _doc(roles=[{"id": "ROLE-001", "name": "Member"}, {"id": "ROLE-002", "name": "Host"},
+                        {"id": "ROLE-003", "name": "Operations"}])
+    assert am.account_roles(three) is None, "undeclared: every role has one"
+    three["security"]["accountRoles"] = ["ROLE-001", "ROLE-404"]
+    assert am.account_roles(three) == ["Member"], "declared, by name; an unknown id dropped"
+    am.project_account(three, tmp_path)
+    assert 'ACCOUNT_ROLES: string[] | null = ["Member"]' in (tmp_path / "src/lib/account.ts").read_text()
+    am.project_account(_doc(), tmp_path)
+    assert "ACCOUNT_ROLES: string[] | null = null" in (tmp_path / "src/lib/account.ts").read_text()
+
+
 def test_signup_refuses_a_role_it_does_not_offer():
     # Before, with no account-type choice the schema let any `accountType`
     # through and the route gave it: anyone could post "Admin" and hold it.

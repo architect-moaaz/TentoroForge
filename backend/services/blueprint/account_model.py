@@ -129,6 +129,16 @@ def signup_roles(doc: dict) -> list[str]:
     return [one] if one else []
 
 
+def account_roles(doc: dict) -> list[str] | None:
+    """The roles, by name, whose login is a row of the account entity:
+    `security.accountRoles`, else None — every role has one. A declared list
+    that names no live role is the same as none declared."""
+    roles = {str(r.get("id")): str(r.get("name")) for r in _live(doc.get("roles")) if r.get("name")}
+    declared = [roles[str(rid)] for rid in ((doc.get("security") or {}).get("accountRoles") or [])
+                if str(rid) in roles]
+    return list(dict.fromkeys(declared)) or None
+
+
 def signup_role(doc: dict) -> str | None:
     """The role a self-registered person gets: `security.signupRole`, else the
     application's only role, else — with the administrator's role set aside —
@@ -561,6 +571,8 @@ def project_account(doc: dict, app_root: str | Path) -> dict[str, Any]:
         + f"export const SIGNUP_ROLE: string | null = {json.dumps(signup_role(doc))};\n\n"
         + "/** Every role a person may give themselves at signup; any other is refused. */\n"
         + f"export const SIGNUP_ROLES: string[] = {json.dumps(signup_roles(doc))};\n\n"
+        + "/** The roles whose login is a row of the account entity; null — every role. */\n"
+        + f"export const ACCOUNT_ROLES: string[] | null = {json.dumps(account_roles(doc))};\n\n"
         + "/** The role the built-in admin account holds: the one that reaches the most of the app. */\n"
         + f"export const ADMIN_ROLE: string | null = {json.dumps(admin_role(doc))};\n\n"
         + "/** Every role of the application, by name: the seed signs a demo person into each. */\n"

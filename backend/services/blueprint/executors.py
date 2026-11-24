@@ -2371,7 +2371,12 @@ NODE_TASKS: dict[str, str] = {
         "When people create their own accounts, set `signupRole` to the role "
         "they get — the role whose pages and workflows a new self-registered "
         "person uses. Without it a new person holds no role the application "
-        "names, and every workflow gated by role refuses them."
+        "names, and every workflow gated by role refuses them. "
+        "When the entity marked `account` is the record of only some of the "
+        "people who sign in — a Candidate, while employers and staff sign in "
+        "too — list those roles in `accountRoles`; every other role signs in "
+        "with a login alone and is never given that record. Leave it out "
+        "when everyone who signs in is one."
     ),
 }
 

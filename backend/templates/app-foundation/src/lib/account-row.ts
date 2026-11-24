@@ -33,8 +33,21 @@ export function ownsAccountRecord(role: string | null | undefined): boolean {
   return !(m.SIGNUP_ROLES ?? []).includes(role);
 }
 
+/** WHETHER THIS ROLE'S LOGIN IS A ROW OF THE ACCOUNT ENTITY AT ALL. Declared
+ *  by `security.accountRoles`; undeclared, every role's is. DITANS gave every
+ *  employer, recruiter and member of staff a Candidate record, because the
+ *  starting values alone made one (2026-11-24). No role is the signup role. */
+export function hasAccountRecord(role: string | null | undefined): boolean {
+  const m = accountModule as unknown as { SIGNUP_ROLE?: string | null; ACCOUNT_ROLES?: string[] | null };
+  const roles = m.ACCOUNT_ROLES;
+  if (!Array.isArray(roles) || roles.length === 0) return true;
+  const r = role || m.SIGNUP_ROLE;
+  return !r || roles.includes(r);
+}
+
 export function accountValues(input: Record<string, unknown>, email: string, name = "", role?: string | null): { values?: Record<string, unknown>; error?: string } {
   if (!ACCOUNT) return {};
+  if (!hasAccountRecord(role)) return {};
   const made = recordFrom(input, email, name);
   return made.error && !ownsAccountRecord(role) ? {} : made;
 }
