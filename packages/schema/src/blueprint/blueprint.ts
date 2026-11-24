@@ -2208,9 +2208,10 @@ export const WorkflowStep = z.object({
        * On a `send_notification`: where it reaches the person. `in_app` is the
        * bell every signed-in person has; `push` reaches the devices they have
        * subscribed, and needs `mobile.push` on — a push channel in an
-       * application without push is refused.
+       * application without push is refused; `email` mails the person (or
+       * every login in the role) through the application's mail service.
        */
-      channels: z.array(z.enum(["in_app", "push"])).optional(),
+      channels: z.array(z.enum(["in_app", "push", "email"])).optional(),
     })
     .catchall(z.unknown())
     .default({}),

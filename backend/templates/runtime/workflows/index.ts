@@ -700,6 +700,22 @@ async function stampGuest(tableName: string, values: Record<string, unknown>,
 
 // A config value is either a process-variable name, a special token, or a
 // literal. `{{var}}` templates interpolate from the workflow variables.
+/** Where a notification is emailed: the person's own login, or every active
+ *  login in the role. The role is the login's (`role` or `accountType`). */
+async function notificationAddresses(userId: string | null, role: string | null): Promise<string[]> {
+  const users = (schema as any).users;
+  if (!users || (!userId && !role)) return [];
+  try {
+    const roleColumn = "role" in users ? users.role : "accountType" in users ? users.accountType : null;
+    const where = userId ? eq(users.id, userId) : roleColumn ? eq(roleColumn, role) : null;
+    if (!where) return [];
+    const rows: any[] = await (db as any).select().from(users).where(where).limit(50);
+    return Array.from(new Set(rows.filter((u) => u?.email && u.isActive !== false).map((u) => String(u.email).trim().toLowerCase())));
+  } catch {
+    return [];
+  }
+}
+
 export function _resolveRef(ref: unknown, ctx: WorkflowExecutionContext): unknown {
   if (typeof ref !== "string") return ref;
   // Canonical runtime sentinels — kept in sync with services/proof_auto_heal.py.
@@ -2236,7 +2252,12 @@ export function registerDefaultActions(): void {
     const who = (config as any).to ?? (config as any).userId ?? (config as any).recipient
       ?? (config as any).recipientId ?? (config as any).recipientUserId ?? null;
     const userId = _resolveRef(who, ctx);
-    const role = (config as any).toRole ?? (config as any).assigneeRole ?? (config as any).recipientRole ?? null;
+    // THE ROLE MAY BE WORKED OUT (CARES, 2026-11-24): the stage a case enters
+    // names whose decision it waits for — `{{if stage = "gm_decision" then
+    // "GeneralManager" else …}}` — and was stored as that text, for nobody.
+    const roleRaw = (config as any).toRole ?? (config as any).assigneeRole ?? (config as any).recipientRole ?? null;
+    const roleOut = roleRaw == null ? null : _resolveRef(roleRaw, ctx);
+    const role = roleOut == null || String(roleOut).trim() === "" ? null : String(roleOut).trim();
     const type = String((config as any).notificationType ?? (config as any).type ?? "info");
     const entityId = _resolveRef((config as any).entityId ?? null, ctx);
     // WHERE IT OPENS: the address of the record it is about, filled when the
@@ -2270,9 +2291,34 @@ export function registerDefaultActions(): void {
                                 { title, body: message, link });
       } catch (e) { pushed = { sent: 0, pruned: 0, notice: `push failed: ${e instanceof Error ? e.message : String(e)}` }; }
     }
+    // BY EMAIL TOO, when the step says `email` (CARES, 2026-11-24: approvers and
+    // requesters heard of a case only from the bell, and testers read that as
+    // "email is not implemented"). The person's own address, or the address of
+    // every login in the role, through the application's declared mail service
+    // and under the test version's rules — `send_email` decides both. The bell
+    // already holds the notification, so the message is not kept a second time.
+    let emailed: { sent: number; held: number; notice?: string } | null = null;
+    if (channels.includes("email")) {
+      emailed = { sent: 0, held: 0 };
+      const addresses = await notificationAddresses(userId ? String(userId) : null, role ? String(role) : null);
+      const originRaw = (ctx.variables as any).__origin ?? process.env.NEXT_PUBLIC_APP_URL ?? process.env.NEXTAUTH_URL ?? "";
+      const origin = String(originRaw).replace(/\/$/, "");
+      const base = (process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/$/, "");
+      const href = link && origin ? `${origin}${base}${link}` : "";
+      const mail = getActionHandler("send_email");
+      if (!addresses.length) emailed.notice = "nobody to email: no login with an address for this notification";
+      for (const to of addresses) {
+        const out: any = mail ? await mail({ actionType: "send_email", to, subject: title,
+          body: `${message}${href ? `</p><p><a href="${href}">Open it</a>` : ""}`, __private: true } as any, ctx).catch((e: unknown) => ({ sent: false, notice: String(e) })) : { sent: false };
+        if (out?.sent) emailed.sent += 1;
+        else { emailed.held += 1; emailed.notice = out?.notice ?? emailed.notice; }
+      }
+    }
     // Contract-declared `notificationId` — was always null before.
-    return { sent: true, channel: pushed && pushed.sent > 0 ? "in_app+push" : "in_app", notificationId,
-             ...(pushed ? { pushed: pushed.sent, pushNotice: pushed.notice } : {}) };
+    const by = ["in_app", ...(pushed && pushed.sent > 0 ? ["push"] : []), ...(emailed && emailed.sent > 0 ? ["email"] : [])];
+    return { sent: true, channel: by.join("+"), notificationId,
+             ...(pushed ? { pushed: pushed.sent, pushNotice: pushed.notice } : {}),
+             ...(emailed ? { emailed: emailed.sent, ...(emailed.notice ? { emailNotice: emailed.notice } : {}) } : {}) };
   });
 
   // Real email. THE APPLICATION KNOWS WHICH SERVICE IT IS MEANT TO SEND
@@ -2363,8 +2409,23 @@ export function registerDefaultActions(): void {
       const allowed = String(process.env.FORGE_TEST_RECIPIENTS ?? "").toLowerCase().split(",")
         .map((s) => s.trim()).filter(Boolean);
       const recipients = to.toLowerCase().split(",").map((s) => s.trim()).filter(Boolean);
-      if (!recipients.every((r) => allowed.includes(r))) {
-        heldForTest = `This is the test version, which emails only your organisation's members — the message to ${to} was not sent, and was saved as a notification instead.`;
+      // AND THE PEOPLE THIS APPLICATION INVITED (CARES, 2026-11-24): a tester the
+      // administrator brought in got the invitation and then nothing else — every
+      // approval, every decision held back. An address with an invitation on
+      // record was given to the application by its own administrator.
+      const rest = recipients.filter((r) => !allowed.includes(r));
+      let invited = new Set<string>();
+      if (rest.length) {
+        try {
+          const inv = (schema as any).forgeInvites;
+          if (inv) {
+            const rows: any[] = await (db as any).select().from(inv).where(inArray(inv.email, rest));
+            invited = new Set(rows.map((r) => String(r.email ?? "").toLowerCase()));
+          }
+        } catch { invited = new Set(); }
+      }
+      if (!rest.every((r) => invited.has(r))) {
+        heldForTest = `This is the test version, which emails only your organisation's members and the people this application invited — the message to ${to} was not sent, and was saved as a notification instead.`;
       }
     }
     const sendTo = heldForTest ? "" : to;

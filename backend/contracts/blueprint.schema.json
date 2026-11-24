@@ -2236,7 +2236,8 @@
                         "type": "string",
                         "enum": [
                           "in_app",
-                          "push"
+                          "push",
+                          "email"
                         ]
                       }
                     }
