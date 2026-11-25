@@ -301,6 +301,28 @@ def test_a_menu_entry_opens_its_own_products_page_or_the_one_it_was_bound_to():
     assert got[3] == "#", "a binding to no page leads nowhere"
 
 
+def test_a_menu_entry_for_a_tab_of_a_page_opens_that_tab(tmp_path):
+    """DITANS's "Scorecards & debriefs" was bound to "…/interviews-feedback?tab=feedback-due", a tab of a
+    live page; the query made it no route, so it was written "#" and the entry opened nothing (2026-11-25)."""
+    from services.drawn.project import nav_routes, project_drawn
+
+    doc = _portals_doc()
+    doc["pages"][1]["access"] = "role_restricted"
+    recruiter = doc["drawnViews"][1]
+    recruiter["sample"]["nav"] = [{"label": "Command centre", "href": "/command-centre"},
+                                  {"label": "Scorecards", "href": "/command-centre?tab=scorecards"},
+                                  {"label": "Gone tab", "href": "/nowhere?tab=x"}]
+    rows = nav_routes(doc, recruiter)
+    assert rows[1]["href"] == "/command-centre?tab=scorecards", "the tab's address is kept, query and all"
+    assert rows[1]["roles"] == ["Recruiter"], "who may open it is its page's people"
+    assert rows[2]["href"] == "#", "a tab of no page still leads nowhere"
+    project_drawn(doc, tmp_path, tmp_path / "app")
+    wrapper = (tmp_path / "app/src/components/DrawnShell.tsx").read_text()
+    # The entry for the tab is lit only on that tab, and beats its page's own entry there.
+    assert "if (!query) return route.length;" in wrapper and "return route.length + 0.5;" in wrapper
+    assert "useSearchParams" in wrapper and "<React.Suspense fallback={null}><SearchWatch /></React.Suspense>" in wrapper
+
+
 def test_a_menu_entry_is_offered_only_to_the_roles_that_may_open_its_page(tmp_path):
     from services.drawn.project import nav_routes, project_drawn
 

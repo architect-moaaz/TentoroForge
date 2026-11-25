@@ -88,6 +88,11 @@ def _live_pages(doc: dict) -> list[dict]:
             and p.get("route")]
 
 
+def _route_of(href: str) -> str:
+    """The page an address opens: the address without its query or fragment."""
+    return href.split("#", 1)[0].split("?", 1)[0]
+
+
 def portal_routes(doc: dict, shells: list[dict]) -> list[list[str]]:
     """``[[route, shell key]]`` — the frame each drawn page was drawn in."""
     from services.drawn.convert import _spec_frames
@@ -221,13 +226,16 @@ def nav_routes(doc: dict, shell: dict) -> list[dict]:
             continue
         label = str(row.get("label") or "")
         target = links.get(label.strip().lower())
-        # An entry bound to a page by hand (`href`, a live route) keeps it.
+        # An entry bound to a page by hand (`href`, a live route) keeps it — WITH
+        # ITS QUERY: "…/interviews-feedback?tab=feedback-due" is a tab of a live
+        # page, and was written "#", a menu entry that opened nothing (wzml1sa6,
+        # 2026-11-25).
         bound = str(row.get("href") or "")
-        href = (bound if bound in live else "") or by_frame.get(target or "", "") \
+        href = (bound if _route_of(bound) in live else "") or by_frame.get(target or "", "") \
             or by_name.get(label.strip().lower(), "")
         entry = {**{k: v for k, v in row.items() if k not in ("id", "active", "roles")}, "href": href or "#"}
-        if roles_of.get(href):
-            entry["roles"] = roles_of[href]
+        if roles_of.get(_route_of(href)):
+            entry["roles"] = roles_of[_route_of(href)]
         out.append(entry)
     return out
 
@@ -287,7 +295,7 @@ def _wrapper(shells: list[tuple[dict, list[dict]]], routes: list[list[str]], rol
         "// The design's own frame, bound: its menu led to the pages, the page you are on lit —\n"
         "// the frame of the product the page was drawn in, when the design draws several.\n"
         'import * as React from "react";\n'
-        'import { usePathname, useRouter } from "next/navigation";\n'
+        'import { usePathname, useRouter, useSearchParams } from "next/navigation";\n'
         'import { useIsPhone } from "@/components/DrawnResponsive";\n'
         'import { DrawnFrame } from "@/components/DrawnFrame";\n'
         'import { DrawnWords } from "@/sdk/i18n";\n'
@@ -299,12 +307,35 @@ def _wrapper(shells: list[tuple[dict, list[dict]]], routes: list[list[str]], rol
         "function live<T>(data: Record<string, unknown> | undefined, slot: string, drawn: T): T {\n"
         "  return data && slot in data ? (data[slot] as T) : drawn;\n"
         "}\n\n"
-        "// An entry whose page the signed-in role may not open is not offered.\n"
+        "// The address's query, for entries that open a tab of a page (\"…?tab=x\"). Read through a\n"
+        "// store the watcher below fills after mount, so the server and the first client render agree.\n"
+        "const SEARCH = { value: \"\", subs: new Set<() => void>() };\n"
+        "function SearchWatch() {\n"
+        "  const now = useSearchParams()?.toString() ?? \"\";\n"
+        "  React.useEffect(() => { SEARCH.value = now; SEARCH.subs.forEach((f) => f()); }, [now]);\n"
+        "  return null;\n"
+        "}\n"
+        "function useSearch(): URLSearchParams {\n"
+        "  const value = React.useSyncExternalStore((f) => { SEARCH.subs.add(f); return () => { SEARCH.subs.delete(f); }; },\n"
+        "    () => SEARCH.value, () => \"\");\n"
+        "  return React.useMemo(() => new URLSearchParams(value), [value]);\n"
+        "}\n\n"
+        "// An entry whose page the signed-in role may not open is not offered. The page you are on is lit:\n"
+        "// the longest route holding the address, and an entry for one of its tabs only on that tab.\n"
         "function useNav(all: Entry[], role?: string) {\n"
         "  const path = usePathname() || \"/\";\n"
+        "  const search = useSearch();\n"
         "  const entries = all.filter((n) => !role || !n.roles?.length || n.roles.includes(role));\n"
-        "  const best = entries.map((n) => n.href).filter((h) => h !== \"#\" && (path === h || path.startsWith(h + \"/\")))\n"
-        "    .sort((a, b) => b.length - a.length)[0];\n"
+        "  const fit = (h: string): number => {\n"
+        "    if (h === \"#\") return -1;\n"
+        "    const [route, query] = h.split(\"#\")[0].split(\"?\");\n"
+        "    if (!(path === route || path.startsWith(route + \"/\"))) return -1;\n"
+        "    if (!query) return route.length;\n"
+        "    for (const [k, v] of new URLSearchParams(query)) if (search.get(k) !== v) return -1;\n"
+        "    return route.length + 0.5;\n"
+        "  };\n"
+        "  const best = entries.map((n) => [n.href, fit(n.href)] as const).filter(([, s]) => s >= 0)\n"
+        "    .sort((a, b) => b[1] - a[1])[0]?.[0];\n"
         "  return entries.map((n, i) => ({ ...n, id: String(i), active: n.href === best }));\n"
         "}\n\n"
         + "\n".join(frames) + "\n"
@@ -330,6 +361,7 @@ def _wrapper(shells: list[tuple[dict, list[dict]]], routes: list[list[str]], rol
         "  const key = FRAMES[wanted] ? wanted : FIRST;\n"
         "  const Frame = FRAMES[key];\n"
         f"  return <DrawnFrame appName={{{json.dumps(app_name, ensure_ascii=False)}}}>\n"
+        "    <React.Suspense fallback={null}><SearchWatch /></React.Suspense>\n"
         "    <Frame controls={props.controls} role={props.role} data={props.data?.[key]}>{props.children}</Frame>\n"
         "  </DrawnFrame>;\n"
         "}\n"
